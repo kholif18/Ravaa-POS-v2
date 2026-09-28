@@ -1,0 +1,505 @@
+/* Ravaa POS v2 — kerangka UI (Tailwind v4, gaya TailAdmin).
+   Aturan keras: di dalam @apply HANYA utility class Tailwind
+   (mis. justify-center), JANGAN property CSS mentah (mis. justify-content: center). */
+
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-primary: #0087ff;
+  --color-primary-hover: #0070dd;
+  --color-primary-soft: #e6f3ff;
+  --color-canvas: #f4f6fa;
+  --color-sidebar: #101828;
+  --color-sidebar-hover: #1d2939;
+  --color-sidebar-active: #344054;
+  --color-sidebar-text: #98a2b3;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin.woff2") format("woff2");
+}
+
+@layer base {
+  html {
+    @apply h-full;
+  }
+  body {
+    @apply h-full bg-canvas font-sans text-sm text-gray-800 antialiased dark:bg-gray-900 dark:text-gray-100;
+  }
+  #app {
+    @apply h-full;
+  }
+  button {
+    @apply cursor-pointer;
+  }
+}
+
+@layer components {
+  /* Layout */
+  .app-layout {
+    @apply flex h-full overflow-hidden;
+  }
+  .sidebar {
+    @apply fixed inset-y-0 left-0 z-50 flex w-64 -translate-x-full flex-col border-r border-transparent bg-sidebar text-sidebar-text transition-[width,transform] duration-300 ease-out lg:translate-x-0 dark:border-gray-700;
+    /* Dark mode: sidebar #101828 vs halaman #111827 nyaris sama -> butuh garis
+       pembatas. Di light mode border transparan (kontrasnya sudah jelas).
+       border-box (preflight) membuat garis masuk ke dalam w-64, jadi
+       lg:ml-64 di .main-col tetap pas tanpa menggeser layout. */
+  }
+  .sidebar.is-open {
+    @apply translate-x-0;
+  }
+  .sidebar-backdrop {
+    @apply fixed inset-0 z-40 hidden bg-gray-900/50 backdrop-blur-sm lg:hidden;
+  }
+  .sidebar-backdrop.is-open {
+    @apply block;
+  }
+  .main-col {
+    @apply flex min-w-0 flex-1 flex-col transition-[margin] duration-300 ease-out lg:ml-64;
+  }
+  .app-header {
+    @apply sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4 dark:border-gray-700 dark:bg-gray-800 sm:px-6;
+  }
+  .page {
+    @apply flex-1 overflow-y-auto p-4 sm:p-6;
+  }
+  .page-title {
+    @apply truncate text-lg font-semibold text-gray-900 dark:text-white;
+  }
+  .page-sub {
+    @apply truncate text-xs text-gray-500 dark:text-gray-400;
+  }
+  /* Breadcrumb di header, menyatu dengan judul */
+  .crumb {
+    @apply text-sm font-normal text-gray-500 dark:text-gray-400;
+  }
+  .crumb-sep svg {
+    @apply size-3.5 text-gray-400 dark:text-gray-500;
+  }
+
+  /* ---------- Menu user (avatar + dropdown) ---------- */
+  .user-wrap {
+    @apply relative;
+  }
+  .user-btn {
+    @apply inline-flex items-center gap-2 rounded-xl py-1.5 pl-1.5 pr-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700;
+  }
+  .user-btn[aria-expanded='true'] {
+    @apply bg-gray-100 dark:bg-gray-700;
+  }
+  .user-btn > svg {
+    @apply size-3.5 text-gray-400 dark:text-gray-500;
+  }
+  .user-name {
+    @apply hidden max-w-24 truncate text-sm font-medium text-gray-700 sm:block dark:text-gray-200;
+  }
+  .avatar {
+    @apply inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold uppercase text-white;
+  }
+  .avatar-lg {
+    @apply size-11 text-sm;
+  }
+  .user-dd {
+    @apply absolute right-0 top-full z-50 mt-2 w-60 origin-top-right rounded-2xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-800;
+  }
+  .user-dd[hidden] {
+    display: none;
+  }
+  .user-dd.is-open {
+    animation: dd-in 140ms ease-out;
+  }
+  @keyframes dd-in {
+    from {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  .dd-head {
+    @apply flex items-center gap-2.5 p-2;
+  }
+  .dd-sep {
+    @apply my-1 border-t border-gray-200 dark:border-gray-700;
+  }
+  .dd-item {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700;
+  }
+  .dd-item > svg {
+    @apply size-4 shrink-0 text-gray-500 dark:text-gray-400;
+  }
+  .dd-item-danger {
+    @apply text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10;
+  }
+  .dd-item-danger > svg {
+    @apply text-red-500 dark:text-red-400;
+  }
+
+  /* Sidebar nav (TailAdmin) */
+  .brand {
+    @apply flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-5;
+  }
+  .brand-logo {
+    @apply size-9 shrink-0 rounded-xl object-cover;
+  }
+  .nav-scroll {
+    @apply flex-1 overflow-y-auto px-3 py-5;
+  }
+  .nav-title {
+    @apply mb-2 px-3 text-xs font-semibold tracking-wider text-sidebar-text/60 uppercase;
+  }
+  .nav-link {
+    @apply mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-sidebar-hover hover:text-white;
+  }
+  .nav-link.is-active {
+    @apply bg-sidebar-active text-white;
+  }
+  .nav-link svg {
+    @apply size-5 shrink-0;
+  }
+  .nav-label {
+    @apply truncate;
+  }
+  .sidebar-foot {
+    @apply shrink-0 border-t border-white/10 p-3;
+  }
+
+  /* Kontrol & komponen dasar */
+  .icon-btn {
+    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700;
+  }
+  .icon-btn svg {
+    @apply size-5;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition;
+  }
+  .btn svg {
+    @apply size-4;
+  }
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-hover;
+  }
+  .btn-ghost {
+    @apply border border-gray-200 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700;
+  }
+  .card {
+    @apply rounded-2xl border border-gray-200 bg-white p-5 shadow-xs dark:border-gray-700 dark:bg-gray-800;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300;
+  }
+  .skel {
+    @apply h-3 w-full animate-pulse rounded-full bg-gray-200 dark:bg-gray-700;
+  }
+}
+
+/* Sidebar collapse (desktop) */
+[data-collapsed="1"] .sidebar {
+  @apply w-20;
+}
+[data-collapsed="1"] .main-col {
+  @apply lg:ml-20;
+}
+[data-collapsed="1"] .nav-label,
+[data-collapsed="1"] .nav-title,
+[data-collapsed="1"] .brand-name {
+  @apply hidden;
+}
+[data-collapsed="1"] .nav-link {
+  @apply justify-center;
+}
+
+/* ---------- SweetAlert2: tombol & popup (buttonsStyling: false) ----------
+   SweetAlert2 tidak menata tombol saat buttonsStyling:false, dan opsi
+   confirmButtonColor/cancelButtonColor ikut diabaikan. Semua tampilan
+   tombol karena itu di-holder di sini, bukan dari opsi swal.
+   Selector diberi prefix .swal2-container karena CSS swal di-inject TANPA
+   @layer — aturan unlayered menang atas aturan ber-layer, jadi specificity
+   harus dinaikkan manual. */
+@layer components {
+  .swal2-container .sw-actions {
+    @apply flex flex-row flex-wrap items-center justify-center gap-3;
+  }
+  .swal2-container .sw-btn {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2 text-sm font-semibold transition-colors;
+  }
+  .swal2-container .sw-btn-primary {
+    @apply bg-primary text-white hover:bg-primary-hover;
+  }
+  .swal2-container .sw-btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700;
+  }
+  /* Batal = outline netral, selalu jelas berbeda dari tombol aksi. */
+  .swal2-container .sw-btn-ghost {
+    @apply border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
+  }
+  .swal2-container .sw-danger .swal2-icon {
+    @apply !border-red-500 !text-red-500;
+  }
+  .swal2-container .sw-danger .swal2-title {
+    @apply !text-red-600 dark:!text-red-400;
+  }
+}
+
+/* ---------- Komponen tabel, form, modal, toast (halaman data) ---------- */
+@layer components {
+  .card-flush {
+    @apply overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs dark:border-gray-700 dark:bg-gray-800;
+  }
+  .table-wrap {
+    @apply w-full overflow-x-auto;
+  }
+  .table {
+    @apply w-full min-w-[720px] border-collapse text-left text-sm;
+  }
+  .th {
+    @apply border-b border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400;
+  }
+  /* Header tabel yang nempel di atas area scroll (halaman Produk).
+     WAJIB latar opaque: .th dark mode pakai gray-900/40 (transparan), jadi
+     tanpa ini baris produk akan terlihat menusuk saat tabel di-scroll.
+     #192231 = komposit gray-900/40 di atas dark:bg-gray-800, jadi tampilan
+     header TIDAK berubah, hanya jadi lengket. */
+  .th-sticky {
+    @apply sticky top-0 z-10 dark:bg-[#192231];
+  }
+  /* Area scroll tbody tabel (halaman Produk, >= lg). T purposely terpisah dari
+     .table-wrap global: halaman lain (shift, laporan) tetap overflow-x-auto
+     supaya halaman scroll normal seperti sebelumnya. */
+  .table-scroll {
+    @apply lg:min-h-0 lg:flex-1 lg:overflow-y-auto;
+  }
+  .td {
+    @apply border-b border-gray-100 px-4 py-3 align-middle text-gray-700 dark:border-gray-700/60 dark:text-gray-300;
+  }
+  .tr:hover {
+    @apply bg-gray-50 dark:bg-gray-900/30;
+  }
+  .td-num {
+    @apply text-right tabular-nums;
+  }
+  .cell-strong {
+    @apply font-semibold text-gray-900 dark:text-white;
+  }
+  .cell-sub {
+    @apply text-xs text-gray-500 dark:text-gray-400;
+  }
+
+  /* Sidebar kategori: show/hide dengan animasi — lebar di desktop, tinggi di mobile.
+     Wrapper ini tetap di DOM (hanya lebarnya yang 0) supaya bisa dianimasikan;
+     conditional render (innerHTML) tidak bisa dianimasikan sama sekali. */
+  .prod-side-wrap {
+    @apply min-w-0 overflow-hidden;
+    transition: max-height 280ms ease, opacity 220ms ease, width 280ms ease, margin 280ms ease;
+    max-height: 0;
+    opacity: 0;
+    width: 100%;
+  }
+  .prod-side-wrap[data-open='true'] {
+    max-height: 60rem;
+    opacity: 1;
+  }
+  @media (min-width: 1024px) {
+    .prod-side-wrap {
+      max-height: none;
+      width: 0;
+      margin-right: -1rem; /* batalkan gap saat tertutup */
+    }
+    .prod-side-wrap[data-open='true'] {
+      width: 16rem;
+      margin-right: 0;
+    }
+  }
+
+  .toolbar {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .field {
+    @apply flex flex-col gap-1.5;
+  }
+  /* Versi rapat untuk form panjang (produk): label tetap ada, jaraknya dipadatkan. */
+  .field-sm {
+    @apply flex flex-col gap-1;
+  }
+  /* Judul seksi form ("Detail produk", "Harga") — pemisah blok ala Aronium.
+     `leading-tight` + tanpa pt-1: judul murni hiasan pemisah, jadi tidak perlu
+     baris setinggi teks isi (hemat ±7px x 4 seksi di form produk). */
+  .form-sec {
+    @apply text-[11px] font-bold uppercase leading-tight tracking-wider text-gray-400 dark:text-gray-500;
+  }
+  .hint {
+    @apply text-[11px] leading-tight text-gray-500 dark:text-gray-400;
+  }
+  .label {
+    @apply text-xs font-semibold text-gray-600 dark:text-gray-400;
+  }
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/25 dark:border-gray-600 dark:bg-gray-900 dark:text-white;
+  }
+  .input-sm {
+    @apply py-2;
+  }
+  .search-wrap {
+    @apply relative min-w-[200px] flex-1;
+  }
+  .search-wrap svg {
+    @apply pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-gray-400;
+  }
+  .search-wrap .input {
+    @apply pl-9;
+  }
+
+  /* Dropdown hasil pencarian (POS). Dipakai juga halaman lain yang butuh
+     autocomplete: di dalam .search-wrap, jadi px-9 biar sejajar dengan input. */
+  .suggest {
+    @apply absolute top-full right-0 left-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800;
+  }
+  .suggest-item {
+    @apply flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left transition;
+  }
+  .suggest-item:hover,
+  .suggest-item.is-active {
+    @apply bg-gray-100 dark:bg-gray-700/60;
+  }
+  /* Chip satuan alternatif di bawah baris hasil (fitur #3 Multi satuan).
+     Baris utama = satuan dasar; chip = pack/dus/dsb. Sengaja TIDAK diberi
+     pemisah antar grup supaya tampilan produk tanpa chip tidak berubah. */
+  .suggest-units {
+    @apply flex flex-wrap gap-1.5 px-3 pb-2;
+  }
+  .suggest-unit {
+    @apply cursor-pointer rounded-full border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-600 transition hover:border-primary hover:text-primary dark:border-gray-600 dark:text-gray-300 dark:hover:border-primary dark:hover:text-primary;
+  }
+
+  .side-list {
+    @apply space-y-1;
+  }
+  .side-item {
+    @apply flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/60 dark:hover:text-white;
+  }
+  .side-item.is-active {
+    @apply bg-primary-soft text-primary dark:bg-primary/15 dark:text-primary;
+  }
+  .side-item .side-count {
+    @apply ml-auto text-xs font-semibold text-gray-400;
+  }
+  /* Aksi kategori: muncul saat hover di device mouse, selalu tampil di perangkat sentuh. */
+  .side-collapse-btn {
+    @apply inline-flex size-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200;
+  }
+  .side-collapse-btn svg {
+    @apply size-4;
+  }
+  .side-collapse-btn.is-on {
+    @apply bg-primary-soft text-primary dark:bg-primary/15 dark:text-primary;
+  }
+  .side-actions {
+    @apply absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 transition-opacity;
+  }
+  @media (hover: hover) {
+    .side-actions {
+      @apply opacity-0;
+    }
+    .group:hover .side-actions,
+    .group:focus-within .side-actions {
+      @apply opacity-100;
+    }
+  }
+  .row-btn {
+    @apply inline-flex size-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white;
+  }
+  .row-btn svg {
+    @apply size-4;
+  }
+  .row-btn-danger:hover {
+    @apply bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400;
+  }
+  /* Tombol "aktifkan kembali" — hijau, kontras dengan aksi destruktif. */
+  .row-btn-ok {
+    @apply text-emerald-600 dark:text-emerald-400;
+  }
+  .row-btn-ok:hover {
+    @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300;
+  }
+
+  .badge-ok {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400;
+  }
+  .badge-low {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400;
+  }
+  .badge-off {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-500 dark:bg-gray-700 dark:text-gray-300;
+  }
+  .badge-dyn {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary dark:bg-primary/15 dark:text-primary;
+  }
+
+  .modal-overlay {
+    @apply fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm;
+  }
+  .modal-overlay.is-open {
+    @apply flex;
+  }
+  /* Modal: HANYA .modal-body yang menggulir — header & footer dibekukan.
+     Dulu `overflow-y-auto` ada di .modal, jadi saat form panjang (form produk,
+     pratinjau impor) judul DAN tombol Simpan ikut tergulir ke bawah: kasir
+     kehilangan tombol OK persis saat perlu menekannya.
+     `overflow-hidden` + flex kolom di .modal adalah kuncinya; tanpa itu header
+     dan footer ikut menyusut/bergeser mengikuti isi. */
+  .modal {
+    @apply flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-gray-800;
+  }
+  /* Form produk butuh 3 kolom (modal / markup / harga). Selector digabung supaya
+     spesifikitasnya Pasti mengalahkan .modal, bukan mengandalkan urutan CSS. */
+  .modal.modal-wide {
+    @apply max-w-3xl;
+  }
+  .modal-header {
+    @apply flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700;
+  }
+  /* min-h-0 WAJIB: flex-1 tanpa min-h-0 menolak diperkecil, body tidak pernah
+     scroll dan isinya terpotong di balik footer. */
+  .modal-body {
+    @apply min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3;
+  }
+  .modal-footer {
+    @apply flex shrink-0 justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700;
+  }
+
+  .toast-root {
+    @apply pointer-events-none fixed inset-x-0 bottom-0 z-60 flex flex-col items-center gap-2 p-4 sm:inset-x-auto sm:right-0 sm:items-end;
+  }
+  .toast {
+    @apply pointer-events-auto flex w-full max-w-sm items-center gap-2.5 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100;
+  }
+  .toast .tdot {
+    @apply size-2 shrink-0 rounded-full;
+  }
+  .toast-success .tdot {
+    @apply bg-emerald-500;
+  }
+  .toast-error .tdot {
+    @apply bg-red-500;
+  }
+  .toast-warning .tdot {
+    @apply bg-amber-500;
+  }
+  .toast-info .tdot {
+    @apply bg-primary;
+  }
+  .empty {
+    @apply flex flex-col items-center gap-2 px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400;
+  }
+}

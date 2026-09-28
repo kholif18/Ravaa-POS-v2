@@ -1,0 +1,14 @@
+# API image: runtime tsx (tanpa tsc terpisah agar build tidak rapuh).
+# Seed idempotent (INSERT OR IGNORE) sehingga aman jalan tiap start.
+FROM node:24-alpine
+WORKDIR /app
+COPY package.json ./
+COPY apps/api/package.json apps/api/
+RUN npm install -w apps/api --no-audit --no-fund
+COPY db/ ../db/
+COPY apps/api/ apps/api/
+WORKDIR /app/apps/api
+RUN mkdir -p /data
+ENV PORT=3001 DB_PATH=/data/data.db
+EXPOSE 3001
+CMD ["sh", "-c", "/app/node_modules/.bin/tsx src/seed.ts; /app/node_modules/.bin/tsx src/index.ts"]

@@ -1,0 +1,14 @@
+FROM node:24-alpine AS build
+WORKDIR /app
+ARG VITE_API_URL=
+ENV VITE_API_URL=${VITE_API_URL}
+COPY package.json ./
+COPY apps/web/package.json apps/web/
+RUN npm install -w apps/web --no-audit --no-fund
+COPY apps/web/ apps/web/
+RUN npm run build -w apps/web
+
+FROM caddy:2-alpine
+COPY --from=build /app/apps/web/dist /srv
+COPY infra/Caddyfile /etc/caddy/Caddyfile
+EXPOSE 80

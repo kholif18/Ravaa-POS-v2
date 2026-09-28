@@ -1,0 +1,21 @@
+{
+  "name": "ravaaposv2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ravaa POS v2 — kasir toko (ATK, Cetak, Desain, Jasa, Topup/Tunai, Es Krim, Minuman, Snack, Rokok). 1-2 kasir bersamaan, DB di home server.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "trap 'kill 0' INT TERM; npm run dev:api & npm run dev:web & wait",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:agent": "npm start -w apps/print-agent",
+    "seed": "npm run seed -w apps/api",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "test": "node tests/run.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

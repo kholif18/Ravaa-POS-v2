@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.DS_Store
+*.log
+
+# Output print-agent (fallback struk bila printer tak ketemu)
+apps/print-agent/out/
+
+# Cadangan DB lokal (snapshot data toko — bukan bagian repo)
+apps/api/data/*.bak*
+
+# Keluaran test: screenshot & tangkapan print-agent, dibuat ulang tiap run.
+# tests/artifacts/.gitkeep tetap di-commit supaya foldernya ada di clone baru
+# (beberapa suite menulis file ke situ tanpa mkdir).
+tests/artifacts/*
+!tests/artifacts/.gitkeep

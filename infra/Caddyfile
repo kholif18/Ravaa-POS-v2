@@ -1,0 +1,9 @@
+# Web static + proxy /api ke service api (same-origin, tanpa CORS drama)
+:80 {
+  root * /srv
+  file_server
+  reverse_proxy /api/* api:3001
+  handle {
+    try_files {path} /index.html
+  }
+}

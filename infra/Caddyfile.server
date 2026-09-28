@@ -1,0 +1,11 @@
+# Caddy native di home server (tanpa Docker).
+# Install: sudo apt install -y caddy && sudo cp infra/Caddyfile.server /etc/caddy/Caddyfile && sudo systemctl reload caddy
+# {$HOME} di-expand otomatis oleh Caddy dari environment.
+:5656 {
+  root * {$HOME}/ravaaposv2/apps/web/dist
+  file_server
+  reverse_proxy /api/* localhost:3001
+  handle {
+    try_files {path} /index.html
+  }
+}

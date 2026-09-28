@@ -1,0 +1,19 @@
+[Unit]
+Description=Ravaa POS v2 API (home server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/ravaaposv2/apps/api
+Environment=PORT=3001
+Environment=DB_PATH=%h/ravaa-data/data.db
+Environment=CORS_ORIGIN=*
+Environment=CASHIER_DEFAULT=kasir
+# PATH mengutamakan ~/.local (untuk Node hasil install otomatis bila bawaan OS < v20)
+Environment=PATH=%h/.local/node-v22-linux-arm64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=%h/ravaaposv2/node_modules/.bin/tsx src/index.ts
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

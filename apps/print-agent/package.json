@@ -1,0 +1,9 @@
+{
+  "name": "ravaa-print-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bridge HTTP -> printer thermal 58mm ESC/POS (tanpa dependencies). Jalan di PC kasir :9100.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

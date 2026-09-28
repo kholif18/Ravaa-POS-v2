@@ -1,0 +1,39 @@
+# Home server: API + Web + Caddy. SQLite disimpan di volume api-data.
+# Jalankan: cd infra && docker compose up -d --build
+# Akses: http://<ip-server>:5656 (web), http://<ip-server>:3001/health (api)
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    environment:
+      PORT: '3001'
+      DB_PATH: /data/data.db
+      CORS_ORIGIN: '*'
+      CASHIER_DEFAULT: kasir
+    volumes:
+      - api-data:/data
+    ports:
+      - '3001:3001'
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:3001/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    args:
+      VITE_API_URL: '' # same-origin via caddy /api
+    ports:
+      - '5656:80'
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api-data:
