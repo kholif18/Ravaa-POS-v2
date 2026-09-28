@@ -332,11 +332,9 @@
   .field-sm {
     @apply flex flex-col gap-1;
   }
-  /* Judul seksi form ("Detail produk", "Harga") — pemisah blok ala Aronium.
-     `leading-tight` + tanpa pt-1: judul murni hiasan pemisah, jadi tidak perlu
-     baris setinggi teks isi (hemat ±7px x 4 seksi di form produk). */
+  /* Judul seksi form ("Detail produk", "Harga") — pemisah blok ala Aronium. */
   .form-sec {
-    @apply text-[11px] font-bold uppercase leading-tight tracking-wider text-gray-400 dark:text-gray-500;
+    @apply pt-1 text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500;
   }
   .hint {
     @apply text-[11px] leading-tight text-gray-500 dark:text-gray-400;

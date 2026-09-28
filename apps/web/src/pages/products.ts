@@ -535,25 +535,27 @@ function productForm(p: Product | 'new', cats: Category[]): void {
     okLabel: isNew ? 'Tambah' : 'Simpan',
     wide: true,
     body: `
-      <div class="space-y-2">
+      <div class="space-y-2.5">
         <p class="form-sec">Detail produk</p>
         <div class="field-sm">
           <label class="label" for="f-name">Nama produk *</label>
           <input id="f-name" class="input input-sm" value="${esc(d?.name ?? '')}" placeholder="cth: Pulpen A5 Hitam" />
         </div>
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-2 gap-2.5">
           <div class="field-sm">
-            <label class="label" for="f-sku">SKU <span class="hint font-normal" id="f-sku-hint"></span></label>
+            <label class="label" for="f-sku">SKU</label>
             <input id="f-sku" class="input input-sm" value="${esc(d?.sku ?? '')}" placeholder="kosong = otomatis" ${
               d ? 'readonly title="SKU tidak bisa diubah (upsert by SKU)"' : ''
             } />
+            <p class="hint" id="f-sku-hint"></p>
           </div>
           <div class="field-sm">
-            <label class="label" for="f-barcode">Barcode <span class="hint font-normal">1 produk = 1 barcode</span></label>
+            <label class="label" for="f-barcode">Barcode</label>
             <input id="f-barcode" class="input input-sm" value="${esc(d?.barcode ?? '')}" inputmode="numeric" placeholder="opsional" />
+            <p class="hint">1 produk = 1 barcode</p>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-2 gap-2.5">
           <div class="field-sm">
             <label class="label" for="f-cat">Kategori *</label>
             <select id="f-cat" class="input input-sm">${cats
@@ -564,14 +566,15 @@ function productForm(p: Product | 'new', cats: Category[]): void {
               .join('')}</select>
           </div>
           <div class="field-sm">
-            <label class="label" for="f-unit">Satuan <span class="hint font-normal">daftar: halaman Satuan</span></label>
+            <label class="label" for="f-unit">Satuan</label>
             <select id="f-unit" class="input input-sm">${unitOptions(d?.unit)}</select>
+            <p class="hint">Atur daftarnya di halaman Satuan</p>
           </div>
         </div>
         <p class="hint" id="f-track-hint"></p>
 
         <p class="form-sec">Harga</p>
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-3 gap-2.5">
           <div class="field-sm">
             <label class="label" for="f-cost">Harga beli (Rp)</label>
             <input id="f-cost" class="input input-sm" inputmode="numeric" value="${d?.cost ?? 0}" />
@@ -597,10 +600,11 @@ function productForm(p: Product | 'new', cats: Category[]): void {
         </div>
 
         <p class="form-sec">Satuan jual</p>
-        <div class="space-y-1.5">
+        <div class="space-y-2">
           <p class="hint">
-            Satuan dasar <b id="f-unit-base">${esc(d?.unit ?? 'pcs')}</b> selalu ada; baris di bawah untuk
-            pack/dus — <b>stok &amp; HPP pakai satuan dasar</b>.
+            Satuan dasar <b id="f-unit-base">${esc(d?.unit ?? 'pcs')}</b> selalu tersedia tanpa daftar.
+            Baris di bawah untuk jual per pack / dus / dsn — <b>stok tetap dihitung dalam satuan dasar</b>,
+            dan harga diisi manual hanya bila beda dari perkiraan (faktor &times; harga dasar).
           </p>
           <div class="grid grid-cols-[1fr_72px_1fr_auto] gap-2 text-[11px] text-gray-500 dark:text-gray-400">
             <span>Satuan</span><span class="text-center">1 = berapa</span><span>Harga</span><span></span>
@@ -611,7 +615,7 @@ function productForm(p: Product | 'new', cats: Category[]): void {
 
         <div id="f-stock-wrap">
           <p class="form-sec">Stok</p>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-2 gap-2.5">
             <div class="field-sm">
               <label class="label" for="f-stock">Stok</label>
               <input id="f-stock" class="input input-sm" inputmode="numeric" value="${d?.stock ?? 0}" />
