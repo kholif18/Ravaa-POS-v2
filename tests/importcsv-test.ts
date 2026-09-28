@@ -24,7 +24,7 @@ function eq(nama: string, a: unknown, b: unknown): void {
   else { gagal++; console.log(`  GAGAL ${nama}\n         dapat : ${JSON.stringify(a)}\n         harap : ${JSON.stringify(b)}`); }
 }
 
-import { parseTable, mapRows, parseAngka, parseAktif, CONTOH_KOLOM, HEADER_ARONIUM_ORI, HEADER_TEMPLATE, templateProduk } from '/home/seira/Projects/ravaaposv2/apps/web/src/importcsv.ts';
+import { parseTable, mapRows, parseAngka, parseAktif, CONTOH_KOLOM, HEADER_ARONIUM_ORI, HEADER_TEMPLATE, templateProduk } from '../apps/web/src/importcsv.ts';
 
 console.log('=== A. parseTable: pemisah & kutip ===');
 {

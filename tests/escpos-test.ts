@@ -3,7 +3,7 @@
 import {
   COLS, ascii, rp, potong, tengah, kanan, labelHarga, teksLabel, gabungLabel,
   keBase64, struk, type ProdukLabel,
-} from '/home/seira/Projects/ravaaposv2/apps/web/src/escpos.ts';
+} from '../apps/web/src/escpos.ts';
 
 let lolos = 0, gagal = 0;
 const ok = (n: string, c: boolean, info: unknown = '') => {

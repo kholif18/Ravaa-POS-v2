@@ -12,9 +12,12 @@
 // Suite ini murni HTTP + sqlite3 (tanpa browser). Artefaknya ditandai nama
 // `Uji SKU Urut%` supaya pembersihan tidak menyentuh produk PRD asli.
 import { execSync } from 'node:child_process';
+import path0 from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const API = 'http://localhost:3001';
-const DB = '/home/seira/Projects/ravaaposv2/apps/api/data/data.db';
+const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
+const DB = path0.join(REPO, 'apps/api/data/data.db');
 
 let pass = 0, fail = 0;
 const chk = (name, ok, info = '') => {

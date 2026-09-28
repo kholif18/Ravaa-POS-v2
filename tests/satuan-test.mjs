@@ -1,20 +1,24 @@
 // Master satuan: CRUD di #/satuan + dropdown satuan di form produk.
-import { chromium } from '/home/seira/.local/share/nvm/v24.16.0/lib/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright-core';
 import { execSync } from 'node:child_process';
+import path0 from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 let pass = 0, fail = 0;
 const chk = (name, ok, info = '') => {
   if (ok) { pass++; console.log('  OK   ', name, info ? `| ${info}` : ''); }
   else { fail++; console.log('  GAGAL', name, '|', info); }
 };
-const sql = (q) => execSync(`sqlite3 /home/seira/Projects/ravaaposv2/apps/api/data/data.db "${q}"`).toString().trim();
+const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
+const DB = path0.join(REPO, 'apps/api/data/data.db');
+const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 const TAG = 'uji-' + Date.now().toString(36);
 
 // sisa run yang gagal sebelumnya: satuan uji tidak boleh bocor ke test ini
 sql("DELETE FROM units WHERE slug LIKE 'karung-%'");
 sql("DELETE FROM products WHERE name LIKE 'Kertas Test %'");
 
-const b = await chromium.launch({ channel: 'chrome' });
+const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
 const err = [];
 p.on('pageerror', (e) => err.push(String(e).slice(0, 120)));

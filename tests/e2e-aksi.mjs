@@ -7,7 +7,8 @@ import path0 from 'node:path';
 const ARTIFAK = path0.join(path0.dirname(fileURLToPath(import.meta.url)), 'artifacts');
 import { execFileSync } from 'node:child_process';
 
-const DB = '/home/seira/Projects/ravaaposv2/apps/api/data/data.db';
+const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
+const DB = path0.join(REPO, 'apps/api/data/data.db');
 const API = 'http://localhost:3001';
 const WEB = 'http://localhost:5656';
 const SKU_STOK = 'E2E-AKSI-STOK';   // track_stock=1  -> menu berisi Stok & opname

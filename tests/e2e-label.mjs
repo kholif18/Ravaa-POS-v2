@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-const REPO = '/home/seira/Projects/ravaaposv2';
+const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 // Print-agent dijalankan TERPISAH pada :9101 dengan PRINTER_PATH ke file tiruan.
 // Agent bawaan (:9100) memilih /dev/usb/lp0 begitu perangkat USB terpasang —
 // kalau test ini memakainya, tiap run akan MEMBUANG KERTAS NYATA. Dengan agent

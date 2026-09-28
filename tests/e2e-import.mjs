@@ -7,7 +7,8 @@ const ARTIFAK = path0.join(path0.dirname(fileURLToPath(import.meta.url)), 'artif
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
-const DB = '/home/seira/Projects/ravaaposv2/apps/api/data/data.db';
+const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
+const DB = path0.join(REPO, 'apps/api/data/data.db');
 
 /** Bersihkan artefak suite ini lewat sqlite3 (test-only, bukan jalur API).
  *  Dipanggil di AWAL supaya run sebelumnya yang gagal di tengah tidak membuat

@@ -7,6 +7,7 @@
  *   2. proses crash / exit!=0 -> GAGAL
  *   3. 0 assertion terbaca    -> GAGAL (test diam = test rusak)
  *   4. lolos != `ekspek`      -> GAGAL (jumlah asersi turun diam-diam)
+ *   5. path absolut milik mesin di file test -> GAGAL sebelum suite dijalankan
  *
  * `ekspek` adalah jumlah asersi terakhir yang hijau. Bila Anda MEMANG sengaja
  * menambah/mengurangi asersi, update angkanya di sini — jangan dihapus.
@@ -15,11 +16,35 @@
  * lewat tsx, .mjs lewat node biasa.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
+
+/* Aturan keras #5: file test tidak boleh memuat path absolut milik mesin
+ * (awalan direktori home pengguna, atau direktori user di macOS). Path begitu
+ * membuat suite gagal begitu pindah clone / ganti mesin / naik versi Node —
+ * dulu importcsv-test, escpos-test, enam suite e2e, dan satuan-test
+ * memakainya; satuan-test bahkan mengimpor paket browser lewat path global
+ * yang memuat nomor versi Node di dalamnya, jadi ia pecah pada saat Node
+ * diganti, bukan saat kode diubah. Semuanya kini diturunkan dari
+ * import.meta.url atau specifier relatif. */
+function cekPathAbsolut() {
+  const jelek = [];
+  for (const nama of readdirSync(DIR)) {
+    if (!/\.(mjs|ts)$/.test(nama)) continue;
+    readFileSync(path.join(DIR, nama), 'utf8').split('\n').forEach((b, i) => {
+      const m = b.match(/\/(home|Users)\/[A-Za-z0-9._-]+/);
+      if (m) jelek.push(`${nama}:${i + 1}  ${m[0]}`);
+    });
+  }
+  if (jelek.length) {
+    console.log('GAGAL     path absolut milik mesin di file test — turunkan dari import.meta.url:');
+    jelek.forEach((j) => console.log(`            ${j}`));
+    process.exit(1);
+  }
+}
 
 const SUITE = [
   ['importcsv-test.ts', 111],
@@ -74,6 +99,7 @@ async function siapkan() {
   }
 }
 
+cekPathAbsolut();
 await siapkan();
 
 for (const [nama, ekspek] of SUITE) {

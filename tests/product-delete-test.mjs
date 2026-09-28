@@ -9,8 +9,11 @@
  */
 import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
+import path0 from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const DB = '/home/seira/Projects/ravaaposv2/apps/api/data/data.db';
+const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
+const DB = path0.join(REPO, 'apps/api/data/data.db');
 /** Hapus keras artefak uji lewat sqlite3 langsung (test-only, bukan jalur API). */
 const cleanupDB = () => {
   try {
