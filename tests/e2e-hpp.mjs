@@ -24,7 +24,7 @@ const jpost = async (p, b, m = 'POST') => {
 const rp = (n) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 let S = 0;   // stok awal, diisi saat try — dipakai finally untuk mengembalikan
 
-const SKU = 'ATK-PULPEN-HITAM';
+const SKU = 'PRD00001';
 const ambil = async () => (await jget(`/api/products?status=semua&q=${SKU}`)).data[0];
 // Rumus yang sama dengan server — sengaja diduplikasi supaya selisih ketahuan.
 const avgBaru = (stok, avg, qty, harga) => Math.round((stok * avg + qty * harga) / (stok + qty));
@@ -38,6 +38,18 @@ const errs = [];
 page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });
 
+/** Stok & opname pindah dari menu⋮ halaman Produk ke halaman Stok (#/stock),
+ *  tempat tombol barisnya [data-stock]. Selalu navigasi dulu supaya urutan test
+ *  tidak bergantung pada halaman mana yang sedang terbuka. */
+const bukaDialogStok = async (sku) => {
+  await page.goto('http://localhost:5656/#/stock', { waitUntil: 'load' });
+  await page.waitForSelector('#page tbody tr', { timeout: 20000 });
+  await page.fill('#st-q', sku);
+  await page.waitForTimeout(500);
+  await page.click('#page tbody tr [data-stock]');
+  await page.waitForSelector('#r-qty', { timeout: 8000 });
+};
+
 try {
   const awal = await ambil();
   S = awal.stock;
@@ -47,12 +59,7 @@ try {
   const EKSP = avgBaru(S, A, QTY, HARGA);
 
   console.log('=== A. Dialog stok: field harga beli ===');
-  await page.goto('http://localhost:5656/#/products', { waitUntil: 'load' });
-  await page.waitForSelector('#rows tr', { timeout: 20000 });
-  await page.fill('#q', SKU);
-  await page.waitForTimeout(500);
-  await page.click('#rows tr [data-restock]');
-  await page.waitForSelector('#r-qty', { timeout: 8000 });
+  await bukaDialogStok(SKU);
   ok('mode default Masuk barang',
     (await page.getAttribute('.modal [data-mode="masuk"]', 'aria-pressed')) === 'true');
   ok('field "Harga beli / nota" tampil di mode masuk', await page.isVisible('#r-cost'));
@@ -94,10 +101,7 @@ try {
     `dapat ${sesudah.avg_cost}, ekspektasi ${EKSP}`);
 
   console.log('=== E. Restock TANPA harga tidak mengubah rata-rata ===');
-  await page.fill('#q', SKU);
-  await page.waitForTimeout(400);
-  await page.click('#rows tr [data-restock]');
-  await page.waitForSelector('#r-qty', { timeout: 8000 });
+  await bukaDialogStok(SKU);
   await page.fill('#r-cost', '');        // kosongkan = tanpa nota
   await page.fill('#r-qty', '3');
   await page.waitForTimeout(150);
@@ -109,6 +113,9 @@ try {
     `dapat ${tanpaNota.avg_cost}, ekspektasi ${EKSP}`);
 
   console.log('=== F. Form produk menampilkan modal rata-rata ===');
+  // Restock di atas membuka halaman Stok; form produk ada di halaman Produk.
+  await page.goto('http://localhost:5656/#/products', { waitUntil: 'load' });
+  await page.waitForSelector('#rows tr', { timeout: 20000 });
   await page.fill('#q', SKU);
   // Tunggu baris produk INI muncul — mengklik `#rows tr` pertama bisa membuka
   // modal produk lain bila filter belum ter-apply (race, bikin suite flaky).
@@ -121,6 +128,14 @@ try {
   ok('membedakan harga beli manual dari rata-rata', /patokan markup/.test(form));
   ok('Harga beli manual tidak tertimpa', (await page.inputValue('#f-cost')) === String(awal.cost),
     await page.inputValue('#f-cost'));
+  // Stok HANYA diisi saat awal (keputusan 2026-09-28): di mode Ubah inputnya
+  // tidak dirender SAMA SEKALI — bukan readonly, bukan tersembunyi CSS — jadi
+  // tidak ada jalan mengubah stok lewat form ini. `Stok minimum` tetap boleh
+  // diedit: itu ambang peringatan produk, bukan mutasi stok.
+  ok('input Stok TIDAK dirender di mode Ubah (stok hanya diisi saat awal)',
+    (await page.locator('#f-stock').count()) === 0);
+  ok('Stok minimum tetap bisa diedit di mode Ubah',
+    (await page.locator('#f-min').count()) === 1 && !(await page.locator('#f-min').isDisabled()));
   await page.click('.modal [data-x]');
   await page.waitForSelector('.modal', { state: 'detached', timeout: 5000 });
 
@@ -159,12 +174,7 @@ try {
     try {
       const kini = await ambil();
       if (kini.stock !== S) {
-        await page.goto('http://localhost:5656/#/products', { waitUntil: 'load' });
-        await page.waitForSelector('#rows tr', { timeout: 20000 });
-        await page.fill('#q', SKU);
-        await page.waitForTimeout(500);
-        await page.click('#rows tr [data-restock]');
-        await page.waitForSelector('#r-qty', { timeout: 8000 });
+        await bukaDialogStok(SKU);
         await page.click('.modal [data-mode="opname"]');
         await page.fill('#r-qty', String(S));
         await page.click('.modal [data-ok]');

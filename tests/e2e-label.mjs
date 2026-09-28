@@ -103,12 +103,18 @@ try {
   }
 
   console.log('=== D. Filter = pemilih ===');
-  await page.fill('#q', 'Aqua');
+  // Cari pakai SKU seed yang UNIK, bukan kata "Aqua". Pencarian memang sengaja
+  // memecah jadi kata dan SEMUA kata harus cocok di nama/SKU/barcode — jadi
+  // begitu toko menambah produk ber-"Aqua" kedua, harapan "1 label" jadi basi
+  // lalu menyalahkan aplikasi padahal perilakunya benar (jumlah = jumlah produk
+  // yang lolos filter). SKU seed tidak boleh diganti tanpa konfirmasi, jadi
+  // angkanya di sini dijamin.
+  await page.fill('#q', 'PRD00013');
   await page.waitForTimeout(400);
   await page.click('#prod-label');
   await page.waitForSelector('.modal [data-ok]');
   const t2 = norm(await page.innerText('.modal [data-ok]'));
-  ok('jumlah mengikuti pencarian', /^Cetak 1 label$/.test(t2), t2);
+  ok('jumlah mengikuti pencarian (SKU unik -> tepat 1)', /^Cetak 1 label$/.test(t2), t2);
   await page.click('.modal [data-x]');
   await page.waitForSelector('.modal', { state: 'detached', timeout: 5000 });
 

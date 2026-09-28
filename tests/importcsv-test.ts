@@ -24,7 +24,7 @@ function eq(nama: string, a: unknown, b: unknown): void {
   else { gagal++; console.log(`  GAGAL ${nama}\n         dapat : ${JSON.stringify(a)}\n         harap : ${JSON.stringify(b)}`); }
 }
 
-import { parseTable, mapRows, parseAngka, parseAktif, CONTOH_KOLOM } from '/home/seira/Projects/ravaaposv2/apps/web/src/importcsv.ts';
+import { parseTable, mapRows, parseAngka, parseAktif, CONTOH_KOLOM, HEADER_ARONIUM_ORI, HEADER_TEMPLATE, templateProduk } from '/home/seira/Projects/ravaaposv2/apps/web/src/importcsv.ts';
 
 console.log('=== A. parseTable: pemisah & kutip ===');
 {
@@ -206,6 +206,96 @@ console.log('=== E. gabungan: tempel Excel asli (tab) ===');
   eq('2 baris valid', { n: r.length, g: r.filter((x) => x.aksi === 'gagal').length }, { n: 2, g: 0 });
   eq('harga rokok', r[0].data?.price, 28000);
   eq('stok aqua', r[1].data?.stock, 24);
+}
+
+console.log('=== F. Format Aronium: (a) file lama 16 kolom tetap masuk, (b) template kita = gaya Aronium isinya form Ravaa ===');
+{
+  // Header persis lampiran help.aronium.com "Import products using CSV"
+  // (products.csv, 443 byte) — termasuk CRLF dan kolom yang Ravaa tidak pakai.
+  // IsPriceChangeAllowed sengaja diisi 1 (bukan 0 seperti template Aronium
+  // asli) supaya tes membuktikan kolomnya benar-benar terbawa — nilai 0 bisa
+  // juga berarti kolomnya gagal dipetakan lalu jatuh default.
+  const csv = 'Name,ProductGroup,SKU,Barcode,MeasurementUnit,Cost,Markup,Price,Tax,IsTaxInclusivePrice,IsPriceChangeAllowed,IsUsingDefaultQuantity,IsService,IsEnabled,Description,Quantity\r\n'
+    + 'Pulpen Hitam,Alat Tulis Kantor,ATK-PLV-1,8991234567890,pcs,2000,50,3000,0,1,1,1,0,1,Deskripsi bebas,12\r\n';
+  const r = satuanS(parseTable(csv));
+  eq('baris Aronium tidak gagal', r[0].aksi, 'baru');
+  eq('Name -> name', r[0].data?.name, 'Pulpen Hitam');
+  eq('ProductGroup cocok lewat NAMA kategori', r[0].data?.category_slug, 'atk');
+  eq('SKU -> sku', r[0].data?.sku, 'ATK-PLV-1');
+  eq('Barcode -> barcode', r[0].data?.barcode, '8991234567890');
+  eq('MeasurementUnit -> unit', r[0].data?.unit, 'pcs');
+  eq('Cost -> cost', r[0].data?.cost, 2000);
+  eq('Markup -> markup', r[0].data?.markup, 50);
+  eq('Price -> price', r[0].data?.price, 3000);
+  eq('IsPriceChangeAllowed -> price_dynamic', r[0].data?.price_dynamic, 1);
+  eq('IsEnabled -> is_active', r[0].data?.is_active, 1);
+  eq('Quantity -> stock', r[0].data?.stock, 12);
+  ok('kolom Tax/IsService/Description diabaikan tanpa error', r[0].error === null, r[0].error);
+  eq('payload hanya berisi field API yang sah', Object.keys(r[0].data ?? {}).sort(),
+    ['barcode', 'category_slug', 'cost', 'is_active', 'markup', 'name', 'price', 'price_dynamic', 'sku', 'stock', 'unit']);
+}
+{
+  // Template ARONIUM ASLI (kategori "Group 1/2" tidak ada di master Ravaa):
+  // gagalnya harus TEPAT di kategori saja — bukti kolom lain semua terpetakan.
+  const asli = 'Name,ProductGroup,SKU,Barcode,MeasurementUnit,Cost,Markup,Price,Tax,IsTaxInclusivePrice,IsPriceChangeAllowed,IsUsingDefaultQuantity,IsService,IsEnabled,Description,Quantity\r\n'
+    + 'Item 1,Group 1,1,501234567890,pcs,1,20,1.2,0,1,0,1,0,1,Item description,10\r\n'
+    + 'Item 3,Group 2,3,,hr,3,20,3.6,0,1,0,1,1,1,Service item,0\r\n';
+  const r = satuanS(parseTable(asli));
+  eq('2 baris template Aronium terbaca', r.length, 2);
+  ok('gagal HANYA di kategori (kolom lain terpetakan semua)',
+    r.every((x) => /^Kategori "Group \d+" tidak ada di master$/.test(x.error ?? '')),
+    r.map((x) => x.error));
+}
+{
+  // Varian ejaan yang dipakai tabel bantuan Aronium (berspasi), bukan template.
+  const r = satuanS(parseTable('Name,Product group,SKU,Measurement Unit,Price,Enabled,Quantity\nAqua,Snack,A-1,pcs,4000,1,7\n'));
+  eq('varian berspasi: Product group', r[0].data?.category_slug, 'snack');
+  eq('varian berspasi: Measurement Unit', r[0].data?.unit, 'pcs');
+  eq('varian berspasi: Enabled -> is_active', r[0].data?.is_active, 1);
+  eq('varian berspasi: Quantity -> stock', r[0].data?.stock, 7);
+}
+{
+  // Template unduhan harus kembali utuh: di-parse lagi, keduanya siap diimpor.
+  const teks = templateProduk(
+    [{ slug: 'atk', name: 'Alat Tulis Kantor', track_stock: 1 }, { slug: 'snack', name: 'Snack' }],
+    [{ slug: 'pcs', name: 'Pcs' }],
+  );
+  const header = teks.split('\r\n')[0];
+  const kolom = header.split(',');
+
+  // (a) gaya Aronium, tapi isinya form kita
+  eq('header = HEADER_TEMPLATE', header, HEADER_TEMPLATE);
+  ok('template kita MEMANG disesuaikan (bukan 16 kolom Aronium utuh)',
+    header !== HEADER_ARONIUM_ORI, header);
+  eq('12 kolom = jumlah field form', kolom.length, 12);
+  ok('kolom Aronium yang tak ada di form TIDAK ikut',
+    !kolom.some((c) => ['Tax', 'IsTaxInclusivePrice', 'IsUsingDefaultQuantity',
+      'IsService', 'Description'].includes(c)), kolom);
+  ok('semua judul = label form (bukan istilah Aronium)',
+    ['Nama', 'Kategori', 'SKU', 'Barcode', 'Satuan',
+      'Harga beli', 'Markup', 'Harga jual', 'Boleh ubah harga saat jual',
+      'Aktif', 'Stok', 'Stok minimum']
+      .every((c, i) => kolom[i] === c), kolom);
+  ok('ProductGroup / MeasurementUnit / MinStock sudah tidak dipakai',
+    !kolom.some((c) => ['ProductGroup', 'MeasurementUnit', 'MinStock'].includes(c)), kolom);
+
+  // (b) file hasil unduh harus tetap valid dan siap diimpor
+  eq('pakai CRLF seperti template Aronium', teks.includes('\r\n'), true);
+  eq('tanpa baris kosong di kaki file', teks.endsWith('\r\n'), false);
+  const r = satuanS(parseTable(teks));
+  eq('2 baris contoh terbaca', r.length, 2);
+  ok('kedua baris contoh siap diimpor (bukan gagal)',
+    r.every((x) => x.aksi === 'baru'), r.map((x) => x.error));
+  eq('SKU contoh', r[0].data?.sku, 'CONTOH-1');
+  eq('kategori contoh diambil dari master hidup', r[0].data?.category_slug, 'atk');
+  eq('harga jual contoh konsisten dengan markup', r[0].data?.price, 3000);
+  eq('Stok minimum terbaca jadi min_stok', r[0].data?.min_stock, 2);
+  // Baris 1 diisi 1, baris 2 diisi 0 -> pemetaan kolom panjang terbukti nyata,
+  // bukan kebetulan sama dengan default.
+  eq('Boleh ubah harga saat jual -> price_dynamic (nilai 1)', r[0].data?.price_dynamic, 1);
+  eq('Boleh ubah harga saat jual -> price_dynamic (nilai 0)', r[1].data?.price_dynamic, 0);
+  eq('BOM Excel tidak bocor ke nama kolom', parseTable('\uFEFF' + teks).header[0], 'Nama');
+  eq('nama contoh memuat penanda CONTOH', /^CONTOH /.test(String(r[0].data?.name)), true);
 }
 
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);

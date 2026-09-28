@@ -40,8 +40,29 @@ const ALIAS: Record<string, string> = {
   markup: 'markup', margin: 'markup', 'persen margin': 'markup',
   stok: 'stock', stock: 'stock', qty: 'stock', jumlah: 'stock',
   'min stok': 'min_stock', minimum: 'min_stock', 'stok minimum': 'min_stock',
+  // `MinStock` (gaya Aronium, tanpa spasi) -> normalJudul jadi `minstock`;
+  // `Min Stock` -> `min stock`. Dua-duanya belum tertangkap di atas.
+  minstock: 'min_stock', 'min stock': 'min_stock',
   'harga dinamis': 'price_dynamic', 'price dynamic': 'price_dynamic',
+  // Label persis di form produk (switch): "Boleh ubah harga saat jual".
+  // normalJudul membuang tanda baca -> jadi tiga kata ini.
+  'boleh ubah harga saat jual': 'price_dynamic', 'boleh ubah harga': 'price_dynamic',
   aktif: 'is_active', 'is active': 'is_active', status: 'is_active',
+  // ── Header resmi Aronium ────────────────────────────────────────────────
+  // Sumber: help.aronium.com "Import products using CSV" + file template
+  // bawaannya (products.csv, 16 kolom). Aronium menulis CamelCase tanpa spasi
+  // (`ProductGroup`, `MeasurementUnit`, `IsPriceChangeAllowed`, `IsEnabled`,
+  // `Quantity`), sedangkan normalJudul() menghapus tanda jadi satu kata — jadi
+  // kedua bentuk (dengan/tanpa spasi) dicatat eksplisit di sini.
+  // Sengaja TIDAK dicatat, berarti diabaikan dengan aman: Tax,
+  // IsTaxInclusivePrice, IsUsingDefaultQuantity, IsService, Description —
+  // Ravaa tidak punya konsep pajak/deskripsi, dan track_stock diambil dari
+  // kategori, bukan dari IsService.
+  productgroup: 'category_slug', 'product group': 'category_slug',
+  measurementunit: 'unit', 'measurement unit': 'unit',
+  ispricechangeallowed: 'price_dynamic', 'price change allowed': 'price_dynamic',
+  isenabled: 'is_active', enabled: 'is_active',
+  quantity: 'stock',
 };
 
 function normalJudul(h: string): string {
@@ -181,6 +202,11 @@ export function mapRows(tb: Tabel, o: MapOpts): BarisImpor[] {
     out.name = name;
     out.category_slug = slugCat;
     if (sku) out.sku = sku;
+    // Barcode: ALIAS sudah memetakannya sejak awal, tetapi dulu tidak pernah
+    // disalin ke payload — kolom Barcode terbaca tapi isinya dibuang diam-diam
+    // setiap impor. Ditemukan oleh test format Aronium (barcode wajib di sana).
+    const barcode = ambil('barcode');
+    if (barcode) out.barcode = barcode;
     if (satuanRaw) {
       const slugSat = satBySlug.get(satuanRaw.toLowerCase()) ?? satByName.get(satuanRaw.toLowerCase());
       if (!slugSat) return gagal(`Satuan "${satuanRaw}" tidak ada di master`);
@@ -203,6 +229,81 @@ export function mapRows(tb: Tabel, o: MapOpts): BarisImpor[] {
   });
 }
 
-/** Judul kolom contoh yang disalin ke textarea. Hanya judul (tanpa baris data)
- *  supaya tombol "Contoh format" tidak diam-diam menanam produk sampel. */
-export const CONTOH_KOLOM = 'sku,nama,kategori,satuan,harga,modal,stok';
+/** Header ARONIUM ASLI (16 kolom) — disimpan utuh BUKAN untuk diunduh, tapi
+ *  sebagai alat bukti: test menggunakannya untuk membuktikan file ekspor
+ *  Aronium lama yang beredar masih BISA diimpor. Parser mengabaikan kolom yang
+ *  tidak kita punya, jadi tidak perlu ada header khusus untuk file lama. */
+export const HEADER_ARONIUM_ORI =
+  'Name,ProductGroup,SKU,Barcode,MeasurementUnit,Cost,Markup,Price,Tax,IsTaxInclusivePrice,IsPriceChangeAllowed,IsUsingDefaultQuantity,IsService,IsEnabled,Description,Quantity';
+
+/** Header template yang KITA unduh — nama kolom bergaya Aronium, tapi ISINYA
+ *  harus mencerminkan form produk Ravaa — namanya DIAMBIL DARI LABEL FORM,
+ *  bukan istilah Aronium, supaya kasir bisa mencocokkan kolom CSV dengan layar
+ *  yang dia lihat:
+ *    Nama                          <- "Nama produk *"
+ *    Kategori                      <- "Kategori *"   (bukan "ProductGroup")
+ *    SKU, Barcode                  <- kolom form
+ *    Satuan                        <- "Satuan"
+ *    Harga beli                    <- "Harga beli (Rp)"
+ *    Markup                        <- "Markup (%)"
+ *    Harga jual                    <- "Harga jual (Rp) *"
+ *    Boleh ubah harga saat jual    <- label switch-nya, persis
+ *    Aktif                         <- switch "Aktif"
+ *    Stok, Stok minimum            <- "Stok", "Stok minimum"
+ *
+ *  Lima kolom Aronium sengaja TIDAK ikut karena tidak ada di form:
+ *    Tax, IsTaxInclusivePrice   -> sistem pajak tidak dipakai
+ *    Description                -> tidak ada di form produk
+ *    IsUsingDefaultQuantity     -> tidak ada "jumlah bawaan"
+ *    IsService                  -> keputusan stok ada di kategori.track_stock,
+ *                                  bukan per produk
+ *  Parser TETAP menerima semuanya (lihat blok "Header resmi Aronium" di ALIAS),
+ *  jadi file ekspor Aronium lama yang beredar tetap bisa langsung diimpor. */
+export const HEADER_TEMPLATE =
+  'Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,Boleh ubah harga saat jual,Aktif,Stok,Stok minimum';
+
+/** Placeholder textarea = header template yang sama (satu baris, tanpa baris data).
+ *  Dulu diisi oleh tombol "Contoh format" — tombol itu DIHAPUS karena tombol
+ *  Unduh template sudah menghasilkan file lengkap berisi baris contoh. */
+export const CONTOH_KOLOM = HEADER_TEMPLATE;
+
+/** Kutip satu sel CSV sesuai RFC4180 (kutip ganda digandakan). */
+function sel(v: string | number): string {
+  const s = String(v);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Isi file template yang diunduh: header KITA (HEADER_TEMPLATE) + 2 baris
+ *  contoh. Dua penyesuaian penting dibanding file ekspor Aronium yang beredar:
+ *  1. Nilai Kategori diambil dari MASTER HIDUP, bukan "Group 1" — kalau
+ *     memakai "Group 1", begitu diimpor semua baris langsung gagal dengan
+ *     `Kategori "Group 1" tidak ada di master`.
+ *  2. Baris contoh memuat `CONTOH` di awal Nama, supaya gampang dikenali dan
+ *     dihapus. Tidak ada kolom Description di template kita, jadi catatan
+ *     "hapus saya" tidak bisa ditaruh di file.
+ *  Nilai Harga beli/Markup/Harga jual sengaja konsisten
+ *  (Harga jual = Harga beli x (1+Markup/100)) supaya tidak membingungkan
+ *  saat diedit di Excel. Garis CRLF mengikuti Excel Windows. */
+export function templateProduk(
+  kategori: { slug: string; name: string; track_stock?: number }[],
+  satuan: { slug: string }[],
+): string {
+  // Utamakan kategori yang melacak stok, karena kolom Stok = stok.
+  const track = kategori.filter((c) => c.track_stock);
+  const cat1 = track[0] ?? kategori[0];
+  // Baris kedua memakai kategori stok berbeda bila ada, supaya kedua contoh
+  // tidak terlihat seperti dua nama produk pada kategori yang sama.
+  const cat2 = track.find((c) => c.slug !== cat1?.slug) ?? cat1;
+  const u = satuan[0]?.slug ?? 'pcs';
+  // Urutan nilai HARUS identik dengan HEADER_TEMPLATE:
+  // Nama, Kategori, SKU, Barcode, Satuan, Harga beli, Markup, Harga jual,
+  // Boleh ubah harga saat jual, Aktif, Stok, Stok minimum
+  const baris = [
+    // Kolom ke-9 ("Boleh ubah harga saat jual") sengaja 1 / 0 bergantian:
+    // kalau keduanya 0, test tidak akan bisa membedakan kolomnya TERPETAKAN
+    // dari kolomnya gagal dibaca lalu jatuh ke default 0.
+    ['CONTOH Pulpen', cat1?.name ?? '', 'CONTOH-1', '', u, '2000', '50', '3000', '1', '1', '10', '2'],
+    ['CONTOH Minuman', cat2?.name ?? '', 'CONTOH-2', '', u, '3000', '50', '4500', '0', '1', '10', '2'],
+  ];
+  return [HEADER_TEMPLATE, ...baris.map((r) => r.map(sel).join(','))].join('\r\n');
+}

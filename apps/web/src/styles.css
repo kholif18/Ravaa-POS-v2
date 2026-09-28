@@ -433,6 +433,29 @@
     @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300;
   }
 
+  /* Menu ⋮ "aksi lain" baris tabel Produk: hanya Ubah + Hapus yang selalu
+     tampil langsung; sisanya (stok, duplikat, nonaktifkan) masuk ke sini.
+     `position: fixed` WAJIB: .table-wrap pakai overflow-x-auto, dan menurut
+     spesifikasi itu memaksa overflow-y ikut dihitung `auto` — anak ber-position
+     absolute di dalamnya ikut terpotong / memicu scrollbar tabel. Posisi
+     kiri-atasnya dihitung JS di bukaMenu() dari getBoundingClientRect tombol. */
+  .row-more {
+    @apply relative;
+  }
+  .row-more .row-btn[aria-expanded='true'] {
+    @apply bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-white;
+  }
+  .row-dd {
+    position: fixed;
+    @apply z-50 w-52 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-800;
+  }
+  .row-dd[hidden] {
+    display: none;
+  }
+  .row-more.is-open .row-dd {
+    animation: dd-in 140ms ease-out;
+  }
+
   .badge-ok {
     @apply inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400;
   }
@@ -451,6 +474,57 @@
   }
   .modal-overlay.is-open {
     @apply flex;
+    animation: modal-scrim-in 160ms ease-out;
+  }
+  /* Sisi KELUAR butuh kelas .is-closing (dipasang modal.ts). Kalau cumu melepas
+     .is-open, display langsung balik ke none dan animasi keluar tidak pernah
+     sempat jalan — display tidak bisa ditransisikan. Kelas ini menahan
+     display:flex selama 140ms animasi, baru modal.ts melepas node-nya. */
+  .modal-overlay.is-closing {
+    @apply flex;
+    animation: modal-scrim-out 140ms ease-in forwards;
+  }
+  .modal-overlay.is-open .modal {
+    animation: modal-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .modal-overlay.is-closing .modal {
+    animation: modal-out 140ms ease-in forwards;
+  }
+  @keyframes modal-scrim-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes modal-scrim-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes modal-out {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
   }
   /* Modal: HANYA .modal-body yang menggulir — header & footer dibekukan.
      Dulu `overflow-y-auto` ada di .modal, jadi saat form panjang (form produk,
@@ -501,5 +575,18 @@
   }
   .empty {
     @apply flex flex-col items-center gap-2 px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400;
+  }
+}
+
+/* prefers-reduced-motion: matikan animasi modal. Sengaja di LUAR @layer —
+   aturan unlayered menang atas ber-layer, jadi menimpa .modal-overlay.is-open
+   tanpa perlu mengandalkan urutan atau !important. Pemanggilan di modal.ts
+   ikut menyesuaikan (langsung remove node, tanpa jeda 200ms). */
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay.is-open,
+  .modal-overlay.is-open .modal,
+  .modal-overlay.is-closing,
+  .modal-overlay.is-closing .modal {
+    animation: none;
   }
 }

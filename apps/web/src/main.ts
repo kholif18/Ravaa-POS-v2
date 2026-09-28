@@ -1,6 +1,7 @@
 import { mountPosPage, unmountPosPage } from './pages/pos';
 import { mountProductsPage } from './pages/products';
 import { mountSatuanPage } from './pages/satuan';
+import { mountStockPage, unmountStockPage } from './pages/stock';
 import { icon, type IconName } from './ui/icons';
 import {
   applySidebarState,
@@ -119,11 +120,18 @@ function render(): void {
   updateOutboxBadge();
   const page = document.getElementById('page');
   if (!page) return;
+  // Keluar dari halaman Stok: buang host-nya supaya paint() berikutnya tidak
+  // menulis ke DOM yang sudah tergantikan innerHTML di atas.
+  if (route !== 'stock') unmountStockPage();
+
   if (route === 'products') {
     // Halaman Produk punya state sendiri (filter, form, sync) -> di-mount, bukan string statis.
     void mountProductsPage(page);
   } else if (route === 'satuan') {
     void mountSatuanPage(page);
+  } else if (route === 'stock') {
+    // Halaman Stok: ringkasan + restock/opname, state sendiri -> di-mount.
+    void mountStockPage(page);
   } else if (route === 'pos') {
     // POS: gate shift + keranjang, state sendiri -> di-mount.
     void mountPosPage(page);

@@ -75,8 +75,8 @@ const jaminStok = async (sku, minimal = 20) => {
   dikelola.push({ id: p.id, awal: p.stock });
   if (p.stock < minimal) await jpost('/api/restock', { product_id: p.id, qty: minimal, cashier: 'kasir' });
 };
-await jaminStok('MINUM-AQUA-600');
-await jaminStok('SNK-CHITATO-SAPI');
+await jaminStok('PRD00013');
+await jaminStok('PRD00014');
 
 const jual = async (paket) => {
   await page.fill('#pos-q', paket.q);
@@ -100,7 +100,12 @@ try {
   ok('saklar "Cetak struk otomatis" tampil di baris Mode', await page.isVisible('#pos-autoprint'));
   ok('saklar NYALA secara bawaan', await page.isChecked('#pos-autoprint'));
 
-  await jual({ q: 'aqua', tunai: 20000 });
+  // Cari pakai SKU seed, BUKAN kata generik. POS memang sengaja memecah jadi
+  // kata dan SEMUA kata harus cocok di nama/SKU/barcode, jadi begitu toko
+  // menambah produk ber-"aqua" kedua, .suggest-item pertama berubah menjadi
+  // produk yang salah dan struknya ikut salah isi. Query persis = exact SKU
+  // -> tepat 1 hasil (lihat pos.ts pencarian).
+  await jual({ q: 'PRD00013', tunai: 20000 });
   ok('struk dikirim sekali', tercetak.length === 1, tercetak.length);
   const s1 = Buffer.from(tercetak[0], 'base64');
   ok('diawali INIT', s1[0] === 0x1b && s1[1] === 0x40);
@@ -131,9 +136,29 @@ try {
   await page.click('label[for="pos-autoprint"]');
   ok('posisi saklar terbaca mati', !(await page.isChecked('#pos-autoprint')));
   // Chitato, bukan Pulpen Hitam: pulpen adalah fixture baseline E2E opname.
-  await jual({ q: 'chitato', tunai: 20000 });
+  await jual({ q: 'PRD00014', tunai: 20000 });
   ok('penjualan jalan walau cetak mati', await page.isVisible('#pos-rows'));
   ok('TIDAK ada permintaan cetak tambahan', tercetak.length === 1, tercetak.length);
+
+  // Pintasan katalog produk layanan (AGENTS §1): produk kategori `topup` bukan
+  // item jual — klik harus MEMBUKA form topup/tarik, bukan memasukkan ke keranjang.
+  // Sejak SKU seed jadi PRD#####, cabang `/tarik/i.test(p.sku)` tidak pernah cocok
+  // lagi untuk produk "Tarik tunai"; yang menentukan kini hanya NAMAnya.
+  // Test ini menutup celah itu — tanpanya perubahan nama bisa mematikan mode.
+  await page.click('[data-mode="jual"]');
+  await page.waitForSelector('#pos-q', { timeout: 8000 });
+  await page.fill('#pos-q', 'PRD00018');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#tp-submit', { timeout: 8000 });
+  const adaTarikBank = await page.locator('#tp-jenis [data-jenis="tarik-bank"]').count();
+  const adaEWallet = await page.locator('#tp-jenis [data-jenis="e-wallet"]').count();
+  ok('produk "Tarik tunai" membuka mode TARIK (bukan topup)',
+    adaTarikBank === 1 && adaEWallet === 0,
+    `tarik-bank=${adaTarikBank} e-wallet=${adaEWallet}`);
+  const toastPintasan = norm(await page.innerText('#toast-root'));
+  ok('produk layanan TIDAK masuk keranjang (toast mengajak isi form)',
+    /isi form tarik tunai/.test(toastPintasan), toastPintasan);
 
   console.log('=== C. Topup tetap memakai saklar yang sama ===');
   await page.click('label[for="pos-autoprint"]');
@@ -172,7 +197,7 @@ try {
   gagalCetak = true;
   await page.click('[data-mode="jual"]');
   await page.waitForSelector('#pos-q', { timeout: 8000 });
-  await jual({ q: 'aqua', tunai: 20000 });
+  await jual({ q: 'PRD00013', tunai: 20000 });
   ok('permintaan cetak tetap dikirim (dicoba)', tercetak.length === 3, tercetak.length);
   const toast = norm(await page.innerText('#toast-root'));
   ok('toast peringatan cetak muncul', /Struk tidak tercetak/.test(toast), toast);

@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS units (
 CREATE TABLE IF NOT EXISTS products (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   category_id   INTEGER NOT NULL REFERENCES categories(id),
-  sku           TEXT NOT NULL UNIQUE,  -- cth: ATK-PULPEN-HITAM, RK-SMP-12, CETAK-BW-A4
+  sku           TEXT NOT NULL UNIQUE,  -- cth: PRD00001, PRD00015 (nomor urut server; boleh juga diketik manual)
   barcode       TEXT UNIQUE,           -- opsional, dari scanner USB
   name          TEXT NOT NULL,
   unit          TEXT NOT NULL DEFAULT 'pcs' REFERENCES units(slug), -- satuan untuk struk

@@ -5,13 +5,13 @@
 // nature produk sudah tercermin dari kategori (categories.track_stock).
 
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
-import { getCachedProducts, removeProductBySku, syncMaster, type Category, type Product, type Unit } from '../store';
+import { fullReset, getCachedProducts, removeProductBySku, syncMaster, type Category, type Product, type Unit } from '../store';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
-import { CONTOH_KOLOM, mapRows, parseTable, type BarisImpor } from '../importcsv';
+import { CONTOH_KOLOM, mapRows, parseTable, templateProduk, type BarisImpor } from '../importcsv';
 import { COLS, gabungLabel, kirimPrint, teksLabel, urlAgent, type ProdukLabel } from '../escpos';
 
 const SIDE_KEY = 'ravaa.prodside';
@@ -158,6 +158,13 @@ function categorySidebar(): string {
   </div>`;
 }
 
+/** Isi tbody tabel Produk.
+ *
+ *  Sel aksi: hanya **Ubah** dan **Hapus** yang selalu tampil langsung (paling
+ *  sering dipakai); sisanya — Duplikat, Nonaktifkan / Aktifkan kembali — masuk
+ *  ke menu ⋮ supaya baris tidak penuh tombol. Stok & opname sengaja TIDAK ada
+ *  di menu ini: perubahan stok hanya lewat halaman Stok. Menu dibuka dan
+ *  diletakkan oleh bukaMenu(). */
 function productRows(): string {
   const list = filteredProducts();
 
@@ -197,16 +204,20 @@ function productRows(): string {
         <td class="td">${stockBadge}</td>
         <td class="td">
           <div class="flex items-center justify-end gap-1">
-            ${off
-              ? `<button type="button" data-on="${p.id}" class="row-btn row-btn-ok" title="Aktifkan kembali" aria-label="Aktifkan kembali ${esc(p.name)}">${icon('check')}</button>`
-              : p.track_stock
-                ? `<button type="button" data-restock="${p.id}" class="row-btn" title="Stok &amp; opname" aria-label="Stok dan opname ${esc(p.name)}">${icon('truck')}</button>`
-                : ''}
             <button type="button" data-edit="${p.id}" class="row-btn" title="Ubah" aria-label="Ubah ${esc(p.name)}">${icon('pencil')}</button>
-            ${off
-              ? ''
-              : `<button type="button" data-off="${p.id}" class="row-btn row-btn-danger" title="Nonaktifkan" aria-label="Nonaktifkan ${esc(p.name)}">${icon('close')}</button>`}
             <button type="button" data-del="${p.id}" class="row-btn row-btn-danger" title="Hapus produk" aria-label="Hapus ${esc(p.name)}">${icon('trash')}</button>
+            <div class="row-more">
+              <button type="button" data-more="${p.id}" class="row-btn" aria-haspopup="menu" aria-expanded="false" title="Aksi lain" aria-label="Aksi lain untuk ${esc(p.name)}">${icon('more')}</button>
+              <div class="row-dd" role="menu" hidden>
+                ${off
+                  ? `<button type="button" data-on="${p.id}" class="dd-item" role="menuitem">${icon('check')}<span>Aktifkan kembali</span></button>`
+                  : ''}
+                <button type="button" data-copy="${p.id}" class="dd-item" role="menuitem">${icon('copy')}<span>Duplikat (varian baru)</span></button>
+                ${off
+                  ? ''
+                  : `<button type="button" data-off="${p.id}" class="dd-item dd-item-danger" role="menuitem">${icon('close')}<span>Nonaktifkan</span></button>`}
+              </div>
+            </div>
           </div>
         </td>
       </tr>`;
@@ -296,7 +307,7 @@ export function renderProductsPage(): string {
               ${icon('search')}
               <input id="q" class="input input-sm" type="search" placeholder="Cari nama, SKU, atau barcode..." value="${esc(state.q)}" />
             </div>
-            <button type="button" id="sync" class="btn btn-ghost" title="Sinkronkan master produk">${icon('sync')}<span class="hidden sm:inline">Sinkron</span></button>
+            <button type="button" id="sync" class="btn btn-ghost" title="Sinkronkan master produk — Shift+klik untuk reset cache penuh">${icon('sync')}<span class="hidden sm:inline">Sinkron</span></button>
             <button type="button" id="prod-import" class="btn btn-ghost" title="Impor produk dari CSV atau tempelan Excel">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>
             <button type="button" id="prod-label" class="btn btn-ghost" title="Cetak label harga untuk produk di filter ini">${icon('print')}<span class="hidden sm:inline">Label</span></button>
             <button type="button" id="prod-new" class="btn btn-primary ml-auto">${icon('plus')}<span>Produk</span></button>
@@ -334,17 +345,18 @@ function unitOptions(current?: string): string {
     .join('');
 }
 
-/** Cerminan aturan server (index.ts:skuDariNama) untuk pratinjau di form.
- *  Hanya pratinjau: server yang memastikan SKU benar-benar unik. */
-function skuOtomatis(name: string): string {
-  return (
-    name
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'PRODUK'
-  );
+/** Semua SKU yang sudah dipakai (aktif + nonaktif). Dasar cek tabrakan SKU
+ *  di form — pola yang SAMA dengan dialog impor (lihat `adaSku` di baca()). */
+function skuTerpakai(): Set<string> {
+  return new Set([...state.products, ...state.inactive].map((x) => x.sku));
 }
+
+/** Client TIDAK lagi menurunkan SKU dari nama (sejak SKU default jadi `PRD#####`
+ *  yang dihitung server dari MAX). Form membiarkan kolom kosong untuk mode baru
+ *  & salinan, lalu server mengisi saat menyimpan — pratinjau angka dari client
+ *  tidak akan pernah tepat karena bisa saja ada perubahan lain di server.
+ *  Kolom hanya divalidasi ketika DIKETIK: SKU adalah kunci upsert, jadi SKU yang
+ *  sudah dipakai tidak boleh lolos (pola daftarnya sama dengan dialog impor). */
 
 /* ---------- IMPOR CSV / TEMPELAN EXCEL ---------- */
 
@@ -425,11 +437,11 @@ function importForm(): void {
       <div class="space-y-3">
         <p class="form-sec">1. Isi data</p>
         <p class="text-xs text-gray-500 dark:text-gray-400">
-          Salin tabel dari Excel lalu tempel di kotak ini, atau pilih file CSV.
-          Baris pertama = judul kolom. Kolom yang dikenal:
-          <code>sku</code>, <code>nama</code>, <code>kategori</code>, <code>satuan</code>,
-          <code>harga</code>, <code>modal</code>, <code>markup</code>, <code>stok</code>,
-          <code>min_stok</code>, <code>harga_dinamis</code>, <code>aktif</code>.
+          Baris pertama = judul kolom. <b>Unduh template</b> untuk mendapat
+          judul + 2 baris contoh — namanya persis seperti label di form, dan
+          kategori/satunya sudah terisi dari master Anda.
+          Bisa juga tempel tabel dari Excel atau tulis judul sendiri;
+          file ekspor <b>Aronium</b> tetap bisa langsung masuk tanpa diubah.
           Kategori &amp; satuan boleh ditulis nama biasa ("ATK", "Lembar").
         </p>
         <textarea id="imp-text" rows="6" class="input font-mono text-xs" placeholder="${esc(CONTOH_KOLOM)}" aria-label="Data produk CSV"></textarea>
@@ -438,7 +450,7 @@ function importForm(): void {
             ${icon('upload')}<span>Pilih file</span>
             <input id="imp-file" type="file" accept=".csv,.txt,text/csv,text/plain" class="sr-only" />
           </label>
-          <button type="button" id="imp-contoh" class="btn btn-ghost">Contoh format</button>
+          <button type="button" id="imp-unduh" class="btn btn-ghost">${icon('download')}<span>Unduh template</span></button>
           <button type="button" id="imp-read" class="btn btn-primary ml-auto">Baca &amp; tinjau</button>
         </div>
         <p class="form-sec">2. Tinjau lalu tekan Impor</p>
@@ -466,10 +478,25 @@ function importForm(): void {
       };
 
       m.el.querySelector('#imp-read')?.addEventListener('click', baca);
-      m.el.querySelector('#imp-contoh')?.addEventListener('click', () => {
-        ta.value = CONTOH_KOLOM;
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
+      // Unduh template CSV: header = label form (HEADER_TEMPLATE) + 2 baris
+      // contoh dari master kategori/satuan hidup. Menggantikan tombol
+      // "Contoh format" lama — satu tombol, satu file, langsung siap isi.
+      // BOM di depan supaya Excel Windows membaca UTF-8 benar — parser membuang
+      // BOM-nya sendiri, jadi file hasil unduh tetap bisa langsung diimpor.
+      m.el.querySelector('#imp-unduh')?.addEventListener('click', () => {
+        const isi = '\uFEFF' + templateProduk(state.categories, state.units);
+        const url = URL.createObjectURL(new Blob([isi], { type: 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'template-produk-ravaa.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        // Sengaja TIDAK memakai toast: browser sudah menampilkan unduhannya,
+        // dan toast tambahan menumpuk di #toast-root sehingga menggeser
+        // `.first()` pada test toast impor (e2e-import) yang mengasumsikan
+        // toast teratas = hasil impor.
       });
       m.el.querySelector('#imp-file')?.addEventListener('change', async (e) => {
         const f = (e.target as HTMLInputElement).files?.[0];
@@ -525,16 +552,48 @@ function importForm(): void {
   });
 }
 
-function productForm(p: Product | 'new', cats: Category[]): void {
-  const isNew = p === 'new';
-  const d = isNew ? null : p;
+type ModeForm = 'new' | 'edit' | 'copy';
+
+/** `mode`:
+ *  - `new`  = tambah; SKU boleh kosong (server menurunkan), pasti aktif.
+ *  - `edit` = ubah; SKU terkunci karena SKU adalah kunci upsert.
+ *  - `copy` = duplikat buat VARIAN (cth. "Bolpoin Snowman" -> Merah/Biru):
+ *     disalin: kategori, satuan, harga, markup, satuan jual, stok minimum,
+ *     harga-dinamis. TIDAK disalin: SKU (wajib baru), barcode (1 barcode = 1
+ *     produk), stok (varian baru belum tentu ada barang fisiknya — menyalin
+ *     angkanya berarti menciptakan persediaan yang tidak ada). */
+function productForm(
+  p: Product | 'new',
+  cats: Category[],
+  mode: ModeForm = p === 'new' ? 'new' : 'edit',
+): void {
+  const d = p === 'new' ? null : p;
+  const salin = mode === 'copy';
+  const bisaEditSku = mode !== 'edit';
   const trackDefault = d ? d.track_stock : (cats[0]?.track_stock ?? 0);
+  // Mode salinan sengaja mengosongkan SKU: nomor PRD##### hanya bisa dihitung
+  // oleh server, dan mengosongkan juga memaksa kasir meninjau SKU sebelum simpan.
+  const skuAwal = salin ? '' : (d?.sku ?? '');
+  const barcodeAwal = salin ? '' : (d?.barcode ?? '');
+  const stokAwal = salin ? 0 : (d?.stock ?? 0);
+  // Mode Ubah TIDAK merender input Stok sama sekali (bukan readonly, bukan
+  // disembunyikan CSS) — stok hanya diisi saat produk dibuat, sesudahnya hanya
+  // lewat restock/opname di halaman Stok. `Stok minimum` tetap ada: itu ambang
+  // peringatan produk, bukan mutasi stok.
+  const inputStok =
+    mode === 'edit'
+      ? ''
+      : `<div class="field-sm">
+              <label class="label" for="f-stock">Stok</label>
+              <input id="f-stock" class="input input-sm" inputmode="numeric" value="${stokAwal}" />
+            </div>`;
 
   openModal({
-    title: isNew ? 'Tambah Produk' : `Ubah: ${d!.name}`,
-    okLabel: isNew ? 'Tambah' : 'Simpan',
+    title: mode === 'new' ? 'Tambah Produk' : salin ? `Duplikat: ${d!.name}` : `Ubah: ${d!.name}`,
+    okLabel: mode === 'new' ? 'Tambah' : salin ? 'Buat produk' : 'Simpan',
     wide: true,
     body: `
+      ${salin ? `<p class="hint">Salinan baru — SKU dikosongkan dan akan diisi server dengan nomor urut <b>PRD#####</b> saat disimpan; barcode &amp; stok sengaja dikosongkan. Ubah nama &amp; barcode sesuai varian.</p>` : ''}
       <div class="space-y-2">
         <p class="form-sec">Detail produk</p>
         <div class="field-sm">
@@ -544,13 +603,13 @@ function productForm(p: Product | 'new', cats: Category[]): void {
         <div class="grid grid-cols-2 gap-2">
           <div class="field-sm">
             <label class="label" for="f-sku">SKU <span class="hint font-normal" id="f-sku-hint"></span></label>
-            <input id="f-sku" class="input input-sm" value="${esc(d?.sku ?? '')}" placeholder="kosong = otomatis" ${
-              d ? 'readonly title="SKU tidak bisa diubah (upsert by SKU)"' : ''
+            <input id="f-sku" class="input input-sm" value="${esc(skuAwal)}" placeholder="kosong = PRD#####" ${
+              bisaEditSku ? '' : 'readonly title="SKU tidak bisa diubah (upsert by SKU)"'
             } />
           </div>
           <div class="field-sm">
             <label class="label" for="f-barcode">Barcode <span class="hint font-normal">1 produk = 1 barcode</span></label>
-            <input id="f-barcode" class="input input-sm" value="${esc(d?.barcode ?? '')}" inputmode="numeric" placeholder="opsional" />
+            <input id="f-barcode" class="input input-sm" value="${esc(barcodeAwal)}" inputmode="numeric" placeholder="opsional" />
           </div>
         </div>
         <div class="grid grid-cols-2 gap-2">
@@ -585,7 +644,7 @@ function productForm(p: Product | 'new', cats: Category[]): void {
             <input id="f-price" class="input input-sm" inputmode="numeric" value="${d?.price ?? 0}" />
           </div>
         </div>
-        ${d && d.track_stock ? `
+        ${mode === 'edit' && d && d.track_stock ? `
         <p class="-mt-1 text-xs text-gray-500 dark:text-gray-400">
           Modal rata-rata: <b class="text-gray-700 dark:text-gray-200">${rp(d.avg_cost)}</b>
           — hasil penimbangan seluruh restock, dipakai sebagai HPP saat jual.
@@ -593,7 +652,7 @@ function productForm(p: Product | 'new', cats: Category[]): void {
         </p>` : ''}
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2 pt-0.5">
           ${switchHtml('f-dyn', d ? !!d.price_dynamic : false, 'Boleh ubah harga saat jual')}
-          ${d ? switchHtml('f-active', !!d.is_active, 'Aktif') : ''}
+          ${mode === 'edit' && d ? switchHtml('f-active', !!d.is_active, 'Aktif') : ''}
         </div>
 
         <p class="form-sec">Satuan jual</p>
@@ -611,11 +670,8 @@ function productForm(p: Product | 'new', cats: Category[]): void {
 
         <div id="f-stock-wrap">
           <p class="form-sec">Stok</p>
-          <div class="grid grid-cols-2 gap-2">
-            <div class="field-sm">
-              <label class="label" for="f-stock">Stok</label>
-              <input id="f-stock" class="input input-sm" inputmode="numeric" value="${d?.stock ?? 0}" />
-            </div>
+          <div class="grid gap-2 ${mode === 'edit' ? 'grid-cols-1' : 'grid-cols-2'}">
+            ${inputStok}
             <div class="field-sm">
               <label class="label" for="f-min">Stok minimum</label>
               <input id="f-min" class="input input-sm" inputmode="numeric" value="${d?.min_stock ?? 0}" />
@@ -635,7 +691,6 @@ function productForm(p: Product | 'new', cats: Category[]): void {
       const price = el.querySelector('#f-price') as HTMLInputElement;
       const cost = el.querySelector('#f-cost') as HTMLInputElement;
       const markup = el.querySelector('#f-markup') as HTMLInputElement;
-      const stock = el.querySelector('#f-stock') as HTMLInputElement;
       const min = el.querySelector('#f-min') as HTMLInputElement;
       const name = el.querySelector('#f-name') as HTMLInputElement;
       const sku = el.querySelector('#f-sku') as HTMLInputElement;
@@ -684,13 +739,31 @@ function productForm(p: Product | 'new', cats: Category[]): void {
 
       // SKU kosong -> server menurunkan dari nama. Cuma pratinjau; server yang
       // menjamin unik (nama sama -> SKU dapat akhiran -2, -3, ...).
+      const merah = ['text-red-600', 'dark:text-red-400'];
+      // Kolom SKU hanya divalidasi ketika diketik — client tidak pernah
+      // mengisinya sendiri, termasuk di mode salinan. Saat kosong, server yang
+      // menomori `PRD#####`; pratinjau angka dari client tidak akan pernah tepat
+      // karena nomor berikutnya bisa saja sudah dipakai perubahan lain di server.
       const syncSkuHint = () => {
-        if (d) {
+        skuHint.classList.remove(...merah);
+        if (!bisaEditSku) {
           skuHint.textContent = 'SKU tidak bisa diubah';
           return;
         }
         const ketik = sku.value.trim();
-        skuHint.textContent = ketik ? '' : `dibuat otomatis: ${skuOtomatis(name.value)}`;
+        if (!ketik) {
+          skuHint.textContent = 'dikosongkan = diisi server (PRD#####)';
+          return;
+        }
+        // Cek tabrakan LIVE. Server meng-upsert berdasarkan SKU, jadi SKU yang
+        // sudah dipakai TIDAK boleh lolos — kalau lolos, produk lain ikut
+        // tertimpa diam-diam. Pola daftar-nya sama dengan dialog impor.
+        if (skuTerpakai().has(ketik)) {
+          skuHint.textContent = 'sudah dipakai!';
+          skuHint.classList.add(...merah);
+        } else {
+          skuHint.textContent = 'unik';
+        }
       };
 
       catSel.addEventListener('change', syncTrack);
@@ -698,8 +771,8 @@ function productForm(p: Product | 'new', cats: Category[]): void {
       cost.addEventListener('input', syncHargaDariMarkup);
       markup.addEventListener('input', syncHargaDariMarkup);
       price.addEventListener('input', syncMarkupDariHarga);
-      name.addEventListener('input', syncSkuHint);
       sku.addEventListener('input', syncSkuHint);
+      name.addEventListener('input', syncSkuHint);
 
       // --- satuan jual alternatif (fitur #3 Multi satuan) -------------------
       // Satuan DASAR tidak punya baris (implisit dari select Satuan di atas);
@@ -786,6 +859,13 @@ function productForm(p: Product | 'new', cats: Category[]): void {
       ok.addEventListener('click', async () => {
         const nama = val('f-name');
         if (!nama) { toast('Nama produk wajib diisi', 'warning'); return; }
+        const skuKetik = val('f-sku');
+        if (bisaEditSku && skuKetik && skuTerpakai().has(skuKetik)) {
+          toast(`SKU "${skuKetik}" sudah dipakai produk lain — SKU harus unik. Kosongkan agar diisi server (PRD#####).`, 'warning');
+          sku.focus();
+          sku.select();
+          return;
+        }
         bacaUnitRows();
         const base = unitSel.value || 'pcs';
         const rusak = unitList.find((u) => !Number.isFinite(u.factor) || u.factor <= 0);
@@ -802,7 +882,7 @@ function productForm(p: Product | 'new', cats: Category[]): void {
         try {
           const res = await apiPost<{ data: Product }>('/api/products', {
             name: nama,
-            sku: val('f-sku'),
+            sku: skuKetik,
             barcode: val('f-barcode') || null,
             category_slug: catSel.value,
             unit: val('f-unit') || 'pcs',
@@ -810,9 +890,16 @@ function productForm(p: Product | 'new', cats: Category[]): void {
             cost: num('f-cost'),
             markup: dec('f-markup'),
             price_dynamic: dyn.checked ? 1 : 0,
-            stock: num('f-stock'),
+            // Mode Ubah tidak punya elemen `#f-stock`. `num('f-stock')` tanpa
+            // elemennya jatuh ke 0 -> server men-reset stok jadi nol diam-diam
+            // (lihat AGENTS §3: field yang tidak dikirim ikut ke-reset). Kirim
+            // nilai lama apa adanya.
+            stock: mode === 'edit' ? (d?.stock ?? 0) : num('f-stock'),
             min_stock: num('f-min'),
-            is_active: d ? ((el.querySelector('#f-active') as HTMLInputElement).checked ? 1 : 0) : 1,
+            is_active:
+              mode === 'edit'
+                ? ((el.querySelector('#f-active') as HTMLInputElement).checked ? 1 : 0)
+                : 1,
             // SELALU dikirim (termasuk []) — tidak dikirim = tidak diubah, jadi
             // form tanpa perubahan satuan harus tetap mengirim daftar lama agar
             // konsisten dengan tampilan. `[]` = hapus semua satuan alternatif.
@@ -820,7 +907,10 @@ function productForm(p: Product | 'new', cats: Category[]): void {
           });
           // SKU bisa dibuat server saat kolomnya dikosongkan -> tampilkan apa
           // yang benar-benar tersimpan, bukan tebakan client.
-          toast(`${d ? 'Produk diperbarui' : 'Tersimpan'} · ${res?.data?.sku ?? ''}`, 'success');
+          toast(
+            `${mode === 'edit' ? 'Produk diperbarui' : salin ? 'Produk diduplikat' : 'Tersimpan'} · ${res?.data?.sku ?? ''}`,
+            'success',
+          );
           close();
           await reload(true);
         } catch (e) {
@@ -921,7 +1011,11 @@ function labelForm(): void {
   });
 }
 
-function restockForm(p: Product): void {
+/** Dialog stok (restock + opname). HANYA dipanggil dari halaman Stok — sejak
+ *  2026-09-28 form produk menyimpan stok AWAL saja, jadi tiap perubahan stok
+ *  wajib melewati jalur ini dan tercatat sebagai mutasi. `sesudah` disuntikkan,
+ *  bukan memakai `reload()` halaman Produk (halaman Stok punya state sendiri). */
+export function restockForm(p: Product, sesudah?: () => void | Promise<void>): void {
   type Mode = 'masuk' | 'opname';
   let mode: Mode = 'masuk';
 
@@ -1085,7 +1179,7 @@ function restockForm(p: Product): void {
           }
         }
         close();
-        await reload(true);
+        await (sesudah ? sesudah() : reload(true));
       });
     },
   });
@@ -1285,7 +1379,17 @@ function bind(): void {
   find('.table-wrap')?.addEventListener('scroll', onScroll, { passive: true });
   host.closest('.page')?.addEventListener('scroll', onScroll, { passive: true });
 
-  find('#sync')?.addEventListener('click', () => void reload(true));
+  // Shift+klik Sinkron = reset cache lalu tarik ulang dari nol (`fullReset()`
+  // sudah ada sejak awal tapi tidak pernah dipanggil). Perlu setelah migrasi SKU:
+  // syncMaster merge per SKU dan tidak pernah menghapus key lama, jadi baris
+  // lama akan menetap sebagai hantu di IndexedDB bila hanya delta sync biasa.
+  find('#sync')?.addEventListener('click', async (e) => {
+    if (e.shiftKey) {
+      await fullReset();
+      toast('Cache master dibersihkan — menarik ulang semua data dari nol.', 'success');
+    }
+    await reload(true);
+  });
   find('#prod-new')?.addEventListener('click', () => productForm('new', state.categories));
   find('#prod-import')?.addEventListener('click', () => importForm());
   find('#prod-label')?.addEventListener('click', () => labelForm());
@@ -1370,7 +1474,70 @@ function payloadToggleAktif(p: Product, isActive: 0 | 1) {
   };
 }
 
-/** Tombol aksi di tiap baris tabel (edit / restock / nonaktifkan / aktifkan / hapus).
+/* ---------- menu ⋮ aksi baris ---------- */
+
+/** Tutup satu menu ⋮ (wrap = pembungkus .row-more). */
+function tutupMenu(wrap: HTMLElement): void {
+  wrap.classList.remove('is-open');
+  wrap.querySelector('[data-more]')?.setAttribute('aria-expanded', 'false');
+  wrap.querySelector<HTMLElement>('.row-dd')?.setAttribute('hidden', '');
+}
+
+function tutupSemuaMenu(): void {
+  document.querySelectorAll<HTMLElement>('.row-more.is-open').forEach(tutupMenu);
+}
+
+/** Buka menu ⋮ — buka dulu baru ukur: elemen `hidden` tidak punya
+ *  offsetWidth/offsetHeight, jadi posisinya belum bisa dihitung.
+ *
+ *  Posisi pakai `position: fixed` (di-set inline + di CSS .row-dd) supaya lolos
+ *  dari .table-wrap yang overflow-x-auto — menurut spesifikasi itu memaksa
+ *  overflow-y ikut dihitung `auto`, sehingga anak ber-absolute di dalamnya ikut
+ *  terpotong atau memicu scrollbar tabel. */
+function bukaMenu(wrap: HTMLElement, btn: HTMLElement): void {
+  const dd = wrap.querySelector<HTMLElement>('.row-dd');
+  if (!dd) return;
+  tutupSemuaMenu(); // hanya satu menu yang boleh terbuka pada satu waktu
+  dd.removeAttribute('hidden');
+  dd.style.left = '0';
+  dd.style.top = '0';
+  const r = btn.getBoundingClientRect();
+  const w = dd.offsetWidth;
+  const h = dd.offsetHeight;
+  // Siku kanan menu = siku kanan tombol, lalu dijepit ke viewport: kolom Aksi
+  // menempel di tepi kanan tabel, tanpa jepit menu bisa keluar layar.
+  const kiri = Math.min(Math.max(8, r.right - w), Math.max(8, window.innerWidth - w - 8));
+  // Baris paling bawah -> buka ke atas, jangan keluar tepi bawah layar.
+  const atas = r.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, r.top - 4 - h) : r.bottom + 4;
+  dd.style.left = `${kiri}px`;
+  dd.style.top = `${atas}px`;
+  wrap.classList.add('is-open');
+  btn.setAttribute('aria-expanded', 'true');
+}
+
+/** Klik di luar & Escape. Dipasang SEKALI — kalau dipasang di dalam
+ *  bindRowActions(), listener menumpuk satu tiap renderRows() dipanggil
+ *  (pencarian, filter, dan infinite scroll sama-sama merender ulang tbody). */
+let menuGlobalTerpasang = false;
+function pasangMenuGlobal(): void {
+  if (menuGlobalTerpasang) return;
+  menuGlobalTerpasang = true;
+  document.addEventListener('click', (e) => {
+    const t = e.target as Node;
+    document.querySelectorAll<HTMLElement>('.row-more.is-open').forEach((w) => {
+      // Tombol ⋮ dan seluruh isi menu ada di dalam .row-more, jadi klik di
+      // dalamnya sengaja tidak ditutup oleh listener ini (dibiarkan oleh
+      // pemanggilannya sendiri).
+      if (!w.contains(t)) tutupMenu(w);
+    });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') tutupSemuaMenu();
+  });
+}
+
+/** Tombol aksi di tiap baris tabel (edit / hapus + menu ⋮: duplikat,
+ *  nonaktifkan / aktifkan).
  *
  *  WAJIB dipanggil ulang setiap kali tbody dirender ulang. Sebelumnya listener
  *  ini hanya dipasang sekali di bind(), sedangkan renderRows() mengganti
@@ -1378,18 +1545,28 @@ function payloadToggleAktif(p: Product, isActive: 0 | 1) {
  *  jadi mati diam-diam (klik tidak buka form, tanpa error di console). */
 function bindRowActions(): void {
   if (!host) return;
+  host.querySelectorAll<HTMLElement>('[data-copy]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const id = Number(b.dataset.copy);
+      const p = state.products.find((x) => x.id === id) ?? state.inactive.find((x) => x.id === id);
+      if (p) productForm(p, state.categories, 'copy');
+    }),
+  );
   host.querySelectorAll<HTMLElement>('[data-edit]').forEach((b) =>
     b.addEventListener('click', () => {
-      const p = state.products.find((x) => x.id === Number(b.dataset.edit));
+      // Cari juga di state.inactive: Ubah kini satu-satunya tombol yang selalu
+      // tampil di baris, jadi ia harus tetap hidup saat status = nonaktif.
+      // Form edit menampilkan switch #f-active (mati) dan menyimpannya apa
+      // adanya, jadi membuka produk nonaktif tidak mengaktifkannya diam-diam.
+      const id = Number(b.dataset.edit);
+      const p =
+        state.products.find((x) => x.id === id) ?? state.inactive.find((x) => x.id === id);
       if (p) productForm(p, state.categories);
     }),
   );
-  host.querySelectorAll<HTMLElement>('[data-restock]').forEach((b) =>
-    b.addEventListener('click', () => {
-      const p = state.products.find((x) => x.id === Number(b.dataset.restock));
-      if (p) restockForm(p);
-    }),
-  );
+  // "Stok & opname" TIDAK ada lagi di sini: perubahan stok hanya lewat halaman
+  // Stok (#/stock), supaya form produk benar-benar menyimpan stok AWAL saja dan
+  // tiap mutasi punya jejak. Lihat restockForm() yang kini hanya dipanggil stock.ts.
   host.querySelectorAll<HTMLElement>('[data-off]').forEach((b) =>
     b.addEventListener('click', async () => {
       const p = state.products.find((x) => x.id === Number(b.dataset.off));
@@ -1472,6 +1649,30 @@ function bindRowActions(): void {
       }
     }),
   );
+
+  // Menu ⋮: buka/tutup. Sengaja TANPA stopPropagation — tombol ⋮ ada di dalam
+  // .row-more, jadi listener "klik di luar" di document menganggapnya klik
+  // di dalam dan tidak ikut menutup. Keuntungannya handler global lain (menu
+  // pengguna, dropdown POS) tetap jalan saat ⋮ diklik.
+  host.querySelectorAll<HTMLElement>('[data-more]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const wrap = b.closest('.row-more');
+      if (!(wrap instanceof HTMLElement)) return;
+      if (wrap.classList.contains('is-open')) tutupMenu(wrap);
+      else bukaMenu(wrap, b);
+    }),
+  );
+
+  // Item menu diklik -> tutup menunya. Aksi masing-masing sudah diikat di atas
+  // (selector [data-on]/[data-copy]/… menemukannya juga di dalam menu);
+  // penutup ini supaya tidak ada panel tipis yang menutupi modal hasilnya.
+  host.querySelectorAll<HTMLElement>('.row-dd').forEach((d) =>
+    d.addEventListener('click', () => {
+      const wrap = d.closest('.row-more');
+      if (wrap instanceof HTMLElement) tutupMenu(wrap);
+    }),
+  );
+  pasangMenuGlobal();
 }
 
 /* ---------- ENTRY ---------- */

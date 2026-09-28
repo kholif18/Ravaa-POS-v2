@@ -24,7 +24,7 @@ const jpost = async (p, b, m = 'POST') => {
   return { s: r.status, j: await r.json().catch(() => ({})) };
 };
 
-const SKU = 'ATK-PULPEN-HITAM';
+const SKU = 'PRD00001';
 const ambil = async () => (await jget(`/api/products?status=semua&q=${SKU}`)).data[0];
 
 // Buang ESC/POS supaya argumen perintah tidak terbaca sebagai isi struk.
@@ -120,7 +120,7 @@ try {
   console.log('\n=== B. POS: chip satuan -> baris keranjang TERPISAH ===');
   await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 20000 });
-  await page.fill('#pos-q', 'Pulpen');
+  await page.fill('#pos-q', SKU);
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   const chips = await page.$$('#pos-results .suggest-unit');
   ok('chip satuan alternatif tampil (pack & dus)', chips.length === 2, chips.length);
@@ -132,7 +132,7 @@ try {
   const hDasar = await page.innerText(`#pos-rows tr[data-key="${PID}:pcs"]`);
   ok('harga baris dasar = Rp3.000', hDasar.includes(rp(3000)), hDasar);
   // 2) ketuk chip "pack" -> baris BARU, bukan menumpuk di baris pcs
-  await page.fill('#pos-q', 'Pulpen');
+  await page.fill('#pos-q', SKU);
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   await page.click('#pos-results .suggest-unit[data-unit="pack"]');
   await page.waitForSelector(`#pos-rows tr[data-key="${PID}:pack"]`, { timeout: 8000 });

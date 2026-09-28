@@ -589,6 +589,19 @@ function paint(): void {
   // lain yang baru dirender router.
   if (!host || !host.isConnected) return;
   host.innerHTML = shift ? cartHtml() : shiftGateHtml();
+  // Saklar "Cetak struk otomatis" ikut diganti tiap paint() (host.innerHTML),
+  // jadi listenernya WAJIB dipasang di sini — bukan di bindCart(). bindCart()
+  // hanya dipanggil saat mode 'jual'; kalau listenernya menetap di sana, saklar
+  // di mode topup/tarik kelihatan berfungsi tapi MATEK: checkbox bergerak,
+  // `autoPrint` tidak ikut, sehingga struk diam-diam tidak dicetak.
+  host.querySelector('#pos-autoprint')?.addEventListener('change', (e) => {
+    autoPrint = (e.target as HTMLInputElement).checked;
+    try {
+      localStorage.setItem(KEY_CETAK, autoPrint ? '1' : '0');
+    } catch {
+      /* abaikan */
+    }
+  });
   if (!shift) {
     bindShiftGate();
     return;
@@ -1228,15 +1241,6 @@ function bindCart(): void {
   host!.querySelector('#pos-cash')?.addEventListener('input', (e) => {
     cashIn = Number((e.target as HTMLInputElement).value || 0);
     paintCart();
-  });
-
-  host!.querySelector('#pos-autoprint')?.addEventListener('change', (e) => {
-    autoPrint = (e.target as HTMLInputElement).checked;
-    try {
-      localStorage.setItem(KEY_CETAK, autoPrint ? '1' : '0');
-    } catch {
-      /* abaikan */
-    }
   });
 
   host!.querySelector('#pos-pay')?.addEventListener('click', () => void pay());

@@ -22,16 +22,25 @@ const errs = [];
 page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });
 
+/** Stok & opname kini HANYA di halaman Stok (#/stock) — tombol barisnya
+ *  [data-stock], tidak lagi lewat menu ⋮ halaman Produk. Halaman dibuka sekali
+ *  di awal; pencarian `#st-q` disimpan di state dan bertahan antar paint, jadi
+ *  tiap panggilan cukup mengklik baris pertama (sudah tersaring). */
+const bukaDialogStok = async () => {
+  await page.click('#page tbody tr [data-stock]');
+  await page.waitForSelector('#r-qty', { timeout: 8000 });
+};
+
 const stokSelai = async () => {
-  // kolom ke-4 (Stok) pada baris produk yang sedang dicari
-  const tds = await page.locator('#rows tr').first().locator('td').allInnerTexts();
-  return norm(tds[3] ?? '');
+  // kolom ke-3 (badge Stok) pada baris produk yang sedang dicari
+  const tds = await page.locator('#page tbody tr').first().locator('td').allInnerTexts();
+  return norm(tds[2] ?? '');
 };
 
 try {
-  await page.goto('http://localhost:5656/#/products', { waitUntil: 'load' });
-  await page.waitForSelector('#rows tr', { timeout: 20000 });
-  await page.fill('#q', 'ATK-PULPEN-HITAM');
+  await page.goto('http://localhost:5656/#/stock', { waitUntil: 'load' });
+  await page.waitForSelector('#page tbody tr', { timeout: 20000 });
+  await page.fill('#st-q', 'PRD00001');
   await page.waitForTimeout(400);
   const awal = await stokSelai();
   // Baseline DIBACA dari data, bukan ditulis tetap 50: test lain (mis. E2E struk
@@ -42,8 +51,7 @@ try {
   const b = n + 7;   // stok setelah restock +7 pada bagian C
 
   console.log('=== A. Buka dialog: mode default Masuk barang ===');
-  await page.click('#rows tr [data-restock]');
-  await page.waitForSelector('#r-qty');
+  await bukaDialogStok();
   ok('judul menutup dua mode', /Stok:/.test(await page.innerText('.modal-header h3')));
   ok('label = Jumlah masuk', (await page.innerText('#r-label')).trim() === 'Jumlah masuk *');
   ok('tombol = Tambah stok', (await page.innerText('.modal [data-ok]')).trim() === 'Tambah stok');
@@ -65,14 +73,13 @@ try {
   await page.fill('#r-qty', '7');
   await page.click('.modal [data-ok]');
   await page.waitForSelector('.modal', { state: 'detached', timeout: 15000 });
-  await page.fill('#q', 'ATK-PULPEN-HITAM');
+  await page.fill('#st-q', 'PRD00001');
   await page.waitForTimeout(600);
   ok(`stok ${n} -> ${b}`, (await stokSelai()) === String(b), await stokSelai());
   ok('toast restock', /Stok .+ \+7/.test(await page.innerText('#toast-root')));
 
   console.log('=== D. Mode Hitung fisik (opname) ===');
-  await page.click('#rows tr [data-restock]');
-  await page.waitForSelector('#r-qty');
+  await bukaDialogStok();
   await page.click('.modal [data-mode="opname"]');
   ok('label berubah', (await page.innerText('#r-label')).trim() === 'Jumlah fisik hasil hitung *');
   ok('tombol berubah', (await page.innerText('.modal [data-ok]')).trim() === 'Simpan opname');
@@ -101,11 +108,14 @@ try {
   await page.fill('#r-qty', '0');
   await page.click('.modal [data-ok]');
   await page.waitForSelector('.modal', { state: 'detached', timeout: 15000 });
-  await page.fill('#q', 'ATK-PULPEN-HITAM');
+  await page.fill('#st-q', 'PRD00001');
   await page.waitForTimeout(600);
-  // sel stok ikut menampilkan minimum ("0 / min 10") saat di bawah min_stock,
-  // jadi cocokkan AWALAN barisnya, bukan seluruh isinya.
-  ok('stok jadi 0 (opname boleh 0)', /^0\b/.test(await stokSelai()), await stokSelai());
+  // Badge halaman Stok menulis "habis" (bukan "0") saat stok 0, dan "N / min M"
+  // saat di bawah minimum — keduanya berarti angkanya memang 0. Yang persis angka
+  // diperiksa lewat toast di baris berikutnya.
+  const stokNol = await stokSelai();
+  ok('stok jadi 0 (opname boleh 0)',
+    /^0\b/.test(stokNol) || stokNol === 'habis', stokNol);
   ok('toast opname memuat angka', new RegExp(`Opname .+: ${b} -> 0 \\(-${b}\\)`).test(norm(await page.innerText('#toast-root'))),
     norm(await page.innerText('#toast-root')));
 
@@ -117,8 +127,7 @@ try {
 } finally {
   // kembalikan stok seperti semula (50) lewat UI yang sama
   try {
-    await page.click('#rows tr [data-restock]');
-    await page.waitForSelector('#r-qty');
+    await bukaDialogStok();
     await page.click('.modal [data-mode="opname"]');
     await page.fill('#r-qty', '50');
     await page.click('.modal [data-ok]');

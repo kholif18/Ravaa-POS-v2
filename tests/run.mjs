@@ -22,16 +22,19 @@ import { fileURLToPath } from 'node:url';
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const SUITE = [
-  ['importcsv-test.ts', 73],
+  ['importcsv-test.ts', 111],
   ['escpos-test.ts', 55],
+  ['sku-urut-test.mjs', 17],
   ['product-delete-test.mjs', 25],
-  ['e2e-import.mjs', 24],
+  ['e2e-import.mjs', 30],
   ['e2e-opname.mjs', 23],
   ['e2e-label.mjs', 20],
-  ['e2e-struk.mjs', 34],
-  ['e2e-hpp.mjs', 26],
-  ['satuan-test.mjs', 43],
+  ['e2e-struk.mjs', 36],
+  ['e2e-hpp.mjs', 28],
+  ['satuan-test.mjs', 44],
   ['e2e-multisatuan.mjs', 29],
+  ['e2e-duplikat.mjs', 37],
+  ['e2e-aksi.mjs', 34],
 ];
 
 let total = 0;

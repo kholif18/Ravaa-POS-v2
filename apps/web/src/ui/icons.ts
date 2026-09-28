@@ -6,7 +6,7 @@ export type IconName =
   | 'menu' | 'close' | 'search' | 'plus' | 'minus' | 'trash' | 'print' | 'sync'
   | 'clock' | 'users' | 'truck' | 'check' | 'alert' | 'info' | 'chevL' | 'chevR' | 'chevD'
   | 'moon' | 'sun' | 'receipt' | 'pencil' | 'filter' | 'download' | 'calendar' | 'logout' | 'wallet'
-  | 'upload';
+  | 'upload' | 'copy' | 'more';
 
 const P: Record<IconName, string> = {
   dashboard: '<rect width="7" height="9" x="3" y="3" rx="1" /> <rect width="7" height="5" x="14" y="3" rx="1" /> <rect width="7" height="9" x="14" y="12" rx="1" /> <rect width="7" height="5" x="3" y="16" rx="1" />',
@@ -20,6 +20,9 @@ const P: Record<IconName, string> = {
   close: '<path d="M18 6 6 18" /> <path d="m6 6 12 12" />',
   search: '<path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" />',
   plus: '<path d="M5 12h14" /> <path d="M12 5v14" />',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />',
+  // ellipsis-vertical (titik tiga menegak) — tombol "aksi lain" menu baris.
+  more: '<circle cx="12" cy="12" r="1" fill="currentColor" /> <circle cx="12" cy="5" r="1" fill="currentColor" /> <circle cx="12" cy="19" r="1" fill="currentColor" />',
   minus: '<path d="M5 12h14" />',
   trash: '<path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />',
   print: '<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /> <path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6" /> <rect x="6" y="14" width="12" height="8" rx="1" />',

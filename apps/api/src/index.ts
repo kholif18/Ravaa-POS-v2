@@ -213,21 +213,29 @@ app.delete('/api/products/:id', (c) => {
   return c.json({ data: { id: p.id, sku: p.sku, deleted: true } });
 });
 
-// SKU kosong -> diturunkan dari nama produk (ala Aronium: "default value based on
-// max value"). WAJIB unik: SKU adalah kunci upsert, jadi SKU yang bentrok tidak
-// sekadar gagal — ia akan menimpa produk lain._suffix -2, -3, ... dipakai sampai
-// benar-benar baru.
-function skuDariNama(name: string): string {
-  const base =
-    name
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'PRODUK';
-  let s = base;
-  let n = 2;
-  while (db.prepare('SELECT 1 FROM products WHERE sku = ?').get(s)) s = `${base}-${n++}`;
-  return s;
+// SKU kosong -> diisi server dengan nomor urut `PRD00001`, `PRD00002`, ...
+// (ala Aronium "default value based on max value"). Pola PRD + 5 digit dipilih
+// karena pendek, urut alami walau diurutkan sebagai teks, dan tabrakan nol.
+// SKU masih boleh diketik manual — fungsi ini hanya dipanggil saat kolom kosong.
+//
+// Nomor diambil dari MAX, bukan COUNT: baris produk yang pernah dihapus tetap
+// ada di DB (tombstone — wajib, supaya sale_items/stock_moves tetap valid), jadi
+// COUNT bisa menghasilkan nomor yang sudah pernah terpakai dan membingungkan
+// label yang sudah tercetak. `SUBSTR(sku, 4) GLOB '[0-9]*'` mengecualikan SKU
+// manual yang tidak berbentuk urut (mis. `PRD-FOO`), tapi tetap menghitung
+// ekor panjang (`PRD100000`) sehingga MAX tidak mundur.
+//
+// WAJIB unik: SKU adalah kunci upsert, jadi SKU yang bentrok tidak sekadar
+// gagal — ia akan menimpa produk lain.
+function skuDariUrut(): string {
+  const row = db
+    .prepare(
+      `SELECT MAX(CAST(SUBSTR(sku, 4) AS INTEGER)) AS n
+         FROM products
+        WHERE sku LIKE 'PRD%' AND SUBSTR(sku, 4) GLOB '[0-9]*'`,
+    )
+    .get() as { n: number | null };
+  return `PRD${String((row?.n ?? 0) + 1).padStart(5, '0')}`;
 }
 
 // Satuan jual ALTERNATIF (fitur #3 Multi satuan).
@@ -283,7 +291,7 @@ const upsertProduct = db.transaction((input: {
 }) => {
   const cat = db.prepare('SELECT id FROM categories WHERE slug = ?').get(input.category_slug) as { id: number } | undefined;
   if (!cat) throw new Error(`kategori tidak dikenal: ${input.category_slug}`);
-  const sku = input.sku?.trim() || skuDariNama(input.name);
+  const sku = input.sku?.trim() || skuDariUrut();
   const unit = input.unit?.trim() || 'pcs';
   // Satuan harus ada di master (form produk pakai dropdown). Dicek di sini biar
   // jawabannya 400 yang jelas, bukan error FK mentah dari SQLite.
@@ -373,7 +381,7 @@ app.post('/api/products/import', async (c) => {
         }
         try {
           const existed = db.prepare('SELECT 1 FROM products WHERE sku = ?').get(
-            sku || skuDariNama(String(r.name)),
+            sku || skuDariUrut(),
           );
           upsertProduct(r as never);
           rep.ok++;

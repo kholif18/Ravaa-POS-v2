@@ -84,9 +84,9 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   "pcs" vs "Pcs" untuk produk yang sama; satuan yang tak dikenal ditolak 400.
   Produk baru default ke `pcs` (kalau `pcs` tak ada di master, ke satuan pertama).
   **SKU boleh kosong** —
-  server menurunkan dari nama dan menjamin unik (`Kopi Kapal Api Sachet` ->
-  `KOPI-KAPAL-API-SACHET`, nama kembar -> `...-2`), jadi dua produk tidak mungkin
-  diam-diam saling menimpa.
+  server menomori sendiri `PRD00001`, `PRD00002`, ... (`PRD` + 5 digit, dihitung
+  dari MAX yang ada di DB), jadi dua produk tidak mungkin diam-diam saling
+  menimpa. SKU tetap boleh diketik manual; form sengaja membiarkannya kosong.
 * Layar kasir (`#/pos`) **tidak memakai grid produk**. Satu input scan/ketik
   (barcode persis → SKU persis → nama mengandung) dengan dropdown hasil: ArrowUp /
   ArrowDown menyorot, Enter atau klik memasukkan ke keranjang, Escape menutup.
@@ -111,7 +111,7 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   Kontrak `POST /api/topups` tidak berubah — `provider` tetap TEXT non-kosong,
   hanya maknanya yang jadi kode jenis. Putar `GET /api/reports/daily` untuk
   memecah omzet per jenis.
-* Produk kategori **`topup`** (`TOPUP-ALL`, `TARIK-TUNAI`) **bukan item jual**:
+* Produk kategori **`topup`** (`PRD00017` topup, `PRD00018` tarik) **bukan item jual**:
   scan/ketik/klik produk itu membuka mode topup atau tarik, tidak pernah masuk
   keranjang. Alasannya satu produk hanya punya satu harga, sedangkan topup butuh
   dua angka (`nominal` + `admin`); kalau jadi `sale_item`, `SUM(sales.total)`
@@ -119,6 +119,14 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
 * Rokok: SKU per-bungkus dan ketengan terpisah.
 * Produk punya status **aktif / nonaktif**. Nonaktif disembunyikan dari kasir; bisa
   diaktifkan kembali dari halaman Products (filter status **Nonaktif**).
+* **Kolom Aksi** — hanya dua tombol yang selalu tampil langsung: **Ubah** ✎ dan
+  **Hapus** 🗑. Aksi yang lebih jarang dipakai masuk ke **menu ⋮** (titik tiga) di
+  ujung baris: *Duplikat* dan *Nonaktifkan* / *Aktifkan kembali*. Perubahan stok
+  tidak lewat menu ini — restock & opname ada di halaman Stok. Menu pakai
+  `position: fixed` yang dihitung
+  dari tombolnya, supaya lolos dari `overflow-x-auto` pembungkus tabel, jatuh ke
+  atas kalau baris berada di tepi bawah layar, dan menutup sendiri saat diklik di
+  luar atau saat Esc ditekan.
 * **Hapus produk** (tombol tong sampah di tiap baris) berbeda dari nonaktifkan:
   - Hapus = **soft delete**: barisnya tetap ada di DB (kolom `deleted_at` terisi)
     tapi hilang permanen dari daftar, dari POS, dan dari laporan baru. Dipakai
@@ -165,7 +173,7 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   - Saklar disimpan di `ravaa.cetak` (bawaan **nyala**). **Gagal cetak tidak
     membatalkan penjualan**: uang sudah tercatat, hanya kertasnya belum keluar;
     toast peringatan muncul sekali per sesi agar tidak membanjiri layar kasir.
-* **Stok & opname** (ikon truk di tiap baris produk, kategori yang dilacak
+* **Stok & opname** (ikon truk di tiap baris **halaman Stok**, kategori yang dilacak
   stok) kini satu dialog dengan dua mode:
   - **Masuk barang** = restock lama: menambah `qty`, minimal 1.
   - **Hitung fisik** = opname: menulis jumlah HASIL HITUNG apa adanya, termasuk
@@ -174,6 +182,36 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     `57 -> 52 (-5)`. Angka input mengikuti mode (`1` untuk masuk, stok tercatat
     untuk hitung fisik) supaya angka tidak berpindah mode dengan arti berbeda.
   - Riwayat masuk ke `stock_moves` dengan `reason='opname'` dan `qty` = selisih.
+* **Duplikat produk** (menu **⋮** pada baris) — untuk membuat **varian**
+  dari produk yang sudah ada, mis. *Bolpoin Snowman* punya warna hitam/merah/biru:
+  cukup salin, ganti nama & barcode, selesai.
+  - **Disalin**: kategori, satuan, harga beli, markup, harga jual, satuan jual
+    alternatif, stok minimum, saklar harga-dinamis.
+  - **TIDAK disalin** (sengaja):
+    - **SKU** — selalu baru. Diisi otomatis (`NAMA-2`, `-3`, ...) dan ikut
+      digenerate ulang selama kasir belum mengetik SKU sendiri.
+    - **Barcode** — dikosongkan, karena 1 barcode = 1 produk.
+    - **Stok** — direset `0`. Varian baru belum tentu ada barang fisiknya;
+      menyalin angkanya berarti menciptakan persediaan yang tidak ada.
+  - **SKU wajib unik**: hint di bawah kolom menandai `unik` / `sudah dipakai!`
+    secara live, dan tombol Simpan ditolak dengan toast bila SKU sudah dipakai
+    produk lain. Tanpa cek ini, `POST /api/products` yang meng-*upsert* by SKU
+    akan **menimpa produk lain diam-diam**. Pola daftarnya sama dengan dialog
+    impor (aktif + nonaktif). Kosongkan SKU untuk menyerahkan kehitungan ke
+    server — server memeriksa langsung DB, paling aman bila state belum sinkron.
+* **Halaman Stok** (`#/stock`, menu **Stok** di sidebar) — selama ini masih
+  kerangka, kini terisi:
+  - **Ringkasan**: jumlah produk dilacak stok, stok habis, stok menipis, dan
+    nilai persediaan (`stok × modal rata-rata` — bukan `cost` manual).
+  - **Filter** Semua / Stok menipis / Stok habis plus pencarian (nama, SKU,
+    barcode, kategori). Urutan tabel diurutkan menurut urgensi: habis dulu,
+    lalu menipis, lalu aman.
+  - **Restock & opname** langsung dari barisnya (dialog yang sama dengan
+    halaman Produk), dan angka langsung ter-update setelah disimpan.
+  - Hanya produk kategori `track_stock=1` yang tampil — jasa/cetak/desain/topup
+    tidak punya stok.
+  - **Belum ada**: riwayat restock. Menampilkan `stock_moves` butuh endpoint
+    baca baru (`GET /api/stock-moves`) yang belum ada di kontrak §3.
 * **HPP & laba (modal rata-rata)** — menutup celah "HPP rata-rata" di bawah.
   - Restock kini menerima **`harga_beli`** (opsional, isian "Harga beli / nota"
     di dialog stok, mode **Masuk barang**). Tidak diisi = rata-rata modal tidak
@@ -218,8 +256,41 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   - Pemisah dideteksi otomatis: **TAB** untuk tempelan Excel, **koma** untuk CSV,
     **titik-koma** untuk CSV Excel Indonesia. Kutip `"` mengikuti RFC4180.
   - Kolom dikenali dalam nama Indonesia/Inggris (`nama`/`name`, `stok`/`stock`,
-    `min_stok`, `harga_dinamis`, `aktif`, ...). **Kategori & satuan boleh ditulis
-    namanya** ("ATK", "Lembar") — server/master menurunkan slug-nya.
+    `min_stok`, `harga_dinamis`, `aktif`, ...) **maupun nama Aronium**
+    (`Name`, `ProductGroup`, `SKU`, `Barcode`, `MeasurementUnit`, `Cost`,
+    `Markup`, `Price`, `IsPriceChangeAllowed`, `IsEnabled`, `Quantity`,
+    `MinStock`) — jadi **file ekspor Aronium lama (16 kolom) tetap bisa langsung
+    dimasukkan tanpa diubah**. Lima kolom Aronium yang tidak dipakai Ravaa
+    (`Tax`, `IsTaxInclusivePrice`, `IsUsingDefaultQuantity`, `IsService`,
+    `Description`) diabaikan dengan aman; `track_stock` tetap diambil dari
+    kategori, bukan dari `IsService`.
+    (Kolom `Barcode` dulu terbaca tapi **dibuang diam-diam** — `ALIAS` sudah
+    memetakannya, `mapRows` tak pernah menyalinnya ke payload. Sekarang ikut
+    tersimpan; ketahuan lewat test format Aronium.)
+  - Tombol **Unduh template** mengunduh CSV `template-produk-ravaa.csv`
+    berisi **12 kolom — namanya persis label di form**, supaya kasir bisa
+    mencocokkan kolom CSV dengan layar yang dia lihat:
+
+    ```
+    Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,
+    Boleh ubah harga saat jual,Aktif,Stok,Stok minimum
+    ```
+
+    Lima kolom Aronium sengaja tidak ikut karena memang tidak ada di form:
+    `Tax`, `IsTaxInclusivePrice` (sistem pajak tidak dipakai), `Description`,
+    `IsUsingDefaultQuantity`, `IsService`. **Parser tetap menerima semuanya**,
+    jadi file ekspor Aronium lama (16 kolom) tetap bisa langsung diimpor.
+    Tombol **Contoh format** lama sudah dihapus — digantikan tombol ini
+    (satu tombol, satu file, sudah berisi baris contoh).
+    Berbeda dari file ekspor Aronium yang beredar, template ini **tidak** memuat
+    baris `Group 1`: kategori/satuan contohnya diambil dari **master hidup**,
+    karena `Group 1` tidak ada di Ravaa dan akan membuat semua baris gagal
+    `Kategori tidak ada di master`. Baris contoh ditandai `CONTOH` di awal
+    nama — hapus atau ganti sebelum impor. Ada BOM di depan supaya Excel
+    Windows membaca UTF-8 benar (parser membuang BOM-nya sendiri).
+  - **Kategori & satuan boleh ditulis namanya** ("ATK", "Lembar") — server/master
+    menurunkan slug-nya. Kategori yang belum ada di master harus dibuat dulu:
+    barisnya dilaporkan `Kategori "..." tidak ada di master` (bukan gagal diam).
   - Angka menerima gaya Indonesia dan internasional (`1.500` = 1500, `1500,50` =
     1500.5, `Rp 3.000` = 3000).
   - Baris bermasalah TIDAK menggugurkan file: baris valid tetap diimpor, baris

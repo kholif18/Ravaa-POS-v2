@@ -120,14 +120,20 @@ chk('satuan tampil di baris tabel', (await p.textContent('tbody')).includes('· 
 sql(`DELETE FROM products WHERE name = 'Kertas Test ${TAG}'`);
 
 console.log('=== 8. Edit produk lama: satuan existing terpilih ===');
-// Nama seed produk ini "Aqua 600ml" (SKU MINUM-AQUA-600) -> cari pakai SKU.
-await p.fill('#q', ''); await w('#q', 'MINUM-AQUA');
+// Nama seed produk ini "Aqua 600ml" (SKU PRD00013) -> cari pakai SKU.
+await p.fill('#q', ''); await w('#q', 'PRD00013');
 await p.waitForTimeout(900);
 chk('cari by SKU ketemu 1 baris', (await p.locator('tr[data-row]').count()) === 1, `${await p.locator('tr[data-row]').count()} baris`);
 await p.click('tr[data-row] [data-edit]'); await p.waitForSelector('.modal');
 chk('dropdown menampilkan satuan lama (btl)', await p.inputValue('#f-unit') === 'btl', await p.inputValue('#f-unit'));
+// Pengawas jebakan paling mahal: mode Ubah tidak lagi merender input #f-stock,
+// jadi payload wajib mengirim nilai lama. Tanpa itu `num('f-stock')` jatuh ke 0
+// dan server men-reset stok (AGENTS §3) -> penjualan berikutnya "stok kurang".
+const stokSebelum = Number(sql(`SELECT stock FROM products WHERE sku='PRD00013';`));
 await p.click('.modal [data-ok]'); await p.waitForTimeout(1200);
-chk('tanpa ubah satuan, nilainya tetap di server', sql(`SELECT unit FROM products WHERE sku='MINUM-AQUA-600';`) === 'btl');
+chk('tanpa ubah satuan, nilainya tetap di server', sql(`SELECT unit FROM products WHERE sku='PRD00013';`) === 'btl');
+const stokSesudah = Number(sql(`SELECT stock FROM products WHERE sku='PRD00013';`));
+chk('stok TIDAK tertimpa 0 saat simpan form Ubah', stokSesudah === stokSebelum, `${stokSebelum} -> ${stokSesudah}`);
 
 console.log('=== 9. Error state: halaman survive saat API down ===');
 await p.route('**/api/units', (r) => r.abort());

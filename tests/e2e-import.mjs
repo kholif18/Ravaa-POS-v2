@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path0 from 'node:path';
 const ARTIFAK = path0.join(path0.dirname(fileURLToPath(import.meta.url)), 'artifacts');
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 
 const DB = '/home/seira/Projects/ravaaposv2/apps/api/data/data.db';
 
@@ -64,13 +65,33 @@ try {
   ok('tombol Impor MATI sebelum pratinjau', await page.locator('.modal [data-ok]').isDisabled());
   ok('judul dialog benar', (await page.locator('.modal-header h3').innerText()) === 'Impor produk');
 
-  console.log('=== B. Tombol "Contoh format" ===');
-  await page.click('#imp-contoh');
-  ok('textarea terisi contoh judul kolom',
-    (await page.inputValue('#imp-text')) === 'sku,nama,kategori,satuan,harga,modal,stok');
-  ok('contoh TIDAK memuat baris data (tidak menanam produk sampel)',
-    !(await page.inputValue('#imp-text')).includes('\n'));
+  console.log('=== B. Tombol "Contoh format" DIHAPUS (digantikan Unduh template) ===');
+  ok('tombol Contoh format tidak ada lagi', (await page.locator('#imp-contoh').count()) === 0);
+  ok('placeholder = header template, satu baris tanpa data',
+    (await page.getAttribute('#imp-text', 'placeholder') ?? '').includes('\n') === false);
+  await page.fill('#imp-text', 'Nama,Kategori,SKU\n');
   ok('setelah diketik, masih MATI', await page.locator('.modal [data-ok]').isDisabled());
+
+  console.log('=== B2. Tombol "Unduh template" (header = label form) ===');
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    page.click('#imp-unduh'),
+  ]);
+  ok('file terunduh dengan nama benar',
+    dl.suggestedFilename() === 'template-produk-ravaa.csv', dl.suggestedFilename());
+  const isi = fs.readFileSync(await dl.path(), 'utf8').replace(/^\uFEFF/, '');
+  const baris = isi.split(/\r\n/);
+  ok('baris 1 = 12 kolom, namanya persis label di form',
+    baris[0] === 'Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,'
+      + 'Boleh ubah harga saat jual,Aktif,Stok,Stok minimum',
+    baris[0]);
+  const kolom = baris[0].split(',');
+  ok('kolom Tax/Description/IsService TIDAK ikut',
+    !kolom.some((c) => ['Tax', 'IsTaxInclusivePrice', 'IsUsingDefaultQuantity',
+      'IsService', 'Description'].includes(c)), kolom);
+  ok('ada 2 baris contoh + header = 3 baris', baris.length === 3, baris.length);
+  ok('kedua baris contoh ditandai CONTOH', baris.slice(1).every((b) => b.startsWith('CONTOH ')), baris.slice(1));
+  ok('tombol unduh TIDAK menutup dialog', await page.isVisible('#imp-text'));
 
   console.log('=== C. Baca & tinjau ===');
   await page.fill('#imp-text', CSV);

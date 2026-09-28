@@ -16,7 +16,7 @@
   atau butuh tulis remote concurrent berat.
 * Stok dilacak HANYA untuk barang fisik (`categories.track_stock=1`):
   atk, eskrim, snack, rokok. Jasa/cetak/desain/topup: `track_stock=0`.
-* Rokok: SKU bungkus dan ketengan TERPISAH (cth `RK-SMP-12` vs `RK-SMP-KETENG`).
+* Rokok: SKU bungkus dan ketengan TERPISAH (cth `PRD00015` bungkus vs `PRD00016` ketengan).
 * Topup/tarik: `nominal` bebas + `admin` editable per transaksi.
   `nominal` = mutasi modal, `admin` = pendapatan jasa, `total = nominal + admin`.
 * Harga produk non-dinamis DIKUNCI server (client tidak boleh override).
@@ -93,11 +93,15 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     Untuk produk **dihapus** (tombstone) tidak perlu dipanggil manual:
     `syncMaster()` sudah membuangnya saat menerima `deleted_at` terisi.
 * `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?}` (upsert by sku, version++)
-  - `sku` **opsional**: kosong berarti server menurunkan dari nama.
-    Wajib dijamin unik — SKU adalah kunci upsert, jadi SKU bentrok akan menimpa
-    produk lain. Bentuk: nama -> uppercase, non-alnum jadi `-`, potong 40 karakter;
-    kalau sudah ada, tambahkan `-2`, `-3`, ... sampai baru. Contoh:
-    "Kopi Kapal Api Sachet" -> `KOPI-KAPAL-API-SACHET`.
+  - `sku` **opsional**: kosong berarti server menomori sendiri `PRD00001`,
+    `PRD00002`, ... (`PRD` + 5 digit, sejak 2026-09-28 — sebelumnya diturunkan
+    dari nama). Nomor = **MAX** SKU `PRD[0-9]+` di DB + 1, **BUKAN COUNT**:
+    baris tombstone (`deleted_at`) wajib tetap dihitung supaya nomor tidak pernah
+    mundur, dan COUNT bisa menabrak rangkaian begitu ada celah di tengah.
+    Wajib tetap unik — SKU adalah kunci upsert, jadi SKU bentrok akan menimpa
+    produk lain. SKU manual yang diketik sendiri dipakai apa adanya; **client
+    dilarang menebak nomornya** (angka berikutnya bisa saja sudah terpakai di
+    server — biar server yang menghitung dari DB).
   - `unit` satuan untuk struk, WAJIB ada di master `units` (form produk pakai
     dropdown dari `GET /api/units`). Tidak dikenal -> 400 dengan pesan
     "satuan tidak dikenal: <x> — buat dulu di halaman Satuan", dicek di server
@@ -245,6 +249,10 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
 ## 5. Batasan perubahan (anti-merusak)
 
 * DILARANG menghapus/mengganti SKU seed yang dipakai struk contoh tanpa konfirmasi user.
+  (Sudah pernah dikonfirmasi user & dijalankan 2026-09-28: seluruh 18 SKU seed
+  di-rename ke pola `PRD00001`..`PRD00018` mengikuti urutan `db/seed.sql`,
+  produk buatan user ikut jadi `PRD00019`. Backup:
+  `apps/api/data/data.db.bak.sku-prd`.)
 * DILARANG menambah framework (React/Svelte/Electron) tanpa persetujuan — web vanilla-TS adalah keputusan sadar (ringan, tanpa build rapuh).
 * Tailwind CSS v4 DISETUJUI 2026-09-25 (hanya build-time `@tailwindcss/vite` di `apps/web`,
   tanpa CDN; logika tetap vanilla-TS, tanpa Alpine/jQuery/chart-lib/font-icon).
