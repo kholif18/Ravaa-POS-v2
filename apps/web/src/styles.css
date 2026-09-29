@@ -182,7 +182,12 @@
     @apply size-5;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition;
+    /* min-h-[42px] WAJIB: tombol ber-label = 42px, tapi tombol yang hanya
+       berisi ikon (label `hidden sm:inline` lenyap di HP) tingginya 38px, dan
+       tombol tanpa border (btn-primary) 40px. Tanpa batas ini satu baris toolbar
+       bisa campur 38/40/42px, plus 38px di bawah target sentuh 40px.
+       42px = tinggi .input, jadi search, filter, dan tombol aksi sebaris seragam. */
+    @apply inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition;
   }
   .btn svg {
     @apply size-4;
@@ -192,6 +197,13 @@
   }
   .btn-ghost {
     @apply border border-gray-200 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700;
+  }
+  /* Status aktif untuk .btn yang dipakai sebagai filter (halaman Stok).
+     Sengaja TETAP membawa border seperti btn-ghost: tombol aktif tanpa border
+     berarti 2px lebih pendek, dan baris toolbar akan melompat tiap kali
+     kasir mengganti filter. Warna mengikuti .side-item.is-active. */
+  .btn.is-on {
+    @apply border-primary bg-primary-soft text-primary dark:border-primary dark:bg-primary/15 dark:text-primary;
   }
   .card {
     @apply rounded-2xl border border-gray-200 bg-white p-5 shadow-xs dark:border-gray-700 dark:bg-gray-800;
@@ -294,6 +306,18 @@
   }
   .cell-sub {
     @apply text-xs text-gray-500 dark:text-gray-400;
+  }
+
+  /* Tabel padat (halaman Produk & Stok): padding baris dipangkas supaya lebih
+     banyak baris muat tanpa scroll. Hanya JARAK yang diubah — ukuran teks
+     tetap 14px/12px, jadi batas minimal 13px untuk info penting tidak dilanggar.
+     Specificity `.table-compact th` (0,1,1) menang atas `.th` (0,1,0) yang juga
+     berada di @layer components, jadi urutan deklarasi tidak jadi penentu. */
+  .table-compact th {
+    @apply px-3 py-2;
+  }
+  .table-compact td {
+    @apply px-3 py-1.5;
   }
 
   /* Sidebar kategori: show/hide dengan animasi — lebar di desktop, tinggi di mobile.

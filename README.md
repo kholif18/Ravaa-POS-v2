@@ -208,6 +208,31 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     lalu menipis, lalu aman.
   - **Restock & opname** langsung dari barisnya (dialog yang sama dengan
     halaman Produk), dan angka langsung ter-update setelah disimpan.
+  - **Ekspor** (tombol di toolbar): mengunduh `stok-ravaa.csv` berisi
+    `SKU,Nama,Stok,Stok minimum` untuk **baris yang sedang tampil** — ikut
+    filter dan pencarian, jadi "yang saya lihat = yang saya dapat".
+  - **Impor** (tombol di toolbar): menerapkan angka stok dari CSV, dengan alur
+    yang sama dengan impor produk (pilih file / tempel dari Excel ->
+    **Baca & tinjau** -> **Impor**). Tombol **Impor** mati sampai pratinjau
+    ada, dan mati lagi begitu isi diubah, supaya yang dikirim selalu sama
+    dengan yang dilihat kasir.
+    - **Impor hanya untuk HITUNG FISIK.** Angka pada kolom `Stok` menjadi stok
+      baru apa adanya, termasuk 0, dan selisihnya tercatat sebagai mutasi
+      (`POST /api/stock-opname`). Pratinjau menampilkan kolom **Saat ini** dan
+      **Sesudah**, jadi dampaknya terlihat sebelum satu pun angka berubah.
+    - **Masuk barang tidak lewat impor** — alasannya dua-duanya fakta, bukan
+      selera: (1) format ekspor (`SKU,Nama,Stok,Stok minimum`) berisi
+      hitungan **absolut**, jadi menjumlahkannya kembali akan **menggandakan
+      stok** setiap kali file hasil unduh diimpor ulang; (2) berkasnya tidak
+      punya kolom harga beli dan dialog tidak pernah mengirim `harga_beli`,
+      sehingga `avg_cost` tak akan pernah terperbarui — padahal `avg_cost`
+      adalah satu-satunya sumber HPP. Masuk barang dikerjakan per item lewat
+      tombol truk, yang sudah punya isian **Harga beli / nota**.
+    - Pembaca hanya memakai kolom `SKU` dan `Stok`; kolom lain dilewati, jadi
+      hasil unduh halaman Stok **maupun halaman Produk** bisa langsung masuk.
+    - **Tidak ada endpoint baru**: tiap baris ditembak ke
+      `POST /api/stock-opname`, sehingga `version` naik per baris persis
+      seperti dilakukan manual lewat tombol truk.
   - Hanya produk kategori `track_stock=1` yang tampil — jasa/cetak/desain/topup
     tidak punya stok.
   - **Belum ada**: riwayat restock. Menampilkan `stock_moves` butuh endpoint
@@ -295,8 +320,33 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     1500.5, `Rp 3.000` = 3000).
   - Baris bermasalah TIDAK menggugurkan file: baris valid tetap diimpor, baris
     gagal dilaporkan per nomor baris aslinya.
+  - **Kolom yang tidak ada di berkas = jangan diubah**, bukan "setel ke 0".
+    Kontrak `POST /api/products` memang mereset field yang tidak dikirim ke
+    default server, tapi di impor kolom absen berarti *file ini tidak
+    memuatnya*. Tanpa aturan itu, file tanpa kolom `Stok`/`Harga jual`/
+    `Satuan` akan diam-diam menyetel produk yang sudah ada jadi 0 / `pcs`
+    tanpa jejak `stock_moves` — kejadian nyata sebelum diperbaiki: stok 7 ->
+    0, harga 1000 -> 0 lewat satu baris impor tanpa kolom tersebut. Server
+    memasang bendera `pertahankanTidakDikirim` **hanya** di
+    `/api/products/import`, sehingga perilaku `POST /api/products` (form
+    produk & toggle aktif yang mengirim payload lenkap) tidak berubah.
+    Angka yang memang dikirim tetap ditulis apa adanya — kolom `Stok` di
+    berkas tetap menulis ulang stok.
   - **Bukan `.xlsx`**: file itu ZIP+XML dan butuh dependensi parser — sengaja
     tidak dipasang. Jalan pintas Excel: Blok sel -> Ctrl+C -> tempel.
+* **Ekspor produk** (`#/products` -> tombol **Ekspor**): mengunduh
+  `produk-ravaa.csv` berisi **produk yang sedang tampil** — ikut filter status,
+  kategori, dan pencarian, sama lingkupnya dengan tombol **Label**
+  ("yang saya lihat = yang saya dapat").
+  - Urutan kolom **identik dengan `HEADER_TEMPLATE`** (12 kolom di atas), jadi
+    hasil unduh bisa langsung dimasukkan lagi lewat tombol **Impor** tanpa
+    disesuaikan — bolak-balik utuh, dan itu diuji langsung (ekspor produk
+    diterima pembaca stok).
+  - Kolom `Stok` ikut terbawa supaya bolak-baliknya lengkap. Mengimpor kembali
+    memang menulis ulang angka stok, tapi dialog Impor selalu menampilkan
+    pratinjau sebelum mengirim — jadi keputusan sadar, bukan diam-diam.
+  - BOM Excel dipasang di helper `unduhCSV()` (bukan di tiap pemanggil), supaya
+    tidak bisa terlewat dan membuat Excel membaca UTF-8 salah.
 * Kolom `products.type` (barang|jasa|cetak|desain|topup) **sudah dihapus** — nature
   produk sudah tercermin dari `categories.track_stock`. DB dev sudah dimigrasi.
   Install lain (mis. `~/ravaa-data/data.db` di STB) jalankan manual:

@@ -11,7 +11,7 @@ import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
-import { CONTOH_KOLOM, mapRows, parseTable, templateProduk, type BarisImpor } from '../importcsv';
+import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
 import { COLS, gabungLabel, kirimPrint, teksLabel, urlAgent, type ProdukLabel } from '../escpos';
 
 const SIDE_KEY = 'ravaa.prodside';
@@ -226,8 +226,11 @@ function productRows(): string {
 }
 
 function tableCard(): string {
+  // `lg:flex-1` WAJIB: tanpa grow-nya kartu berhenti seukuran isi, jadi footer
+  // tidak pernah turun ke dasar area tabel saat barisnya sedikit (wrap 696px vs
+  // kartu 172px pada filter 1 baris) — selama ini tertutupi banyaknya baris.
   return `
-  <div class="card-flush lg:flex lg:min-h-0 lg:flex-col">
+  <div class="card-flush lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
     <div class="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
       <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</span>
       ${STATUSES.map(
@@ -241,7 +244,7 @@ function tableCard(): string {
       }</span>
     </div>
     <div class="table-wrap table-scroll">
-      <table class="table">
+      <table class="table table-compact">
         <thead>
           <tr>
             <th class="th th-sticky">Produk</th>
@@ -309,6 +312,7 @@ export function renderProductsPage(): string {
             </div>
             <button type="button" id="sync" class="btn btn-ghost" title="Sinkronkan master produk — Shift+klik untuk reset cache penuh">${icon('sync')}<span class="hidden sm:inline">Sinkron</span></button>
             <button type="button" id="prod-import" class="btn btn-ghost" title="Impor produk dari CSV atau tempelan Excel">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>
+            <button type="button" id="prod-export" class="btn btn-ghost" title="Unduh produk yang sedang tampil (ikut filter &amp; pencarian) sebagai CSV">${icon('download')}<span class="hidden sm:inline">Ekspor</span></button>
             <button type="button" id="prod-label" class="btn btn-ghost" title="Cetak label harga untuk produk di filter ini">${icon('print')}<span class="hidden sm:inline">Label</span></button>
             <button type="button" id="prod-new" class="btn btn-primary ml-auto">${icon('plus')}<span>Produk</span></button>
           </div>
@@ -484,15 +488,7 @@ function importForm(): void {
       // BOM di depan supaya Excel Windows membaca UTF-8 benar — parser membuang
       // BOM-nya sendiri, jadi file hasil unduh tetap bisa langsung diimpor.
       m.el.querySelector('#imp-unduh')?.addEventListener('click', () => {
-        const isi = '\uFEFF' + templateProduk(state.categories, state.units);
-        const url = URL.createObjectURL(new Blob([isi], { type: 'text/csv;charset=utf-8' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'template-produk-ravaa.csv';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        unduhCSV(templateProduk(state.categories, state.units), 'template-produk-ravaa.csv');
         // Sengaja TIDAK memakai toast: browser sudah menampilkan unduhannya,
         // dan toast tambahan menumpuk di #toast-root sehingga menggeser
         // `.first()` pada test toast impor (e2e-import) yang mengasumsikan
@@ -1392,6 +1388,13 @@ function bind(): void {
   });
   find('#prod-new')?.addEventListener('click', () => productForm('new', state.categories));
   find('#prod-import')?.addEventListener('click', () => importForm());
+  // Ekspor mengikuti filter & pencarian yang sedang aktif — sama lingkupnya
+  // dengan tombol Label, jadi "yang saya lihat = yang saya dapat".
+  // Sengaja TIDAK memakai toast: browser sudah menampilkan unduhannya.
+  find('#prod-export')?.addEventListener('click', () => {
+    const rows = filteredProducts();
+    unduhCSV(csvProduk(rows), 'produk-ravaa.csv');
+  });
   find('#prod-label')?.addEventListener('click', () => labelForm());
   // Toggle sidebar kategori: ubah atribut data-open saja (bukan render ulang),
   // supaya animasi CSS berjalan dan isian search tidak hilang/fokus hilang.

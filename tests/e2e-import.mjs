@@ -140,6 +140,58 @@ try {
   // "Tidak ada produk yang cocok" saat filter kosong (products.ts:169).
   ok('baris gagal TIDAK ikut terimpor', (await page.locator('#rows tr[data-row]').count()) === 0);
 
+  console.log('=== F2. Ekspor produk (ikut filter pencarian) ===');
+  await page.fill('#q', 'E2e Impor');
+  await page.waitForTimeout(400);
+  ok('tombol Ekspor ada di toolbar', await page.locator('#prod-export').isVisible());
+  const [dlProd] = await Promise.all([
+    page.waitForEvent('download', { timeout: 8000 }),
+    page.click('#prod-export'),
+  ]);
+  ok('nama file ekspor', /produk-ravaa\.csv$/.test(dlProd.suggestedFilename()), dlProd.suggestedFilename());
+  const isiProd = fs.readFileSync(await dlProd.path(), 'utf8');
+  const tanpaBom = isiProd.replace(/^\uFEFF/, '');
+  ok('judul ekspor = HEADER_TEMPLATE (12 kolom, urut persis)',
+    tanpaBom.startsWith('Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,Boleh ubah harga saat jual,Aktif,Stok,Stok minimum'),
+    tanpaBom.split(/\r?\n/)[0]);
+  const barisEkspor = tanpaBom.split(/\r?\n/).filter(Boolean);
+  ok('ekspor ikut filter (judul + 2 baris)', barisEkspor.length === 3, String(barisEkspor.length));
+  ok('baris ekspor memuat SKU hasil impor', tanpaBom.includes('E2E-IMP-1'));
+
+  console.log('=== H. Regresi: kolom TIDAK dikirim = jangan diubah ===');
+  // Bug lama (terbukti sebelum diperbaiki): satu baris impor tanpa kolom
+  // Stok/Harga/Satuan menyetel produk yang sudah ada jadi 0 / 'pcs' diam-diam,
+  // tanpa jejak stock_moves — karena upsert memakai `input.x ?? 0` dan
+  // `mapRows` tidak pernah mengirim kolom yang absen di berkas.
+  // Perbaikannya di SERVER (`upsertProduct(..., { pertahankanTidakDikirim })`),
+  // jadi diuji lewat API, bukan lewat dialog.
+  const bacaBaris = () => execFileSync('sqlite3', [DB,
+    "SELECT stock || '|' || price || '|' || cost || '|' || unit || '|' || min_stock " +
+    "FROM products WHERE sku='E2E-IMP-1'"], { encoding: 'utf8' }).trim();
+  const utuh = bacaBaris();
+  ok('produk uji utuh sebelum regresi (stok 5, harga 4444, modal 3000, pcs)',
+    /^5\|4444\|3000\|pcs\|\d+$/.test(utuh), utuh);
+
+  const kirim = async (baris) => (await (await fetch('http://localhost:3001/api/products/import', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ rows: [baris] }),
+  })).json());
+
+  // HANYA nama + kategori: kolom Stok/Harga/Satuan/modal/min_stok tidak dikirim.
+  const rH = await kirim({ sku: 'E2E-IMP-1', name: 'E2e Impor Satu', category_slug: 'atk' });
+  ok('impor TANPA kolom Stok/Harga/Satuan: seluruh baris dipertahankan',
+    bacaBaris() === utuh, `${JSON.stringify(rH.data)} -> ${bacaBaris()} (dulu: 0|0|0|pcs)`);
+  ok('laporan: 1 baris diperbarui, tidak ada yang gagal',
+    rH.data?.ok === 1 && rH.data?.update === 1 && rH.data?.baru === 0 && rH.data?.gagal === 0,
+    JSON.stringify(rH.data));
+
+  // Angka yang MEMANG dikirim tetap ditulis — aturan ini menahan kolom absen,
+  // bukan menahan semua perubahan.
+  const rH2 = await kirim({ sku: 'E2E-IMP-1', name: 'E2e Impor Satu', category_slug: 'atk', stock: 9 });
+  const sesudah2 = bacaBaris();
+  ok('impor DENGAN kolom Stok: angka ditulis, harga/modal/satuan tetap',
+    /^9\|4444\|3000\|pcs\|\d+$/.test(sesudah2), `${JSON.stringify(rH2.data)} -> ${sesudah2}`);
+
   console.log('=== G. Tanpa error runtime ===');
   ok('tidak ada pageerror/console error', errs.length === 0, errs.join(' | '));
 } catch (e) {

@@ -70,12 +70,34 @@ export async function getMaxVersion(): Promise<number> {
 }
 
 // Tarik delta dari server (?since=maxVersion), gabung per sku, simpan.
+// Bila versi server mundur di bawah `since` (fresh install / restore), otomatis
+// tarik ulang dari nol dan ganti seluruh cache — lihat cabang di bawah.
 export async function syncMaster(
   fetchDelta: (since: number) => Promise<{ data: Product[]; maxVersion: number }>,
 ): Promise<{ added: number; total: number }> {
-  const since = await getMaxVersion();
-  const { data, maxVersion } = await fetchDelta(since);
-  const cur = await getCachedProducts();
+  let since = await getMaxVersion();
+  let delta = await fetchDelta(since);
+  let gantiTotal = false;
+  if (delta.maxVersion < since) {
+    // Versi server MUNDUR di bawah `since`. Terjadi setelah fresh install /
+    // restore backup / DB diganti — dan AGENTS §5 memang menyuruh `rm data.db`
+    // + `npm run seed`, jadi kejadian ini pasti terulang tiap migrasi.
+    // Akibatnya dua kali lipat: (1) delta sejak `since` tidak akan pernah berisi
+    // apa pun karena server hanya punya version <= maxVersion, lalu
+    // `Math.max(since, maxVersion)` di bawah mengunci `since` di angka lama
+    // selamanya sehingga semua perubahan baru tak pernah sampai; (2) baris lama
+    // (mis. SKU lama sebelum rename) tetap nempel di IndexedDB karena merge
+    // tidak pernah menghapus key yang tidak dikirim ulang server.
+    // Solusi: tarik ulang dari nol dan GANTI cache, bukan merge.
+    since = 0;
+    delta = await fetchDelta(0);
+    gantiTotal = true;
+  }
+  const { data, maxVersion } = delta;
+  // Cache hanya cerminan server, bukan sumber kebenaran — menggantinya dengan
+  // isi server tidak pernah membuang data yang sah (outbox ada di localStorage,
+  // terpisah dari IndexedDB ini).
+  const cur = gantiTotal ? [] : await getCachedProducts();
   const map = new Map(cur.map((p) => [p.sku, p]));
   for (const p of data) {
     // Tombstone (deleted_at terisi): produk sudah dihapus di server -> BUANG dari

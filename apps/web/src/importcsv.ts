@@ -307,3 +307,103 @@ export function templateProduk(
   ];
   return [HEADER_TEMPLATE, ...baris.map((r) => r.map(sel).join(','))].join('\r\n');
 }
+
+/* ==========================================================================
+ * EKSPOR — sengaja di file yang sama dengan parser, supaya urutan kolom
+ * template, pembaca, dan penulis tidak bisa berjalan menjauh satu sama lain.
+ * ========================================================================== */
+
+/** Baris produk yang dibutuhkan penulis CSV. Sengaja structural, bukan import
+ *  `Product` dari store — modul ini dipakai test di Node tanpa IndexedDB. */
+export interface ProdukEkspor {
+  name: string; category_name: string; sku: string; barcode: string | null;
+  unit: string; cost: number; markup: number; price: number;
+  price_dynamic: number; is_active: number; stock: number; min_stock: number;
+}
+
+/** Isi CSV ekspor produk. URUTAN KOLOM identik dengan `HEADER_TEMPLATE`, dan
+ *  kategori ditulis NAMA (bukan slug) persis seperti `templateProduk` — jadi
+ *  hasil unduh bisa langsung dimasukkan lagi ke dialog Impor tanpa disesuaikan.
+ *  `Stok` ikut terbawa supaya bolak-baliknya utuh; mengimpor kembali berarti
+ *  menulis ulang angka stok, dan dialog Impor selalu menampilkan pratinjau
+ *  sebelum mengirim, jadi itu keputusan sadar pengguna, bukan diam-diam. */
+export function csvProduk(list: ProdukEkspor[]): string {
+  const baris = list.map((p) =>
+    [
+      p.name, p.category_name ?? '', p.sku, p.barcode ?? '', p.unit ?? '',
+      p.cost, p.markup, p.price, p.price_dynamic, p.is_active, p.stock, p.min_stock,
+    ].map(sel).join(','),
+  );
+  return [HEADER_TEMPLATE, ...baris].join('\r\n');
+}
+
+/** Header ekspor stok. Hanya `SKU` dan `Stok` yang DIHARAPKAN oleh pembaca;
+ *  dua kolom sisanya untuk manusia, dan sengaja dilewati saat impor — lihat
+ *  `bacaStok`. */
+export const HEADER_STOK = 'SKU,Nama,Stok,Stok minimum';
+
+export interface StokEkspor {
+  sku: string; name: string; stock: number; min_stock: number;
+}
+
+/** Isi CSV ekspor stok (halaman Stok): hanya produk `track_stock=1`. */
+export function csvStok(list: StokEkspor[]): string {
+  const baris = list.map((p) => [p.sku, p.name, p.stock, p.min_stock].map(sel).join(','));
+  return [HEADER_STOK, ...baris].join('\r\n');
+}
+
+export interface BarisStok {
+  /** Nomor baris ASLI di file (baris judul = 1). */
+  baris: number;
+  sku: string;
+  /** `null` = tidak terbaca sebagai angka; penilaian akhir (mis. >0 untuk
+   *  restock) dilakukan di dialog karena bergantung mode yang dipilih. */
+  qty: number | null;
+  error: string | null;
+}
+
+export interface HasilBacaStok {
+  /** Kedua kolom wajib ada. `false` = file ini bukan daftar stok. */
+  ada: boolean;
+  baris: BarisStok[];
+}
+
+/** Baca CSV/TSV daftar stok. Hanya kolom `SKU` dan `Stok` yang dipakai —
+ *  kolom lain (termasuk seluruh kolom ekspor produk) dilewati, jadi file hasil
+ *  unduh halaman Stok MAUPUN halaman Produk bisa ditempel apa adanya.
+ *  Nama kolom dinormalisasi dulu (`stok-minimum` dan `Stok minimum` sama), dan
+ *  fallback `stock`/`qty` dipakai supaya file ekspor Aronium lama tetap masuk. */
+export function bacaStok(text: string): HasilBacaStok {
+  const tb = parseTable(text);
+  const norm = (s: string) => s.trim().toLowerCase().replace(/[.\-_]+/g, ' ');
+  const iSku = tb.header.findIndex((h) => ['sku', 'kode', 'code'].includes(norm(h)));
+  const iQty = tb.header.findIndex((h) => ['stok', 'stock', 'qty', 'jumlah'].includes(norm(h)));
+  if (iSku < 0 || iQty < 0) return { ada: false, baris: [] };
+
+  const baris: BarisStok[] = tb.rows.map((r, i) => {
+    const nomor = i + 2; // +2: baris judul = 1
+    const sku = (r[iSku] ?? '').trim();
+    const mentah = (r[iQty] ?? '').trim();
+    if (!sku) return { baris: nomor, sku, qty: null, error: 'SKU kosong' };
+    if (!mentah) return { baris: nomor, sku, qty: null, error: 'kolom Stok kosong' };
+    const qty = parseAngka(mentah);
+    if (qty === null) return { baris: nomor, sku, qty: null, error: `bukan angka: "${mentah}"` };
+    return { baris: nomor, sku, qty, error: null };
+  });
+  return { ada: true, baris };
+}
+
+/** Unduh string jadi file CSV. BOM ditanam DI SINI (bukan di pemanggil)
+ *  supaya tidak bisa terlewat dan membuat Excel Windows membaca UTF-8 salah;
+ *  parser membuang BOM-nya sendiri, jadi file hasil unduh tetap langsung bisa
+ *  diimpor. */
+export function unduhCSV(isi: string, namaFile: string): void {
+  const url = URL.createObjectURL(new Blob(['\uFEFF' + isi], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = namaFile;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

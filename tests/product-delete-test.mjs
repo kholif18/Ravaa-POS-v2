@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /* Test fitur: HAPUS PRODUK (soft delete + tombstone).
  *
- * Menguji 4 hal sekaligus:
+ * Menguji 5 hal sekaligus:
  *   A. tombol Hapus ada di tiap baris + dialog menjelaskan guard
  *   B. hapus sukses -> hilang dari tabel, dari list biasa, MUNCUL di delta sbg tombstone
  *   C. cache kasir (POS) benar-benar MEMBUANG produk tsb setelah sync
  *   D. guard: produk yang pernah terjual -> 400, produk tetap utuh
+ *   E. POST ulang SKU tombstone -> bangkit kembali (deleted_at dikosongkan)
  */
 import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
@@ -162,6 +163,36 @@ try {
   chk('toast error menjelaskan guard', /sudah pernah terjual/.test(err), err.slice(0, 130));
   chk('produk TETAP di API (deleted_at null)', !!p2sekarang && p2sekarang.deleted_at === null, JSON.stringify({ ada: !!p2sekarang, deleted: p2sekarang?.deleted_at }));
   chk('produk TETAP di tabel (tidak hilang)', (await pg.locator(`#rows tr[data-row="${p2.id}"]`).count()) === 1);
+
+  // ---------- E. POST ulang SKU tombstone -> bangkit ----------
+  // Regresi 2026-09-29: cabang UPDATE produk dulu tidak menyetel deleted_at, jadi
+  // upsert by SKU membalas 201 OK namun barisnya tetap mayat — hilang dari
+  // status=aktif|semua tapi masih ikut delta sebagai deleted_at terisi, artinya
+  // client malah MEMBUANGNYA dari cache. Ditemukan saat suite gagal misterius
+  // karena test ini sendiri meninggalkan satu tombstone.
+  console.log('=== E. POST ulang SKU yang sudah dihapus -> bangkit kembali ===');
+  const hidup = await jpost('/api/products', {
+    sku: 'UJI-HAPUS-1', name: 'Uji Hapus Satu', category_slug: 'atk',
+    unit: 'pcs', price: 1000, cost: 500, markup: 100, stock: 0, is_active: 1,
+  });
+  chk('POST ulang SKU tombstone diterima', hidup.s === 201, `HTTP ${hidup.s} ${hidup.j.error ?? ''}`);
+  chk('deleted_at dikosongkan', hidup.j.data?.deleted_at === null,
+    JSON.stringify({ deleted_at: hidup.j.data?.deleted_at, id: hidup.j.data?.id }));
+  const kembali = (await jget('/api/products?status=semua')).j.data.find((x) => x.id === p1.id);
+  chk('muncul lagi di list', !!kembali && kembali.deleted_at === null,
+    kembali ? `id=${kembali.id} deleted_at=${kembali.deleted_at}` : 'tidak ada');
+  chk('ikut filter Aktif', (await jget('/api/products?status=aktif')).j.data.some((x) => x.id === p1.id));
+  // version harus naik di atas tombstonenya supaya client yang sudah membuang
+  // baris ini (since = version tombstone) ikut menariknya kembali.
+  const delta2 = (await jget(`/api/products?since=${t.version}`)).j.data.find((x) => x.id === p1.id);
+  chk('terkirim lewat ?since= sbg bangkitan', !!delta2 && delta2.deleted_at === null && delta2.version > t.version,
+    delta2 ? `version=${t.version} -> ${delta2.version}, deleted_at=${delta2.deleted_at}` : 'tidak ada di delta');
+
+  await pg.reload({ waitUntil: 'networkidle' });
+  await pg.waitForSelector('#rows tr[data-row]', { timeout: 15000 });
+  await pg.waitForTimeout(1500);
+  chk('tampil lagi di tabel Produk', (await pg.locator(`#rows tr[data-row="${p1.id}"]`).count()) === 1,
+    `data-row="${p1.id}"`);
 
   chk('tanpa pageerror browser', errs.length === 0, errs.join(' || '));
 } finally {

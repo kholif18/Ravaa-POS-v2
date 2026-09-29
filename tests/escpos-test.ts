@@ -51,7 +51,7 @@ eq('kanan rata', JSON.stringify(kanan('ab', 6)), JSON.stringify('    ab'));
 
 console.log('=== B. semua baris pratinjau <= 32 kolom ===');
 const contoh: ProdukLabel = {
-  name: 'Sampoerna Mild (keteng/batang)', sku: 'RK-SMP-KETENG', price: 4000, unit: 'batang', barcode: '8991002103017',
+  name: 'Sampoerna Mild (keteng/batang)', sku: 'PRD00016', price: 4000, unit: 'batang', barcode: '8991002103017',
 };
 for (const p of [
   contoh,
@@ -70,7 +70,7 @@ console.log('=== C. labelHarga -> bytes ===');
   const b = labelHarga(contoh);
   const s = teksDari(b);
   ok('memuat nama', s.includes('Sampoerna Mild'));
-  ok('memuat SKU', s.includes('RK-SMP-KETENG'));
+  ok('memuat SKU', s.includes('PRD00016'));
   ok('memuat harga', s.includes('Rp4.000'));
   ok('diawali INIT (ESC @)', b[0] === 0x1b && b[1] === 0x40);
   ok('diakhiri CUT (GS V 0)', b[b.length - 3] === 0x1d && b[b.length - 2] === 0x56 && b[b.length - 1] === 0x00);

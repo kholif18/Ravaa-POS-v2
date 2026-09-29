@@ -9,16 +9,35 @@
 //   GET  /api/products        -> daftar + stock/min_stock/avg_cost/track_stock
 //   POST /api/restock         -> tambah stok + rata-rata modal (melalui restockForm)
 //   POST /api/stock-opname    -> ganti stok dengan hitung fisik (restockForm)
+// Impor CSV di halaman ini HANYA memakai /api/stock-opname — lihat komentar
+// importStokForm() di bawah kenapa restock tidak masuk lewat impor massal.
 // Riwayat restock butuh baca `stock_moves` — BELUM ada endpoint-nya, jadi
 // halaman ini sengaja tidak menjanjikan riwayat.
 
-import { apiGet, HttpError } from '../api';
-import { getCachedProducts, type Product } from '../store';
+import { apiGet, apiPost, HttpError } from '../api';
+import { getCachedProducts, type Category, type Product } from '../store';
 import { icon } from '../ui/icons';
+import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
+import { HEADER_STOK, bacaStok, csvStok, unduhCSV, type BarisStok } from '../importcsv';
 import { restockForm } from './products';
 
 const rp = (n: number) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
+
+/** Kunci persistensi sidebar kategori — SAMA dengan halaman Produk, jadi
+ *  preferensi tampil/sembunyi berlaku untuk keduanya. */
+const SIDE_KEY = 'ravaa.prodside';
+
+/** Default: tampil di desktop, sembunyi di HP (sidebar 256px di layar 390px). */
+function readSide(): boolean {
+  try {
+    const v = localStorage.getItem(SIDE_KEY);
+    if (v) return v !== 'hidden';
+    return window.matchMedia('(min-width: 1024px)').matches;
+  } catch {
+    return true;
+  }
+}
 
 type Filter = 'semua' | 'kritis' | 'habis';
 const FILTERS: { key: Filter; label: string }[] = [
@@ -29,9 +48,13 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 const state = {
   products: [] as Product[],
+  categories: [] as Category[],
   loading: true,
   error: '',
   filter: 'semua' as Filter,
+  /** Slug kategori terpilih di sidebar; 'all' = tanpa saring. */
+  cat: 'all',
+  side: readSide(),
   q: '',
 };
 
@@ -67,21 +90,75 @@ function urutan(p: Product): number {
   return 2;
 }
 
-function terlihat(): Product[] {
+/** Dasar penghitung: sudah tersaring KATEGORI + PENCARIAN, belum tersaring status.
+ *  Dipakai bersama oleh isi tabel DAN angka pada tombol filter, supaya keduanya
+ *  tidak pernah beda — sama polanya dengan filteredProducts() halaman Produk. */
+function dasar(): Product[] {
   const q = state.q.trim().toLowerCase();
   const kata = q ? q.split(/\s+/) : [];
   return state.products
     .filter(dilacak)
-    .filter((p) =>
-      state.filter === 'habis' ? habis(p) : state.filter === 'kritis' ? kritis(p) || habis(p) : true,
-    )
+    .filter((p) => state.cat === 'all' || p.category_slug === state.cat)
     .filter((p) => {
       if (!kata.length) return true;
       // SEMUA kata harus cocok — konsisten dengan pencarian Produk & POS.
       const hay = `${p.name} ${p.sku} ${p.barcode ?? ''} ${p.category_name}`.toLowerCase();
       return kata.every((k) => hay.includes(k));
-    })
+    });
+}
+
+function terlihat(): Product[] {
+  return dasar()
+    .filter((p) =>
+      state.filter === 'habis' ? habis(p) : state.filter === 'kritis' ? kritis(p) || habis(p) : true,
+    )
     .sort((a, b) => urutan(a) - urutan(b) || a.name.localeCompare(b.name, 'id'));
+}
+
+/** Teks footer di bawah tabel — selalu sebanding dengan isi tabel karena
+ *  keduanya memakai terlihat(). Halaman Stok merender semua baris (tanpa
+ *  infinite scroll seperti Produk), jadi cukup hitungan tunggal. */
+function countText(): string {
+  return `${terlihat().length} produk dilacak stok`;
+}
+
+/** Sidebar kategori: tampilan disamakan dengan halaman Produk
+ *  (.side-list / .side-item / .side-count) supaya satu kebiasaan UI.
+ *  Sengaja TANPA tombol tambah/ubah/hapus kategori — pengelolaan kategori
+ *  berada di halaman Produk (lihat komentar header file ini), dan
+ *  categoryForm() memang tidak diekspor dari sana.
+ *  Hanya kategori yang benar-benar punya produk dilacak stok yang dicantumkan:
+ *  jasa/cetak/desain/topup selalu 0 di sini dan hanya memenuhi ruang. */
+function categorySidebar(): string {
+  const list = state.products.filter(dilacak);
+  const counts = new Map<string, number>();
+  for (const p of list) counts.set(p.category_slug, (counts.get(p.category_slug) ?? 0) + 1);
+  const kategori = state.categories.filter((c) => (counts.get(c.slug) ?? 0) > 0);
+
+  return `
+  <div class="flex h-full flex-col">
+    <div class="mb-3 flex items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Kategori</h2>
+    </div>
+    <div class="side-list">
+      <button type="button" data-cat="all" class="side-item${state.cat === 'all' ? ' is-active' : ''}">
+        <span class="min-w-0 flex-1 truncate">Semua</span><span class="side-count">${list.length}</span>
+      </button>
+      ${kategori
+        .map(
+          (c) => `
+        <button type="button" data-cat="${esc(c.slug)}" class="side-item${state.cat === c.slug ? ' is-active' : ''}">
+          <span class="min-w-0 flex-1 truncate" title="${esc(c.name)}">${esc(c.name)}</span>
+          <span class="side-count">${counts.get(c.slug) ?? 0}</span>
+        </button>`,
+        )
+        .join('')}
+    </div>
+
+    <div class="mt-auto flex items-center justify-end pt-3">
+      <span class="text-xs text-gray-400">${kategori.length} kategori</span>
+    </div>
+  </div>`;
 }
 
 /* ---------- Render ---------- */
@@ -119,84 +196,104 @@ function ringkasan(): string {
 }
 
 function toolbar(): string {
-  const list = state.products.filter(dilacak);
+  // Hitungan memakai dasar() (ikut kategori + pencarian), bukan seluruh daftar —
+  // angka pada tombol harus mencerminkan yang sedang dibuka kasir.
+  const list = dasar();
   const jml = (f: Filter) =>
     f === 'habis' ? list.filter(habis).length : f === 'kritis' ? list.filter(kritis).length : list.length;
   return `
-    <div class="card flex flex-wrap items-center gap-2">
-      <div class="relative min-w-[180px] flex-1">
-        <input id="st-q" class="input pl-9" type="search" placeholder="Cari nama, SKU, barcode..."
-          aria-label="Cari produk" value="${esc(state.q)}" />
-        <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
+    <div class="card !p-3">
+      <div class="toolbar">
+        <button type="button" id="side-toggle" class="side-collapse-btn" title="Tampilkan/sembunyikan kategori" aria-label="Tampilkan atau sembunyikan sidebar kategori" aria-expanded="${state.side}">${icon('menu')}</button>
+        <div class="search-wrap">
+          ${icon('search')}
+          <input id="st-q" class="input" type="search" placeholder="Cari nama, SKU, barcode..."
+            aria-label="Cari produk" value="${esc(state.q)}" />
+        </div>
+        ${FILTERS.map(
+          (f) =>
+            // Sengaja .btn (bukan .chip): ukurannya harus sama dengan kolom
+            // pencarian dan tombol Ekspor/Impor di baris yang sama.
+            `<button type="button" data-filter="${f.key}" class="btn btn-ghost${state.filter === f.key ? ' is-on' : ''}">${f.label} <span class="tabular-nums ${state.filter === f.key ? 'text-primary' : 'text-gray-400'}">${jml(f.key)}</span></button>`,
+        ).join('')}
+        <button type="button" id="st-export" class="btn btn-ghost ml-auto" title="Unduh daftar stok yang sedang tampil (ikut filter &amp; pencarian)">${icon('download')}<span class="hidden sm:inline">Ekspor</span></button>
+        <button type="button" id="st-import" class="btn btn-ghost" title="Terapkan stok dari CSV — tambah atau ganti">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>
       </div>
-      ${FILTERS.map(
-        (f) =>
-          `<button type="button" data-filter="${f.key}" class="chip ${
-            state.filter === f.key ? '!border-primary !text-primary' : ''
-          }">${f.label} <span class="tabular-nums text-gray-400">${jml(f.key)}</span></button>`,
-      ).join('')}
     </div>`;
 }
 
-function tabel(): string {
+function tableCard(): string {
   const list = terlihat();
 
+  let isi: string;
   if (state.loading) {
-    return `<div class="card"><div class="space-y-2"><div class="skel"></div><div class="skel w-5/6"></div><div class="skel w-2/3"></div></div></div>`;
-  }
-
-  if (!list.length) {
+    isi = `<div class="space-y-2 p-5"><div class="skel"></div><div class="skel w-5/6"></div><div class="skel w-2/3"></div></div>`;
+  } else if (!list.length) {
     const pesan = state.error
       ? `Gagal memuat: ${state.error}`
-      : state.q || state.filter !== 'semua'
+      : state.q || state.filter !== 'semua' || state.cat !== 'all'
         ? 'Tidak ada produk yang cocok dengan filter.'
         : 'Belum ada produk yang melacak stok. Stok hanya dihitung untuk kategori dengan pelacakan stok (ATK, Es krim, Snack, Rokok).';
-    return `<div class="card"><div class="empty">${icon('stock')}<span>${esc(pesan)}</span></div></div>`;
+    isi = `<div class="p-5"><div class="empty">${icon('stock')}<span>${esc(pesan)}</span></div></div>`;
+  } else {
+    isi = `
+      <div class="table-wrap table-scroll">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th class="th th-sticky">Produk</th>
+              <th class="th th-sticky">Kategori</th>
+              <th class="th th-sticky text-right">Stok</th>
+              <th class="th th-sticky text-right">Minimum</th>
+              <th class="th th-sticky text-right">Nilai</th>
+              <th class="th th-sticky text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="st-rows">
+            ${list
+              .map((p) => {
+                const h = habis(p);
+                const k = kritis(p);
+                const badge = h
+                  ? `<span class="badge-low">${icon('alert')}<span>habis</span></span>`
+                  : k
+                    ? `<span class="badge-low">${icon('alert')}<span>${p.stock} / min ${p.min_stock}</span></span>`
+                    : `<span class="badge-ok">${icon('check')}<span>${p.stock}</span></span>`;
+                const off = p.is_active === 0;
+                return `<tr class="tr${off ? ' opacity-60' : ''}">
+                  <td class="td">
+                    <div class="cell-strong">${esc(p.name)}${off ? ' <span class="badge-off ml-1">nonaktif</span>' : ''}</div>
+                    <div class="cell-sub">${esc(p.sku)} · ${esc(p.unit)}</div>
+                  </td>
+                  <td class="td">${esc(p.category_name)}</td>
+                  <td class="td text-right">${badge}</td>
+                  <td class="td text-right tabular-nums">${p.min_stock > 0 ? p.min_stock : '—'}</td>
+                  <td class="td text-right tabular-nums">${rp(p.stock * p.avg_cost)}</td>
+                  <td class="td">
+                    <div class="flex items-center justify-end gap-1">
+                      <button type="button" data-stock="${p.id}" class="row-btn"
+                        title="Stok &amp; opname" aria-label="Stok dan opname ${esc(p.name)}">${icon('truck')}</button>
+                    </div>
+                  </td>
+                </tr>`;
+              })
+              .join('')}
+          </tbody>
+        </table>
+      </div>`;
   }
 
-  return `<div class="card-flush overflow-x-auto">
-    <table class="table">
-      <thead>
-        <tr>
-          <th class="th">Produk</th>
-          <th class="th">Kategori</th>
-          <th class="th text-right">Stok</th>
-          <th class="th text-right">Minimum</th>
-          <th class="th text-right">Nilai</th>
-          <th class="th text-right">Aksi</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${list
-          .map((p) => {
-            const h = habis(p);
-            const k = kritis(p);
-            const badge = h
-              ? `<span class="badge-low">${icon('alert')}<span>habis</span></span>`
-              : k
-                ? `<span class="badge-low">${icon('alert')}<span>${p.stock} / min ${p.min_stock}</span></span>`
-                : `<span class="badge-ok">${icon('check')}<span>${p.stock}</span></span>`;
-            const off = p.is_active === 0;
-            return `<tr class="tr${off ? ' opacity-60' : ''}">
-              <td class="td">
-                <div class="cell-strong">${esc(p.name)}${off ? ' <span class="badge-off ml-1">nonaktif</span>' : ''}</div>
-                <div class="cell-sub">${esc(p.sku)} · ${esc(p.unit)}</div>
-              </td>
-              <td class="td">${esc(p.category_name)}</td>
-              <td class="td text-right">${badge}</td>
-              <td class="td text-right tabular-nums">${p.min_stock > 0 ? p.min_stock : '—'}</td>
-              <td class="td text-right tabular-nums">${rp(p.stock * p.avg_cost)}</td>
-              <td class="td">
-                <div class="flex items-center justify-end gap-1">
-                  <button type="button" data-stock="${p.id}" class="row-btn"
-                    title="Stok &amp; opname" aria-label="Stok dan opname ${esc(p.name)}">${icon('truck')}</button>
-                </div>
-              </td>
-            </tr>`;
-          })
-          .join('')}
-      </tbody>
-    </table>
+  // Footer menempel di bawah area scroll (sama seperti halaman Produk), jadi
+  // angka jumlah produk tidak pernah ikut ter-scroll keluar layar.
+  // `lg:flex-1` WAJIB: card-flush adalah anak dari wrapper column-flex, dan tanpa
+  // grow-nya kartu berhenti seukuran isi — footer tidak pernah turun ke dasar
+  // area tabel (terbukti: wrap 544px, kartu cuma 419px saat barisnya cuma 7).
+  return `<div class="card-flush lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+    ${isi}
+    <div class="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+      <span id="st-count" aria-live="polite">${state.loading ? 'memuat data…' : countText()}</span>
+      <span class="hidden sm:inline">Ubah nama, harga &amp; satuan di halaman Produk</span>
+    </div>
   </div>`;
 }
 
@@ -206,12 +303,23 @@ function paint(): void {
   const posisi = cari?.selectionStart ?? null;
   const fokus = document.activeElement === cari;
 
+  // Rantai `lg:h-full` + `lg:min-h-0` mengikuti halaman Produk: di desktop (>= lg)
+  // halaman TIDAK scroll — hanya tbody tabel yang scroll, jadi ringkasan, toolbar,
+  // dan footer jumlah produk tidak pernah keluar layar. Di mobile halaman scroll
+  // normal seperti sebelumnya.
   host.innerHTML = `
-    <div class="space-y-4">
-      ${ringkasan()}
-      ${toolbar()}
-      ${tabel()}
-      <p class="text-xs text-gray-500 dark:text-gray-400">
+    <div class="lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+      <div class="shrink-0 space-y-4">
+        ${ringkasan()}
+        ${toolbar()}
+      </div>
+      <div class="mt-4 flex flex-col items-stretch gap-4 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch">
+        <div class="prod-side-wrap shrink-0" data-open="${state.side}">
+          <aside class="card w-64 max-w-full !p-3 lg:overflow-y-auto">${categorySidebar()}</aside>
+        </div>
+        <div class="min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">${tableCard()}</div>
+      </div>
+      <p class="shrink-0 pt-4 text-xs text-gray-500 dark:text-gray-400">
         Angka stok di sini sama dengan yang dipakai kasir. Ubah nama, harga, atau satuan
         dilakukan di halaman <a class="text-primary underline underline-offset-2" href="#/products">Produk</a>.
       </p>
@@ -243,6 +351,43 @@ function bind(): void {
     }),
   );
 
+  // Preferensi sidebar disimpan di kunci yang sama dengan halaman Produk,
+  // jadi sekali disembunyikan di satu halaman, halaman lain ikut.
+  host.querySelector('#side-toggle')?.addEventListener('click', () => {
+    state.side = !state.side;
+    try {
+      localStorage.setItem(SIDE_KEY, state.side ? 'shown' : 'hidden');
+    } catch {
+      /* abaikan */
+    }
+    // Visibilitas sidebar dikendalikan CSS lewat [data-open] pada .prod-side-wrap
+    // (lihat styles.css), BUKAN lewat kehadiran elemennya. Kalau atribut ini tidak
+    // diikuti, tombolnya berubah (aria-expanded / is-on) tapi sidebar diam saja —
+    // terbukti 2026-09-29: data-open tetap "true" & lebar 256px dua kali klik.
+    // Sengaja ubah atribut saja, bukan paint() ulang: supaya animasi CSS jalan
+    // dan isian search tidak hilang/fokus tidak pindah (pola sama dgn Produk).
+    const wrap = host!.querySelector('.prod-side-wrap');
+    if (wrap) wrap.setAttribute('data-open', String(state.side));
+    const btn = host!.querySelector('#side-toggle');
+    btn?.setAttribute('aria-expanded', String(state.side));
+    btn?.classList.toggle('is-on', state.side);
+  });
+
+  host.querySelectorAll<HTMLElement>('[data-cat]').forEach((b) =>
+    b.addEventListener('click', () => {
+      state.cat = b.dataset.cat ?? 'all';
+      paint();
+    }),
+  );
+
+  // Ekspor mengikuti filter + pencarian, sama lingkupnya dengan tabel —
+  // "yang saya lihat = yang saya dapat". Sengaja tanpa toast: browser sudah
+  // menampilkan unduhannya.
+  host.querySelector('#st-export')?.addEventListener('click', () => {
+    unduhCSV(csvStok(terlihat()), 'stok-ravaa.csv');
+  });
+  host.querySelector('#st-import')?.addEventListener('click', () => importStokForm());
+
   host.querySelectorAll<HTMLElement>('[data-stock]').forEach((b) =>
     b.addEventListener('click', () => {
       const p = state.products.find((x) => x.id === Number(b.dataset.stock));
@@ -252,6 +397,211 @@ function bind(): void {
       restockForm(p, () => load());
     }),
   );
+}
+
+/* ---------- Impor stok ---------- */
+
+/** Dialog impor stok — dua langkah seperti Impor Produk: "Baca & tinjau" dulu,
+ *  baru kirim. TIDAK ada endpoint baru: tiap baris ditembak ke
+ *  `POST /api/stock-opname`, jadi `version` naik per baris persis seperti saat
+ *  dilakukan manual lewat tombol truk — delta sync kasir offline tetap
+ *  menarik perubahannya.
+ *
+ *  Impor HANYA untuk HITUNG FISIK (opname): angka pada kolom Stok MENJADI
+ *  stok baru apa adanya, termasuk 0. Masuk barang TIDAK lewat sini, karena
+ *  dua alasan yang keduanya bukan selera tapi bukti:
+ *    1. Format ekspor (`csvStok`) berisi hitungan ABSOLUT, bukan selisih —
+ *       menjumlahkannya kembali (restock) akan MENGANDAKAN stok tiap kali
+ *       file hasil unduh diimpor ulang.
+ *    2. Berkasnya tidak punya kolom harga beli, dan `stock.ts` tidak pernah
+ *       mengirim `harga_beli` — restock begitu tidak akan pernah memperbarui
+ *       `avg_cost`, padahal `avg_cost` adalah satu-satunya sumber HPP.
+ *  Masuk barang dilakukan per item lewat tombol truk yang sudah punya isian
+ *  harga beli. Pratinjau menampilkan "Saat ini" dan "Sesudah" supaya tidak ada
+ *  satu pun angka berubah sebelum kasir melihat dampaknya. */
+function importStokForm(): void {
+  let hasil: BarisStok[] = [];
+  /** Pratinjau yang tampil sekarang masih mencerminkan isi textarea. */
+  let sudahBaca = false;
+  /** Sama seperti di importForm produk: dilekatkan, tidak pernah direset ketikan. */
+  let pernahBaca = false;
+
+  type Siap = {
+    baris: number; sku: string; p?: Product;
+    qty: number | null; sesudah?: number; error: string | null;
+  };
+
+  /** Pencarian SKU tidak peka huruf besar/kecil: file bisa dari mesin lain. */
+  const cari = (sku: string) =>
+    state.products.find((x) => x.sku.toUpperCase() === sku.toUpperCase());
+
+  /** Padukan hasil baca + produk jadi baris siap-tampil. */
+  const nilai = (): Siap[] =>
+    hasil.map((r) => {
+      if (r.error) return { baris: r.baris, sku: r.sku, qty: null, error: r.error };
+      const p = cari(r.sku);
+      if (!p) return { baris: r.baris, sku: r.sku, qty: r.qty, error: 'SKU tidak ditemukan' };
+      if (p.track_stock !== 1)
+        return { baris: r.baris, sku: r.sku, p, qty: r.qty, error: 'produk ini tidak melacak stok' };
+      const q = r.qty as number;
+      // Hitung fisik: 0 sah (semua hilang), negatif tidak pernah.
+      if (q < 0) return { baris: r.baris, sku: r.sku, p, qty: q, error: 'jumlah tidak boleh negatif' };
+      return { baris: r.baris, sku: r.sku, p, qty: q, sesudah: q, error: null };
+    });
+
+  const preview = (): string => {
+    const rows = nilai();
+    if (!rows.length) return 'Belum dibaca.';
+    const siap = rows.filter((r) => !r.error);
+    const bad = rows.length - siap.length;
+    const baris = rows
+      .map(
+        (r) => `<tr class="border-t border-gray-200 dark:border-gray-700">
+          <td class="py-1 pr-2 tabular-nums">${r.baris}</td>
+          <td class="py-1 pr-2 font-mono">${esc(r.sku)}</td>
+          <td class="py-1 pr-2">${r.p ? esc(r.p.name) : '—'}</td>
+          <td class="py-1 pr-2 tabular-nums">${r.p ? r.p.stock : '—'}</td>
+          <td class="py-1 pr-2 tabular-nums">${r.qty ?? '—'}</td>
+          <td class="py-1 pr-2 tabular-nums">${r.sesudah ?? '—'}</td>
+          <td class="py-1 ${r.error ? 'text-red-500' : 'text-green-600'}">${r.error ? esc(r.error) : 'siap'}</td>
+        </tr>`,
+      )
+      .join('');
+    return `<div class="overflow-x-auto"><table class="w-full text-left">
+        <thead><tr class="text-gray-400">
+          <th class="py-1 pr-2">#</th><th class="py-1 pr-2">SKU</th><th class="py-1 pr-2">Produk</th>
+          <th class="py-1 pr-2">Saat ini</th><th class="py-1 pr-2">Angka</th>
+          <th class="py-1 pr-2">Sesudah</th><th class="py-1">Status</th>
+        </tr></thead>
+        <tbody>${baris}</tbody>
+      </table></div>
+      <p class="mt-2">${siap.length} baris siap dikirim${bad ? `, ${bad} tidak bisa dipakai` : ''}.</p>`;
+  };
+
+  openModal({
+    title: 'Impor stok',
+    okLabel: 'Impor',
+    wide: true,
+    body: `
+      <div class="space-y-3">
+        <p class="form-sec">1. Isi data</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          <b>Hitung fisik.</b> Angka pada kolom <b>Stok</b> menjadi stok baru
+          apa adanya, termasuk 0; selisihnya tercatat sebagai mutasi.
+          Masuk barang tidak lewat sini — kerjakan per item lewat tombol truk
+          supaya harganya ikut tercatat.
+        </p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          Baris pertama = judul kolom. Wajib ada <b>SKU</b> dan <b>Stok</b>;
+          kolom lain (<b>Nama</b>, <b>Stok minimum</b>) boleh ada dan dilewati —
+          jadi hasil unduh halaman Stok maupun halaman Produk bisa langsung
+          dipakai. Bisa juga tempel tabel langsung dari Excel.
+        </p>
+        <textarea id="st-text" rows="6" class="input font-mono text-xs" placeholder="${HEADER_STOK}" aria-label="Data stok CSV"></textarea>
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="btn btn-ghost cursor-pointer">
+            ${icon('upload')}<span>Pilih file</span>
+            <input id="st-file" type="file" accept=".csv,.txt,text/csv,text/plain" class="sr-only" />
+          </label>
+          <button type="button" id="st-unduh" class="btn btn-ghost">${icon('download')}<span>Unduh template</span></button>
+          <button type="button" id="st-read" class="btn btn-primary ml-auto">Baca &amp; tinjau</button>
+        </div>
+
+        <p class="form-sec">2. Tinjau lalu tekan Impor</p>
+        <div id="st-prev" class="text-xs text-gray-500 dark:text-gray-400">Belum dibaca.</div>
+      </div>`,
+    onMount: (m) => {
+      const ta = m.el.querySelector<HTMLTextAreaElement>('#st-text')!;
+      const prev = m.el.querySelector<HTMLElement>('#st-prev')!;
+      m.ok.disabled = true;
+
+      const gambar = () => {
+        prev.innerHTML = preview();
+        const siap = nilai().filter((r) => !r.error).length;
+        m.ok.disabled = siap === 0;
+        m.ok.textContent = siap ? `Impor ${siap} baris` : 'Impor';
+      };
+
+      const baca = () => {
+        // Diparse SEKALI: hasilnya disimpan, supaya pratinjau yang tampil
+        // selalu berasal dari teks yang sama dengan yang dibaca tombol Impor.
+        const res = bacaStok(ta.value);
+        hasil = res.baris;
+        sudahBaca = true;
+        pernahBaca = true;
+        const gagalBaca = (pesan: string) => {
+          prev.innerHTML = pesan;
+          m.ok.disabled = true;
+          m.ok.textContent = 'Impor';
+        };
+        if (!res.ada) {
+          gagalBaca('Judul kolom <b>SKU</b> / <b>Stok</b> tidak ditemukan — periksa baris pertama.');
+          return;
+        }
+        if (!res.baris.length) {
+          gagalBaca('File terbaca, tapi tidak ada baris data.');
+          return;
+        }
+        gambar();
+      };
+
+      m.el.querySelector('#st-read')?.addEventListener('click', baca);
+
+      m.el.querySelector('#st-file')?.addEventListener('change', async (e) => {
+        const f = (e.target as HTMLInputElement).files?.[0];
+        if (!f) return;
+        try {
+          ta.value = await f.text();
+        } catch {
+          toast('Gagal membaca file', 'error');
+          return;
+        }
+        baca();
+      });
+
+      // Template = dua baris pertama dari data HIDUP (SKU asli + angka asli),
+      // jadi file hasil unduh langsung valid untuk dicoba.
+      m.el.querySelector('#st-unduh')?.addEventListener('click', () => {
+        unduhCSV(csvStok(state.products.filter(dilacak).slice(0, 2)), 'template-stok-ravaa.csv');
+      });
+
+      /** Isi berubah setelah pratinjau = pratinjau basi. Tombol Impor mati
+       *  sampai dibaca ulang, supaya yang dikirim selalu sama dengan yang
+       *  dilihat kasir (sama guard-nya dengan importForm produk). */
+      ta.addEventListener('input', () => {
+        sudahBaca = false;
+        m.ok.disabled = true;
+        m.ok.textContent = 'Impor';
+        prev.innerHTML = pernahBaca
+          ? 'Isi sudah berubah — tekan <b>Baca &amp; tinjau</b> lagi.'
+          : 'Belum dibaca.';
+      });
+
+      m.ok.addEventListener('click', async () => {
+        if (!sudahBaca) return;
+        const rows = nilai().filter((r) => !r.error);
+        if (!rows.length) return;
+        m.ok.disabled = true;
+        let ok = 0;
+        let gagal = 0;
+        // Berurutan sengaja: 1-2 kasir, dan jalur yang sama dengan tombol truk.
+        for (const r of rows) {
+          try {
+            await apiPost('/api/stock-opname', { product_id: r.p!.id, qty_fisik: r.qty });
+            ok++;
+          } catch {
+            gagal++;
+          }
+        }
+        toast(
+          `Impor stok selesai: ${ok} baris${gagal ? `, ${gagal} gagal` : ''}`,
+          gagal ? 'error' : 'success',
+        );
+        m.close();
+        await load();
+      });
+    },
+  });
 }
 
 /* ---------- Muat data ---------- */
@@ -273,6 +623,38 @@ async function load(): Promise<void> {
     state.error = errMsg(e);
     if (state.error) toast(`Stok: ${state.error}`, 'warning');
   }
+
+  // Master kategori untuk sidebar. SELALU ditarik ulang tiap kali halaman di-mount
+  // — sebelumnya dijaga `if (!state.categories.length)`, dan itu membuat kategori
+  // yang baru dibuat/diedit di halaman Produk TIDAK pernah muncul selama sesi SPA
+  // masih hidup (produknya sendiri ikut kehitung karena selalu di-fetch, jadi
+  // angka "Semua" naik tapi nama kategorinya hilang; baru benar setelah reload
+  // penuh). Halaman Produk sudah memakai pola selalu-fetch (loadCategories), jadi
+  // ini juga soal konsistensi antar-halaman.
+  //
+  // Gagal pun halaman tetap jalan: bila DAFTAR LAMA MASIH ADA, biarkan (lebih
+  // lengkap daripada fallback); fallback turunan dari produk hanya dipakai saat
+  // belum pernah berhasil sekali pun (mis. buka Stok langsung saat offline).
+  try {
+    const c = await apiGet<{ data: Category[] }>('/api/categories');
+    state.categories = c.data;
+  } catch {
+    if (!state.categories.length) {
+      const seen = new Map<string, Category>();
+      for (const p of state.products) {
+        if (!seen.has(p.category_slug))
+          seen.set(p.category_slug, {
+            id: p.category_id,
+            slug: p.category_slug,
+            name: p.category_name,
+            track_stock: p.track_stock,
+            sort: 0,
+          });
+      }
+      state.categories = [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'id'));
+    }
+  }
+
   state.loading = false;
   paint();
 }

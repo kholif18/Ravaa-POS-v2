@@ -283,41 +283,82 @@ function simpanSatuanJual(productId: number, baseUnit: string, rows: unknown[]):
 }
 
 // Tambah / ubah master. Naikkan version agar client yang cache bisa sync via ?since=
-const upsertProduct = db.transaction((input: {
-  sku?: string; name: string; category_slug: string;
-  barcode?: string | null; unit?: string; price?: number; cost?: number; markup?: number;
-  price_dynamic?: number; stock?: number; min_stock?: number; is_active?: number;
-  units?: unknown[];
-}) => {
+//
+// `opts.pertahankanTidakDikirim` dipasang SATU-SATUNYA oleh /api/products/import.
+// Di sana berkas = daftar kolom, jadi kolom yang tidak ada berarti "jangan
+// diubah" — BUKAN "setel ke default". Tanpa bendera ini, file CSV tanpa kolom
+// Stok/Harga/Satuan akan diam-diam menyetel ulang produk yang sudah ada jadi 0
+// / 'pcs' tanpa jejak stock_moves (diuji langsung: stok 7 -> 0, price 1000 -> 0).
+// POST /api/products TETAP perilaku lamanya (field kosong -> default server)
+// sesuai kontrak AGENTS.md §3, karena form & toggle aktif mengirim payload lenkap.
+const upsertProduct = db.transaction((
+  input: {
+    sku?: string; name: string; category_slug: string;
+    barcode?: string | null; unit?: string; price?: number; cost?: number; markup?: number;
+    price_dynamic?: number; stock?: number; min_stock?: number; is_active?: number;
+    units?: unknown[];
+  },
+  opts?: { pertahankanTidakDikirim?: boolean },
+) => {
   const cat = db.prepare('SELECT id FROM categories WHERE slug = ?').get(input.category_slug) as { id: number } | undefined;
   if (!cat) throw new Error(`kategori tidak dikenal: ${input.category_slug}`);
   const sku = input.sku?.trim() || skuDariUrut();
-  const unit = input.unit?.trim() || 'pcs';
+  const pertahankan = opts?.pertahankanTidakDikirim === true;
+  // Baris lama dibaca lebih dulu: satuan ikut diambil dari sini, karena satuan
+  // menentukan cek master dan nilai FK — kalau kolom Satuan absen, satuan
+  // lama harus dipakai, bukan jatuh ke 'pcs'.
+  const existing = db.prepare('SELECT * FROM products WHERE sku = ?').get(sku) as
+    | ({ id: number } & Record<string, unknown>) | undefined;
+  const lama = pertahankan ? existing : undefined;
+  /** Kolom tidak dikirim + bendera pasang = nilai lama; baris baru tetap default. */
+  const amb = <T>(baru: T | undefined, kunci: string, bawaan: T): T => {
+    if (pertahankan && baru === undefined && lama && lama[kunci] !== undefined) {
+      return lama[kunci] as T;
+    }
+    return baru ?? bawaan;
+  };
+  const unitRaw = input.unit?.trim();
+  const unit = unitRaw || amb(undefined, 'unit', 'pcs');
   // Satuan harus ada di master (form produk pakai dropdown). Dicek di sini biar
   // jawabannya 400 yang jelas, bukan error FK mentah dari SQLite.
   const satu = db.prepare('SELECT id FROM units WHERE slug = ?').get(unit) as { id: number } | undefined;
   if (!satu) throw new Error(`satuan tidak dikenal: ${unit} — buat dulu di halaman Satuan`);
-  const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku) as { id: number } | undefined;
+  const barcode = amb(input.barcode ?? undefined, 'barcode', null);
+  const price = amb(input.price, 'price', 0);
+  const priceDynamic = amb(input.price_dynamic, 'price_dynamic', 0);
+  const cost = amb(input.cost, 'cost', 0);
+  const markup = amb(input.markup, 'markup', 0);
+  const stock = amb(input.stock, 'stock', 0);
+  const minStock = amb(input.min_stock, 'min_stock', 0);
+  const isActive = amb(input.is_active, 'is_active', 1);
   let pid: number;
   if (!existing) {
     const info = db.prepare(
       `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_dynamic, cost, markup, stock, min_stock, is_active, updated_at, version)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
          COALESCE((SELECT MAX(version) FROM products), 0) + 1)`,
-    ).run(cat.id, sku, input.barcode ?? null, input.name, unit,
-      input.price ?? 0, input.price_dynamic ?? 0, input.cost ?? 0, input.markup ?? 0,
-      input.stock ?? 0, input.min_stock ?? 0, input.is_active ?? 1);
+    ).run(cat.id, sku, barcode, input.name, unit,
+      price, priceDynamic, cost, markup, stock, minStock, isActive);
     pid = Number(info.lastInsertRowid);
   } else {
     pid = existing.id;
+    // deleted_at IKUT di-set NULL di sini: pencarian `existing` (baris 310) tidak
+    // memfilter tombstone, jadi baris yang pernah dihapus ketemu dan masuk cabang
+    // UPDATE ini. Kalau kolomnya tidak dikosongkan, POST ulang SKU yang sudah
+    // dihapus membalas 201 OK tapi produknya tetap MAYAT — tak pernah muncul di
+    // `status=aktif|semua` (line ~150) dan tetap terkirim sbg `deleted_at` terisi
+    // lewat `?since=` (line ~148), sehingga client justru MEMBUANGNYA dari cache.
+    // Konsisten dengan semangat upsert by SKU: menyebut SKU yang sama berarti
+    // "produk ini ada (lagi)". version tetap naik supaya delta sync membangkitkan
+    // barisnya kembali di semua device (dipertegas di tests bagian E).
     db.prepare(
       `UPDATE products SET category_id=?, barcode=?, name=?, unit=?, price=?, price_dynamic=?,
-         cost=?, markup=?, stock=?, min_stock=?, is_active=?, updated_at=datetime('now'),
+         cost=?, markup=?, stock=?, min_stock=?, is_active=?, deleted_at=NULL,
+         updated_at=datetime('now'),
          version=(SELECT COALESCE(MAX(version),0)+1 FROM products)
        WHERE id=?`,
-    ).run(cat.id, input.barcode ?? null, input.name, unit,
-      input.price ?? 0, input.price_dynamic ?? 0, input.cost ?? 0, input.markup ?? 0,
-      input.stock ?? 0, input.min_stock ?? 0, input.is_active ?? 1, pid);
+    ).run(cat.id, barcode, input.name, unit,
+      price, priceDynamic, cost, markup, stock, minStock, isActive, pid);
   }
   // units === undefined -> biarkan apa adanya; array (termasuk []) -> ganti semua.
   if (input.units !== undefined) simpanSatuanJual(pid, unit, input.units);
@@ -343,6 +384,8 @@ app.post('/api/products', async (c) => {
 // tiap baris di-upsert lewat upsertProduct YANG SAMA dengan POST /api/products:
 // validasi kategori, cek satuan di master, dan turunan SKU tetap satu sumber
 // kebenaran, bukan versi kedua yang bisa melenceng.
+// SATU-SATUNYA bedanya: bendera `pertahankanTidakDikirim` — di impor, kolom yang
+// tidak ada di berkas berarti "biarkan", bukan "setel ke 0".
 // `dry_run:true` = hitung hasil tanpa menyimpan: seluruh baris dijalankan dalam
 // satu transaksi yang sengaja DIBATALKAN di akhir (rollback lempar error), jadi
 // validasinya tetap kode yang sama persis seperti import sungguhan.
@@ -383,7 +426,10 @@ app.post('/api/products/import', async (c) => {
           const existed = db.prepare('SELECT 1 FROM products WHERE sku = ?').get(
             sku || skuDariUrut(),
           );
-          upsertProduct(r as never);
+          // pertahankanTidakDikirim: kolom yang tidak ada di berkas = jangan
+          // diubah. Lihat komentar upsertProduct — tanpa ini file tanpa kolom
+          // Stok/Harga menyetel produk lama jadi 0 diam-diam.
+          upsertProduct(r as never, { pertahankanTidakDikirim: true });
           rep.ok++;
           if (existed) rep.update++; else rep.baru++;
         } catch (e) {

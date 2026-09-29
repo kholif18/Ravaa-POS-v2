@@ -24,7 +24,7 @@ function eq(nama: string, a: unknown, b: unknown): void {
   else { gagal++; console.log(`  GAGAL ${nama}\n         dapat : ${JSON.stringify(a)}\n         harap : ${JSON.stringify(b)}`); }
 }
 
-import { parseTable, mapRows, parseAngka, parseAktif, CONTOH_KOLOM, HEADER_ARONIUM_ORI, HEADER_TEMPLATE, templateProduk } from '../apps/web/src/importcsv.ts';
+import { parseTable, mapRows, parseAngka, parseAktif, bacaStok, csvProduk, csvStok, CONTOH_KOLOM, HEADER_ARONIUM_ORI, HEADER_STOK, HEADER_TEMPLATE, templateProduk, type ProdukEkspor } from '../apps/web/src/importcsv.ts';
 
 console.log('=== A. parseTable: pemisah & kutip ===');
 {
@@ -200,7 +200,7 @@ const satuanS = (tb: ReturnType<typeof parseTable>) => mapRows(tb, kosong);
 console.log('=== E. gabungan: tempel Excel asli (tab) ===');
 {
   const paste = 'SKU\tNama\tKategori\tSatuan\tHarga\tStok\n'
-    + 'RK-SMP-12\tSampoerna Mild\trokok\tbungkus\t28000\t10\n'
+    + 'PRD00015\tSampoerna Mild\trokok\tbungkus\t28000\t10\n'
     + 'AQUA-600\tAqua 600ml\tatk\tpcs\t3000\t24\n';
   const r = mapRows(parseTable(paste), { ...kosong, kategori: [...KAT, { slug: 'rokok', name: 'Rokok' }] });
   eq('2 baris valid', { n: r.length, g: r.filter((x) => x.aksi === 'gagal').length }, { n: 2, g: 0 });
@@ -296,6 +296,65 @@ console.log('=== F. Format Aronium: (a) file lama 16 kolom tetap masuk, (b) temp
   eq('Boleh ubah harga saat jual -> price_dynamic (nilai 0)', r[1].data?.price_dynamic, 0);
   eq('BOM Excel tidak bocor ke nama kolom', parseTable('\uFEFF' + teks).header[0], 'Nama');
   eq('nama contoh memuat penanda CONTOH', /^CONTOH /.test(String(r[0].data?.name)), true);
+}
+
+
+console.log('=== I. Ekspor produk: kolom identik dengan template impor ===');
+{
+  const contoh: ProdukEkspor = {
+    name: 'Aqua 600ml', category_name: 'Minuman', sku: 'PRD00013',
+    barcode: '8991', unit: 'btl', cost: 1000, markup: 50, price: 1500,
+    price_dynamic: 0, is_active: 1, stock: 7, min_stock: 2,
+  };
+  const teks = csvProduk([contoh]);
+  eq('header ekspor = HEADER_TEMPLATE persis', teks.split('\r\n')[0], HEADER_TEMPLATE);
+  eq('header + 1 baris data', teks.split('\r\n').length, 2);
+  const sel = parseTable(teks).rows[0];
+  eq('12 kolom', sel.length, 12);
+  eq('kolom 1 = Nama', sel[0], 'Aqua 600ml');
+  eq('kolom 3 = SKU', sel[2], 'PRD00013');
+  eq('kategori ditulis NAMA, bukan slug', sel[1], 'Minuman');
+  eq('Stok ikut terbawa (bolak-balik utuh)', sel[10], '7');
+  eq('Stok minimum ikut terbawa', sel[11], '2');
+
+  // Bolak-balik: file ekspor halaman Produk harus bisa masuk dialog Impor Stok.
+  const stok = bacaStok(teks);
+  eq('ekspor produk dikenali pembaca stok', stok.ada, true);
+  eq('bolak-balik: SKU terbaca', stok.baris[0].sku, 'PRD00013');
+  eq('bolak-balik: angka stok terbaca', stok.baris[0].qty, 7);
+}
+
+console.log('=== J. Ekspor stok ===');
+{
+  eq('csvStok kosong = header saja', csvStok([]), HEADER_STOK);
+  const t = csvStok([{ sku: 'PRD00001', name: 'Pulpen', stock: 50, min_stock: 5 }]);
+  eq('4 kolom', parseTable(t).rows[0].length, 4);
+  eq('Stok minimum = kolom ke-4', parseTable(t).rows[0][3], '5');
+  ok('nama berkoma ikut dikutip RFC4180',
+    csvStok([{ sku: 'X', name: 'Kopi, hitam', stock: 1, min_stock: 0 }]).includes('"Kopi, hitam"'));
+}
+
+console.log('=== K. Pembaca stok: kolom lain dilewati, pemisah dideteksi ===');
+{
+  const b = bacaStok('SKU;Nama;Stok\nPRD1;Pulpen;1.500\nPRD2;Buku;');
+  eq('pemisah ";" (Excel Indonesia) terdeteksi', b.ada, true);
+  eq('angka gaya Indonesia 1.500 = 1500', b.baris[0].qty, 1500);
+  eq('kolom Stok kosong -> qty null', b.baris[1].qty, null);
+  ok('pesan error menyebut kolomnya', /Stok kosong/.test(b.baris[1].error ?? ''), b.baris[1].error);
+
+  const x = bacaStok('Nama,Harga\nBudi,1000');
+  eq('tanpa kolom SKU -> ada=false', x.ada, false);
+  eq('tanpa kolom SKU -> tidak ada baris diproses', x.baris.length, 0);
+
+  const y = bacaStok('sku;stock\nprd-a;10\n;5\nprd-b;abc');
+  eq('alias huruf kecil sku/stock tetap dikenali', y.ada, true);
+  eq('SKU diambil apa adanya', y.baris[0].sku, 'prd-a');
+  ok('baris tanpa SKU -> error', /SKU kosong/.test(y.baris[1].error ?? ''), y.baris[1].error);
+  ok('baris non-angka -> error memuat teks aslinya', /bukan angka: "abc"/.test(y.baris[2].error ?? ''), y.baris[2].error);
+  eq('nomor baris asli (judul = 1)', y.baris[2].baris, 4);
+
+  const tab = bacaStok('SKU\tStok\nPRD01\t3');
+  eq('tempelan Excel (tab) terbaca', tab.baris[0]?.qty, 3);
 }
 
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);

@@ -3,6 +3,7 @@
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
 import path0 from 'node:path';
+import fs from 'node:fs';
 const ARTIFAK = path0.join(path0.dirname(fileURLToPath(import.meta.url)), 'artifacts');
 
 let lolos = 0, gagal = 0;
@@ -119,6 +120,71 @@ try {
   ok('toast opname memuat angka', new RegExp(`Opname .+: ${b} -> 0 \\(-${b}\\)`).test(norm(await page.innerText('#toast-root'))),
     norm(await page.innerText('#toast-root')));
 
+  console.log('=== G2. Ekspor & Impor stok (toolbar) ===');
+  await page.fill('#st-q', 'PRD00002');
+  await page.waitForTimeout(400);
+  ok('tombol Ekspor ada di toolbar', await page.locator('#st-export').isVisible());
+  ok('tombol Impor ada di toolbar', await page.locator('#st-import').isVisible());
+
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 8000 }),
+    page.click('#st-export'),
+  ]);
+  ok('nama file ekspor', /stok-ravaa\.csv$/.test(dl.suggestedFilename()), dl.suggestedFilename());
+  const isi = fs.readFileSync(await dl.path(), 'utf8');
+  ok('ekspor memuat judul SKU,Nama,Stok,Stok minimum',
+    isi.includes('SKU,Nama,Stok,Stok minimum'));
+  const barisEkspor = isi.replace(/^\uFEFF/, '').split(/\r?\n/).filter(Boolean);
+  ok('ekspor ikut filter pencarian (judul + 1 baris)',
+    barisEkspor.length === 2, String(barisEkspor.length));
+  const skuUji = barisEkspor[1].split(',')[0];
+  ok('baris ekspor = PRD00002 (SKU dipakai untuk impor)', skuUji === 'PRD00002', skuUji);
+
+  await page.click('#st-import');
+  await page.waitForSelector('#st-text', { timeout: 8000 });
+  ok('dialog Impor stok terbuka', await page.isVisible('#st-text'));
+  // Impor stok HANYA hitung fisik: pemilih mode "Tambah/Ganti" sengaja tidak
+  // ada lagi. Format ekspor berisi hitungan absolut, jadi mode tambah akan
+  // menggandakan stok tiap file hasil unduh diimpor ulang.
+  const jumlahMode = await page.locator('.modal [data-mode]').count();
+  ok('TIDAK ada pemilih mode (impor = hitung fisik saja)', jumlahMode === 0,
+    `data-mode=${jumlahMode}`);
+  ok('penjelasan hitung fisik tampil',
+    /hitung fisik/i.test(await page.locator('.modal').innerText()));
+  ok('tombol Impor MATI sebelum Baca & tinjau',
+    await page.locator('.modal [data-ok]').isDisabled());
+
+  await page.fill('#st-text', `SKU,Stok\n${skuUji},40`);
+  await page.click('#st-read');
+  await page.waitForTimeout(300);
+  const barisPrev = await page.locator('#st-prev tbody tr').count();
+  ok('pratinjau menampilkan 1 baris', barisPrev === 1, String(barisPrev));
+  ok('tombol Impor hidup setelah dibaca',
+    !(await page.locator('.modal [data-ok]').isDisabled()));
+
+  // Angka pada kolom Stok MENJADI stok baru — kalau tertukar jadi penjumlahan,
+  // asersi ini gagal karena stok awal 30 bukan 0 (0 akan menyamar ke 30+40=40
+  // vs 40 yang sama-sama "40" bila salah baca).
+  const td = page.locator('#st-prev tbody tr td');
+  const saatIni = Number(await td.nth(3).innerText());
+  const sesudah = Number(await td.nth(5).innerText());
+  ok('produk uji berstok > 0 supaya hitung fisik terbaca', saatIni > 0, String(saatIni));
+  ok('Sesudah = angka apa adanya (bukan ditambahkan)', sesudah === 40,
+    `${saatIni} -> ${sesudah}`);
+
+  // Batal tanpa menekan Impor: tidak ada satu pun angka boleh berubah.
+  await page.click('.modal [data-x]');
+  await page.waitForSelector('.modal', { state: 'detached', timeout: 8000 });
+  const stokBatal = await stokSelai();
+  ok('batal impor: stok PRD00002 tetap 30', /^30\b/.test(norm(stokBatal)), stokBatal);
+
+  // WAJIB: blok `finally` memulihkan stok dengan mengklik baris PERTAMA, jadi
+  // pencarian harus menunjuk produk uji lagi. Tanpa baris ini, pemulihan justru
+  // menekan PRD00002 dan meninggalkan PRD00001 di 0 — pernah terjadi dan baru
+  // ketahuan pada regresi penuh berikutnya (PRD00001 terbaca "habis").
+  await page.fill('#st-q', 'PRD00001');
+  await page.waitForTimeout(400);
+
   console.log('=== G. Tanpa error runtime ===');
   ok('tidak ada pageerror/console error', errs.length === 0, errs.join(' | '));
 } catch (e) {
@@ -127,7 +193,14 @@ try {
 } finally {
   // kembalikan stok seperti semula (50) lewat UI yang sama
   try {
+    // Pencarian disetel EKSPLISIT di sini, bukan dititipkan ke bagian terakhir
+    // suite. Salah sasaran di tempat ini pernah terjadi: pemulihan menekan
+    // produk yang salah dan merusak data untuk suite berikutnya.
+    await page.fill('#st-q', 'PRD00001');
+    await page.waitForTimeout(400);
     await bukaDialogStok();
+    const judulPulih = await page.innerText('.modal-header h3');
+    if (!/Pulpen Hitam/.test(judulPulih)) throw new Error(`salah sasaran: ${judulPulih}`);
     await page.click('.modal [data-mode="opname"]');
     await page.fill('#r-qty', '50');
     await page.click('.modal [data-ok]');

@@ -136,9 +136,29 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - **DILARANG menghapus baris tombstone dari DB** selama masih ada device kasir
     yang belum sync — baris hilang = tombstone tidak pernah terkirim = produk mati
     nempel selamanya di cache device itu.
+  - **POST ulang SKU tombstone = BANGKITKAN kembali** (sejak 2026-09-29):
+    `POST /api/products` / `POST /api/products/import` dengan SKU yang sama akan
+    mengosongkan `deleted_at` + `version++`, bukan sekadar membalas 201.
+    Alasannya kebalikannya justru fatal: tanpa ini upsert by SKU menemukan baris
+    tombstone (pencarian `SELECT * WHERE sku=?` tanpa filter), meng-update
+    kolom-kolom lain, tapi `deleted_at` tetap terisi — produk tampak "tersimpan"
+    padahal tidak pernah muncul di `status=aktif|semua`, dan tetap terkirim lewat
+    `?since=` sebagai tombstone sehingga client justru **membuangnya dari cache**.
+    Naiknya `version` membuat device yang sudah membuang baris ikut menariknya
+    kembali. Diuji di `tests/product-delete-test.mjs` bagian E.
 * `POST /api/products/import` `{rows:[<payload POST /api/products>], dry_run?:bool}` -> `{data:{total,ok,baru,update,gagal,errors:[{baris,sku,error}]}}` (200)
   - Tiap baris di-upsert lewat **fungsi yang sama** dengan `POST /api/products`
     (kategori/satuan/turunan SKU jadi satu sumber kebenaran, bukan versi kedua).
+  - **SATU-SATUNYA beda dengan `POST /api/products`: kolom yang TIDAK dikirim
+    = jangan diubah, bukan reset ke default.** Server memasang bendera
+    `pertahankanTidakDikirim` **hanya** di endpoint ini. Alasan: berkas CSV
+    cuma memuat sebagian kolom; tanpa aturan ini file tanpa kolom
+    `Stok`/`price`/`Satuan` akan menyetel produk yang sudah ada jadi 0 / `pcs`
+    **diam-diam dan tanpa `stock_moves`** (terbukti sebelum diperbaiki: stok
+    7 -> 0, price 1000 -> 0 lewat satu baris tanpa kolom tersebut).
+    `POST /api/products` **TETAP** perilaku reset ke default — form produk dan
+    toggle aktif memang mengirim payload lenkap, dan itu kontrak yang diuji.
+    Angka yang benar-benar dikirim tetap ditulis apa adanya.
   - `dry_run:true` = validasi saja, **tidak menulis apa pun** (dijalankan dalam
     transaksi yang sengaja di-rollback). Dipakai tombol "Baca & tinjau".
   - SKU eksplisit yang muncul **lebih dari satu kali dalam satu file** ditolak di
@@ -166,6 +186,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     riwayat mutasi tetap bermakna (+ kelebihan, - kekurangan). Nilai `opname`
     sudah ada di `db/schema.sql` sejak awal — TIDAK ada kolom/tabel baru.
   - `version` wajib naik (aturan mutasi `products`); 400 untuk produk non-track.
+  - **Dipakai juga oleh tombol Impor halaman Stok — impor stok HANYA hitung
+    fisik, tidak ada pilihan mode "tambah/restock".** Alasannya fakta, bukan
+    selera: format ekspor `csvStok` (`SKU,Nama,Stok,Stok minimum`) berisi
+    hitungan **absolut**, jadi menerapkannya sebagai restock akan
+    **menggandakan stok** tiap file hasil unduh diimpor ulang; dan berkasnya
+    tidak punya kolom `harga_beli`, sehingga restock lewat impor tidak akan
+    pernah memperbarui `avg_cost` (padahal `avg_cost` = sumber HPP). Masuk
+    barang massal = lewat `POST /api/restock` per item (tombol truk), yang
+    isian `harga_beli`-nya sudah ada. Jangan "memperluas" impor stok dengan
+    menambahkan mode restock tanpa menambahkan kolom harga dan semantik absolut
+    sekaligus.
 * ATURAN WAJIB: **setiap mutasi `products` harus menaikkan `version`** — termasuk
   stok (`POST /api/restock` dan pengurangan stok di `POST /api/sales`). Kalau version
   tidak naik, client offline tidak pernah menarik perubahan tsb karena delta sync
