@@ -33,9 +33,11 @@ const bukaDialogStok = async () => {
 };
 
 const stokSelai = async () => {
-  // kolom ke-3 (badge Stok) pada baris produk yang sedang dicari
+  // Kolom ke-4 pada baris produk yang sedang dicari. Urutannya kini
+  // No. | Produk | Kategori | Stok | ... — kolom No. (nomor urut) ditambahkan
+  // di depan, jadi indeks badge Stok bergeser dari 2 menjadi 3.
   const tds = await page.locator('#page tbody tr').first().locator('td').allInnerTexts();
-  return norm(tds[2] ?? '');
+  return norm(tds[3] ?? '');
 };
 
 try {

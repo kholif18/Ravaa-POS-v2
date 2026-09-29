@@ -173,14 +173,14 @@ function productRows(): string {
       state.status === 'nonaktif'
         ? 'Tidak ada produk nonaktif. Bagus — semua produk masih aktif.'
         : 'Tidak ada produk yang cocok dengan filter.';
-    return `<tr><td colspan="5"><div class="empty">${icon('products')}<span>${msg}</span></div></td></tr>`;
+    return `<tr><td colspan="6"><div class="empty">${icon('products')}<span>${msg}</span></div></td></tr>`;
   }
 
   // Infinite scroll: potong dulu, baru render. Baris baru hanya ditambahkan di
   // BAWAH, jadi scrollTop pengguna tidak bergeser saat halaman berikutnya dimuat.
   return list
     .slice(0, state.limit)
-    .map((p) => {
+    .map((p, i) => {
       const off = p.is_active === 0;
       // min_stock = 0 berarti TIDAK ada ambang batas -> jangan tulis "/ min 0",
       // dan jangan tandai "stok menipis" (0 <= 0 akan selalu salah alarms).
@@ -195,6 +195,7 @@ function productRows(): string {
         : `<span class="td-num block font-semibold text-gray-900 tabular-nums dark:text-white">${rp(p.price)}</span>`;
       return `
       <tr class="tr${off ? ' opacity-60' : ''}" data-row="${p.id}">
+        <td class="td w-12 text-center tabular-nums text-gray-400">${i + 1}</td>
         <td class="td">
           <div class="cell-strong">${esc(p.name)}${off ? ` <span class="badge-off ml-1">nonaktif</span>` : ''}</div>
           <div class="cell-sub">${esc(p.sku)}${p.unit && p.unit !== '-' ? ` · ${esc(p.unit)}` : ''}${p.barcode ? ` · ${esc(p.barcode)}` : ''}</div>
@@ -247,6 +248,7 @@ function tableCard(): string {
       <table class="table table-compact">
         <thead>
           <tr>
+            <th class="th th-sticky w-12 text-center">No.</th>
             <th class="th th-sticky">Produk</th>
             <th class="th th-sticky">Kategori</th>
             <th class="th th-sticky text-right">Harga</th>

@@ -241,6 +241,7 @@ function tableCard(): string {
         <table class="table table-compact">
           <thead>
             <tr>
+              <th class="th th-sticky w-12 text-center">No.</th>
               <th class="th th-sticky">Produk</th>
               <th class="th th-sticky">Kategori</th>
               <th class="th th-sticky text-right">Stok</th>
@@ -251,7 +252,7 @@ function tableCard(): string {
           </thead>
           <tbody id="st-rows">
             ${list
-              .map((p) => {
+              .map((p, i) => {
                 const h = habis(p);
                 const k = kritis(p);
                 const badge = h
@@ -261,6 +262,7 @@ function tableCard(): string {
                     : `<span class="badge-ok">${icon('check')}<span>${p.stock}</span></span>`;
                 const off = p.is_active === 0;
                 return `<tr class="tr${off ? ' opacity-60' : ''}">
+                  <td class="td w-12 text-center tabular-nums text-gray-400">${i + 1}</td>
                   <td class="td">
                     <div class="cell-strong">${esc(p.name)}${off ? ' <span class="badge-off ml-1">nonaktif</span>' : ''}</div>
                     <div class="cell-sub">${esc(p.sku)} · ${esc(p.unit)}</div>
@@ -290,9 +292,10 @@ function tableCard(): string {
   // area tabel (terbukti: wrap 544px, kartu cuma 419px saat barisnya cuma 7).
   return `<div class="card-flush lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
     ${isi}
-    <div class="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
       <span id="st-count" aria-live="polite">${state.loading ? 'memuat data…' : countText()}</span>
-      <span class="hidden sm:inline">Ubah nama, harga &amp; satuan di halaman Produk</span>
+      <span class="sm:text-right">Angka stok di sini sama dengan yang dipakai kasir. Ubah nama, harga, atau satuan
+        dilakukan di halaman <a class="text-primary underline underline-offset-2" href="#/products">Produk</a>.</span>
     </div>
   </div>`;
 }
@@ -319,10 +322,6 @@ function paint(): void {
         </div>
         <div class="min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">${tableCard()}</div>
       </div>
-      <p class="shrink-0 pt-4 text-xs text-gray-500 dark:text-gray-400">
-        Angka stok di sini sama dengan yang dipakai kasir. Ubah nama, harga, atau satuan
-        dilakukan di halaman <a class="text-primary underline underline-offset-2" href="#/products">Produk</a>.
-      </p>
     </div>`;
 
   bind();
