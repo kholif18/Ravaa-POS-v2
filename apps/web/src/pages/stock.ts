@@ -661,6 +661,12 @@ async function load(): Promise<void> {
 
 export async function mountStockPage(el: HTMLElement): Promise<void> {
   host = el;
+  // Baca ulang preferensi sidebar tiap mount. state.side diinisialisasi hanya
+  // SEKALI saat boot modul, sedangkan kuncinya (SIDE_KEY) berbagi dengan
+  // halaman Produk — tanpa baris ini, menyembunyikan sidebar di satu halaman
+  // baru terasa di halaman lain setelah reload penuh, padahal komentar di bind()
+  // menjanjikan "halaman lain ikut".
+  state.side = readSide();
   state.loading = true;
   state.error = '';
   paint();

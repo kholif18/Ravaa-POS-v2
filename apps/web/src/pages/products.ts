@@ -1682,6 +1682,11 @@ function bindRowActions(): void {
 
 export async function mountProductsPage(el: HTMLElement): Promise<void> {
   host = el;
+  // Baca ulang preferensi sidebar tiap mount — kuncinya (SIDE_KEY) berbagi
+  // dengan halaman Stok, sementara state.side hanya dibaca sekali saat boot
+  // modul. Harus SEBELUM renderProductsPage(), karena render itulah yang
+  // menuliskan data-open ke DOM.
+  state.side = readSide();
   el.innerHTML = renderProductsPage();
   bind();
   // Cache dulu supaya tabel terisi instan, lalu tarik data server.
