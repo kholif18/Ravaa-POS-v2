@@ -13,6 +13,15 @@ const ok = (n, cond, info = '') => {
 };
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
 
+const API = 'http://localhost:3001';
+/** Stok PRD00002 menurut SERVER (baseline), bukan menurut layar.
+ *  Dipakai untuk membuktikan "batal impor tidak menulis apa pun" tanpa
+ *  mematok angka seed — lihat komentar pada bagian G2. */
+const stokServer = async () => {
+  const j = await (await fetch(`${API}/api/products?q=PRD00002`)).json();
+  return j.data?.find((p) => p.sku === 'PRD00002')?.stock ?? null;
+};
+
 const browser = await chromium.launch({
   executablePath: '/usr/bin/google-chrome-stable',
   headless: true,
@@ -145,6 +154,9 @@ try {
   const skuUji = barisEkspor[1].split(',')[0];
   ok('baris ekspor = PRD00002 (SKU dipakai untuk impor)', skuUji === 'PRD00002', skuUji);
 
+  // Baseline dibaca SEBELUM dialog dibuka — lihat komentar pada bagian G2.
+  const serverSebelum = await stokServer();
+
   await page.click('#st-import');
   await page.waitForSelector('#st-text', { timeout: 8000 });
   ok('dialog Impor stok terbuka', await page.isVisible('#st-text'));
@@ -181,7 +193,20 @@ try {
   await page.click('.modal [data-x]');
   await page.waitForSelector('.modal', { state: 'detached', timeout: 8000 });
   const stokBatal = await stokSelai();
-  ok('batal impor: stok PRD00002 tetap 30', /^30\b/.test(norm(stokBatal)), stokBatal);
+  const serverSesudah = await stokServer();
+  // Angka absolut (mis. "tetap 30") DILARANG di sini: stok Buku Tulis boleh
+  // berubah karena pemakaian nyata maupun suite lain, dan yang diuji adalah
+  // PEMBATALAN impor tidak menulis apa pun — bukan angka seed. Baseline diambil
+  // sebelum dialog dibuka; prinsipnya sama dengan baseline bagian A (`n`).
+  // Regression: mematok "30" membuat suite gagal `30 | 20` / `30 | 27` hanya
+  // karena DB tidak persis seed, walau semua perilaku benar (37/38 lolos).
+  const angkaUI = /^(\d+)/.exec(norm(stokBatal))?.[1];
+  const uiCocok = angkaUI !== undefined
+    ? Number(angkaUI) === serverSesudah
+    : norm(stokBatal) === 'habis' && serverSesudah === 0;
+  ok('batal impor: stok PRD00002 tidak berubah (server & layar)',
+    serverSesudah !== null && serverSesudah === serverSebelum && uiCocok,
+    `server ${serverSebelum} -> ${serverSesudah} | UI: ${stokBatal}`);
 
   // WAJIB: blok `finally` memulihkan stok dengan mengklik baris PERTAMA, jadi
   // pencarian harus menunjuk produk uji lagi. Tanpa baris ini, pemulihan justru
