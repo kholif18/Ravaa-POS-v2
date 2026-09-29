@@ -12,7 +12,6 @@ import { openModal } from '../ui/modal';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
-import { COLS, gabungLabel, kirimPrint, teksLabel, urlAgent, type ProdukLabel } from '../escpos';
 
 const SIDE_KEY = 'ravaa.prodside';
 
@@ -36,6 +35,18 @@ const STATUSES: { key: StatusFilter; label: string }[] = [
 
 type EditCat = { isNew: boolean; slug: string; name: string; track_stock: number };
 
+/** Kolom yang bisa diurutkan dengan klik header. Default `nama` asc = urutan yang
+ *  selama ini dipakai (load & sync mengurutkan nama), jadi tidak ada perubahan
+ *  perilaku untuk kasir yang tidak pernah menyentuh header. */
+type SortKey = 'nama' | 'kategori' | 'harga' | 'stok';
+type SortState = { key: SortKey; dir: 'asc' | 'desc' };
+const SORT_LABEL: Record<SortKey, string> = {
+  nama: 'Produk',
+  kategori: 'Kategori',
+  harga: 'Harga',
+  stok: 'Stok',
+};
+
 const state = {
   products: [] as Product[],
   /** Produk nonaktif: diambil dari server saat dibutuhkan, TIDAK disimpan di cache. */
@@ -46,6 +57,7 @@ const state = {
   q: '',
   cat: 'all',
   status: 'aktif' as StatusFilter,
+  sort: { key: 'nama', dir: 'asc' } as SortState,
   side: readSide(),
   catEditing: null as EditCat | null,
   syncedAt: '' as string,
@@ -96,7 +108,7 @@ function filteredProducts(): Product[] {
   // Kata dipisah: "aqua 600" atau "kopi kapal" harusnya ketemu juga. Semua kata
   // wajib cocok di nama/SKU/barcode, tidak harus di field atau urutan sama.
   const terms = q.split(/\s+/).filter(Boolean);
-  return visibleProducts().filter((p) => {
+  const list = visibleProducts().filter((p) => {
     if (state.cat !== 'all' && p.category_slug !== state.cat) return false;
     if (!terms.length) return true;
     const n = p.name.toLowerCase();
@@ -104,7 +116,77 @@ function filteredProducts(): Product[] {
     const c = (p.barcode ?? '').toLowerCase();
     return terms.every((x) => n.includes(x) || s.includes(x) || c.includes(x));
   });
+  return urutkan(list);
 }
+
+/** Pengurutan tabel (klik header). Selalu di-pegang dengan nama sebagai tie-break
+ *  supaya dua produk berharga sama tidak berpindah-pindah tiap render. */
+function urutkan(list: Product[]): Product[] {
+  const { key, dir } = state.sort;
+  const n = dir === 'asc' ? 1 : -1;
+  return list.sort((a, b) => {
+    let x = 0;
+    if (key === 'kategori') x = a.category_name.localeCompare(b.category_name, 'id');
+    else if (key === 'harga') x = a.price - b.price;
+    else if (key === 'stok') x = a.stock - b.stock;
+    else x = a.name.localeCompare(b.name, 'id');
+    return n * (x !== 0 ? x : a.name.localeCompare(b.name, 'id'));
+  });
+}
+
+/* ---------- DISKON & KADALUARSA (tampilan baris) ---------- */
+
+/** Nilai potongan rupiah yang benar-benar memotong harga: diskon Rp yang
+ *  melebihi harga jual tidak menghasilkan harga coret masuk akal (justru minus),
+ *  jadi dibatasi setara harga (gratis) supaya tampilan tidak bohong. */
+function diskonRp(p: Product): number {
+  if (p.discount_type !== 'rp' || p.discount <= 0) return 0;
+  if (p.price_dynamic || p.price <= 0) return 0;
+  return Math.min(p.discount, p.price);
+}
+
+/** Label badge diskon untuk baris tabel: `-10%` atau `-Rp500`. */
+function labelDiskon(p: Product): string {
+  if (p.discount_type === 'pct') return p.discount > 0 ? `-${p.discount}%` : '';
+  const rpDisc = diskonRp(p);
+  return rpDisc > 0 ? `-${rp(rpDisc)}` : '';
+}
+
+/** Harga setelah diskon permanen (dipakai kolom Harga & pratinjau form). */
+function hargaDiskon(p: Product): number | null {
+  if (p.price_dynamic) return null;
+  if (p.discount_type === 'pct') {
+    if (p.discount <= 0) return null;
+    return Math.round((p.price * (1 - p.discount / 100)) / 100) * 100;
+  }
+  const d = diskonRp(p);
+  return d > 0 ? p.price - d : null;
+}
+
+/** Status kadaluarsa: `lewat` (melewati hari ini) / `dekat` (<= 30 hari) / `jauh`. */
+function statusExpiry(iso: string | null): 'lewat' | 'dekat' | 'jauh' | null {
+  if (!iso) return null;
+  const t = Date.parse(`${iso}T23:59:59`);
+  if (Number.isNaN(t)) return null;
+  const hari = (t - Date.now()) / 86_400_000;
+  return hari < 0 ? 'lewat' : hari <= 30 ? 'dekat' : 'jauh';
+}
+
+/** Tanggal kadaluarsa pendek ("15 Okt 2026"). */
+function tglExpiry(iso: string): string {
+  const t = Date.parse(`${iso}T00:00:00`);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Kategori yang memunculkan field Tanggal kadaluarsa (keputusan user:
+ *  snack & es krim). Produk yang SUDAH punya tanggal tetap menampilkan fieldnya
+ *  walau kategorinya berubah — data jangan pernah disembunyikan begitu saja. */
+const KATEGORI_KADALUARSA = new Set(['snack', 'eskrim']);
+function perluExpiry(slug: string, adaNilai: boolean): boolean {
+  return adaNilai || KATEGORI_KADALUARSA.has(slug);
+}
+
 
 /** Teks footer: "18 produk aktif" atau "Menampilkan 50 dari 137 produk aktif". */
 function countText(): string {
@@ -192,13 +274,45 @@ function productRows(): string {
           : `<span class="badge-ok">${icon('check')}<span>${p.stock}</span></span>`;
       const priceBadge = p.price_dynamic
         ? `<span class="badge-dyn">harga dinamis</span>`
-        : `<span class="td-num block font-semibold text-gray-900 tabular-nums dark:text-white">${rp(p.price)}</span>`;
+        : (() => {
+            const akhir = hargaDiskon(p);
+            const lbl = labelDiskon(p);
+            // Diskon permanen: harga coret di atas + harga akhir, badge potongannya.
+            // Tanpa diskon tetap tampil persis seperti sebelumnya (satu baris).
+            if (akhir === null || !lbl) {
+              return `<span class="td-num block font-semibold text-gray-900 tabular-nums dark:text-white">${rp(p.price)}</span>`;
+            }
+            return `<span class="block text-xs text-gray-400 line-through tabular-nums">${rp(p.price)}</span>
+              <span class="td-num block font-semibold text-red-600 tabular-nums dark:text-red-400">${rp(akhir)}</span>
+              <span class="badge-low mt-1 !px-1.5 !py-0.5">${lbl}</span>`;
+          })();
+      const exp = statusExpiry(p.expiry_date);
+      const expTeks = p.expiry_date
+        ? exp === 'lewat'
+          ? `<span class="font-semibold text-red-600 dark:text-red-400">lewat kadaluarsa ${tglExpiry(p.expiry_date)}</span>`
+          : exp === 'dekat'
+            ? `<span class="font-semibold text-amber-600 dark:text-amber-400">kadaluarsa ${tglExpiry(p.expiry_date)}</span>`
+            : `<span>kadaluarsa ${tglExpiry(p.expiry_date)}</span>`
+        : '';
+      // Foto: thumbnail kecil saja (file aslinya di disk server, jadi tidak
+      // membebani cache IndexedDB). onerror menyembunyikan gambar rusak tanpa
+      // meninggalkan ikon pecah di tengah nama produk.
+      const thumb = p.image
+        ? `<img src="/api/products/${p.id}/image?${p.version}" alt="" aria-hidden="true"
+             class="size-8 shrink-0 rounded-md border border-gray-200 object-cover dark:border-gray-700"
+             loading="lazy" onerror="this.remove()" />`
+        : '';
       return `
       <tr class="tr${off ? ' opacity-60' : ''}" data-row="${p.id}">
         <td class="td w-12 text-center tabular-nums text-gray-400">${i + 1}</td>
         <td class="td">
-          <div class="cell-strong">${esc(p.name)}${off ? ` <span class="badge-off ml-1">nonaktif</span>` : ''}</div>
-          <div class="cell-sub">${esc(p.sku)}${p.unit && p.unit !== '-' ? ` · ${esc(p.unit)}` : ''}${p.barcode ? ` · ${esc(p.barcode)}` : ''}</div>
+          <div class="flex items-start gap-2">
+            ${thumb}
+            <div class="min-w-0">
+              <div class="cell-strong">${esc(p.name)}${off ? ` <span class="badge-off ml-1">nonaktif</span>` : ''}</div>
+              <div class="cell-sub">${esc(p.sku)}${p.unit && p.unit !== '-' ? ` · ${esc(p.unit)}` : ''}${p.barcode ? ` · ${esc(p.barcode)}` : ''}${expTeks ? ` · ${expTeks}` : ''}</div>
+            </div>
+          </div>
         </td>
         <td class="td">${esc(p.category_name)}</td>
         <td class="td">${priceBadge}</td>
@@ -226,6 +340,19 @@ function productRows(): string {
     .join('');
 }
 
+/** Header kolom yang bisa diurutkan. Panah `↕` pada kolom non-aktif menandakan
+ *  "bisa diklik" tanpa mengklaim urutan apa pun; `aria-sort` memberi tahu
+ *  pembaca layar urutan yang sedang berlaku. */
+function thUrut(key: SortKey, extra = ''): string {
+  const on = state.sort.key === key;
+  const arah = on ? (state.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const panah = on ? (state.sort.dir === 'asc' ? '▲' : '▼') : '↕';
+  return `<th class="th th-sticky ${extra}" aria-sort="${arah}">
+            <button type="button" data-sort="${key}" class="th-sort${on ? ' is-on' : ''}"
+              title="Urutkan menurut ${SORT_LABEL[key]}">${SORT_LABEL[key]}<span class="th-arrow" aria-hidden="true">${panah}</span></button>
+          </th>`;
+}
+
 function tableCard(): string {
   // `lg:flex-1` WAJIB: tanpa grow-nya kartu berhenti seukuran isi, jadi footer
   // tidak pernah turun ke dasar area tabel saat barisnya sedikit (wrap 696px vs
@@ -249,10 +376,10 @@ function tableCard(): string {
         <thead>
           <tr>
             <th class="th th-sticky w-12 text-center">No.</th>
-            <th class="th th-sticky">Produk</th>
-            <th class="th th-sticky">Kategori</th>
-            <th class="th th-sticky text-right">Harga</th>
-            <th class="th th-sticky">Stok</th>
+            ${thUrut('nama')}
+            ${thUrut('kategori')}
+            ${thUrut('harga', 'text-right')}
+            ${thUrut('stok')}
             <th class="th th-sticky text-right">Aksi</th>
           </tr>
         </thead>
@@ -315,7 +442,6 @@ export function renderProductsPage(): string {
             <button type="button" id="sync" class="btn btn-ghost" title="Sinkronkan master produk — Shift+klik untuk reset cache penuh">${icon('sync')}<span class="hidden sm:inline">Sinkron</span></button>
             <button type="button" id="prod-import" class="btn btn-ghost" title="Impor produk dari CSV atau tempelan Excel">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>
             <button type="button" id="prod-export" class="btn btn-ghost" title="Unduh produk yang sedang tampil (ikut filter &amp; pencarian) sebagai CSV">${icon('download')}<span class="hidden sm:inline">Ekspor</span></button>
-            <button type="button" id="prod-label" class="btn btn-ghost" title="Cetak label harga untuk produk di filter ini">${icon('print')}<span class="hidden sm:inline">Label</span></button>
             <button type="button" id="prod-new" class="btn btn-primary ml-auto">${icon('plus')}<span>Produk</span></button>
           </div>
         </div>
@@ -550,6 +676,89 @@ function importForm(): void {
   });
 }
 
+/** Kolom KIRI form produk: kotak foto persegi (modal 2 kolom ala RPOS — kiri
+ *  gambar, kanan form).
+ *
+ *  Mode Ubah (`d != null`) kotaknya hidup: seluruh kotak diklik = pilih berkas,
+ *  tombol hapus melayang di pojok kanan atas. Mode Tambah/Duplikat BELUM punya
+ *  id produk sehingga endpoint fotonya belum bisa dipanggil — yang tampil
+ *  placeholder dengan catatan jujur, bukan tombol yang kelihatan hidup tapi
+ *  tidak melakukan apa-apa.
+ *
+ *  Kenapa unggaH LANGSUNG tersimpan (bukan menunggu tombol Simpan): endpoint
+ *  fotonya terpisah (`POST /api/products/:id/image`), dan menunda berarti
+ *  menggabungkan dua operasi jadi satu tombol — bila simpan produk gagal, foto
+ *  ikut hilang; bila simpan sukses tapi foto gagal, kasir tidak tahu mana yang
+ *  benar. Dengan simpan seketika, hasilnya terlihat di tempat dan bisa diulang
+ *  sendiri. Keterbatasannya DITULIS apa adanya di hint: tombol Batal tidak
+ *  mengembalikan foto yang sudah terlanjur terunggah. */
+function fotoKolom(d: Product | null, mode: ModeForm): string {
+  if (!d) {
+    const ket =
+      mode === 'copy'
+        ? 'Foto sumber <b>tidak ikut disalin</b> — unggah setelah produk baru disimpan.'
+        : 'Foto baru bisa diunggah <b>setelah produk disimpan</b> — endpoint fotonya butuh id produk.';
+    return `
+        <p class="form-sec">Foto</p>
+        <div class="foto-kotak foto-kotak-off" aria-hidden="true">
+          ${icon('products')}
+          <span>tanpa foto</span>
+        </div>
+        <p class="hint mt-1.5">${ket}</p>`;
+  }
+  const src = d.image ? `/api/products/${d.id}/image?v=${d.version}` : '';
+  return `
+        <p class="form-sec">Foto</p>
+        <div class="relative">
+          <label class="foto-kotak" title="Klik untuk memilih foto">
+            <input id="f-photo-file" type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" />
+            <img id="f-photo" src="${src}" alt="Foto ${esc(d.name)}" class="foto-kotak-img"
+              ${src ? '' : 'hidden'} />
+            <span id="f-photo-empty" class="foto-kotak-empty" ${src ? 'hidden' : ''}>${icon('upload')}<span>Klik untuk pilih foto</span></span>
+          </label>
+          <button type="button" id="f-photo-del" class="foto-kotak-x ${src ? '' : 'hidden'}"
+            title="Hapus foto" aria-label="Hapus foto">${icon('trash')}</button>
+        </div>
+        <p class="hint mt-1.5">
+          Foto <b>langsung tersimpan</b> begitu dipilih (tidak menunggu Simpan) dan otomatis
+          dikecilkan jadi thumbnail supaya ringan dibuka HP kasir — file aslinya disimpan di
+          server, bukan di cache browser. Karena simpannya seketika, tombol <b>Batal</b> tidak
+          mengembalikan foto yang sudah terlanjur diunggah.
+        </p>`;
+}
+
+/** Baca berkas gambar -> thumbnail JPEG maksimal 512px sebagai dataURL.
+ *
+ *  Q1 (keputusan user): yang disimpan hanya THUMBNAIL — foto asli berukuran
+ *  besar memenuhi cache IndexedDB dan memperlambat sync di HP kasir, padahal
+ *  tampilan butuh 64-128px. JPEG dipilih karena jauh lebih kecil dari PNG pada
+ *  foto hasil kamera; latar transparan PNG jadi putih (dapat ditoleransi untuk
+ *  thumbnail produk). */
+async function kecilkanFoto(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('gambar tidak bisa dibaca'));
+      i.src = url;
+    });
+    const MAX = 512;
+    const skala = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * skala));
+    const h = Math.max(1, Math.round(img.naturalHeight * skala));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    if (!ctx) throw new Error('canvas tidak tersedia');
+    ctx.drawImage(img, 0, 0, w, h);
+    return cv.toDataURL('image/jpeg', 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 type ModeForm = 'new' | 'edit' | 'copy';
 
 /** `mode`:
@@ -589,10 +798,14 @@ function productForm(
   openModal({
     title: mode === 'new' ? 'Tambah Produk' : salin ? `Duplikat: ${d!.name}` : `Ubah: ${d!.name}`,
     okLabel: mode === 'new' ? 'Tambah' : salin ? 'Buat produk' : 'Simpan',
-    wide: true,
+    wider: true,
     body: `
       ${salin ? `<p class="hint">Salinan baru — SKU dikosongkan dan akan diisi server dengan nomor urut <b>PRD#####</b> saat disimpan; barcode &amp; stok sengaja dikosongkan. Ubah nama &amp; barcode sesuai varian.</p>` : ''}
-      <div class="space-y-2">
+      <div class="grid grid-cols-1 gap-x-4 gap-y-3 lg:grid-cols-[240px_1fr]">
+        <div class="mx-auto w-44 sm:w-56 lg:mx-0 lg:w-full">
+          ${fotoKolom(mode === 'edit' && d ? d : null, mode)}
+        </div>
+        <div class="space-y-2 min-w-0">
         <p class="form-sec">Detail produk</p>
         <div class="field-sm">
           <label class="label" for="f-name">Nama produk *</label>
@@ -653,6 +866,22 @@ function productForm(
           ${mode === 'edit' && d ? switchHtml('f-active', !!d.is_active, 'Aktif') : ''}
         </div>
 
+        <p class="form-sec">Diskon</p>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="field-sm">
+            <label class="label" for="f-disc-type">Tipe diskon</label>
+            <select id="f-disc-type" class="input input-sm">
+              <option value="rp" ${(d?.discount_type ?? 'rp') === 'rp' ? 'selected' : ''}>Potongan Rupiah (Rp)</option>
+              <option value="pct" ${d?.discount_type === 'pct' ? 'selected' : ''}>Persen dari harga (%)</option>
+            </select>
+          </div>
+          <div class="field-sm">
+            <label class="label" for="f-disc">Nilai diskon</label>
+            <input id="f-disc" class="input input-sm" inputmode="decimal" value="${d?.discount ?? 0}" />
+          </div>
+        </div>
+        <p class="hint" id="f-disc-hint"></p>
+
         <p class="form-sec">Satuan jual</p>
         <div class="space-y-1.5">
           <p class="hint">
@@ -676,7 +905,21 @@ function productForm(
             </div>
           </div>
         </div>
-      </div>`,
+
+        <div id="f-exp-wrap" ${perluExpiry(d?.category_slug ?? '', !!d?.expiry_date) ? '' : 'hidden'}>
+          <p class="form-sec">Kadaluarsa</p>
+          <div class="field-sm">
+            <label class="label" for="f-exp">Tanggal kadaluarsa</label>
+            <input id="f-exp" type="date" class="input input-sm" value="${esc(d?.expiry_date ?? '')}" />
+            <span class="hint" id="f-exp-hint">${
+              perluExpiry(d?.category_slug ?? '', !!d?.expiry_date)
+                ? 'Diisi untuk snack &amp; es krim — tampil di tabel Produk dan dipakai peringatan stok.'
+                : 'Kategori ini tidak termasuk snack/eskrim, tapi tanggal tetap boleh diisi.'
+            }            </span>
+          </div>
+        </div>
+        </div><!-- /kolom kanan (form) -->
+      </div><!-- /grid 2 kolom -->`,
     onMount: ({ el, ok, close }) => {
       const val = (id: string) => (el.querySelector(`#${id}`) as HTMLInputElement).value.trim();
       const num = (id: string) => Number(val(id).replace(/\D/g, '') || 0);
@@ -695,6 +938,11 @@ function productForm(
       const skuHint = el.querySelector('#f-sku-hint') as HTMLElement;
       const trackHint = el.querySelector('#f-track-hint') as HTMLElement;
       const stockWrap = el.querySelector('#f-stock-wrap') as HTMLElement;
+      const expWrap = el.querySelector('#f-exp-wrap') as HTMLElement;
+      const expInput = el.querySelector('#f-exp') as HTMLInputElement;
+      const discType = el.querySelector('#f-disc-type') as HTMLSelectElement;
+      const discInput = el.querySelector('#f-disc') as HTMLInputElement;
+      const discHint = el.querySelector('#f-disc-hint') as HTMLElement;
 
       const track = () => cats.find((c) => c.slug === catSel.value)?.track_stock === 1;
       const syncTrack = () => {
@@ -705,6 +953,11 @@ function productForm(
         trackHint.textContent = t
           ? 'Kategori ini melacak stok, jadi blok Stok di bawah aktif.'
           : `Kategori "${cats.find((c) => c.slug === catSel.value)?.name ?? ''}" tidak melacak stok (jasa/cetak/topup) — stok diisi lewat penjualan, bukan master.`;
+        // Kadaluarsa: hanya snack & es krim yang ditawari, TAPI produk yang sudah
+        // punya tanggal tetap menampilkan fieldnya — data tidak boleh disembunyikan
+        // begitu kategorinya dipindah (perluExpiry menilai keduanya).
+        const adaNilai = expInput.value.trim() !== '';
+        expWrap.hidden = !perluExpiry(catSel.value, adaNilai);
       };
 
       // --- harga: modal <-> markup <-> harga jual saling mengisi -------------
@@ -764,13 +1017,125 @@ function productForm(
         }
       };
 
+      // --- diskon permanen: pratinjau harga akhir ---------------------------
+      // Nilai disimpan apa adanya (rp bulat / persen boleh desimal); yang
+      // diverifikasi di sini hanya batas yang memang mustahil (persen > 100,
+      // rupiah melewati harga jual) supaya kesalahannya ketahuan SEBELUM simpan,
+      // bukan sebagai toast gagal setelah kasir menekan Simpan.
+      const warnaMerah = ['text-red-600', 'dark:text-red-400'];
+      const bacaDisc = () => (discType.value === 'pct' ? dec('f-disc') : num('f-disc'));
+      const syncDisc = () => {
+        const pct = discType.value === 'pct';
+        const nilai = bacaDisc();
+        const harga = num('f-price');
+        discHint.classList.remove(...warnaMerah);
+        if (nilai <= 0) {
+          discHint.innerHTML = 'Tanpa diskon — dijual sesuai harga jual di atas.';
+          return;
+        }
+        if (pct && nilai > 100) {
+          discHint.textContent = 'Diskon persen maksimal 100%.';
+          discHint.classList.add(...warnaMerah);
+          return;
+        }
+        if (!pct && !dyn.checked && harga > 0 && nilai > harga) {
+          discHint.textContent = `Diskon ${rp(nilai)} melebihi harga jual ${rp(harga)} — kurangi dulu.`;
+          discHint.classList.add(...warnaMerah);
+          return;
+        }
+        // Harga dinamis / belum diisi: tidak ada angka yang bisa dipratinjau,
+        // dan memang harga per transaksilah yang akan dipotong.
+        if (dyn.checked || harga <= 0) {
+          discHint.textContent = pct
+            ? `Potong ${nilai}% dari harga yang diketik kasir saat transaksi.`
+            : `Potong ${rp(nilai)} dari harga yang diketik kasir saat transaksi.`;
+          return;
+        }
+        const akhir = pct ? Math.round((harga * (1 - nilai / 100)) / 100) * 100 : harga - nilai;
+        discHint.innerHTML =
+          `Harga jual ${rp(harga)} &rarr; <b class="text-gray-700 dark:text-gray-200">${rp(Math.max(0, akhir))}</b>` +
+          ` (${pct ? `${nilai}%` : `potong ${rp(nilai)}`}) — jadi diskon awal baris di kasir.`;
+      };
+
+      // --- foto: unggah seketika (lihat catatan pada fotoKolom) --------------
+      const fotoEl = el.querySelector<HTMLImageElement>('#f-photo');
+      const fotoEmpty = el.querySelector<HTMLElement>('#f-photo-empty');
+      const fotoDel = el.querySelector<HTMLButtonElement>('#f-photo-del');
+      const tampilFoto = (src: string | null) => {
+        if (!fotoEl) return;
+        if (src) {
+          fotoEl.src = src;
+          fotoEl.hidden = false;
+          if (fotoEmpty) fotoEmpty.hidden = true;
+          fotoDel?.classList.remove('hidden');
+        } else {
+          fotoEl.hidden = true;
+          fotoEl.removeAttribute('src');
+          if (fotoEmpty) fotoEmpty.hidden = false;
+          fotoDel?.classList.add('hidden');
+        }
+      };
+      el.querySelector('#f-photo-file')?.addEventListener('change', async (e) => {
+        const inp = e.target as HTMLInputElement;
+        const f = inp.files?.[0];
+        // Di-reset dulu: kalau tidak, memilih berkas yang sama dua kali tidak
+        // memicu event change (nilai DOM identik) dan terlihat seperti tombol mati.
+        inp.value = '';
+        if (!f || !d) return;
+        if (!f.type.startsWith('image/')) {
+          toast('Berkas harus gambar (PNG, JPG, atau WebP)', 'warning');
+          return;
+        }
+        const btn = el.querySelector<HTMLLabelElement>('#f-photo-file')?.closest('label');
+        if (btn) btn.classList.add('pointer-events-none', 'opacity-60');
+        try {
+          const dataUrl = await kecilkanFoto(f);
+          const res = await apiPost<{ data: { image: string } }>(
+            `/api/products/${d.id}/image`,
+            { image: dataUrl },
+          );
+          d.image = res.data.image;
+          tampilFoto(`/api/products/${d.id}/image?v=${Date.now()}`);
+          toast('Foto tersimpan', 'success');
+        } catch (err) {
+          toast(`Gagal unggah foto: ${errMsg(err)}`, 'error');
+        } finally {
+          if (btn) btn.classList.remove('pointer-events-none', 'opacity-60');
+        }
+      });
+      fotoDel?.addEventListener('click', async () => {
+        if (!d) return;
+        const yes = await confirmDialog({
+          title: 'Hapus foto produk?',
+          message: 'Foto dihapus dari produk ini dan tidak bisa dikembalikan — masih bisa diunggah ulang kapan saja.',
+          okLabel: 'Hapus foto',
+          danger: true,
+        });
+        if (!yes) return;
+        try {
+          await apiPost(`/api/products/${d.id}/image`, { image: '' });
+          d.image = null;
+          tampilFoto(null);
+          toast('Foto dihapus', 'success');
+        } catch (e) {
+          toast(`Gagal hapus foto: ${errMsg(e)}`, 'error');
+        }
+      });
+
       catSel.addEventListener('change', syncTrack);
       dyn.addEventListener('change', syncPrice);
+      dyn.addEventListener('change', syncDisc);
       cost.addEventListener('input', syncHargaDariMarkup);
+      cost.addEventListener('input', syncDisc);
       markup.addEventListener('input', syncHargaDariMarkup);
+      markup.addEventListener('input', syncDisc);
       price.addEventListener('input', syncMarkupDariHarga);
+      price.addEventListener('input', syncDisc);
       sku.addEventListener('input', syncSkuHint);
       name.addEventListener('input', syncSkuHint);
+      discType.addEventListener('change', syncDisc);
+      discInput.addEventListener('input', syncDisc);
+      expInput.addEventListener('change', syncTrack);
 
       // --- satuan jual alternatif (fitur #3 Multi satuan) -------------------
       // Satuan DASAR tidak punya baris (implisit dari select Satuan di atas);
@@ -853,6 +1218,7 @@ function productForm(
       syncPrice();
       syncSkuHint();
       syncMarkupDariHarga();
+      syncDisc();
 
       ok.addEventListener('click', async () => {
         const nama = val('f-name');
@@ -875,6 +1241,25 @@ function productForm(
         }
         if (unitList.some((u) => u.unit === base)) {
           toast(`Satuan dasar (${base}) tidak perlu diulang`, 'warning'); return;
+        }
+        // --- diskon & kadaluarsa: tolak sebelum mengirim ---------------------
+        const tipeDisc = discType.value === 'pct' ? 'pct' : 'rp';
+        const nilaiDisc = tipeDisc === 'pct' ? dec('f-disc') : num('f-disc');
+        if (!Number.isFinite(nilaiDisc) || nilaiDisc < 0) {
+          toast('Nilai diskon harus angka >= 0', 'warning'); discInput.focus(); return;
+        }
+        if (tipeDisc === 'pct' && nilaiDisc > 100) {
+          toast('Diskon persen maksimal 100%', 'warning'); discInput.focus(); return;
+        }
+        const hargaJual = num('f-price');
+        if (tipeDisc === 'rp' && !dyn.checked && hargaJual > 0 && nilaiDisc > hargaJual) {
+          toast(`Diskon ${rp(nilaiDisc)} melebihi harga jual ${rp(hargaJual)}`, 'warning');
+          discInput.focus();
+          return;
+        }
+        const expVal = val('f-exp');
+        if (expVal && !/^\d{4}-\d{2}-\d{2}$/.test(expVal)) {
+          toast('Tanggal kadaluarsa tidak valid', 'warning'); expInput.focus(); return;
         }
         ok.disabled = true;
         try {
@@ -902,6 +1287,16 @@ function productForm(
             // form tanpa perubahan satuan harus tetap mengirim daftar lama agar
             // konsisten dengan tampilan. `[]` = hapus semua satuan alternatif.
             units: unitList.map((u) => ({ unit: u.unit, factor: u.factor, price: u.price })),
+            // Diskon & kadaluarsa SELALU ikut: field yang tidak dikirim di-reset
+            // server ke default (lihat AGENTS §3), jadi form yang tidak menyentuhnya
+            // tetap harus mengirim nilai yang sedang tampil.
+            discount_type: tipeDisc,
+            discount: nilaiDisc,
+            expiry_date: expVal || null,
+            // `image` sengaja TIDAK ada di payload: server memperlakukan
+            // ketidakhadirannya sebagai "tidak diubah", sehingga menyimpan form
+            // tidak pernah menghapus foto yang sudah diunggah lewat blok Foto
+            // (persis perlakuan `units` terhadap satuan jual).
           });
           // SKU bisa dibuat server saat kolomnya dikosongkan -> tampilkan apa
           // yang benar-benar tersimpan, bukan tebakan client.
@@ -934,81 +1329,6 @@ function productForm(
 /** Produk yang TIDAK layak jadi label: harga nol (label tanpa harga = sampah)
  *  dan harga dinamis (harga aslinya baru diketahui per transaksi, jadi label
  *  yang dicetak hari ini akan MENYESATKAN besok). */
-function layakLabel(p: Product): boolean {
-  return p.price_dynamic !== 1 && p.price > 0;
-}
-
-/** Dialog cetak label: mencetak SESUAI FILTER SAAT INI (cari/kategori/status),
- *  karena pekerjaan wajar toko adalah "cetak label untuk rak Minuman" — bukan
- *  memilih 500 SKU satu per satu. Kolom cari jadi pemilih halusnya: ketik
- *  "Aqua" -> 1 label. Jumlah selalu ditampilkan sebelum dikirim. */
-function labelForm(): void {
-  const semua = filteredProducts();
-  const layak = semua.filter(layakLabel);
-  const lewat = semua.length - layak.length;
-  if (!layak.length) {
-    toast('Tidak ada produk berharga tetap di filter ini', 'warning');
-    return;
-  }
-  const contoh = layak[0];
-  const preview: ProdukLabel = {
-    name: contoh.name, sku: contoh.sku, price: contoh.price,
-    unit: contoh.unit, barcode: contoh.barcode,
-  };
-
-  openModal({
-    title: 'Cetak label harga',
-    okLabel: `Cetak ${layak.length} label`,
-    wide: true,
-    body: `
-      <p class="text-xs text-gray-500 dark:text-gray-400">
-        ${layak.length} label mengikuti <b>filter saat ini</b>${lewat ? ` · ${lewat} dilewati (harga dinamis/nol)` : ''}.
-        Mau sedikit saja? Saring dulu lewat kolom cari.
-      </p>
-      <p class="text-xs text-gray-500 dark:text-gray-400" id="lbl-agent">cek print-agent…</p>
-      <div class="table-scroll mt-2 max-h-36 overflow-y-auto rounded border border-gray-200 dark:border-gray-700">
-        <ul class="divide-y divide-gray-100 dark:divide-gray-800">
-          ${layak.slice(0, 100).map((p) => `<li class="px-2 py-1.5">${esc(p.name)} <span class="text-gray-400">· ${esc(p.sku)} · ${rp(p.price)}</span></li>`).join('')}
-        </ul>
-      </div>
-      ${layak.length > 100 ? `<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">… ${layak.length - 100} lainnya ikut tercetak.</p>` : ''}
-      <p class="form-sec">Pratinjau label (${COLS} kolom)</p>
-      <pre class="overflow-x-auto rounded bg-gray-100 p-2 font-mono text-[11px] leading-tight dark:bg-gray-800">${esc(teksLabel(preview).join('\n'))}</pre>`,
-    onMount: ({ el, ok, close }) => {
-      // Cek agent dulu: kasir perlu tahu apakah ini masuk printer atau file,
-      // dan tahu SEBELUM menekan Cetak kalau agent tidak jalan.
-      fetch(`${urlAgent()}/health`)
-        .then((r) => r.json())
-        .then((j) => {
-          const box = el.querySelector('#lbl-agent');
-          if (box) box.textContent = j.printer ? `print-agent siap · printer ${j.printer}` : 'print-agent siap · printer belum ketemu (output jadi file)';
-        })
-        .catch(() => {
-          const box = el.querySelector('#lbl-agent');
-          if (box) {
-            box.textContent = `print-agent TIDAK terjangkau di ${urlAgent()} — jalankan: npm run dev:agent`;
-            box.classList.add('font-semibold', 'text-red-600', 'dark:text-red-400');
-          }
-          ok.disabled = true;
-        });
-
-      ok.addEventListener('click', async () => {
-        ok.disabled = true;
-        try {
-          const via = await kirimPrint(gabungLabel(layak.map((p) => ({
-            name: p.name, sku: p.sku, price: p.price, unit: p.unit, barcode: p.barcode,
-          }))));
-          toast(`${layak.length} label dikirim${via ? ` · ${via}` : ''}`, 'success');
-          close();
-        } catch (e) {
-          toast(`Gagal cetak: ${errMsg(e)}`, 'error');
-          ok.disabled = false;
-        }
-      });
-    },
-  });
-}
-
 /** Dialog stok (restock + opname). HANYA dipanggil dari halaman Stok — sejak
  *  2026-09-28 form produk menyimpan stok AWAL saja, jadi tiap perubahan stok
  *  wajib melewati jalur ini dan tercatat sebagai mutasi. `sesudah` disuntikkan,
@@ -1390,14 +1710,13 @@ function bind(): void {
   });
   find('#prod-new')?.addEventListener('click', () => productForm('new', state.categories));
   find('#prod-import')?.addEventListener('click', () => importForm());
-  // Ekspor mengikuti filter & pencarian yang sedang aktif — sama lingkupnya
-  // dengan tombol Label, jadi "yang saya lihat = yang saya dapat".
+  // Ekspor mengikuti filter & pencarian yang sedang aktif, jadi
+  // "yang saya lihat = yang saya dapat".
   // Sengaja TIDAK memakai toast: browser sudah menampilkan unduhannya.
   find('#prod-export')?.addEventListener('click', () => {
     const rows = filteredProducts();
     unduhCSV(csvProduk(rows), 'produk-ravaa.csv');
   });
-  find('#prod-label')?.addEventListener('click', () => labelForm());
   // Toggle sidebar kategori: ubah atribut data-open saja (bukan render ulang),
   // supaya animasi CSS berjalan dan isian search tidak hilang/fokus hilang.
   find('#side-toggle')?.addEventListener('click', () => {
@@ -1417,6 +1736,22 @@ function bind(): void {
       paint();
     }),
   );
+  // Klik header = urutkan. Klik lagi di kolom yang sama MEMBALIK arah (asc <-> desc),
+  // klik kolom lain mulai dari asc. Paint penuh karena panahnya ada di thead;
+  // limit ikut reset ke PAGE karena daftarnya berubah total.
+  host.querySelectorAll<HTMLElement>('[data-sort]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const key = b.dataset.sort as SortKey;
+      if (!(key in SORT_LABEL)) return;
+      state.sort =
+        state.sort.key === key
+          ? { key, dir: state.sort.dir === 'asc' ? 'desc' : 'asc' }
+          : { key, dir: 'asc' };
+      resetFilterScroll();
+      paint();
+    }),
+  );
+
   host.querySelectorAll<HTMLElement>('[data-status]').forEach((b) =>
     b.addEventListener('click', async () => {
       state.status = (b.dataset.status ?? 'aktif') as StatusFilter;
@@ -1472,10 +1807,18 @@ function payloadToggleAktif(p: Product, isActive: 0 | 1) {
     unit: p.unit, price: p.price, cost: p.cost, markup: p.markup,
     price_dynamic: p.price_dynamic, stock: p.stock, min_stock: p.min_stock,
     is_active: isActive,
-    // `units` sengaja TIDAK dimasukkan. Server memperlakukan ketidakhadirannya
-    // sebagai "tidak ada perubahan" (lihat upsertProduct), sehingga toggle
-    // status tidak pernah menghapus satuan jual — dan nilai di DB (bukan cache
-    // client yang mungkin basi) tetap jadi yang dipertahankan.
+    // Diskon & kadaluarsa ikut dikirim karena server me-reset field yang absen
+    // ke default (`rp`, 0, null) — tanpa ini, menonaktifkan produk lalu
+    // mengaktifkannya kembali MEMBUANG diskon permanen & tanggal kadaluarsanya
+    // diam-diam. Sama alasannya dengan price/cost/min_stock di atas.
+    discount_type: p.discount_type ?? 'rp',
+    discount: p.discount ?? 0,
+    expiry_date: p.expiry_date ?? null,
+    // `image` & `units` sengaja TIDAK dimasukkan. Server memperlakukan
+    // ketidakhadirannya sebagai "tidak ada perubahan" (lihat upsertProduct),
+    // sehingga toggle status tidak pernah menghapus foto maupun satuan jual —
+    // dan nilai di DB (bukan cache client yang mungkin basi) tetap jadi yang
+    // dipertahankan.
   };
 }
 

@@ -34,13 +34,17 @@ apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync).
 apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
+apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
+                         + pratinjau label, cetak via gabungLabel()/kirimPrint().
+apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): saklar
+                         "Stok boleh minus" -> GET/POST /api/settings.
 apps/web/src/escpos.ts   ESC/POS 58mm (32 kolom): label harga + struk + POST ke print-agent.
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                          produk dan panel mode POS.
                          Berisi: label harga (labelHarga/teksLabel/gabungLabel),
                          struk 32 kolom (struk/StrukBaris), ascii()/potong/baris
                          dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
-                         default :9100). Dipanggil dari label produk dan dari
+                         default :9100). Dipanggil dari halaman Label harga dan dari
                          pay()/submitTopup() POS. PENTING: `teks()` tidak
                          menambah baris baru — setiap baris struk HARUS diakhiri
                          LF, kalau tidak seluruh struk menempel jadi satu baris.
@@ -92,7 +96,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Client WAJIB menghapus SKU nonaktif dari cache (`removeProductBySku`).
     Untuk produk **dihapus** (tombstone) tidak perlu dipanggil manual:
     `syncMaster()` sudah membuangnya saat menerima `deleted_at` terisi.
-* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?}` (upsert by sku, version++)
+* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?,image?,discount_type?,discount?,expiry_date?}` (upsert by sku, version++)
   - `sku` **opsional**: kosong berarti server menomori sendiri `PRD00001`,
     `PRD00002`, ... (`PRD` + 5 digit, sejak 2026-09-28 — sebelumnya diturunkan
     dari nama). Nomor = **MAX** SKU `PRD[0-9]+` di DB + 1, **BUKAN COUNT**:
@@ -124,6 +128,24 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `factor` wajib `> 0`, `unit` wajib ada di master `units`, satuan dasar
     TIDAK boleh diulang, dan tidak boleh duplikat. Stok TIDAK pernah dikonversi
     lewat endpoint ini — stok selalu satuan dasar.
+  - **`image` (foto produk, sejak 2026-09-29)**: berisi **nama file** thumbnail
+    (bukan isi gambar — isinya lewat `GET /api/products/:id/image`).
+    **DIKECUALIKAN dari aturan reset, sama seperti `units`**: `undefined` =
+    tidak diubah, `''`/null = **hapus foto**. Alasan sama: `payloadToggleAktif()`
+    dan tiap baris impor tidak boleh menghapus foto diam-diam. File thumbnail
+    dikirim lewat `POST /api/products/:id/image`, bukan lewat kolom ini.
+  - **`discount_type` + `discount`** (diskon per produk): `'rp'` (rupiah) atau
+    `'pct'` (persen) + nilai. Keduanya hanya **prefill** saat produk masuk
+    keranjang POS — kasir boleh mengubahnya per baris (ala OSPOS/Aronium),
+    jadi angka master bukan angka yang dikunci saat jual. Field BIASA (ikut
+    aturan reset) -> wajib masuk `payloadToggleAktif()`.
+  - **`expiry_date`**: tanggal kadaluarsa ISO `YYYY-MM-DD` atau `null`.
+    Hanya diisi untuk kategori track_stock yang isinya cepat basi (snack,
+    eskrim) — form menyembunyikannya untuk kategori lain. Field BIASA (ikut
+    aturan reset) -> wajib masuk `payloadToggleAktif()`.
+  - **`discount`/`expiry_date` divalidasi server**: `discount >= 0` dan
+    `discount_type ∈ {rp,pct}` (pct juga `<= 100`); `expiry_date` harus
+    `''`/null atau pola `YYYY-MM-DD` sah -> selain itu 400.
 * `DELETE /api/products/:id` -> `{data:{id,sku,deleted:true}}` (SOFT delete)
   - Guard: 400 bila produk **pernah terjual** (ada di `sale_items`) dengan pesan
     "produk ini sudah pernah terjual (N baris penjualan) — riwayatnya harus utuh,
@@ -146,6 +168,45 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `?since=` sebagai tombstone sehingga client justru **membuangnya dari cache**.
     Naiknya `version` membuat device yang sudah membuang baris ikut menariknya
     kembali. Diuji di `tests/product-delete-test.mjs` bagian E.
+* **Foto produk (sejak 2026-09-29) — file di disk, DB hanya menyimpan NAMANYA**
+  * `POST /api/products/:id/image` `{image: "<dataURL>"}` -> `{data:{image:"<nama file>"}}` (200)
+    - Payload adalah **data URL hasil resize di client** (canvas, sisi terpanjang
+      <=512px, JPEG kualitas ~0.72 -> ±10-20KB). Server TIDAK mengubah ukuran
+      (tanpa dependensi gambar), hanya menulis byte apa adanya.
+    - File ditulis ke `apps/api/data/img/<produk.id>.<ext>` (folder ikut
+      `DB_PATH`, jadi instalasi Docker/native tetap terisolasi). Kolom
+      `products.image` diisi nama file itu + **`version++`** supaya device lain
+      menarik perubahan fotonya lewat `?since=`.
+    - 400 bila `image` bukan data URL `data:image/...;base64,...`, base64 tidak
+      valid, atau byte > **300.000** (thumbnail 512px jauh di bawah itu; batas
+      ini menahan kasir yang menempel foto asli HP 4MB).
+    - Ekstensi diambil dari mime (`jpeg|png|webp`), selain itu ditolak 400.
+    - File lama (ekstensi berbeda) ikut DIBUANG supaya tidak menumpuk.
+  * `POST /api/products/:id/image` `{image: ""}` -> `{data:{image:null}}` (hapus foto;
+    file di-unlink bila ada)
+  * `GET /api/products/:id/image` -> byte + `Content-Type` + `ETag` dari
+    `updated_at` (`no-cache`, jadi browser revalidasi murah).
+    404 bila produk tidak ada / tanpa foto / filenya hilang.
+  * **Offline**: isi gambar TIDAK ikut delta sync (sengaja). Client mengunduh
+    satu kali lalu menyimpannya di IndexedDB dan menampilkannya dari cache —
+    jadi setelah sekali terlihat, foto tetap tampil walau server mati.
+* `GET /api/stock-moves?product_id=&reason=&limit=&offset=` ->
+  `{data:[{id,created_at,product_id,sku,name,qty,reason,ref_id,unit_cost,cashier}], total}`
+  - **Riwayat mutasi stok / product history.** Read-only: TIDAK mengubah
+    `products.version` dan tidak perlu.
+  - `product_id` **wajib** (riwayat selalu milik satu produk) -> 400 tanpa itu.
+  - `reason` opsional (`sale|restock|opname|rusak`); `limit` default 50, maks
+    200; `offset` default 0. `total` = jumlah baris tanpa limit (untuk paginasi).
+  - Urutan `created_at DESC, id DESC` (yang terbaru di atas).
+  - Data sudah ada sejak awal (`stock_moves` diisi oleh sale/restock/opname) —
+    endpoint ini hanya MEMBUKANYA, bukan memodifikasi riwayat.
+* `GET /api/settings` -> `{data:{allow_negative_stock:false}}` (selalu ada —
+  default di-seed oleh `db/seed.sql`, `INSERT OR IGNORE` jadi seed ulang tidak
+  mereset pilihan pemilik)
+* `POST /api/settings` `{allow_negative_stock: boolean}` -> `{data:{...}}` (200)
+  - **Satu-satunya pembaca aturan stok di server ada di `POST /api/sales`.**
+    400 bila `allow_negative_stock` bukan boolean (angka 0/1, `"ya"`, `null`
+    semua ditolak — memaksa client mengirim boolean sungguhan).
 * `POST /api/products/import` `{rows:[<payload POST /api/products>], dry_run?:bool}` -> `{data:{total,ok,baru,update,gagal,errors:[{baris,sku,error}]}}` (200)
   - Tiap baris di-upsert lewat **fungsi yang sama** dengan `POST /api/products`
     (kategori/satuan/turunan SKU jadi satu sumber kebenaran, bukan versi kedua).
@@ -218,13 +279,31 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   (409 hanya bila kasir yang sama masih punya shift open — ditegakkan UNIQUE INDEX
   `idx_shifts_open_cashier`, bukan cek SELECT; jangan kembalikan ke pola cek-manual)
   | `POST /api/shifts/:id/close` `{modal_akhir}`
-* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?}],pay_method,discount?,cash_in?,cashier?}`
+* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?}],pay_method,discount?,cash_in?,cashier?}`
+  - **Diskon PER BARIS `discount?`** (baru 2026-09-29): nilai rupiah mutlak.
+    Diisi client (prefill dari `products.discount` tipe `rp`/`pct`, boleh
+    diubah kasir per baris) lalu **DI-SNAPSHOT** ke `sale_items.discount` —
+    riwayat tidak ikut berubah kalau pemilik mengubah diskon master besok.
+    Validasi server: `0 <= discount <= qty*price`, selain itu 400
+    "diskon baris melebihi jumlah baris". Client yang mengirim persen akan
+    **ditolak** (kontrak server = rupiah) — konversi `% -> Rp` ada di client.
+    `sale_items.amount` tetap **kotor** `qty*price`; nilai bersih baris =
+    `amount - discount`.
+  - **Stok boleh minus — tunduk pada `GET/POST /api/settings`
+    `allow_negative_stock`** (baru 2026-09-29):
+    `false` (default) = perilaku lama, `p.stock < qty*factor` -> 400
+    `"stok kurang: <nama> (butuh X, sisa Y)"`.
+    `true` = cek **dilewati**, stok boleh jadi negatif, `stock_moves` tetap
+    tercatat minus dan `version` tetap naik (minus menyeberang ke device lain
+    lewat `?since=`). Pengaturan dibaca dari DB **setiap penjualan** — bukan
+    cache — supaya keputusan server tidak pernah terpecah dari isi tabel.
   - **HPP di-snapshot per baris**: `sale_items.cost` = `products.avg_cost` saat
     jual (0 untuk item manual). WAJIB snapshot, bukan dibaca ulang saat laporan
     di-query — `avg_cost` berubah tiap restock, kalau dibaca ulang laba hari lalu
-    ikut berubah retroaktif. `laba baris = amount - qty*cost`.
-  Idempotent per `id`. Error 400 bila: items kosong, qty<=0, stok kurang, harga dinamis kosong,
-  item manual tanpa name+price, diskon > subtotal.
+    ikut berubah retroaktif. `laba baris = (amount - discount) - qty*cost`.
+  Idempotent per `id`. Error 400 bila: items kosong, qty<=0, stok kurang
+  (bila `allow_negative_stock=false`), harga dinamis kosong,
+  item manual tanpa name+price, diskon baris > jumlah baris, diskon transaksi > subtotal bersih.
   - **`unit` (opsional, fitur #3)** = satuan jual TERPILIH; kosong = satuan dasar.
     **Resolusi sepenuhnya di server** — client hanya mengirim unit; faktor & harga
     diambil dari `product_units`:
@@ -247,7 +326,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
 * `GET /api/reports/daily?date=YYYY-MM-DD`
   -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock}}`
   - `hpp = ROUND(SUM(sale_items.qty * sale_items.cost))` untuk penjualan hari itu.
-  - `laba = sales.omzet - hpp` (omzet sudah **setelah** diskon).
+  - `laba = sales.omzet - hpp` (omzet sudah **setelah** semua diskon).
+  - `sales.diskon` = **TOTAL diskon hari itu** = `SUM(sales.discount)` (transaksi)
+    + `SUM(sale_items.discount)` (per baris). Tanpa penjumlahan ini angka diskon
+    akan menyembunyikan diskon per baris padahal omzet sudah menguranginya —
+    dan `omzet - diskon != subtotal` jadi tidak terjawab.
   - `topItems` dikelompokkan per `(name, unit)` dan tiap baris memuat `unit` —
     tanpa pemisahan ini penjualan "2 pack" dan "3 btl" produk sama tercampur
     jadi satu baris qty=5 campur satuan.
@@ -305,8 +388,14 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-09-28 (fitur #3 Multi satuan):** tabel
-  `product_units` + kolom `sale_items.unit` (re-create penuh, backup
+  **Migrasi terakhir 2026-09-29 (foto + diskon + kadaluarsa + pengaturan):**
+  kolom `products.image`, `products.discount_type`, `products.discount`,
+  `products.expiry_date`, kolom `sale_items.discount`, dan **tabel `settings`**
+  (re-create penuh, backup `data.db.bak.foto-diskon-kadaluarsa`). Seeder juga
+  menanam baris `settings ('allow_negative_stock','0')` lewat `INSERT OR IGNORE`
+  — seed ulang TIDAK mereset pilihan pemilik.
+  Migrasi sebelumnya 2026-09-28 (fitur #3 Multi satuan): tabel
+  `product_units` + kolom `sale_items.unit` (backup
   `data.db.bak.multisatuan`). Sejak itu `npm run seed` juga mengisi
   `avg_cost = cost` untuk produk seed — sebelumnya `avg_cost` 0 sehingga laba
   penjualan stok awal terlihat terlalu besar sampai restock pertama.
@@ -321,6 +410,19 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   ```
   Kalau `npm run seed` gagal dengan `table products has no column named type`,
   migrasi itu belum dijalankan di install tersebut.
+  Untuk migrasi 2026-09-29 di install yang tidak boleh di-recreate, jalankan
+  (di luar repo ini):
+  ```sql
+  ALTER TABLE products ADD COLUMN image TEXT;
+  ALTER TABLE products ADD COLUMN discount_type TEXT NOT NULL DEFAULT 'rp';
+  ALTER TABLE products ADD COLUMN discount INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE products ADD COLUMN expiry_date TEXT;
+  ALTER TABLE sale_items ADD COLUMN discount INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('allow_negative_stock', '0');
+  ```
+  Folder thumbnail `apps/api/data/img/` dibuat sendiri oleh API saat unggah
+  pertama — tidak perlu dibuat manual.
 
 ## 6. Troubleshooting yang sudah diketahui (fakta, bukan tebakan)
 

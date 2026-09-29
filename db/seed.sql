@@ -64,3 +64,8 @@ UNION ALL SELECT c.id, 'PRD00016', 'Sampoerna Mild (keteng/batang)', 'batang', 3
 INSERT OR IGNORE INTO products (category_id, sku, name, unit, price, price_dynamic)
 SELECT c.id, 'PRD00017', 'Topup e-wallet / Pulsa / PLN (nominal bebas)', '-', 0, 1 FROM categories c WHERE c.slug='topup'
 UNION ALL SELECT c.id, 'PRD00018', 'Tarik tunai (nominal bebas)', '-', 0, 1 FROM categories c WHERE c.slug='topup';
+
+-- Pengaturan default. '0' = stok TIDAK boleh minus (penjualan melebihi stok
+-- ditolak 400 — perilaku asli repo); pemilik mengubahnya lewat halaman #/settings.
+-- INSERT OR IGNORE: seed ulang tidak mereset pilihan yang sudah diubah pemilik.
+INSERT OR IGNORE INTO settings (key, value) VALUES ('allow_negative_stock', '0');

@@ -1,6 +1,8 @@
+import { mountLabelsPage, unmountLabelsPage } from './pages/labels';
 import { mountPosPage, unmountPosPage } from './pages/pos';
 import { mountProductsPage } from './pages/products';
 import { mountSatuanPage } from './pages/satuan';
+import { mountSettingsPage } from './pages/settings';
 import { mountStockPage, unmountStockPage } from './pages/stock';
 import { icon, type IconName } from './ui/icons';
 import {
@@ -39,6 +41,11 @@ const PAGES: Record<AdminRoute, PagePlan> = {
     intro: 'Ringkasan penjualan hari ini, shift berjalan, dan produk stok menipis.',
     todo: ['Kartu ringkasan omzet', 'Grafik penjualan 7 hari', 'Status shift & outbox'],
   },
+  labels: {
+    icon: 'print',
+    intro: 'Cetak label harga: alat di kiri, pratinjau label 32 kolom di kanan.',
+    todo: ['Pencarian & filter kategori', 'Centang label terpilih', 'Status print-agent', 'Cetak massal'],
+  },
   products: {
     icon: 'products',
     intro: 'Kelola produk, kategori, dan tipe. Kategori memakai sidebar kiri, tabel di kanan.',
@@ -63,6 +70,11 @@ const PAGES: Record<AdminRoute, PagePlan> = {
     icon: 'shifts',
     intro: 'Buka/tutup shift kasir dengan modal awal dan modal akhir.',
     todo: ['Modal buka shift', 'Modal tutup shift + selisih', 'Riwayat shift'],
+  },
+  settings: {
+    icon: 'settings',
+    intro: 'Aturan server yang berlaku untuk semua device kasir (bukan per browser).',
+    todo: ['Stok boleh minus / tidak', 'Aturan lain menyusul'],
   },
 };
 
@@ -123,6 +135,7 @@ function render(): void {
   // Keluar dari halaman Stok: buang host-nya supaya paint() berikutnya tidak
   // menulis ke DOM yang sudah tergantikan innerHTML di atas.
   if (route !== 'stock') unmountStockPage();
+  if (route !== 'labels') unmountLabelsPage();
 
   if (route === 'products') {
     // Halaman Produk punya state sendiri (filter, form, sync) -> di-mount, bukan string statis.
@@ -135,6 +148,12 @@ function render(): void {
   } else if (route === 'pos') {
     // POS: gate shift + keranjang, state sendiri -> di-mount.
     void mountPosPage(page);
+  } else if (route === 'labels') {
+    // Label harga: pratinjau per produk + cetak massal -> di-mount.
+    void mountLabelsPage(page);
+  } else if (route === 'settings') {
+    // Pengaturan: baca-tulis GET/POST /api/settings -> di-mount.
+    void mountSettingsPage(page);
   } else {
     // Keluar dari POS: buang listener yang menempel ke document.
     unmountPosPage();

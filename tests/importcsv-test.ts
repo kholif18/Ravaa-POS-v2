@@ -104,10 +104,11 @@ eq('ngawur -> null', parseAngka('x') === null && parseAktif('barang') === null, 
 
 console.log('=== D. mapRows ===');
 const KAT = [{ slug: 'atk', name: 'Alat Tulis Kantor' }, { slug: 'snack', name: 'Snack' }];
-// 'bungkus' ikut dimock karena dipakai master seed (SKU rook bungkus).
+// 'bungkus' ikut dimock karena dipakai master seed (SKU rook bungkus),
+// 'btl' karena dipakai contoh ekspor di tes I (bolak-balik harus 2 baris siap).
 const SAT = [
   { slug: 'pcs', name: 'Pcs' }, { slug: 'lembar', name: 'Lembar' },
-  { slug: 'bungkus', name: 'Bungkus' },
+  { slug: 'bungkus', name: 'Bungkus' }, { slug: 'btl', name: 'Btl' },
 ];
 const kosong = { kategori: KAT, satuan: SAT, adaSku: (_: string) => false };
 const satuanS = (tb: ReturnType<typeof parseTable>) => mapRows(tb, kosong);
@@ -267,14 +268,14 @@ console.log('=== F. Format Aronium: (a) file lama 16 kolom tetap masuk, (b) temp
   eq('header = HEADER_TEMPLATE', header, HEADER_TEMPLATE);
   ok('template kita MEMANG disesuaikan (bukan 16 kolom Aronium utuh)',
     header !== HEADER_ARONIUM_ORI, header);
-  eq('12 kolom = jumlah field form', kolom.length, 12);
+  eq('14 kolom = jumlah field form + 2 kolom baru', kolom.length, 14);
   ok('kolom Aronium yang tak ada di form TIDAK ikut',
     !kolom.some((c) => ['Tax', 'IsTaxInclusivePrice', 'IsUsingDefaultQuantity',
       'IsService', 'Description'].includes(c)), kolom);
   ok('semua judul = label form (bukan istilah Aronium)',
     ['Nama', 'Kategori', 'SKU', 'Barcode', 'Satuan',
       'Harga beli', 'Markup', 'Harga jual', 'Boleh ubah harga saat jual',
-      'Aktif', 'Stok', 'Stok minimum']
+      'Aktif', 'Stok', 'Stok minimum', 'Diskon', 'Tanggal kadaluarsa']
       .every((c, i) => kolom[i] === c), kolom);
   ok('ProductGroup / MeasurementUnit / MinStock sudah tidak dipakai',
     !kolom.some((c) => ['ProductGroup', 'MeasurementUnit', 'MinStock'].includes(c)), kolom);
@@ -294,10 +295,75 @@ console.log('=== F. Format Aronium: (a) file lama 16 kolom tetap masuk, (b) temp
   // bukan kebetulan sama dengan default.
   eq('Boleh ubah harga saat jual -> price_dynamic (nilai 1)', r[0].data?.price_dynamic, 1);
   eq('Boleh ubah harga saat jual -> price_dynamic (nilai 0)', r[1].data?.price_dynamic, 0);
+  // Dua kolom terakhir (2026-09-29): bentuk CONTOH sengaja berbeda per baris
+  // supaya pemetaannya terbukti dua-duanya, bukan satu bentuk saja.
+  eq('Diskon "10%" -> discount_type pct',
+    { t: r[0].data?.discount_type, n: r[0].data?.discount }, { t: 'pct', n: 10 });
+  eq('Diskon "500" -> discount_type rp',
+    { t: r[1].data?.discount_type, n: r[1].data?.discount }, { t: 'rp', n: 500 });
+  eq('Tanggal kadaluarsa contoh terbaca', r[1].data?.expiry_date, '2027-12-31');
+  eq('sel kadaluarsa kosong -> kunci TIDAK dikirim', 'expiry_date' in (r[0].data ?? {}), false);
   eq('BOM Excel tidak bocor ke nama kolom', parseTable('\uFEFF' + teks).header[0], 'Nama');
   eq('nama contoh memuat penanda CONTOH', /^CONTOH /.test(String(r[0].data?.name)), true);
 }
 
+
+console.log('=== G. Diskon permanen & Tanggal kadaluarsa (2 kolom baru 2026-09-29) ===');
+{
+  // Satuan diskon ditentukan TANDA PERSEN, bukan kolom terpisah: `1500` = Rp,
+  // `10%` = persen. Tanpa tanda = rupiah, sama seperti default form produk.
+  const d = (sel: string) => satuanS(parseTable(`sku,nama,kategori,Diskon\nA1,Aqua,atk,${sel}\n`))[0];
+  eq('Diskon "1500" = rupiah',
+    { a: d('1500').data?.discount_type, n: d('1500').data?.discount }, { a: 'rp', n: 1500 });
+  eq('Diskon "10%" = persen',
+    { a: d('10%').data?.discount_type, n: d('10%').data?.discount }, { a: 'pct', n: 10 });
+  eq('Diskon "10 %" (ada spasi) tetap persen',
+    { a: d('10 %').data?.discount_type, n: d('10 %').data?.discount }, { a: 'pct', n: 10 });
+  eq('Diskon "Rp 1.500" gaya Excel = 1500 rupiah',
+    { a: d('Rp 1.500').data?.discount_type, n: d('Rp 1.500').data?.discount }, { a: 'rp', n: 1500 });
+  // "0" yang DITULIS harus dikirim (cara membersihkan diskon lewat CSV),
+  // berbeda dengan sel KOSONG yang = kolom absen = nilai lama dipertahankan.
+  eq('Diskon "0" eksplisit tetap dikirim',
+    { a: d('0').data?.discount_type, n: d('0').data?.discount }, { a: 'rp', n: 0 });
+  eq('Diskon sel kosong -> kunci tidak dikirim', 'discount' in (d('').data ?? {}), false);
+  const err = (sel: string) => d(sel).error ?? '';
+  eq('Diskon bukan angka -> baris gagal', d('abc').aksi, 'gagal');
+  ok('pesan diskon menyebut kolomnya', /Diskon/.test(err('abc')) && /bukan angka/.test(err('abc')), err('abc'));
+  eq('Diskon persen > 100 -> baris gagal', d('150%').aksi, 'gagal');
+  ok('pesan persen maksimal 100', /persen maksimal 100/.test(err('150%')), err('150%'));
+  eq('Diskon negatif -> baris gagal', d('-5').aksi, 'gagal');
+  ok('pesan negatif', /negatif/.test(err('-5')), err('-5'));
+
+  // Alias judul kolom (normalJudul membuang tanda baca)
+  const alias = (judul: string, nilai: string) => satuanS(
+    parseTable(`sku,nama,kategori,${judul}\nA1,Aqua,atk,${nilai}\n`))[0].data;
+  eq('alias "Discount"', { t: alias('Discount', '10%')?.discount_type, n: alias('Discount', '10%')?.discount },
+    { t: 'pct', n: 10 });
+  eq('alias "Potongan harga"', { t: alias('Potongan harga', '200')?.discount_type, n: alias('Potongan harga', '200')?.discount },
+    { t: 'rp', n: 200 });
+
+  // ---- Tanggal kadaluarsa ----
+  const tgl = (judul: string, nilai: string) => satuanS(
+    parseTable(`sku,nama,kategori,${judul}\nA1,Aqua,atk,${nilai}\n`))[0];
+  eq('YYYY-MM-DD dipakai apa adanya', tgl('Tanggal kadaluarsa', '2027-12-31').data?.expiry_date, '2027-12-31');
+  eq('DD/MM/YYYY gaya Excel Indonesia dinormalkan', tgl('Tanggal kadaluarsa', '31/12/2027').data?.expiry_date, '2027-12-31');
+  eq('DD-MM-YYYY juga dinormalkan', tgl('Tanggal kadaluarsa', '31-12-2027').data?.expiry_date, '2027-12-31');
+  eq('tanggal satu digit dipadankan (9 -> 09)', tgl('Tanggal kadaluarsa', '2027-01-09').data?.expiry_date, '2027-01-09');
+  eq('alias "Tgl Kadaluarsa"', tgl('Tgl Kadaluarsa', '2027-06-01').data?.expiry_date, '2027-06-01');
+  eq('sel kosong -> kunci tidak dikirim', 'expiry_date' in (tgl('Tanggal kadaluarsa', '').data ?? {}), false);
+  const tglErr = (v: string) => tgl('Tanggal kadaluarsa', v).error ?? '';
+  eq('tanggal yang tidak ada di kalender -> gagal (31 Feb)',
+    tgl('Tanggal kadaluarsa', '31-02-2026').aksi, 'gagal');
+  ok('pesan tanggal tidak valid', /tidak ada di kalender/.test(tglErr('31-02-2026')), tglErr('31-02-2026'));
+  eq('teks bebas -> gagal', tgl('Tanggal kadaluarsa', 'besok').aksi, 'gagal');
+  ok('pesan format tanggal', /bukan tanggal/.test(tglErr('besok')), tglErr('besok'));
+
+  // File LAMA (tanpa dua kolom ini) tidak boleh menyentuh diskon/kadaluarsa:
+  // parser tidak mengirim kuncinya -> server mode pertahankan nilai lama.
+  const lama = satuanS(parseTable('SKU,Nama,Kategori,Harga\nA1,Aqua,atk,1500\n'))[0].data ?? {};
+  eq('file tanpa kolom Diskon: kunci absen', ['discount', 'discount_type', 'expiry_date']
+    .every((k) => !(k in lama)), true);
+}
 
 console.log('=== I. Ekspor produk: kolom identik dengan template impor ===');
 {
@@ -306,16 +372,36 @@ console.log('=== I. Ekspor produk: kolom identik dengan template impor ===');
     barcode: '8991', unit: 'btl', cost: 1000, markup: 50, price: 1500,
     price_dynamic: 0, is_active: 1, stock: 7, min_stock: 2,
   };
-  const teks = csvProduk([contoh]);
+  const contohDiskon: ProdukEkspor = {
+    ...contoh, sku: 'PRD00014', name: 'Chitato', category_name: 'Snack',
+    discount_type: 'pct', discount: 12, expiry_date: '2027-03-01',
+  };
+  const teks = csvProduk([contoh, contohDiskon]);
   eq('header ekspor = HEADER_TEMPLATE persis', teks.split('\r\n')[0], HEADER_TEMPLATE);
-  eq('header + 1 baris data', teks.split('\r\n').length, 2);
+  eq('header + 2 baris data', teks.split('\r\n').length, 3);
   const sel = parseTable(teks).rows[0];
-  eq('12 kolom', sel.length, 12);
+  eq('14 kolom', sel.length, 14);
   eq('kolom 1 = Nama', sel[0], 'Aqua 600ml');
   eq('kolom 3 = SKU', sel[2], 'PRD00013');
   eq('kategori ditulis NAMA, bukan slug', sel[1], 'Minuman');
   eq('Stok ikut terbawa (bolak-balik utuh)', sel[10], '7');
   eq('Stok minimum ikut terbawa', sel[11], '2');
+  // Tanpa diskon / kadaluarsa -> sel kosong (bukan "0" / "null"), supaya file
+  // ekspor tidak terlihat menyetel diskon padahal tidak ada.
+  eq('kolom Diskon kosong bila tanpa diskon', sel[12], '');
+  eq('kolom Tanggal kadaluarsa kosong bila tidak ada', sel[13], '');
+  eq('Diskon pct ditulis "12%" (bentuk mesin, bukan label)', parseTable(teks).rows[1][12], '12%');
+  eq('Tanggal kadaluarsa ditulis YYYY-MM-DD', parseTable(teks).rows[1][13], '2027-03-01');
+
+  // Bolak-balik penuh: file ekspor harus menghasilkan payload yang sama.
+  // (master mock ditambah kategori Minuman — sama seperti rokok di tes Excel)
+  const ulang = mapRows(parseTable(teks),
+    { ...kosong, kategori: [...KAT, { slug: 'minuman', name: 'Minuman' }] });
+  eq('kedua baris ekspor siap diimpor ulang', ulang.map((x) => x.aksi), ['baru', 'baru']);
+  eq('bolak-balik diskon pct utuh',
+    { t: ulang[1].data?.discount_type, n: ulang[1].data?.discount }, { t: 'pct', n: 12 });
+  eq('bolak-balik kadaluarsa utuh', ulang[1].data?.expiry_date, '2027-03-01');
+  eq('baris tanpa diskon tidak mengirim kunci', 'discount' in (ulang[0].data ?? {}), false);
 
   // Bolak-balik: file ekspor halaman Produk harus bisa masuk dialog Impor Stok.
   const stok = bacaStok(teks);

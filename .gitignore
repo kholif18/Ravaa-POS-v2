@@ -14,6 +14,9 @@ apps/print-agent/out/
 # Cadangan DB lokal (snapshot data toko — bukan bagian repo)
 apps/api/data/*.bak*
 
+# Thumbnail foto produk (data toko, bukan kode — isinya foto pelanggan/toko)
+apps/api/data/img/
+
 # Keluaran test: screenshot & tangkapan print-agent, dibuat ulang tiap run.
 # tests/artifacts/.gitkeep tetap di-commit supaya foldernya ada di clone baru
 # (beberapa suite menulis file ke situ tanpa mkdir).

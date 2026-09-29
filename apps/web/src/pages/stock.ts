@@ -9,10 +9,12 @@
 //   GET  /api/products        -> daftar + stock/min_stock/avg_cost/track_stock
 //   POST /api/restock         -> tambah stok + rata-rata modal (melalui restockForm)
 //   POST /api/stock-opname    -> ganti stok dengan hitung fisik (restockForm)
+//   GET  /api/stock-moves     -> riwayat mutasi SATU produk (riwayatForm)
 // Impor CSV di halaman ini HANYA memakai /api/stock-opname — lihat komentar
 // importStokForm() di bawah kenapa restock tidak masuk lewat impor massal.
-// Riwayat restock butuh baca `stock_moves` — BELUM ada endpoint-nya, jadi
-// halaman ini sengaja tidak menjanjikan riwayat.
+// Riwayat stok (masuk/keluar/opname per produk) dibuka lewat tombol jam di
+// tiap baris: `GET /api/stock-moves?product_id=` sudah ada sejak Fase 1, jadi
+// halaman ini menjanjikan riwayat tanpa endpoint tambahan.
 
 import { apiGet, apiPost, HttpError } from '../api';
 import { getCachedProducts, type Category, type Product } from '../store';
@@ -39,11 +41,16 @@ function readSide(): boolean {
   }
 }
 
-type Filter = 'semua' | 'kritis' | 'habis';
+type Filter = 'semua' | 'kritis' | 'habis' | 'minus';
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'semua', label: 'Semua' },
   { key: 'kritis', label: 'Stok menipis' },
   { key: 'habis', label: 'Stok habis' },
+  // Stok minus = hasil pengaturan "stok boleh minus" (#/settings): angka di bawah
+  // nol karena penjualan dibiarkan menembus stok. Sengaja filter sendiri supaya
+  // tidak tercampur "habis" (== 0) maupun "menipis" (butuh min_stock > 0) —
+  // minus adalah kondisi yang paling mendesak dibereskan.
+  { key: 'minus', label: 'Stok minus' },
 ];
 
 const state = {
@@ -84,7 +91,11 @@ const habis = (p: Product) => p.stock === 0;
  *  jadi tidak boleh dihitung menipis (sama aturan dengan halaman Produk). */
 const kritis = (p: Product) => p.stock > 0 && p.min_stock > 0 && p.stock <= p.min_stock;
 
+/** Stok menembus nol (pengaturan "stok boleh minus" aktif). */
+const minus = (p: Product) => p.stock < 0;
+
 function urutan(p: Product): number {
+  if (minus(p)) return -1; // paling mendesak: barang sudah terjual melebihi isi rak
   if (habis(p)) return 0;
   if (kritis(p)) return 1;
   return 2;
@@ -109,9 +120,12 @@ function dasar(): Product[] {
 
 function terlihat(): Product[] {
   return dasar()
-    .filter((p) =>
-      state.filter === 'habis' ? habis(p) : state.filter === 'kritis' ? kritis(p) || habis(p) : true,
-    )
+    .filter((p) => {
+      if (state.filter === 'semua') return true;
+      if (state.filter === 'minus') return minus(p);
+      if (state.filter === 'habis') return habis(p);
+      return kritis(p) || habis(p); // "Stok menipis" tetap menyertakan yang habis
+    })
     .sort((a, b) => urutan(a) - urutan(b) || a.name.localeCompare(b.name, 'id'));
 }
 
@@ -200,7 +214,13 @@ function toolbar(): string {
   // angka pada tombol harus mencerminkan yang sedang dibuka kasir.
   const list = dasar();
   const jml = (f: Filter) =>
-    f === 'habis' ? list.filter(habis).length : f === 'kritis' ? list.filter(kritis).length : list.length;
+    f === 'habis'
+      ? list.filter(habis).length
+      : f === 'minus'
+        ? list.filter(minus).length
+        : f === 'kritis'
+          ? list.filter(kritis).length
+          : list.length;
   return `
     <div class="card !p-3">
       <div class="toolbar">
@@ -255,11 +275,14 @@ function tableCard(): string {
               .map((p, i) => {
                 const h = habis(p);
                 const k = kritis(p);
-                const badge = h
-                  ? `<span class="badge-low">${icon('alert')}<span>habis</span></span>`
-                  : k
-                    ? `<span class="badge-low">${icon('alert')}<span>${p.stock} / min ${p.min_stock}</span></span>`
-                    : `<span class="badge-ok">${icon('check')}<span>${p.stock}</span></span>`;
+                const m = minus(p);
+                const badge = m
+                  ? `<span class="badge-low">${icon('alert')}<span>${p.stock} minus</span></span>`
+                  : h
+                    ? `<span class="badge-low">${icon('alert')}<span>habis</span></span>`
+                    : k
+                      ? `<span class="badge-low">${icon('alert')}<span>${p.stock} / min ${p.min_stock}</span></span>`
+                      : `<span class="badge-ok">${icon('check')}<span>${p.stock}</span></span>`;
                 const off = p.is_active === 0;
                 return `<tr class="tr${off ? ' opacity-60' : ''}">
                   <td class="td w-12 text-center tabular-nums text-gray-400">${i + 1}</td>
@@ -273,6 +296,8 @@ function tableCard(): string {
                   <td class="td text-right tabular-nums">${rp(p.stock * p.avg_cost)}</td>
                   <td class="td">
                     <div class="flex items-center justify-end gap-1">
+                      <button type="button" data-hist="${p.id}" class="row-btn"
+                        title="Riwayat mutasi" aria-label="Riwayat stok ${esc(p.name)}">${icon('clock')}</button>
                       <button type="button" data-stock="${p.id}" class="row-btn"
                         title="Stok &amp; opname" aria-label="Stok dan opname ${esc(p.name)}">${icon('truck')}</button>
                     </div>
@@ -396,6 +421,129 @@ function bind(): void {
       restockForm(p, () => load());
     }),
   );
+
+  host.querySelectorAll<HTMLElement>('[data-hist]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const p = state.products.find((x) => x.id === Number(b.dataset.hist));
+      if (p) riwayatForm(p);
+    }),
+  );
+}
+
+/* ---------- Riwayat stok ---------- */
+
+/** Satu baris `stock_moves` (lihat GET /api/stock-moves). */
+type StockMove = {
+  id: number;
+  created_at: string;
+  product_id: number;
+  sku: string;
+  name: string;
+  qty: number; // TANDA: masuk +, keluar - (sale sengaja disimpan negatif)
+  reason: 'sale' | 'restock' | 'opname' | 'rusak';
+  ref_id: string | null;
+  unit_cost: number | null;
+  cashier: string | null;
+};
+
+const ALASAN: Record<StockMove['reason'], string> = {
+  sale: 'Penjualan',
+  restock: 'Masuk barang',
+  opname: 'Opname',
+  rusak: 'Rusak / hilang',
+};
+
+/** Waktu dari SQLite `datetime('now')` (UTC) ditampilkan APA ADANYA, tanpa
+ *  dikonversi ke zona lokal. Konversi malah menipu: laporan harian juga memakai
+ *  `date(created_at)` di sisi server, jadi angka tanggal di riwayat dan di
+ *  laporan harus membaca jam yang sama. */
+function waktu(s: unknown): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(s ?? ''));
+  if (!m) return String(s ?? '—');
+  const bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  return `${Number(m[3])} ${bulan[Number(m[2]) - 1]} ${m[1]} · ${m[4]}:${m[5]}`;
+}
+
+/** Keterangan kolom — alasan angka bergerak, plus rujukan bila ada. */
+function ket(m: StockMove): string {
+  if (m.reason === 'sale') return m.ref_id ? `Nota ${String(m.ref_id).slice(0, 8)}` : 'Penjualan';
+  if (m.reason === 'restock') return 'Pembelian masuk';
+  if (m.reason === 'opname') return 'Selisih hitung fisik';
+  return 'Kerusakan / kehilangan';
+}
+
+/** Riwayat mutasi satu produk: masuk/keluar/opname lengkap dengan kasir &
+ *  harga beli. Tombol hanya baca — semua tulis stok tetap lewat tombol truk. */
+function riwayatForm(p: Product): void {
+  openModal({
+    title: `Riwayat stok — ${p.name}`,
+    wide: true,
+    cancelLabel: 'Tutup',
+    body: `
+      <div class="space-y-3">
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          <b>${esc(p.sku)}</b> · ${esc(p.unit)} · stok saat ini
+          <b class="tabular-nums">${p.stock}</b>${p.min_stock > 0 ? ` (minimum ${p.min_stock})` : ''}
+        </p>
+        <div id="rv-body" class="text-xs text-gray-500 dark:text-gray-400">Memuat riwayat…</div>
+      </div>`,
+    onMount: (api) => {
+      api.ok.remove(); // dialog ini hanya baca — cukup satu tombol "Tutup"
+      void (async () => {
+        const box = api.el.querySelector<HTMLElement>('#rv-body');
+        if (!box) return;
+        try {
+          const res = await apiGet<{ data: StockMove[]; total: number }>(
+            `/api/stock-moves?product_id=${p.id}&limit=100`,
+          );
+          const list = res.data;
+          if (!list.length) {
+            box.innerHTML = `<div class="empty">${icon('info')}<span>Belum ada mutasi tercatat untuk produk ini.</span></div>`;
+            return;
+          }
+          const rows = list
+            .map((s) => {
+              const modal = s.unit_cost && s.unit_cost > 0 ? rp(s.unit_cost) : '—';
+              // Warna hanya untuk angka BENERAN bergerak: opname tanpa selisih
+              // (0) bukan kejadian merah — tidak ada barang yang hilang/masuk.
+              const warna =
+                s.qty > 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : s.qty < 0
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-gray-400 dark:text-gray-500';
+              return `<tr class="border-t border-gray-200 dark:border-gray-700">
+                <td class="whitespace-nowrap py-1.5 pr-3 tabular-nums text-gray-500 dark:text-gray-400">${waktu(s.created_at)}</td>
+                <td class="py-1.5 pr-3">${esc(ALASAN[s.reason] ?? s.reason)}</td>
+                <td class="py-1.5 pr-3 text-right font-semibold tabular-nums ${warna}">${s.qty > 0 ? '+' : ''}${s.qty}</td>
+                <td class="py-1.5 pr-3 text-gray-500 dark:text-gray-400">${esc(ket(s))}</td>
+                <td class="py-1.5 pr-3 text-right tabular-nums">${modal}</td>
+                <td class="py-1.5 text-right text-gray-500 dark:text-gray-400">${esc(s.cashier ?? '—')}</td>
+              </tr>`;
+            })
+            .join('');
+          box.innerHTML = `
+            <div class="table-wrap table-scroll max-h-[55vh]">
+              <table class="table table-compact w-full">
+                <thead><tr>
+                  <th class="th">Waktu</th><th class="th">Jenis</th>
+                  <th class="th text-right">Qty</th><th class="th">Keterangan</th>
+                  <th class="th text-right">Harga modal</th><th class="th text-right">Kasir</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+            <p class="mt-2 text-gray-500 dark:text-gray-400">
+              ${list.length}${res.total > list.length ? ` dari ${res.total}` : ''} mutasi terakhir ·
+              qty memakai satuan dasar <b>${esc(p.unit)}</b> · harga modal = harga beli batch
+              saat masuk barang, atau rata-rata modal yang berlaku pada mutasi lain.
+            </p>`;
+        } catch (e) {
+          box.innerHTML = `<div class="empty">${icon('alert')}<span>Gagal memuat riwayat: ${esc(errMsg(e))}</span></div>`;
+        }
+      })();
+    },
+  });
 }
 
 /* ---------- Impor stok ---------- */

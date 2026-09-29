@@ -8,6 +8,15 @@ export type Product = {
   /** Modal rata-rata tertimbang dari restock (HPP). Bukan `cost` — lihat schema.sql. */
   avg_cost: number;
   stock: number; min_stock: number; is_active: number;
+  /** Nama file foto (bukan dataURL, bukan path) — diambil lewat
+   *  GET /api/products/:id/image. `undefined` di payload POST = tidak diubah. */
+  image: string | null;
+  /** Diskon permanen produk: 'rp' = potongan rupiah, 'pct' = persen harga jual.
+   *  Dipakai POS sebagai pratinjau diskon per baris (boleh diubah kasir). */
+  discount_type: 'rp' | 'pct';
+  discount: number;
+  /** Tanggal kadaluarsa YYYY-MM-DD (snack & es krim). */
+  expiry_date: string | null;
   /** Tombstone: diisi = produk sudah dihapus di server -> dibuang dari cache. */
   deleted_at: string | null;
   category_slug: string; category_name: string; track_stock: number; version: number;
@@ -63,7 +72,17 @@ export async function getCachedProducts(): Promise<Product[]> {
   // Cache lama (sebelum fitur #3) tersimpan tanpa field `units`, dan produk itu
   // tidak ikut delta sync karena version-nya tidak berubah — jadi dinormalisasi
   // saat dibaca supaya POS tidak crash mencari `p.units` yang undefined.
-  return rows.map((p) => ({ ...p, units: p.units ?? [] }));
+  // Kondisi yang SAMA berlaku untuk field baru 2026-09-29 (foto/diskon/kadaluarsa):
+  // produk yang tidak berubah tidak pernah dikirim ulang oleh ?since=, jadi baris
+  // cache lama datang tanpa kolom itu dan harus diberi default saat dibaca.
+  return rows.map((p) => ({
+    ...p,
+    units: p.units ?? [],
+    image: p.image ?? null,
+    discount_type: p.discount_type ?? 'rp',
+    discount: p.discount ?? 0,
+    expiry_date: p.expiry_date ?? null,
+  }));
 }
 export async function getMaxVersion(): Promise<number> {
   return (await kvGet<number>('maxVersion')) ?? 0;

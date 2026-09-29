@@ -1,7 +1,7 @@
 import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 
-export type AdminRoute = 'dashboard' | 'products' | 'satuan' | 'stock' | 'reports' | 'shifts';
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'reports' | 'shifts' | 'settings';
 export type Route = 'pos' | AdminRoute;
 
 interface NavItem {
@@ -16,41 +16,57 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { route: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
       { route: 'products', label: 'Produk', icon: 'products' },
+      // Label harga punya layar sendiri (kiri alat, kanan pratinjau) sejak
+      // 2026-09-29 — dulu ia cuma dialog dari toolbar Produk.
+      { route: 'labels', label: 'Label harga', icon: 'print' },
       { route: 'satuan', label: 'Satuan', icon: 'categories' },
       { route: 'stock', label: 'Stok', icon: 'stock' },
       { route: 'reports', label: 'Laporan', icon: 'reports' },
       { route: 'shifts', label: 'Shift Kasir', icon: 'shifts' },
     ],
   },
+  {
+    // Group sendiri di paling bawah: pengaturan jarang disentuh dan sifatnya
+    // BEDA dari data di atas — isinya aturan server yang berlaku untuk semua
+    // device, bukan catatan per kasir.
+    group: 'Sistem',
+    items: [{ route: 'settings', label: 'Pengaturan', icon: 'settings' }],
+  },
 ];
 
 export const ROUTE_TITLES: Record<AdminRoute, string> = {
   dashboard: 'Dashboard',
   products: 'Produk',
+  labels: 'Label harga',
   satuan: 'Satuan',
   stock: 'Stok',
   reports: 'Laporan',
   shifts: 'Shift Kasir',
+  settings: 'Pengaturan',
 };
 
 /** Breadcrumb: grup nav -> halaman. Ditampilkan menyatu dengan judul di header. */
 export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   dashboard: ['Menu', 'Dashboard'],
   products: ['Menu', 'Produk'],
+  labels: ['Menu', 'Label harga'],
   satuan: ['Menu', 'Satuan'],
   stock: ['Menu', 'Stok'],
   reports: ['Menu', 'Laporan'],
   shifts: ['Menu', 'Shift Kasir'],
+  settings: ['Sistem', 'Pengaturan'],
 };
 
 /** Subjudul per halaman (dipindah dari dalam body ke header). */
 export const ROUTE_SUBS: Record<AdminRoute, string> = {
   dashboard: 'Ringkasan penjualan, shift, dan stok menipis.',
   products: 'Kelola produk, harga, dan stok per kategori.',
+  labels: 'Cetak label harga 32 kolom — alat di kiri, pratinjau label di kanan.',
   satuan: 'Master satuan untuk struk; form produk memilih dari daftar ini.',
   stock: 'Pantau stok menipis dan riwayat restock.',
   reports: 'Laporan penjualan harian, per kategori, dan produk terlaris.',
   shifts: 'Buka dan tutup shift kasir beserta modalnya.',
+  settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
 };
 
 const ADMIN_ROUTES = new Set<string>(ADMIN_NAV.flatMap((g) => g.items.map((i) => i.route)));

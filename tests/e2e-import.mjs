@@ -82,14 +82,16 @@ try {
     dl.suggestedFilename() === 'template-produk-ravaa.csv', dl.suggestedFilename());
   const isi = fs.readFileSync(await dl.path(), 'utf8').replace(/^\uFEFF/, '');
   const baris = isi.split(/\r\n/);
-  ok('baris 1 = 12 kolom, namanya persis label di form',
+  ok('baris 1 = 14 kolom, namanya persis label di form',
     baris[0] === 'Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,'
-      + 'Boleh ubah harga saat jual,Aktif,Stok,Stok minimum',
+      + 'Boleh ubah harga saat jual,Aktif,Stok,Stok minimum,Diskon,Tanggal kadaluarsa',
     baris[0]);
   const kolom = baris[0].split(',');
   ok('kolom Tax/Description/IsService TIDAK ikut',
     !kolom.some((c) => ['Tax', 'IsTaxInclusivePrice', 'IsUsingDefaultQuantity',
       'IsService', 'Description'].includes(c)), kolom);
+  ok('2 kolom baru di UJUNG (file lama tetap terbaca)',
+    kolom.length === 14 && kolom[12] === 'Diskon' && kolom[13] === 'Tanggal kadaluarsa', kolom);
   ok('ada 2 baris contoh + header = 3 baris', baris.length === 3, baris.length);
   ok('kedua baris contoh ditandai CONTOH', baris.slice(1).every((b) => b.startsWith('CONTOH ')), baris.slice(1));
   ok('tombol unduh TIDAK menutup dialog', await page.isVisible('#imp-text'));
@@ -151,8 +153,8 @@ try {
   ok('nama file ekspor', /produk-ravaa\.csv$/.test(dlProd.suggestedFilename()), dlProd.suggestedFilename());
   const isiProd = fs.readFileSync(await dlProd.path(), 'utf8');
   const tanpaBom = isiProd.replace(/^\uFEFF/, '');
-  ok('judul ekspor = HEADER_TEMPLATE (12 kolom, urut persis)',
-    tanpaBom.startsWith('Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,Boleh ubah harga saat jual,Aktif,Stok,Stok minimum'),
+  ok('judul ekspor = HEADER_TEMPLATE (14 kolom, urut persis)',
+    tanpaBom.startsWith('Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,Boleh ubah harga saat jual,Aktif,Stok,Stok minimum,Diskon,Tanggal kadaluarsa'),
     tanpaBom.split(/\r?\n/)[0]);
   const barisEkspor = tanpaBom.split(/\r?\n/).filter(Boolean);
   ok('ekspor ikut filter (judul + 2 baris)', barisEkspor.length === 3, String(barisEkspor.length));
@@ -191,6 +193,43 @@ try {
   const sesudah2 = bacaBaris();
   ok('impor DENGAN kolom Stok: angka ditulis, harga/modal/satuan tetap',
     /^9\|4444\|3000\|pcs\|\d+$/.test(sesudah2), `${JSON.stringify(rH2.data)} -> ${sesudah2}`);
+
+  console.log('=== I. Diskon permanen & Tanggal kadaluarsa (2 kolom baru) ===');
+  // Rantai penuh: teks CSV -> parser -> POST /import -> kolom di SQLite.
+  // Tanggal sengaja ditulis gaya Excel Indonesia (31/12/2027) untuk membuktikan
+  // dinormalkan ke YYYY-MM-DD sebelum menyentuh server (server hanya menerima
+  // bentuk ISO).
+  const CSV_DISKON = [
+    'SKU,Nama,Kategori,Satuan,Harga jual,Diskon,Tanggal kadaluarsa',
+    'E2E-IMP-D1,E2e Diskon,atk,pcs,10000,10%,31/12/2027',
+  ].join('\n');
+  await page.click('#prod-import');
+  await page.waitForSelector('#imp-text', { timeout: 5000 });
+  await page.fill('#imp-text', CSV_DISKON);
+  await page.click('#imp-read');
+  ok('baris diskon & kadaluarsa SIAP diimpor (bukan gagal)',
+    /1 baris siap diimpor/.test(await page.innerText('#imp-prev')),
+    await page.innerText('#imp-prev'));
+  await page.click('.modal [data-ok]');
+  await page.waitForSelector('.modal', { state: 'detached', timeout: 15000 });
+  const bacaBaru = () => execFileSync('sqlite3', [DB,
+    "SELECT discount_type || '|' || discount || '|' || IFNULL(expiry_date,'-') " +
+    "FROM products WHERE sku='E2E-IMP-D1'"], { encoding: 'utf8' }).trim();
+  const tersimpan = bacaBaru();
+  ok('diskon 10% & kadaluarsa tersimpan, tanggal dinormalkan ke ISO',
+    tersimpan === 'pct|10|2027-12-31', tersimpan);
+
+  // File LAMA (tanpa dua kolom ini) tidak boleh menghapus diskon yang sudah ada:
+  // kolom absen = tidak dikirim = server mempertahankan nilai lama.
+  await page.click('#prod-import');
+  await page.waitForSelector('#imp-text', { timeout: 5000 });
+  await page.fill('#imp-text', 'SKU,Nama,Kategori,Harga jual\nE2E-IMP-D1,E2e Diskon,atk,9000');
+  await page.click('#imp-read');
+  await page.click('.modal [data-ok]');
+  await page.waitForSelector('.modal', { state: 'detached', timeout: 15000 });
+  const tetap = bacaBaru();
+  ok('impor file tanpa kolom Diskon/Kadaluarsa: keduanya tetap utuh',
+    tetap === tersimpan, `${tersimpan} -> ${tetap}`);
 
   console.log('=== G. Tanpa error runtime ===');
   ok('tidak ada pageerror/console error', errs.length === 0, errs.join(' | '));

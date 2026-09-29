@@ -48,6 +48,15 @@ const ALIAS: Record<string, string> = {
   // normalJudul membuang tanda baca -> jadi tiga kata ini.
   'boleh ubah harga saat jual': 'price_dynamic', 'boleh ubah harga': 'price_dynamic',
   aktif: 'is_active', 'is active': 'is_active', status: 'is_active',
+  // ── Diskon permanen & kadaluarsa (fitur 2026-09-29) ──────────────────────
+  // Kolom kita "Diskon" (`1500` = Rp, `10%` = persen) dan "Tanggal kadaluarsa".
+  // normalJudul membuang tanda, jadi "expiry-date" & "Tgl Kadaluarsa" ikut masuk.
+  diskon: 'discount', discount: 'discount',
+  'potongan harga': 'discount', 'diskon harga': 'discount',
+  kadaluarsa: 'expiry_date', kedaluwarsa: 'expiry_date',
+  'tanggal kadaluarsa': 'expiry_date', 'tgl kadaluarsa': 'expiry_date',
+  'tanggal kedaluwarsa': 'expiry_date', 'tgl kedaluwarsa': 'expiry_date',
+  'expiry date': 'expiry_date', expiry: 'expiry_date',
   // ── Header resmi Aronium ────────────────────────────────────────────────
   // Sumber: help.aronium.com "Import products using CSV" + file template
   // bawaannya (products.csv, 16 kolom). Aronium menulis CamelCase tanpa spasi
@@ -154,6 +163,57 @@ export function parseAktif(v: string): number | null {
   return null;
 }
 
+/** Nilai kolom Diskon. Satuan DITENTUKAN tanda persen:
+ *    `1500` / `Rp 1.500`  -> rupiah (default, sama dengan form produk)
+ *    `10%`  / `10 %`      -> persen
+ *  `""` (sel kosong)      -> `null` = TIDAK dikirim = kolom dianggap absen
+ *                            (produk lama dipertahankan, produk baru default 0),
+ *                            sama seperti kolom lain di parser ini.
+ *  Angka tidak dikenal / negatif / persen > 100 -> `{ error }` supaya barisnya
+ *  GAGAL di pratinjau dengan pesan yang bisa dicari, bukan diam-diam dibuang. */
+export function parseDiskon(v: string): { type: 'rp' | 'pct'; nilai: number } | { error: string } {
+  const s = v.trim();
+  const pct = /%\s*$/.test(s);
+  const n = parseAngka(s.replace(/%\s*$/, '').trim());
+  if (n === null) return { error: `Nilai "${s}" pada kolom Diskon bukan angka` };
+  if (n < 0) return { error: `Diskon tidak boleh negatif: "${s}"` };
+  if (pct && n > 100) return { error: `Diskon persen maksimal 100: "${s}"` };
+  return { type: pct ? 'pct' : 'rp', nilai: n };
+}
+
+/** Tanggal kadaluarsa. Dua bentuk diterima:
+ *    `YYYY-MM-DD`          -> dipakai apa adanya (format ekspor & syarat server)
+ *    `DD-MM-YYYY`/`DD/MM/YYYY` -> gaya tempelan Excel Indonesia, dinormalkan
+ *  Sel kosong -> `null` = tidak dikirim (lihat catatan `parseDiskon`).
+ *  `31-02-2026` (tanggal yang tidak ada) harus ditolak di sini: `Date.parse`
+ *  menerimanya dengan ROLLOVER ke Maret, jadi dicek bolak-balik dengan
+ *  `toISOString()`, bukan sekadar `isNaN`. */
+export function parseTanggal(v: string): { iso: string } | { error: string } {
+  const s = v.trim();
+  let iso = '';
+  const isoFix = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  const dmy = !isoFix ? /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(s) : null;
+  if (isoFix) {
+    iso = `${isoFix[1]}-${isoFix[2].padStart(2, '0')}-${isoFix[3].padStart(2, '0')}`;
+  } else if (dmy) {
+    iso = `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  }
+  if (!iso) return { error: `Tanggal kadaluarsa bukan tanggal (pakai YYYY-MM-DD): "${s}"` };
+  const t = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== iso) {
+    return { error: `Tanggal kadaluarsa tidak ada di kalender: "${s}"` };
+  }
+  return { iso };
+}
+
+/** Tulis kolom Diskon saat EKSPOR: `10%` / `1500` / `""` (tanpa diskon).
+ *  Sengaja bentuk MESIN, bukan label `Rp 1.500` yang dipakai di layar —
+ *  hasil unduh wajib bisa langsung dimasukkan lagi ke dialog Impor. */
+export function formatDiskon(tipe: string | undefined | null, nilai: number | undefined | null): string {
+  if (!nilai) return '';
+  return tipe === 'pct' ? `${nilai}%` : String(nilai);
+}
+
 export interface MapOpts {
   kategori: { slug: string; name: string }[];
   satuan: { slug: string; name: string }[];
@@ -224,6 +284,28 @@ export function mapRows(tb: Tabel, o: MapOpts): BarisImpor[] {
     const aktif = parseAktif(ambil('is_active'));
     if (aktif !== null) out.is_active = aktif;
 
+    // Diskon permanen & kadaluarsa (2026-09-29). Sel kosong = kolom absen,
+    // bukan "hapus diskon": server mode `pertahankanTidakDikirim` mempertahankan
+    // nilai lama, jadi file ekspor LAMA (tanpa dua kolom ini) tidak menghapus
+    // diskon produk yang sudah ada. Membersihkan diskon tetap lewat form Produk.
+    const diskonRaw = ambil('discount');
+    if (diskonRaw) {
+      const d = parseDiskon(diskonRaw);
+      if ('error' in d) return gagal(d.error);
+      // discount_type & discount SELALU dikirim berpasangan — kalau hanya salah
+      // satu, server memakai nilai lama untuk sisanya (mis. lama `pct` menjadi
+      // `rp` tanpa angkanya berubah) dan impor jadi menulis angka yang salah.
+      out.discount_type = d.type;
+      out.discount = d.nilai;
+    }
+
+    const expRaw = ambil('expiry_date');
+    if (expRaw) {
+      const t = parseTanggal(expRaw);
+      if ('error' in t) return gagal(t.error);
+      out.expiry_date = t.iso;
+    }
+
     const aksi = sku && o.adaSku(sku) ? 'timpa' : 'baru';
     return { baris, sku: sku || '(otomatis)', data: out, aksi, error: null };
   });
@@ -250,6 +332,8 @@ export const HEADER_ARONIUM_ORI =
  *    Boleh ubah harga saat jual    <- label switch-nya, persis
  *    Aktif                         <- switch "Aktif"
  *    Stok, Stok minimum            <- "Stok", "Stok minimum"
+ *    Diskon                        <- "Diskon permanen" (1500 = Rp, 10% = persen)
+ *    Tanggal kadaluarsa            <- "Tanggal kadaluarsa" (YYYY-MM-DD)
  *
  *  Lima kolom Aronium sengaja TIDAK ikut karena tidak ada di form:
  *    Tax, IsTaxInclusivePrice   -> sistem pajak tidak dipakai
@@ -260,7 +344,7 @@ export const HEADER_ARONIUM_ORI =
  *  Parser TETAP menerima semuanya (lihat blok "Header resmi Aronium" di ALIAS),
  *  jadi file ekspor Aronium lama yang beredar tetap bisa langsung diimpor. */
 export const HEADER_TEMPLATE =
-  'Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,Boleh ubah harga saat jual,Aktif,Stok,Stok minimum';
+  'Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,Boleh ubah harga saat jual,Aktif,Stok,Stok minimum,Diskon,Tanggal kadaluarsa';
 
 /** Placeholder textarea = header template yang sama (satu baris, tanpa baris data).
  *  Dulu diisi oleh tombol "Contoh format" — tombol itu DIHAPUS karena tombol
@@ -297,13 +381,17 @@ export function templateProduk(
   const u = satuan[0]?.slug ?? 'pcs';
   // Urutan nilai HARUS identik dengan HEADER_TEMPLATE:
   // Nama, Kategori, SKU, Barcode, Satuan, Harga beli, Markup, Harga jual,
-  // Boleh ubah harga saat jual, Aktif, Stok, Stok minimum
+  // Boleh ubah harga saat jual, Aktif, Stok, Stok minimum, Diskon,
+  // Tanggal kadaluarsa
+  // Dua kolom terakhir sengaja diisi CONTOH BEDA bentuk (persen vs rupiah,
+  // tanggal vs kosong) supaya kasir melihat keduanya sebelum menghapus baris
+  // contoh — sekaligus jadi uji nyata bahwa parser memetakan kolomnya.
   const baris = [
     // Kolom ke-9 ("Boleh ubah harga saat jual") sengaja 1 / 0 bergantian:
     // kalau keduanya 0, test tidak akan bisa membedakan kolomnya TERPETAKAN
     // dari kolomnya gagal dibaca lalu jatuh ke default 0.
-    ['CONTOH Pulpen', cat1?.name ?? '', 'CONTOH-1', '', u, '2000', '50', '3000', '1', '1', '10', '2'],
-    ['CONTOH Minuman', cat2?.name ?? '', 'CONTOH-2', '', u, '3000', '50', '4500', '0', '1', '10', '2'],
+    ['CONTOH Pulpen', cat1?.name ?? '', 'CONTOH-1', '', u, '2000', '50', '3000', '1', '1', '10', '2', '10%', ''],
+    ['CONTOH Minuman', cat2?.name ?? '', 'CONTOH-2', '', u, '3000', '50', '4500', '0', '1', '10', '2', '500', '2027-12-31'],
   ];
   return [HEADER_TEMPLATE, ...baris.map((r) => r.map(sel).join(','))].join('\r\n');
 }
@@ -319,6 +407,12 @@ export interface ProdukEkspor {
   name: string; category_name: string; sku: string; barcode: string | null;
   unit: string; cost: number; markup: number; price: number;
   price_dynamic: number; is_active: number; stock: number; min_stock: number;
+  /** `rp` | `pct`; opsional supaya struct tanpa field ini (test Node) tetap masuk. */
+  discount_type?: string | null;
+  /** Diskon permanen dalam satuan `discount_type` (0 = tidak ada). */
+  discount?: number | null;
+  /** `YYYY-MM-DD` atau null/kosong. */
+  expiry_date?: string | null;
 }
 
 /** Isi CSV ekspor produk. URUTAN KOLOM identik dengan `HEADER_TEMPLATE`, dan
@@ -332,6 +426,8 @@ export function csvProduk(list: ProdukEkspor[]): string {
     [
       p.name, p.category_name ?? '', p.sku, p.barcode ?? '', p.unit ?? '',
       p.cost, p.markup, p.price, p.price_dynamic, p.is_active, p.stock, p.min_stock,
+      formatDiskon(p.discount_type, p.discount),
+      p.expiry_date ?? '',
     ].map(sel).join(','),
   );
   return [HEADER_TEMPLATE, ...baris].join('\r\n');

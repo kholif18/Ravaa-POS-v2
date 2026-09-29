@@ -18,6 +18,10 @@ export function openModal(o: {
   cancelLabel?: string;
   danger?: boolean;
   wide?: boolean;
+  /** `max-w-5xl` — dipakai form produk 2 kolom (kiri foto, kanan form).
+   *  `wide` (max-w-3xl) tidak cukup: kolom kanan menyusut jadi ±460px dan
+   *  grid 3 kolom "Harga" di dalamnya tinggal ±140px per input. */
+  wider?: boolean;
   onMount?: (api: ModalHandle) => void;
 }): ModalHandle {
   const overlay = document.createElement('div');
@@ -25,7 +29,7 @@ export function openModal(o: {
   const prevFocus = document.activeElement as HTMLElement | null;
   const title = o.title.replace(/</g, '&lt;').replace(/"/g, '&quot;');
   overlay.innerHTML = `
-    <div class="modal${o.wide ? ' modal-wide' : ''}" role="dialog" aria-modal="true" aria-label="${title}">
+    <div class="modal${o.wider ? ' modal-wider' : o.wide ? ' modal-wide' : ''}" role="dialog" aria-modal="true" aria-label="${title}">
       <div class="modal-header">
         <h3 class="text-base font-semibold text-gray-900 dark:text-white">${title}</h3>
         <button type="button" class="row-btn" data-x aria-label="Tutup">${CLOSE_SVG}</button>

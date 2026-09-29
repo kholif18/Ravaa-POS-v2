@@ -1,4 +1,8 @@
 // E2E cetak label harga -> print-agent (mode file, tanpa printer).
+// Halaman #/labels (2026-09-29) MENGGANTIKAN tombol #prod-label lama di
+// toolbar Produk: layar terbagi ALAT kiri (cari/kategori/pilih/status agent/
+// tombol cetak) dan PRATINJAU kanan (kartu label per produk). Karena itu tidak
+// ada lagi elemen .modal di suite ini — semua selector memakai id halaman.
 // Jalankan: node e2e-label.mjs
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
@@ -49,26 +53,30 @@ page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });
 
 try {
-  await page.goto('http://localhost:5656/#/products', { waitUntil: 'load' });
-  await page.waitForSelector('#rows tr', { timeout: 20000 });
+  await page.goto('http://localhost:5656/#/labels', { waitUntil: 'load' });
+  await page.waitForSelector('#lb-print', { timeout: 20000 });
+  await page.waitForSelector('pre', { timeout: 20000 });
+  // Status agent diisi asinkron (GET /health) — tunggu sampai jawabannya keluar,
+  // kalau tidak pembacaannya bisa kena teks bawaan 'cek print-agent…'.
+  await page.waitForFunction(() => /print-agent (siap|TIDAK)/.test(
+    document.querySelector('#lb-agent')?.textContent ?? ''), null, { timeout: 10000 });
+  await page.waitForTimeout(300);
 
-  console.log('=== A. Dialog label ===');
-  ok('tombol Label ada', await page.isVisible('#prod-label'));
-  await page.click('#prod-label');
-  await page.waitForSelector('#lbl-agent', { timeout: 5000 });
-  await page.waitForTimeout(600);
-  const agent = await page.innerText('#lbl-agent');
-  ok('status print-agent terbaca', /print-agent siap/.test(norm(agent)), agent);
-  ok('memberi tahu mode file bila tanpa printer', /printer belum ketemu|printer /.test(norm(agent)), agent);
-  ok('tombol cetak aktif (agent terjangkau)', !(await page.locator('.modal [data-ok]').isDisabled()));
-
-  const label = norm(await page.innerText('.modal [data-ok]'));
+  console.log('=== A. Halaman Label harga ===');
+  ok('alat cetak terbuka (bukan dialog lama)', await page.isVisible('#lb-print'));
+  const agentTeks = norm(await page.innerText('#lb-agent'));
+  ok('status print-agent terbaca', /print-agent siap/.test(agentTeks), agentTeks);
+  ok('memberi tahu mode file bila tanpa printer', /printer belum ketemu|printer /.test(agentTeks), agentTeks);
+  ok('tombol cetak aktif (agent terjangkau)', !(await page.locator('#lb-print').isDisabled()));
+  const label = norm(await page.innerText('#lb-print'));
   ok('label tombol memuat jumlah', /^Cetak \d+ label$/.test(label), label);
   const jumlah = Number((label.match(/\d+/) || [0])[0]);
   ok('ada produk yang layak label', jumlah > 0, label);
+  const jmlAwal = norm(await page.innerText('#lb-jml'));
+  ok('hitungan pratinjau tampil', new RegExp(`\\d+ produk ditampilkan · ${jumlah} terpilih`).test(jmlAwal), jmlAwal);
 
   console.log('=== B. Pratinjau label ===');
-  const pre = await page.innerText('.modal pre');
+  const pre = await page.locator('pre').first().innerText();
   const baris = pre.split('\n');
   ok('pratinjau ada isinya', baris.length >= 4, JSON.stringify(baris.slice(0, 6)));
   const maxLen = Math.max(...baris.map((b) => b.length));
@@ -79,8 +87,8 @@ try {
 
   console.log('=== C. Cetak -> file keluaran ===');
   fs.writeFileSync(FAKE, '');   // kosongkan dulu supaya isi berikutnya pasti baru
-  await page.click('.modal [data-ok]');
-  await page.waitForSelector('.modal', { state: 'detached', timeout: 20000 });
+  await page.click('#lb-print');
+  await page.waitForSelector('#toast-root .toast', { timeout: 20000 });
   const toast = norm(await page.innerText('#toast-root'));
   ok('toast sukses memuat jumlah', new RegExp(`${jumlah} label dikirim`).test(toast), toast);
   await page.waitForTimeout(500);
@@ -102,21 +110,18 @@ try {
     ok('ukuran file masuk akal', buf.length > 50 * jumlah, `${buf.length} byte utk ${jumlah} label`);
   }
 
-  console.log('=== D. Filter = pemilih ===');
+  console.log('=== D. Kolom cari = penyaring, pilihan tidak hilang ===');
   // Cari pakai SKU seed yang UNIK, bukan kata "Aqua". Pencarian memang sengaja
   // memecah jadi kata dan SEMUA kata harus cocok di nama/SKU/barcode — jadi
   // begitu toko menambah produk ber-"Aqua" kedua, harapan "1 label" jadi basi
   // lalu menyalahkan aplikasi padahal perilakunya benar (jumlah = jumlah produk
   // yang lolos filter). SKU seed tidak boleh diganti tanpa konfirmasi, jadi
   // angkanya di sini dijamin.
-  await page.fill('#q', 'PRD00013');
+  await page.fill('#lb-q', 'PRD00013');
   await page.waitForTimeout(400);
-  await page.click('#prod-label');
-  await page.waitForSelector('.modal [data-ok]');
-  const t2 = norm(await page.innerText('.modal [data-ok]'));
-  ok('jumlah mengikuti pencarian (SKU unik -> tepat 1)', /^Cetak 1 label$/.test(t2), t2);
-  await page.click('.modal [data-x]');
-  await page.waitForSelector('.modal', { state: 'detached', timeout: 5000 });
+  const jml = norm(await page.innerText('#lb-jml'));
+  ok('SKU unik -> tepat 1 tampil, dan jumlah terpilih tidak ikut berubah',
+    jml === `1 produk ditampilkan · ${jumlah} terpilih`, jml);
 
   console.log('=== E. Tanpa error runtime ===');
   ok('tidak ada pageerror/console error', errs.length === 0, errs.join(' | '));

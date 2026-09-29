@@ -2,9 +2,20 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { randomUUID } from 'node:crypto';
-import { db, migrate } from './db.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { db, dbPath, migrate } from './db.js';
 
 migrate();
+
+// Thumbnail foto produk disimpan di samping file DB (ikut DB_PATH, jadi Docker
+// / install native / test dengan DB_PATH khusus tidak pernah saling menimpa).
+// Dibuat lazy: jarang dipakai, dan folder yang kosong tidak mengganggu git.
+const IMG_DIR = path.join(path.dirname(dbPath), 'img');
+function imgDir(): string {
+  fs.mkdirSync(IMG_DIR, { recursive: true });
+  return IMG_DIR;
+}
 
 const app = new Hono();
 app.use('*', cors({ origin: (process.env.CORS_ORIGIN ?? '*').split(',') }));
@@ -297,6 +308,7 @@ const upsertProduct = db.transaction((
     barcode?: string | null; unit?: string; price?: number; cost?: number; markup?: number;
     price_dynamic?: number; stock?: number; min_stock?: number; is_active?: number;
     units?: unknown[];
+    image?: string | null; discount_type?: string; discount?: number; expiry_date?: string | null;
   },
   opts?: { pertahankanTidakDikirim?: boolean },
 ) => {
@@ -331,14 +343,63 @@ const upsertProduct = db.transaction((
   const stock = amb(input.stock, 'stock', 0);
   const minStock = amb(input.min_stock, 'min_stock', 0);
   const isActive = amb(input.is_active, 'is_active', 1);
+
+  // ---- Foto: aturan KHUSUS, bukan pakai `amb` ----
+  // `undefined` = tidak diubah di SEMUA mode (bukan cuma impor). Kalau pakai
+  // amb(), payload toggle aktif & tiap baris CSV yang tidak membawa foto akan
+  // jatuh ke default '' dan MENGHAPUS FOTO diam-diam — persis kecelakaan yang
+  // pernah terjadi pada `units`.
+  // File-nya sendiri ditulis oleh POST /api/products/:id/image; endpoint ini
+  // hanya menerima nama filenya (dipakai impor & payload yang membawa referensi).
+  let image: string | null;
+  if (input.image === undefined) image = (existing?.image as string | null) ?? null;
+  else if (input.image === null || String(input.image).trim() === '') image = null;
+  else {
+    const nama = String(input.image).trim();
+    // Tanpa slash & tanpa '..': nilai kolom ini nanti dipakai sebagai nama file,
+    // jadi `../..` akan membuka jalan path traversal dari payload client.
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(nama) || nama.includes('..')) {
+      throw new Error('image: nama file tidak valid');
+    }
+    image = nama;
+  }
+
+  const discountType = String(amb(input.discount_type, 'discount_type', 'rp'));
+  if (discountType !== 'rp' && discountType !== 'pct') {
+    throw new Error("discount_type harus 'rp' atau 'pct'");
+  }
+  const discount = Number(amb(input.discount, 'discount', 0));
+  if (!Number.isFinite(discount) || discount < 0) throw new Error('discount harus angka >= 0');
+  if (discountType === 'pct' && discount > 100) throw new Error('discount persen maksimal 100');
+
+  const expiryRaw = amb<string | null | undefined>(input.expiry_date, 'expiry_date', null);
+  const expiry = expiryRaw === null || expiryRaw === undefined || String(expiryRaw).trim() === ''
+    ? null
+    : String(expiryRaw).trim();
+  if (expiry !== null) {
+    // `Date.parse` TIDAK menolak `2026-02-31` — ia ROLLOVER jadi 3 Maret, jadi
+    // pola regex saja meloloskan tanggal yang tidak ada di kalender. Dibolak-
+    // balikkan lewat `toISOString()`: tanggal fiktif bentuknya berbeda setelah
+    // dinormalkan. Klien menolaknya lebih dulu (importcsv.parseTanggal), tapi
+    // endpoint ini juga dipakai import & payload lain yang bisa datang dari
+    // tempelan Excel — validasinya harus sama ketatnya di dua sisi.
+    const t = new Date(`${expiry}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)
+      || Number.isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== expiry) {
+      throw new Error('expiry_date harus tanggal YYYY-MM-DD yang valid');
+    }
+  }
+
   let pid: number;
   if (!existing) {
     const info = db.prepare(
-      `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_dynamic, cost, markup, stock, min_stock, is_active, updated_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
+      `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_dynamic, cost, markup, stock, min_stock,
+                             image, discount_type, discount, expiry_date, is_active, updated_at, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
          COALESCE((SELECT MAX(version) FROM products), 0) + 1)`,
     ).run(cat.id, sku, barcode, input.name, unit,
-      price, priceDynamic, cost, markup, stock, minStock, isActive);
+      price, priceDynamic, cost, markup, stock, minStock,
+      image, discountType, discount, expiry, isActive);
     pid = Number(info.lastInsertRowid);
   } else {
     pid = existing.id;
@@ -353,12 +414,14 @@ const upsertProduct = db.transaction((
     // barisnya kembali di semua device (dipertegas di tests bagian E).
     db.prepare(
       `UPDATE products SET category_id=?, barcode=?, name=?, unit=?, price=?, price_dynamic=?,
-         cost=?, markup=?, stock=?, min_stock=?, is_active=?, deleted_at=NULL,
+         cost=?, markup=?, stock=?, min_stock=?, image=?, discount_type=?, discount=?, expiry_date=?,
+         is_active=?, deleted_at=NULL,
          updated_at=datetime('now'),
          version=(SELECT COALESCE(MAX(version),0)+1 FROM products)
        WHERE id=?`,
     ).run(cat.id, barcode, input.name, unit,
-      price, priceDynamic, cost, markup, stock, minStock, isActive, pid);
+      price, priceDynamic, cost, markup, stock, minStock,
+      image, discountType, discount, expiry, isActive, pid);
   }
   // units === undefined -> biarkan apa adanya; array (termasuk []) -> ganti semua.
   if (input.units !== undefined) simpanSatuanJual(pid, unit, input.units);
@@ -378,6 +441,98 @@ app.post('/api/products', async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan produk' }, 400);
   }
+});
+
+// ---------- Foto produk: file di disk, DB hanya menyimpan NAMANYA ----------
+// Kenapa bukan base64 di kolom: stok saja sudah menaikkan `version`, jadi foto
+// yang menempel di baris produk ikut ditarik ulang oleh ?since= tiap penjualan
+// /restock. Dengan file terpisah, delta sync cuma membawa nama file, dan isi
+// gambar diunduh sekali lalu di-cache client (tampil offline setelah itu).
+const IMG_MIME: Record<string, string> = { jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+const IMG_EXT: Record<string, string> = { jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' };
+// Thumbnail 512px hasil resize client ~10-20KB. 300KB masih longgar, tapi
+// menahan kasir yang menempel foto asli HP (2-4MB) apa adanya.
+const IMG_MAKS_BYTE = 300_000;
+
+function buangFileFoto(nama: string): void {
+  const aman = path.basename(nama); // jaring pengaman: nilai kolom tidak boleh keluar dari img/
+  try { fs.rmSync(path.join(imgDir(), aman), { force: true }); } catch { /* file mungkin tak ada */ }
+}
+
+app.post('/api/products/:id/image', async (c) => {
+  try {
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'id tidak valid' }, 400);
+    const p = db.prepare('SELECT id, image FROM products WHERE id=? AND deleted_at IS NULL').get(id) as
+      { id: number; image: string | null } | undefined;
+    if (!p) return c.json({ error: 'produk tidak ada' }, 404);
+
+    let body: { image?: unknown };
+    try { body = await c.req.json(); } catch { return c.json({ error: 'body harus JSON' }, 400); }
+    const kiriman = body?.image;
+    // Tanpa kunci `image` sama sekali = 400, bukan dianggap hapus: menghapus
+    // foto karena payload yang tidak lengkap terlalu mahal harganya.
+    if (kiriman === undefined) return c.json({ error: 'image wajib diisi ("" untuk menghapus foto)' }, 400);
+
+    const tulis = db.transaction((nama: string | null, lama: string | null) => {
+      if (lama) buangFileFoto(lama);
+      db.prepare(
+        `UPDATE products SET image=?, updated_at=datetime('now'),
+           version=(SELECT COALESCE(MAX(version),0)+1 FROM products)
+         WHERE id=?`,
+      ).run(nama, id);
+    });
+
+    if (kiriman === null || String(kiriman).trim() === '') {
+      tulis(null, p.image);
+      return c.json({ data: { image: null } });
+    }
+
+    const val = String(kiriman).trim();
+    const m = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(val);
+    if (!m) return c.json({ error: 'image harus data URL base64 (data:image/jpeg;base64,...)' }, 400);
+    const ext = IMG_EXT[m[1].toLowerCase()];
+    if (!ext) return c.json({ error: `format gambar tidak didukung: ${m[1]}` }, 400);
+    const buf = Buffer.from(m[2].replace(/\s+/g, ''), 'base64');
+    if (!buf.length) return c.json({ error: 'gambar kosong' }, 400);
+    if (buf.length > IMG_MAKS_BYTE) {
+      return c.json({
+        error: `thumbnail terlalu besar (${buf.length} byte, maks ${IMG_MAKS_BYTE}) — resize dulu di client`,
+      }, 400);
+    }
+
+    const nama = `${id}.${ext}`;
+    fs.writeFileSync(path.join(imgDir(), nama), buf);
+    // File lama dengan ekstensi berbeda ikut dibuang (png -> jpg meninggalkan
+    // barang bukti yang tidak pernah dibaca siapa pun).
+    for (const e of new Set(Object.values(IMG_EXT))) {
+      if (e !== ext) buangFileFoto(`${id}.${e}`);
+    }
+    tulis(nama, p.image && p.image !== nama ? p.image : null);
+    return c.json({ data: { image: nama } });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan foto' }, 400);
+  }
+});
+
+app.get('/api/products/:id/image', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'id tidak valid' }, 400);
+  const p = db.prepare('SELECT image, updated_at FROM products WHERE id=?').get(id) as
+    { image: string | null; updated_at: string } | undefined;
+  if (!p?.image) return c.json({ error: 'foto tidak ada' }, 404);
+  const file = path.join(imgDir(), path.basename(p.image));
+  if (!fs.existsSync(file)) return c.json({ error: 'file foto hilang' }, 404);
+  const etag = `"${p.updated_at}"`;
+  if (c.req.header('if-none-match') === etag) return c.body(null, 304);
+  const buf = fs.readFileSync(file);
+  return c.body(new Uint8Array(buf), 200, {
+    'Content-Type': IMG_MIME[path.extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream',
+    'ETag': etag,
+    // Revalidasi murah (ETag sudah dikirim) dan tidak menyimpan lama di cache —
+    // kunci tampilan offline justru di IndexedDB client, bukan di cache browser.
+    'Cache-Control': 'no-cache',
+  });
 });
 
 // ---------- Import massal (CSV / tempelan Excel) ----------
@@ -536,6 +691,38 @@ app.post('/api/stock-opname', async (c) => {
   return c.json({ data: { product_id: body.product_id, sebelum: p.stock, sesudah: fisik, selisih } });
 });
 
+// ---------- Riwayat stok / product history ----------
+// Baris `stock_moves` sudah ditulis sejak awal oleh sale/restock/opname —
+// endpoint ini hanya MEMBUKANYannya ke halaman Stok. Read-only: tidak menyentuh
+// products.version, jadi tidak ikut delta sync (dan memang tidak perlu — riwayat
+// bukan master yang di-cache client; diambil saat dialog dibuka).
+app.get('/api/stock-moves', (c) => {
+  const pid = Number(c.req.query('product_id'));
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return c.json({ error: 'product_id wajib (riwayat selalu milik satu produk)' }, 400);
+  }
+  const reason = (c.req.query('reason') ?? '').trim();
+  if (reason && !['sale', 'restock', 'opname', 'rusak'].includes(reason)) {
+    return c.json({ error: `reason tidak dikenal: ${reason} (pakai sale|restock|opname|rusak)` }, 400);
+  }
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  const conds = ['sm.product_id = ?'];
+  const params: unknown[] = [pid];
+  if (reason) { conds.push('sm.reason = ?'); params.push(reason); }
+  const where = `WHERE ${conds.join(' AND ')}`;
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM stock_moves sm ${where}`).get(...params) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT sm.id, sm.created_at, sm.product_id, p.sku, p.name, sm.qty, sm.reason,
+            sm.ref_id, sm.unit_cost, sm.cashier
+       FROM stock_moves sm JOIN products p ON p.id = sm.product_id
+       ${where}
+      ORDER BY sm.created_at DESC, sm.id DESC
+      LIMIT ? OFFSET ?`,
+  ).all(...params, limit, offset);
+  return c.json({ data, total });
+});
+
 // ---------- shift ----------
 // Satu shift terbuka per kasir (2 kasir boleh bersamaan, tiap device pakai nama kasir beda).
 // Tanpa ?cashier= -> kembalikan shift terbuka terbaru (kompatibilitas).
@@ -581,13 +768,19 @@ app.post('/api/shifts/:id/close', async (c) => {
 const insertSale = db.transaction((sale: {
   id: string; shift_id: number | null; pay_method: string; discount: number;
   cash_in: number; cashier: string;
-  items: { product_id?: number; name?: string; qty: number; price?: number; unit?: string }[];
+  items: { product_id?: number; name?: string; qty: number; price?: number; unit?: string; discount?: number }[];
 }) => {
   const dup = db.prepare('SELECT * FROM sales WHERE id = ?').get(sale.id);
   if (dup) return { row: dup, duplicate: true };
 
+  // Dibaca sekali per penjualan, langsung dari DB: aturan stok tidak boleh
+  // berdasarkan cache client, karena client bisa offline dan berbeda pendapat
+  // dengan server tentang boleh-tidaknya stok minus.
+  const bolehMinus = settingBool(K_STOK_MINUS, false);
+
   let subtotal = 0;
-  const lines: { product_id: number | null; name: string; qty: number; price: number; amount: number; cost: number; unit: string }[] = [];
+  let totalDiscBaris = 0;
+  const lines: { product_id: number | null; name: string; qty: number; price: number; amount: number; discount: number; cost: number; unit: string }[] = [];
   for (const it of sale.items) {
     const qty = Number(it.qty);
     if (!(qty > 0)) throw new Error('qty harus > 0');
@@ -632,7 +825,11 @@ const insertSale = db.transaction((sale: {
       cost = Math.round(p.avg_cost * factor);
       const keluar = qty * factor;
       if (p.track_stock) {
-        if (p.stock < keluar) {
+        // SATU-SATUNYA pintu "stok kurang" ada di sini. Dilewati bila pengaturan
+        // allow_negative_stock aktif: stok dibiarkan menembus 0 (minus) supaya
+        // transaksi di meja kasir tidak macet karena selisih hitungan fisik.
+        // stock_moves tetap dicatat minus, jadi riwayat tetap jujur.
+        if (!bolehMinus && p.stock < keluar) {
           const butuh = Number.isInteger(keluar) ? keluar : Math.round(keluar * 1000) / 1000;
           throw new Error(`stok kurang: ${p.name} (butuh ${butuh} ${unitJual}, sisa ${p.stock})`);
         }
@@ -651,14 +848,29 @@ const insertSale = db.transaction((sale: {
       unitJual = '';
     }
     const amount = Math.round(qty * price);
+    // Diskon PER BARIS: rupiah mutlak (konversi % -> Rp dilakukan client, server
+    // tidak perlu tipe). Dibatasi <= jumlah baris supaya tidak bisa membuat
+    // total negatif lewat jalan belakang — batas total masih dicek satu kali lagi
+    // di bawah untuk kasus diskon transaksi.
+    const discMentah = Number(it.discount ?? 0);
+    if (!Number.isFinite(discMentah) || discMentah < 0) {
+      throw new Error(`diskon baris tidak valid untuk ${name} (harus angka >= 0)`);
+    }
+    const discBaris = Math.round(discMentah);
+    if (discBaris > amount) {
+      throw new Error(`diskon baris melebihi jumlah baris: ${name} (${discBaris} > ${amount})`);
+    }
     subtotal += amount;
+    totalDiscBaris += discBaris;
     // HPP disnapshot SEKARANG (avg_cost saat jual), bukan dibaca ulang saat
     // laporan di-query — rata-rata modal berubah tiap restock, kalau dibaca ulang
     // maka laba hari lalu ikut berubah setelah pembelian hari ini.
     // Item manual (pid=null) tidak punya persediaan -> HPP 0.
-    lines.push({ product_id: pid, name, qty, price, amount, cost, unit: unitJual });
+    lines.push({ product_id: pid, name, qty, price, amount, discount: discBaris, cost, unit: unitJual });
   }
-  const total = subtotal - Math.max(0, sale.discount);
+  // Nilai BERSIH = kotor - diskon baris - diskon transaksi. `subtotal` yang
+  // disimpan ke sales tetap kotor, supaya subtotal - total = seluruh diskon.
+  const total = subtotal - totalDiscBaris - Math.max(0, sale.discount);
   if (total < 0) throw new Error('diskon melebihi subtotal');
   const change = Math.max(0, sale.cash_in - total);
   const row = db.prepare(
@@ -666,10 +878,12 @@ const insertSale = db.transaction((sale: {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   ).get(sale.id, sale.shift_id, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier);
   const insItem = db.prepare(
-    `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, cost, unit)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, discount, cost, unit)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  for (const l of lines) insItem.run(sale.id, l.product_id, l.name, l.qty, l.price, l.amount, l.cost, l.unit);
+  for (const l of lines) {
+    insItem.run(sale.id, l.product_id, l.name, l.qty, l.price, l.amount, l.discount, l.cost, l.unit);
+  }
   return { row, duplicate: false as const, lines };
 });
 
@@ -679,11 +893,17 @@ app.post('/api/sales', async (c) => {
     if (!Array.isArray(body?.items) || body.items.length === 0) {
       return c.json({ error: 'items kosong' }, 400);
     }
+    // Divalidasi di sini, bukan di dalam transaksi: `Number('abc')` = NaN, dan
+    // NaN lolos cek `total < 0` — penjualan akan tersimpan dengan total NaN.
+    const discTransaksi = Number(body.discount ?? 0);
+    if (!Number.isFinite(discTransaksi) || discTransaksi < 0) {
+      return c.json({ error: 'discount harus angka >= 0' }, 400);
+    }
     const { row, duplicate, lines } = insertSale({
       id: body.id ?? randomUUID(),
       shift_id: body.shift_id ?? null,
       pay_method: body.pay_method ?? 'tunai',
-      discount: Number(body.discount ?? 0),
+      discount: discTransaksi,
       cash_in: Number(body.cash_in ?? 0),
       cashier: body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir',
       items: body.items,
@@ -735,13 +955,52 @@ app.get('/api/topups/suggest-admin', (c) => {
   return c.json({ data: { nominal, admin } });
 });
 
+// ---------- Pengaturan toko ----------
+// Tabel key/value supaya menambah opsi baru tidak butuh migrasi kolom.
+// Nilai disimpan sebagai teks '0'/'1' — angka boolean dilewatkan lewat JSON
+// sebagai boolean betulan, karena menebak '1'/true/'ya' dari client adalah
+// cara pasti membuat dua device memahami aturan yang berbeda.
+const K_STOK_MINUS = 'allow_negative_stock';
+
+function settingBool(key: string, bawaan: boolean): boolean {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row ? row.value === '1' : bawaan;
+}
+
+app.get('/api/settings', (c) => c.json({ data: { allow_negative_stock: settingBool(K_STOK_MINUS, false) } }));
+
+app.post('/api/settings', async (c) => {
+  try {
+    const body = await c.req.json();
+    const v = body?.allow_negative_stock;
+    if (typeof v !== 'boolean') {
+      return c.json({ error: 'allow_negative_stock harus boolean (true|false)' }, 400);
+    }
+    db.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(K_STOK_MINUS, v ? '1' : '0');
+    return c.json({ data: { allow_negative_stock: v } });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengaturan' }, 400);
+  }
+});
+
 // ---------- laporan harian ----------
 app.get('/api/reports/daily', (c) => {
   const date = c.req.query('date') ?? new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   const sales = db.prepare(
     `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS omzet, COALESCE(SUM(discount),0) AS diskon
      FROM sales WHERE date(created_at)=date(?)`,
-  ).get(date);
+  ).get(date) as { n: number; omzet: number; diskon: number };
+  // `diskon` = diskon transaksi + diskon PER BARIS. Tanpa penjumlahan ini angka
+  // diskon menyembunyikan potongan per baris padahal omzet sudah menguranginya,
+  // lalu `subtotal - total` di layar laporan tidak pernah cocok dengan angka ini.
+  sales.diskon += (db.prepare(
+    `SELECT COALESCE(SUM(si.discount),0) AS d
+       FROM sale_items si JOIN sales s ON s.id = si.sale_id
+      WHERE date(s.created_at) = date(?)`,
+  ).get(date) as { d: number }).d;
   const byMethod = db.prepare(
     `SELECT pay_method, COUNT(*) AS n, COALESCE(SUM(total),0) AS total
      FROM sales WHERE date(created_at)=date(?) GROUP BY pay_method`,

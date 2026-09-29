@@ -37,6 +37,22 @@ CREATE TABLE IF NOT EXISTS products (
   markup        REAL    NOT NULL DEFAULT 0,     -- margin % dari modal: (price-cost)/cost*100
   stock         INTEGER NOT NULL DEFAULT 0,     -- hanya berarti bila kategori track_stock=1
   min_stock     INTEGER NOT NULL DEFAULT 0,     -- peringatan stok menipis
+  -- Foto produk: HANYA thumbnail (di-resize client ke <=512px, JPEG) — foto asli
+  -- tidak pernah disimpan (permintaan pemilik, 2026-09-29). Nilai kolom ini =
+  -- NAMA FILE di apps/api/data/img/, BUKAN isi gambar: isi gambar di DB membuat
+  -- setiap ?since= delta sync menarik megabyte foto karena stok saja sudah
+  -- menaikkan version. File dibaca lewat GET /api/products/:id/image.
+  -- NULL/'' = tanpa foto.
+  image         TEXT,
+  -- Diskon per produk (Tipe + Nilai) = PREFILL saat produk masuk keranjang POS.
+  -- Kasir boleh mengubahnya per baris (ala OSPOS/Aronium), jadi master ini hanya
+  -- modal awal — bukan angka yang dikunci saat jual. 'rp' = rupiah, 'pct' = %.
+  discount_type TEXT NOT NULL DEFAULT 'rp',     -- 'rp' | 'pct'
+  discount      INTEGER NOT NULL DEFAULT 0,     -- nilai sesuai tipe (rp bulat / persen)
+  -- Tanggal kadaluarsa (ISO YYYY-MM-DD), HANYA diisi kategori track_stock yang
+  -- isinya cepat basi: snack & eskrim (Es Krim & Minuman). NULL = tidak berlaku
+  -- (ATK/cetak/rokok tidak punya tanggal kadaluarsa).
+  expiry_date   TEXT,
   is_active     INTEGER NOT NULL DEFAULT 1,
   -- Hapus produk = SOFT delete (tombstone), bukan DELETE keras. Baris sengaja
   -- dibiarkan supaya version++ di bawah bisa menyiarkan "produk ini dihapus"
@@ -98,7 +114,13 @@ CREATE TABLE IF NOT EXISTS sale_items (
   name        TEXT NOT NULL,           -- snapshot nama saat jual
   qty         REAL NOT NULL DEFAULT 1,
   price       INTEGER NOT NULL,        -- harga satuan aktual (penting untuk harga dinamis)
-  amount      INTEGER NOT NULL,
+  amount      INTEGER NOT NULL,        -- KOTOR: qty*price, sebelum diskon baris
+  -- Diskon PER BARIS yang disnapshot saat jual (prefill dari products.discount,
+  -- boleh diubah kasir). Nilai BERSIH baris = amount - discount, dan itulah yang
+  -- masuk ke sales.total. Disnapshot bukan dibaca ulang dari products supaya
+  -- riwayat & laba hari lalu tidak ikut berubah kalau pemilik mengubah diskon
+  -- master besok — persis alasan yang sama dengan `cost`.
+  discount    INTEGER NOT NULL DEFAULT 0,
   -- HPP satuan yang di-SNAPSHOT saat jual (products.avg_cost saat itu).
   -- Snapshot wajib: rata-rata modal berubah tiap restock, kalau laporan hanya
   -- membaca products.avg_cost maka laba MASA LALU ikut berubah retroaktif.
@@ -142,3 +164,13 @@ CREATE TABLE IF NOT EXISTS stock_moves (
   cashier     TEXT NOT NULL DEFAULT 'kasir'
 );
 CREATE INDEX IF NOT EXISTS idx_stock_moves_product ON stock_moves(product_id);
+
+-- Pengaturan toko: key/value berbasis teks supaya menambah opsi TIDAK butuh ALTER
+-- (kebijakan migrasi repo = re-create DB, jadi kolom baru mahal — baris baru murah).
+-- Dibaca SEMUA device lewat GET /api/settings, bukan localStorage: aturan stok
+-- harus sama di server dan di kasir, kalau tidak kasir bisa menolak/menerima
+-- penjualan yang server anggap sebaliknya.
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

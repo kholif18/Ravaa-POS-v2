@@ -49,6 +49,16 @@ type CartLine = {
   baseUnit: string;
   /** 1 unit `unit` = berapa satuan dasar. Stok keluar = qty * factor. */
   factor: number;
+  /** Diskon PER BARIS dalam rupiah (bukan persen). Dikirim ke server sebagai
+   *  `items[].discount` dan di-snapshot di `sale_items.discount`. Bisa diubah
+   *  kasir per baris lewat kolom Diskon di keranjang. */
+  discount: number;
+  /** Prefill dari diskon permanen produk (`products.discount_type/discount`).
+   *  Dipakai MENGHITUNG ULANG saat qty berubah selama kasir belum mengedit
+   *  manual — diskon % memang harus ikut bertambah saat qty bertambah. */
+  prefill: { type: 'rp' | 'pct'; value: number } | null;
+  /** true = kasir sudah mengubah sendiri -> jangan ditimpa lagi oleh prefill. */
+  discManual: boolean;
 };
 
 type PayMethod = 'tunai' | 'qris' | 'transfer';
@@ -151,12 +161,39 @@ function suggestAdmin(nominal: number): number {
 
 const rp = (n: number) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 
+/** Nama produk bisa diketik sendiri oleh kasir (item manual, nama produk), jadi
+ *  wajib di-escape sebelum masuk template — tanpa ini satu nama berisi `<b>`
+ *  merusak seluruh baris tabel keranjang. */
+function esc(s: unknown): string {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+  );
+}
+
 /* ---------- hitung ---------- */
 
 const subtotal = () => cart.reduce((s, l) => s + l.price * l.qty, 0);
-const total = () => Math.max(0, subtotal() - discount);
+/** Jumlah seluruh diskon PER BARIS. Server memakai istilah sama (`totalDiscBaris`)
+ *  dan menguranginya SEBELUM diskon transaksi — lihat POST /api/sales. */
+const diskonBaris = () => cart.reduce((s, l) => s + l.discount, 0);
+const total = () => Math.max(0, subtotal() - diskonBaris() - discount);
 const count = () => cart.reduce((s, l) => s + l.qty, 0);
 const change = () => Math.max(0, cashIn - total());
+
+/** Jumlah baris (harga x qty) sebelum diskon. Server menyimpan angka kotor ini
+ *  ke `sales.subtotal`, supaya `subtotal - total` = seluruh diskon. */
+const jumlahBaris = (l: Pick<CartLine, 'price' | 'qty'>) => Math.round(l.price * l.qty);
+
+/** Besar diskon satu baris BILA prefill-nya dihitung ulang dari qty saat ini.
+ *  Selalu dijepit ke jumlah baris: server menolak `discount > amount` (400). */
+function hitungPrefill(l: Pick<CartLine, 'prefill' | 'price' | 'qty'>): number {
+  if (!l.prefill) return 0;
+  const perUnit =
+    l.prefill.type === 'pct'
+      ? Math.round((l.price * l.prefill.value) / 100)
+      : l.prefill.value;
+  return Math.max(0, Math.min(Math.round(perUnit * l.qty), jumlahBaris(l)));
+}
 
 /* ---------- cari produk ---------- */
 
@@ -194,16 +231,28 @@ function queryResults(q: string): Product[] {
 function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1): void {
   // Key menyertakan satuan: 2 pcs dan 2 pack adalah baris BERBEDA, bukan penambahan.
   const key = `${p.id}:${unit}`;
+  // Prefill diskon permanen produk: '%'-nya dihitung ke rupiah per baris, jadi
+  // kasir melihat angka jadi (bukan tebak-tebakan) dan tetap bisa mengubahnya.
+  const prefill = p.discount > 0
+    ? { type: p.discount_type === 'pct' ? ('pct' as const) : ('rp' as const), value: p.discount }
+    : null;
   const found = cart.find((l) => l.key === key);
   if (found) {
     found.qty += qty;
     found.price = price; // harga terbaru untuk produk harga dinamis
+    // Diskon mengikuti qty ASALKAN belum diedit tangan — kalau kasir sudah
+    // menyetel angka sendiri, menimpanya akan mengubah harga yang sudah
+    // disepakati pelanggan di tengah transaksi.
+    if (!found.discManual) found.discount = hitungPrefill(found);
   } else {
-    cart.push({
+    const baris: CartLine = {
       key, product_id: p.id, name: p.name, sku: p.sku,
       price, qty, track_stock: p.track_stock,
       unit, baseUnit: p.unit, factor,
-    });
+      discount: 0, prefill, discManual: false,
+    };
+    baris.discount = hitungPrefill(baris);
+    cart.push(baris);
   }
 }
 
@@ -211,8 +260,37 @@ function setQty(key: string, qty: number): void {
   const line = cart.find((l) => l.key === key);
   if (!line) return;
   if (qty <= 0) cart = cart.filter((l) => l.key !== key);
-  else line.qty = qty;
+  else {
+    line.qty = qty;
+    if (!line.discManual) line.discount = hitungPrefill(line);
+  }
+  clampDiskonTransaksi();
   paintCart();
+}
+
+/** Setel diskon satu baris dari input kolom Diskon. Angka dijepit ke jumlah
+ *  baris supaya server tidak menolak dengan 400 "diskon baris melebihi". */
+function setDisc(key: string, nilai: number): void {
+  const line = cart.find((l) => l.key === key);
+  if (!line) return;
+  const bersih = Number.isFinite(nilai) ? Math.max(0, Math.round(nilai)) : 0;
+  line.discount = Math.min(bersih, jumlahBaris(line));
+  // Semua ketikan dianggap edit manual — termasuk mengosongkan ke 0 (kasir
+  // sengaja membatalkan prefill, jadi jangan dikembalikan saat qty berubah).
+  line.discManual = true;
+  clampDiskonTransaksi();
+  paintCart();
+}
+
+/** Diskon transaksi dijepit ke sisa subtotal SETELAH diskon item, dan nilai
+ *  inputnya ikut ditulis ulang. Tanpa ini, kasir yang mengetik diskon besar
+ *  lalu menambah diskon baris akan menghasilkan total negatif — server jelas
+ *  menolaknya ("diskon melebihi subtotal") tepat di momen pembayaran. */
+function clampDiskonTransaksi(): void {
+  const maks = Math.max(0, subtotal() - diskonBaris());
+  if (discount > maks) discount = maks;
+  const inp = host?.querySelector<HTMLInputElement>('#pos-discount');
+  if (inp && Number(inp.value || 0) !== discount) inp.value = discount ? String(discount) : '';
 }
 
 /* ---------- gate shift ---------- */
@@ -294,6 +372,28 @@ function bindShiftGate(): void {
 
 /* ---------- layar keranjang ---------- */
 
+/** Strip peringatan stok menipis di layar kasir (keputusan user: POS saja).
+ *
+ *  Hitungannya DIAMBIL DARI CACHE LOKAL — aturan yang sama dengan tabel Produk
+ *  (`track_stock && min_stock > 0 && stock <= min_stock`), bukan panggilan API
+ *  tambahan, supaya layar kasir tidak pernah menunggu jaringan hanya untuk
+ *  peringatan. `min_stock = 0` = tanpa ambang, jadi tidak ikut dihitung (kalau
+ *  tidak, semua produk pasti "menipis" karena stok 0 <= 0). */
+function stripStokMenipis(): string {
+  const menipis = products.filter((p) => p.track_stock && p.min_stock > 0 && p.stock <= p.min_stock);
+  if (!menipis.length) return '';
+  const tiga = menipis.slice(0, 3).map((p) => `${esc(p.name)} (${p.stock})`).join(', ');
+  const sisa = menipis.length > 3 ? `, +${menipis.length - 3} lainnya` : '';
+  // Class `strip-low` WAJIB: `icon()` tidak mengeluarkan lebar/tinggi (diatur
+  // CSS wadahnya). Tanpa aturan `svg` di .strip-low, ikon segitiga meregang
+  // setinggi panel dan menutupi seluruh keranjang.
+  return `<a href="#/stock" class="strip-low flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20">
+      ${icon('alert')}
+      <span class="min-w-0 flex-1"><b>${menipis.length} produk stok menipis</b>: ${tiga}${sisa}</span>
+      <span class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">Buka Stok ${icon('chevR')}</span>
+    </a>`;
+}
+
 function cartHtml(): string {
   const scanBar = `
       <div class="card !p-3">
@@ -331,6 +431,7 @@ function cartHtml(): string {
   return `
   <div class="flex h-full min-h-0 flex-col gap-3">
     ${scanBar}
+    ${mode === 'jual' ? stripStokMenipis() : ''}
     ${body}
   </div>`;
 }
@@ -349,6 +450,7 @@ function cartGridHtml(): string {
                 <th class="th th-sticky">Item</th>
                 <th class="th th-sticky text-right">Harga</th>
                 <th class="th th-sticky text-center">Qty</th>
+                <th class="th th-sticky text-right">Diskon</th>
                 <th class="th th-sticky text-right">Subtotal</th>
                 <th class="th th-sticky"></th>
               </tr>
@@ -367,8 +469,12 @@ function cartGridHtml(): string {
           <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Subtotal</span>
           <span id="pos-subtotal" class="text-sm font-semibold text-gray-900 dark:text-white">${rp(sub)}</span>
         </div>
+        <div class="flex items-baseline justify-between" id="pos-disc-item-row" ${diskonBaris() ? '' : 'hidden'}>
+          <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Diskon item</span>
+          <span id="pos-disc-item" class="text-sm font-semibold text-red-600 dark:text-red-400">-${rp(diskonBaris())}</span>
+        </div>
         <div>
-          <label class="label" for="pos-discount">Diskon (Rp)</label>
+          <label class="label" for="pos-discount">Diskon transaksi (Rp)</label>
           <input id="pos-discount" class="input input-sm" type="number" inputmode="numeric" min="0" step="500" value="${discount || ''}" placeholder="0" />
         </div>
         <div class="flex items-baseline justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
@@ -530,13 +636,15 @@ function topupHtml(): string {
 
 function cartRows(): string {
   if (!cart.length) {
-    return `<tr><td colspan="5"><div class="empty">Scan barcode atau ketik nama produk, lalu tekan Enter.</div></td></tr>`;
+    return `<tr><td colspan="6"><div class="empty">Scan barcode atau ketik nama produk, lalu tekan Enter.</div></td></tr>`;
   }
   return cart
-    .map(
-      (l) => `<tr data-key="${l.key}">
+    .map((l) => {
+      const gross = jumlahBaris(l);
+      const net = gross - l.discount;
+      return `<tr data-key="${l.key}">
       <td class="td">
-        <div class="cell-strong">${l.name}</div>
+        <div class="cell-strong">${esc(l.name)}</div>
         <div class="cell-sub">${l.sku}${l.product_id === null ? ' · item manual' : l.track_stock ? '' : ' · jasa'}${l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` · jual per ${l.unit}` : ''}</div>
       </td>
       <td class="td td-num">${rp(l.price)}</td>
@@ -547,10 +655,18 @@ function cartRows(): string {
           <button type="button" class="row-btn" data-act="inc" data-key="${l.key}" title="Tambah" aria-label="Tambah qty">${icon('plus')}</button>
         </div>
       </td>
-      <td class="td td-num">${rp(l.price * l.qty)}</td>
-      <td class="td"><button type="button" class="row-btn row-btn-danger" data-act="del" data-key="${l.key}" title="Hapus" aria-label="Hapus ${l.name}">${icon('trash')}</button></td>
-    </tr>`,
-    )
+      <td class="td td-num">
+        <input class="input input-sm !w-20 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
+          min="0" step="100" value="${l.discount || ''}" placeholder="0"
+          aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}" />
+      </td>
+      <td class="td td-num">
+        ${l.discount > 0 ? `<div class="text-xs text-gray-400 line-through tabular-nums">${rp(gross)}</div>` : ''}
+        <div class="font-semibold text-gray-900 tabular-nums dark:text-white">${rp(net)}</div>
+      </td>
+      <td class="td"><button type="button" class="row-btn row-btn-danger" data-act="del" data-key="${l.key}" title="Hapus" aria-label="Hapus ${esc(l.name)}">${icon('trash')}</button></td>
+    </tr>`;
+    })
     .join('');
 }
 
@@ -625,6 +741,13 @@ function paintCart(): void {
   set('#pos-subtotal', rp(subtotal()));
   set('#pos-total', rp(total()));
   set('#pos-change', rp(change()));
+  // Baris "Diskon item" dirender sekali lalu ditampilkan/disembunyikan —
+  // paintCart tidak mengganti panel kanan, jadi barisnya harus bisa hidup mati
+  // lewat atribut `hidden` tanpa merender ulang (fokus input tetap aman).
+  const db = diskonBaris();
+  set('#pos-disc-item', `-${rp(db)}`);
+  const dbRow = host!.querySelector<HTMLElement>('#pos-disc-item-row');
+  if (dbRow) dbRow.hidden = db === 0;
   const changeEl = host!.querySelector('#pos-change');
   if (changeEl) {
     changeEl.className = `text-sm font-semibold ${cashIn > 0 && cashIn < total() ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`;
@@ -817,6 +940,9 @@ function openManualItem(): void {
         cart.push({
           key: `manual:${manualSeq}`, product_id: null, name: n, sku: 'MANUAL',
           price: pr, qty: q, track_stock: 0, unit: '', baseUnit: '', factor: 1,
+          // Item manual tidak punya diskon permanen (bukan produk katalog),
+          // tapi kolom Diskon tetap terisi 0 dan bisa diketik kasir.
+          discount: 0, prefill: null, discManual: false,
         });
         api.close();
         paintCart();
@@ -859,12 +985,16 @@ async function pay(): Promise<void> {
         // Satuan terjual. Server memakai ini untuk mengambil faktor & harga
         // final — harga di sini hanya rujukan bila produknya price_dynamic.
         ...(l.product_id !== null && l.unit ? { unit: l.unit } : {}),
+        // Diskon baris dalam RUPIAH (bukan persen) — server menghitung ulang
+        // totalnya sendiri dan menolak bila melebihi jumlah baris.
+        discount: l.discount,
       })),
     });
     const kembalian = payMethod === 'tunai' ? change() : 0;
     // WAJIB dihitung sebelum `cart`/`discount`/`cashIn` di-reset di bawah —
     // begitu direset, struk tidak punya sumber data lagi.
     const sub = subtotal();
+    const discItem = diskonBaris();
     const tot = total();
     const strukJual: Struk = {
       judul: getToko(),
@@ -880,6 +1010,9 @@ async function pay(): Promise<void> {
       })),
       baris: [
         { kiri: 'Subtotal', kanan: rp(sub) },
+        // Dua jenis diskon diurutkan persis seperti rumus server:
+        // total = subtotal - diskon item - diskon transaksi.
+        ...(discItem > 0 ? [{ kiri: 'Diskon item', kanan: `-${rp(discItem)}` }] : []),
         ...(discount > 0 ? [{ kiri: 'Diskon', kanan: `-${rp(discount)}` }] : []),
         { kiri: 'TOTAL', kanan: rp(tot), tebal: true },
         ...(payMethod === 'tunai' && cashIn > 0
@@ -1215,16 +1348,26 @@ function bindCart(): void {
   });
 
   host!.querySelector('#pos-rows')?.addEventListener('change', (e) => {
-    const inp = (e.target as HTMLElement).closest<HTMLInputElement>('[data-act="qty"]');
-    if (!inp) return;
-    setQty(inp.dataset.key!, Number(inp.value || 0));
+    const el = e.target as HTMLElement;
+    // Kolom Diskon: ketikan kasir (boleh menghapus prefill = isi 0). Angka
+    // dijepit ke jumlah baris di setDisc supaya server tidak menolak 400.
+    const discInp = el.closest<HTMLInputElement>('[data-act="disc"]');
+    if (discInp) {
+      setDisc(discInp.dataset.key!, Number(discInp.value || 0));
+      return;
+    }
+    const inp = el.closest<HTMLInputElement>('[data-act="qty"]');
+    if (inp) setQty(inp.dataset.key!, Number(inp.value || 0));
   });
 
   host!.querySelector('#pos-discount')?.addEventListener('input', (e) => {
     const v = Number((e.target as HTMLInputElement).value || 0);
     discount = Math.max(0, v);
-    if (discount > subtotal()) {
-      discount = subtotal();
+    // Batasnya sisa SETELAH diskon item: total tidak boleh < 0, dan server
+    // juga menolak "diskon melebihi subtotal".
+    const maks = Math.max(0, subtotal() - diskonBaris());
+    if (discount > maks) {
+      discount = maks;
       (e.target as HTMLInputElement).value = String(discount);
     }
     paintCart();

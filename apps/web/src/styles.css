@@ -359,6 +359,22 @@
   .th-sticky {
     @apply sticky top-0 z-10 dark:bg-[#192231];
   }
+  /* Header kolom yang bisa diurutkan (halaman Produk: klik = balik arah).
+     `px-1 -mx-1` memperbesar area klik tanpa mengubah posisi teks; warna
+     huruf diwarisi dari .th lewat preflight (`color: inherit`), jadi yang
+     perlu diatur hanya kursor, hover, dan panahnya. */
+  .th-sort {
+    @apply inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 transition hover:text-primary focus-visible:outline-2 focus-visible:outline-primary;
+  }
+  .th-sort.is-on {
+    @apply text-primary;
+  }
+  .th-arrow {
+    @apply text-[9px] leading-none opacity-60;
+  }
+  .th-sort:not(.is-on) .th-arrow {
+    @apply opacity-35;
+  }
   /* Area scroll tbody tabel (halaman Produk, >= lg). T purposely terpisah dari
      .table-wrap global: halaman lain (shift, laporan) tetap overflow-x-auto
      supaya halaman scroll normal seperti sebelumnya. */
@@ -437,6 +453,30 @@
   }
   .hint {
     @apply text-[11px] leading-tight text-gray-500 dark:text-gray-400;
+  }
+  /* Kotak foto persegi di kolom kiri form produk (tata letak modal 2 kolom
+     ala RPOS): seluruh kotak = tombol pilih berkas, gambar menutupi kotak,
+     tombol hapus melayang di pojok kanan atas (di LUAR label supaya mengkliknya
+     tidak ikut membuka dialog pilih berkas). */
+  .foto-kotak {
+    @apply relative flex aspect-square w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 text-gray-400 transition hover:border-primary hover:text-primary dark:border-gray-600 dark:bg-gray-900 dark:text-gray-500;
+  }
+  /* Placeholder (mode Tambah/Duplikat): endpoint foto butuh id produk, jadi
+     kotak sengaja TIDAK bisa diklik — bukan tombol yang diam-diam mati. */
+  .foto-kotak-off {
+    @apply cursor-default hover:border-gray-300 hover:text-gray-400 dark:hover:border-gray-600 dark:hover:text-gray-500;
+  }
+  .foto-kotak-img {
+    @apply absolute inset-0 h-full w-full object-cover;
+  }
+  .foto-kotak-empty {
+    @apply flex flex-col items-center gap-1 px-3 text-center text-[10px] leading-tight;
+  }
+  .foto-kotak-empty svg {
+    @apply size-7;
+  }
+  .foto-kotak-x {
+    @apply absolute top-1.5 right-1.5 z-10 flex size-6 items-center justify-center rounded-full bg-white/90 text-gray-500 shadow ring-1 ring-gray-300 transition hover:bg-red-50 hover:text-red-600 dark:bg-gray-900/90 dark:ring-gray-600 dark:hover:bg-red-950/60;
   }
   .label {
     @apply text-xs font-semibold text-gray-600 dark:text-gray-400;
@@ -566,6 +606,13 @@
     @apply inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary dark:bg-primary/15 dark:text-primary;
   }
 
+  /* Strip "N produk stok menipis" di layar POS. `icon()` sengaja TIDAK
+     membawa width/height (diatur CSS wadahnya) — tanpa aturan di sini ikon
+     segitiga meregang seukuran panel lalu menutupi keranjang (bug 2026-09-29). */
+  .strip-low svg {
+    @apply size-4 shrink-0;
+  }
+
   .modal-overlay {
     @apply fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm;
   }
@@ -644,6 +691,11 @@
      spesifikitasnya Pasti mengalahkan .modal, bukan mengandalkan urutan CSS. */
   .modal.modal-wide {
     @apply max-w-3xl;
+  }
+  /* Lebar penuh ala RPOS: form produk kini 2 kolom (kiri kotak foto, kanan
+     form) — max-w-3xl membuat kolom kanan terlalu sempit untuk grid Harga. */
+  .modal.modal-wider {
+    @apply max-w-5xl;
   }
   .modal-header {
     @apply flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700;

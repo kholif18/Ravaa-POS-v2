@@ -86,13 +86,47 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   **SKU boleh kosong** —
   server menomori sendiri `PRD00001`, `PRD00002`, ... (`PRD` + 5 digit, dihitung
   dari MAX yang ada di DB), jadi dua produk tidak mungkin diam-diam saling
-  menimpa. SKU tetap boleh diketik manual; form sengaja membiarkannya kosong.
+   menimpa. SKU tetap boleh diketik manual; form sengaja membiarkannya kosong.
+   - **Foto produk** (kolom `image`): DB hanya menyimpan **nama file**
+     (`apps/api/data/img/`), bukan isi gambar — jadi foto tidak ikut naik-turun
+     lewat delta sync setiap penjualan. Upload lewat
+     `POST /api/products/:id/image` (data URL `image/jpeg|png|webp`; server yang
+     memperkecil ke thumbnail JPEG maks 512px), hapus dengan nilai `""`.
+     Isi gambarnya diunduh sekali lalu di-cache IndexedDB, jadi thumbnail tetap
+     tampil **offline**. Yang boleh dikirim lewat kolom `image` hanya nama
+     filenya (dicek regex anti path-traversal).
+   - **Diskon permanen** (`discount_type` + `discount`): `rp` (Rp1.500) atau
+     `pct` (10%). Tampil sebagai badge `-10%` / `-Rp500` dan harga coret di
+     kolom Harga; **POS memakai harga yang sama** (`hargaDiskon()`), jadi harga
+     diskon tidak perlu diketik ulang di kasir. `pct` dibulatkan ke ratusan,
+     `rp` dibatasi setara harga (tampilan tidak boleh menampilkan harga minus).
+   - **Tanggal kadaluarsa** (`expiry_date`, `YYYY-MM-DD`): isian muncul untuk
+     kategori **snack & eskrim** (`KATEGORI_KADALUARSA`) — produk yang sudah
+     punya tanggal tetap menampilkan isian walau kategorinya berubah. Baris
+     tabel menandainya: merah *lewat kadaluarsa*, amber *kadaluarsa ≤ 30 hari*.
 * Layar kasir (`#/pos`) **tidak memakai grid produk**. Satu input scan/ketik
   (barcode persis → SKU persis → nama mengandung) dengan dropdown hasil: ArrowUp /
   ArrowDown menyorot, Enter atau klik memasukkan ke keranjang, Escape menutup.
-  Mode: **Penjualan / Topup / Tarik** (bar yang sama). Topup-tarik memakai
-  `POST /api/topups`; admin terisi otomatis dari tier toko yang sama dengan
-  `GET /api/topups/suggest-admin`, dan bisa diedit kasir.
+   Mode: **Penjualan / Topup / Tarik** (bar yang sama). Topup-tarik memakai
+   `POST /api/topups`; admin terisi otomatis dari tier toko yang sama dengan
+   `GET /api/topups/suggest-admin`, dan bisa diedit kasir.
+  - **Diskon permanen terpakai otomatis di keranjang**: baris yang masuk
+    memecut `discount`/`discount_type` produk sebagai **prefill** (diskon Rp
+    dihitung per baris, persen dibulatkan ke ratusan), harga coret + harga
+    bersih tampil di kolom, dan total memakai `hargaDiskon()` yang sama dengan
+    tabel produk. Produk tanpa diskon = sel Diskon kosong.
+  - **Diskon per baris bisa diketik ulang kasir** (kolom **Diskon** di tabel
+    keranjang, satuan rupiah selalu) dan **diskon transaksi** (panel
+    **Diskon transaksi (Rp)** di kanan). Keduanya saling membatasi: diskon
+    baris tidak boleh melebihi `qty × harga`, diskon transaksi tidak boleh
+    melebihi `subtotal − Σ diskon baris`, dan TOTAL tidak pernah minus.
+    Semua dikirim ke `POST /api/sales` (`items[].discount` per baris,
+    `discount` transaksi) lalu **di-snapshot** ke `sale_items.discount` /
+    `sales.discount` — laporan `diskon` hari itu = keduanya dijumlah.
+  - **Strip peringatan stok menipis** di atas keranjang (mode Penjualan saja):
+    daftar maks 3 produk yang `stock ≤ min_stock` + tombol **Buka Stok** yang
+    menuju `#/stock`. Hanya kategori yang melacak stok; tanpa kandidat strip
+    tidak dirender sama sekali.
 * Tiap device kasir pakai **nama kasir berbeda** dan buka **shift sendiri**
   (1 shift terbuka per kasir, ditegakkan DB). Laporan harian menggabungkan semua shift.
 * Stok hanya untuk barang fisik (ATK, es krim/minuman/snack, rokok). Jasa/topup/cetak/desain `stock_track=0`.
@@ -143,16 +177,27 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   selamanya di cache IndexedDB. Dengan `deleted_at` + `version++`, tombstone ikut
   terkirim lewat `?since=` dan `syncMaster()` membuangnya. Jangan menghapus baris
   tombstone dari DB selama masih ada device kasir yang belum sinkron.
-* **Cetak label harga** (tombol **Label** di toolbar): mencetak label untuk
-  produk di **filter saat ini** — saring dulu lewat kolom cari kalau hanya mau
-  sebagian ("Aqua" -> 1 label). Dialog menampilkan jumlah, daftar, dan pratinjau
-  label lebar **32 kolom** sebelum dikirim; tombol cetak otomatis mati kalau
-  print-agent tidak terjangkau.
-  - Byte dibuat `apps/web/src/escpos.ts` (ESC/POS: INIT -> nama/SKU bold ->
-    harga **2x2** -> barcode -> FEED -> CUT per label), lalu POST ke print-agent.
-  - Barcode: **EAN13 / UPC-A / EAN8** (digit saja) dikirim sebagai barcode
-    asli; selain itu dicetak sebagai angka biasa — sengaja, salah byte CODE128
-    = label yang tidak bisa discan diam-diam.
+* **Tabel produk bisa diurutkan** (klik header: **Nama, Kategori, Harga, Stok**;
+  klik lagi membalik arah, panah di header menandai kolom & arahnya). Nama selalu
+  jadi tie-break, jadi dua produk berharga sama tidak berpindah-pindah tiap render.
+* **Cetak label harga — halaman sendiri** (`#/labels`, menu **Label harga** di
+  sidebar): panel **kiri 20%** berisi alat (cari, filter kategori, centang
+  massal, status print-agent) dan **pratinjau 80%** berisi kartu label per
+  produk — masing-masing menampilkan thumbnail, nama, SKU/barcode, dan label
+  yang persis akan dicetak.
+  - Yang **layak dicetak**: produk aktif, `price_dynamic ≠ 1`, harga > 0 —
+    produk harga-berubah-otomatis sengaja dilewati karena labelnya tidak bisa
+    menampilkan satu angka. Jumlah yang dilewati dilaporkan di footer alat.
+  - Semua produk layak **tercentang saat pertama buka**; pilihan tersimpan di
+    sesi (kosongkan / pilih ulang sesuai kebutuhan).
+  - Cetak butuh **print-agent hidup**: tombol mati + pesan jelas kalau
+    `${urlAgent()}/health` (default `:9100`) tidak menjawab.
+  - Byte tetap `apps/web/src/escpos.ts` (ESC/POS 32 kolom: nama/SKU bold ->
+    harga **2x2** -> barcode -> FEED -> CUT), digabung `gabungLabel()` lalu
+    `kirimPrint()`. Barcode **EAN13/UPC-A/EAN8** dikirim sebagai barcode asli,
+    selain itu dicetak angka biasa.
+  - Tombol **Label** lama di toolbar halaman Produk **dipindah ke halaman ini**
+    (satu pintu, bisa dipilih produknya, bukan cuma "yang sedang tampil").
   - Tanpa printer, print-agent menyimpan ke `apps/print-agent/out/*.bin`
     (bisa dicek/CUPS-kan manual), jadi alur ini bisa diuji tanpa hardware.
 * **Cetak struk otomatis** (saklar **Cetak struk otomatis** pada baris **Mode**,
@@ -160,7 +205,9 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   print-agent **sebelum** keranjang/state direset.
   - Struk disusun `struk()` di `apps/web/src/escpos.ts` — INIT -> nama toko
     (bold, rata tengah) -> tanggal/no transaksi/kasir/shift -> garis 32 kolom ->
-    item (`qty x nama` + line total) -> Subtotal/Diskon/**TOTAL** (bold)/Tunai/
+    item (`qty x nama` + line total; baris yang didiskon memunculkan baris
+    **Diskon item -Rp…** tepat di bawahnya) -> Subtotal/Diskon (total item +
+    diskon transaksi, bila ada)/**TOTAL** (bold)/Tunai/
     Kembalian -> kaki -> FEED -> CUT.
   - **Setiap baris diakhiri LF**; tanpa LF seluruh struk menempel jadi satu baris
     memanjang (firmware thermal memisah baris dengan LF, bukan FEED). Semua baris
@@ -186,13 +233,17 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   dari produk yang sudah ada, mis. *Bolpoin Snowman* punya warna hitam/merah/biru:
   cukup salin, ganti nama & barcode, selesai.
   - **Disalin**: kategori, satuan, harga beli, markup, harga jual, satuan jual
-    alternatif, stok minimum, saklar harga-dinamis.
+    alternatif, stok minimum, saklar harga-dinamis, **diskon permanen**
+    (`discount_type` + `discount`) dan **tanggal kadaluarsa** — keduanya ikut
+    terisi di form, tinggal dikosongkan kalau varian tidak boleh diskon.
   - **TIDAK disalin** (sengaja):
     - **SKU** — selalu baru. Diisi otomatis (`NAMA-2`, `-3`, ...) dan ikut
       digenerate ulang selama kasir belum mengetik SKU sendiri.
     - **Barcode** — dikosongkan, karena 1 barcode = 1 produk.
     - **Stok** — direset `0`. Varian baru belum tentu ada barang fisiknya;
       menyalin angkanya berarti menciptakan persediaan yang tidak ada.
+    - **Foto** — blok Foto hanya dirender mode Ubah (unggah butuh `product_id`,
+      dan endpointnya memang per id), jadi varian baru mulai tanpa foto.
   - **SKU wajib unik**: hint di bawah kolom menandai `unik` / `sudah dipakai!`
     secara live, dan tombol Simpan ditolak dengan toast bila SKU sudah dipakai
     produk lain. Tanpa cek ini, `POST /api/products` yang meng-*upsert* by SKU
@@ -203,13 +254,22 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   kerangka, kini terisi:
   - **Ringkasan**: jumlah produk dilacak stok, stok habis, stok menipis, dan
     nilai persediaan (`stok × modal rata-rata` — bukan `cost` manual).
-  - **Filter** Semua / Stok menipis / Stok habis plus pencarian (nama, SKU,
-    barcode, kategori). Urutan tabel diurutkan menurut urgensi: habis dulu,
-    lalu menipis, lalu aman.
+  - **Filter** Semua / Stok menipis / Stok habis / **Stok minus** plus pencarian
+    (nama, SKU, barcode, kategori). Urutan tabel diurutkan menurut urgensi:
+    minus dulu, lalu habis, lalu menipis, lalu aman. "Stok minus" hanya muncul
+    bermakna setelah pengaturan **Stok boleh minus** diaktifkan (lihat entri
+    **Pengaturan**); minus ≠ habis (0) dan ≠ menipis (butuh `min_stock > 0`).
   - **Restock & opname** langsung dari barisnya (dialog yang sama dengan
     halaman Produk), dan angka langsung ter-update setelah disimpan.
+  - **Riwayat mutasi** (ikon jam di tiap baris): modal **Riwayat stok —
+    &lt;produk&gt;** menampilkan 100 mutasi terakhir dari
+    `GET /api/stock-moves?product_id=&limit=100` — waktu, jenis (penjualan /
+    pembelian masuk / selisih hitung fisik / rusak-hilang), qty berwarna
+    (+hijau / −merah / 0 abu), keterangan (nama pembeli, kasir, nomor nota),
+    harga modal per mutasi, dan kasir. **Hanya baca** — semua tulis stok tetap
+    lewat tombol truk; tanpa mutasi ada pesan kosong, bukan tabel kosong.
   - **Ekspor** (tombol di toolbar): mengunduh `stok-ravaa.csv` berisi
-    `SKU,Nama,Stok,Stok minimum` untuk **baris yang sedang tampil** — ikut
+    `SKU,Nama,Stok` untuk **baris yang sedang tampil** — ikut
     filter dan pencarian, jadi "yang saya lihat = yang saya dapat".
   - **Impor** (tombol di toolbar): menerapkan angka stok dari CSV, dengan alur
     yang sama dengan impor produk (pilih file / tempel dari Excel ->
@@ -221,7 +281,7 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
       (`POST /api/stock-opname`). Pratinjau menampilkan kolom **Saat ini** dan
       **Sesudah**, jadi dampaknya terlihat sebelum satu pun angka berubah.
     - **Masuk barang tidak lewat impor** — alasannya dua-duanya fakta, bukan
-      selera: (1) format ekspor (`SKU,Nama,Stok,Stok minimum`) berisi
+      selera: (1) format ekspor (`SKU,Nama,Stok`) berisi
       hitungan **absolut**, jadi menjumlahkannya kembali akan **menggandakan
       stok** setiap kali file hasil unduh diimpor ulang; (2) berkasnya tidak
       punya kolom harga beli dan dialog tidak pernah mengirim `harga_beli`,
@@ -235,8 +295,13 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
       seperti dilakukan manual lewat tombol truk.
   - Hanya produk kategori `track_stock=1` yang tampil — jasa/cetak/desain/topup
     tidak punya stok.
-  - **Belum ada**: riwayat restock. Menampilkan `stock_moves` butuh endpoint
-    baca baru (`GET /api/stock-moves`) yang belum ada di kontrak §3.
+* **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — satu kartu yang
+  tumbuh sendiri: **Stok boleh minus** (`settings.allow_negative_stock`).
+  Daring = penjualan boleh membuat stok menembus nol (stok jadi angka minus dan
+  langsung terlihat di filter **Stok minus** halaman Stok); mati = `POST /api/sales`
+  menolak dengan 400 seperti perilaku lama. Nilainya disimpan lewat
+  `GET/POST /api/settings` (boolean sungguhan — angka `0`/`"ya"`/`null` ditolak
+  400), jadi HP kasir yang offline tetap memakai keputusan terakhir.
 * **HPP & laba (modal rata-rata)** — menutup celah "HPP rata-rata" di bawah.
   - Restock kini menerima **`harga_beli`** (opsional, isian "Harga beli / nota"
     di dialog stok, mode **Masuk barang**). Tidak diisi = rata-rata modal tidak
@@ -293,20 +358,31 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     memetakannya, `mapRows` tak pernah menyalinnya ke payload. Sekarang ikut
     tersimpan; ketahuan lewat test format Aronium.)
   - Tombol **Unduh template** mengunduh CSV `template-produk-ravaa.csv`
-    berisi **12 kolom — namanya persis label di form**, supaya kasir bisa
+    berisi **14 kolom — namanya persis label di form**, supaya kasir bisa
     mencocokkan kolom CSV dengan layar yang dia lihat:
 
     ```
     Nama,Kategori,SKU,Barcode,Satuan,Harga beli,Markup,Harga jual,
-    Boleh ubah harga saat jual,Aktif,Stok,Stok minimum
+    Boleh ubah harga saat jual,Aktif,Stok,Stok minimum,Diskon,Tanggal kadaluarsa
     ```
 
     Lima kolom Aronium sengaja tidak ikut karena memang tidak ada di form:
     `Tax`, `IsTaxInclusivePrice` (sistem pajak tidak dipakai), `Description`,
     `IsUsingDefaultQuantity`, `IsService`. **Parser tetap menerima semuanya**,
     jadi file ekspor Aronium lama (16 kolom) tetap bisa langsung diimpor.
+    Dua kolom terakhir (baru 2026-09-29) ditambahkan di **ujung** supaya file
+    yang sudah beredar tidak bergeser urutannya:
+    - **`Diskon`**: `1500` = Rp1.500, `10%` = 10 persen (tanpa tanda =
+      rupiah, sama seperti form). Sel **kosong = kolom absen = tidak diubah**
+      (produk lama tetap mempertahankan diskonnya), sedangkan `0` yang ditulis
+      eksplisit berarti *hapus diskon*.
+    - **`Tanggal kadaluarsa`**: `YYYY-MM-DD` (format ekspor) atau
+      `DD/MM/YYYY` / `DD-MM-YYYY` gaya Excel Indonesia — keduanya dinormalkan
+      ke ISO sebelum dikirim (server hanya menerima ISO). Tanggal yang tidak
+      ada di kalender (`31-02-2026`) gagal di pratinjau, bukan diterima diam.
     Tombol **Contoh format** lama sudah dihapus — digantikan tombol ini
-    (satu tombol, satu file, sudah berisi baris contoh).
+    (satu tombol, satu file, sudah berisi baris contoh: satu baris diskon
+    persen + satu baris diskon rupiah dengan tanggal kadaluarsa).
     Berbeda dari file ekspor Aronium yang beredar, template ini **tidak** memuat
     baris `Group 1`: kategori/satuan contohnya diambil dari **master hidup**,
     karena `Group 1` tidak ada di Ravaa dan akan membuat semua baris gagal
@@ -335,12 +411,14 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   - **Bukan `.xlsx`**: file itu ZIP+XML dan butuh dependensi parser — sengaja
     tidak dipasang. Jalan pintas Excel: Blok sel -> Ctrl+C -> tempel.
 * **Ekspor produk** (`#/products` -> tombol **Ekspor**): mengunduh
-  `produk-ravaa.csv` berisi **produk yang sedang tampil** — ikut filter status,
-  kategori, dan pencarian, sama lingkupnya dengan tombol **Label**
-  ("yang saya lihat = yang saya dapat").
-  - Urutan kolom **identik dengan `HEADER_TEMPLATE`** (12 kolom di atas), jadi
+  `produk-ravaa.csv` berisi **produk yang lolos filter saat ini** — ikut filter
+  status, kategori, dan pencarian ("yang saya lihat = yang saya dapat"; batas
+  render 50 baris tidak ikut membatasi — yang diekspor adalah seluruh hasil
+  filter yang sudah termuat).
+  - Urutan kolom **identik dengan `HEADER_TEMPLATE`** (14 kolom di atas), jadi
     hasil unduh bisa langsung dimasukkan lagi lewat tombol **Impor** tanpa
-    disesuaikan — bolak-balik utuh, dan itu diuji langsung (ekspor produk
+    disesuaikan — bolak-balik utuh (termasuk `Diskon` ditulis `10%`/`1500` dan
+    `Tanggal kadaluarsa` ISO), dan itu diuji langsung (ekspor produk
     diterima pembaca stok).
   - Kolom `Stok` ikut terbawa supaya bolak-baliknya lengkap. Mengimpor kembali
     memang menulis ulang angka stok, tapi dialog Impor selalu menampilkan
