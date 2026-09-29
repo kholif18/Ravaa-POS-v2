@@ -22,7 +22,8 @@ panel topup/laporan, modal struk, atau styling apa pun.
   .btn-outline-secondary/.btn-sm/.btn-lg)` 36px/teks 14 medium, `.input/.select`
   40px (deviasi 16px anti-zoom iOS), `.card` radius 10 + shadow-sm,
   `.table` (th 12px uppercase muted), `.badge-*` 12px medium,
-  `.modal-overlay(.active) > .modal(.wide)` (zoom-in 160ms),
+  `.modal-overlay(.is-open/.is-closing) > .modal(.wide)` (spring-in 180ms,
+  keluar 120ms — node dilepas modal.ts setelah 160ms),
   sidebar `#sidebar` 240px (`.collapsed` 72px, drawer HP ≤860px) + `.nav-dropdown(.open)`,
   tabs/pills segmented (kontainer muted, aktif kartu shadow-sm).
 * Ikon Lucide autentik inline SVG (`ui/icons.ts`, tanpa runtime dep).
@@ -34,7 +35,12 @@ panel topup/laporan, modal struk, atau styling apa pun.
   (→330px ≤1020px →1 kolom ≤860px); grid produk
   `repeat(auto-fill, minmax(150px, 1fr))`, min-tap produk 96px/stepper 30px.
 * Animasi (vanilla, hormat `prefers-reduced-motion`): view fade-slide 180ms,
-  modal zoom 160ms, toast slide-kanan, scrim/drawer 250ms, dropdown 300ms.
+  scrim modal 180ms masuk / 120ms keluar, modal spring-in 180ms
+  `cubic-bezier(.34,1.56,.64,1)` (overshoot halus) / keluar 120ms ease-in,
+  toast slide-kanan, drawer 250ms, dropdown 300ms. SweetAlert2 ikut kunci
+  yang sama lewat `--swal2-show-animation` / `--swal2-hide-animation`
+  (bukan override per-rule — var memang jalur bersih swal). Umpan balik tekan:
+  `.btn:active` dan `.sw-btn:active` scale 0.97 / 90ms.
 
 ## Pola interaksi baku kasir (jangan diubah tanpa persetujuan)
 
@@ -71,6 +77,12 @@ panel topup/laporan, modal struk, atau styling apa pun.
   kontras teks >= 4.5:1, dan labelnya tegas ("Ya, nonaktifkan" vs "Batal, jangan diubah").
   Ukur dengan `getComputedStyle` — jangan hanya cek `.textContent` (yang dulu lolos
   padahal tombolnya tak terlihat).
+  Ukuran popup diseragamkan dengan modal (2026-09-29, semua di `styles.css`
+  lewat var `--swal2-*`): popup `24rem` (384px) radius 16 + shadow-xl,
+  backdrop `rgb(24 24 27 / .5)` + blur 4px, judul 18px, isi 14px,
+  ikon box 56px (font-size 0.7rem — skalakan `font-size`, bukan cuma box,
+  karena geometri glyph ikon memakai `em`), padding judul `.75em 1.25em`,
+  aksi `1.125em auto 0`. Dark: popup `#18181b`, teks `#a1a1aa`.
 * CSS SweetAlert2 di-inject TANPA `@layer`; aturan ber-layer (Tailwind) kalah
   specificity. Naikkan specificity, jangan andalkan urutan.
 * Struk layar (modal `<pre>`) dan struk cetak HARUS dari builder yang sama

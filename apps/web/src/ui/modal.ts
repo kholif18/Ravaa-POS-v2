@@ -43,7 +43,7 @@ export function openModal(o: {
     gone = true;
     document.removeEventListener('keydown', onKey, true);
     // prefers-reduced-motion: animasi keluar dimatikan CSS, jadi node boleh
-    // dilepas sekarang juga — tidak usah menunggu 140ms yang tak terlihat.
+    // dilepas sekarang juga — tidak usah menunggu 120ms yang tak terlihat.
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
       overlay.remove();
     } else {
@@ -51,7 +51,7 @@ export function openModal(o: {
       // display:none di antaranya, jadi animasi keluar tetap jalan.
       overlay.classList.remove('is-open');
       overlay.classList.add('is-closing');
-      window.setTimeout(() => overlay.remove(), 200); // 140ms animasi + buffer
+      window.setTimeout(() => overlay.remove(), 160); // 120ms animasi keluar + buffer
     }
     prevFocus?.focus?.();
   };
@@ -59,7 +59,7 @@ export function openModal(o: {
     if (e.key !== 'Escape') return;
     // Modal bertumpuk (mis. konfirmasi di atas form): ESC hanya menutup yang teratas.
     // :not(.is-closing) — modal yang sedang menutup masih menempel di DOM selama
-    // animasi; kalau dihitung, ESC kedua dalam <140ms justru "tertahan" olehnya.
+    // animasi; kalau dihitung, ESC kedua dalam <120ms justru "tertahan" olehnya.
     const stack = document.querySelectorAll('.modal-overlay:not(.is-closing)');
     if (stack[stack.length - 1] !== overlay) return;
     e.stopPropagation();

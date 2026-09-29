@@ -192,6 +192,14 @@
   .btn svg {
     @apply size-4;
   }
+  /* Umpan balik tekan (sentuh): POS sering dijalankan di layar sentuh, dan
+     tanpa :active tombol terasa "mati" — layar tidak memberi balasan apa pun
+     saat ditekan. scale kecil + durasi pendek supaya tidak terasa lag.
+     `transition` pada .btn sudah mencakup transform (diverifikasi di build). */
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+    transition-duration: 90ms;
+  }
   .btn-primary {
     @apply bg-primary text-white hover:bg-primary-hover;
   }
@@ -236,32 +244,97 @@
    SweetAlert2 tidak menata tombol saat buttonsStyling:false, dan opsi
    confirmButtonColor/cancelButtonColor ikut diabaikan. Semua tampilan
    tombol karena itu di-holder di sini, bukan dari opsi swal.
-   Selector diberi prefix .swal2-container karena CSS swal di-inject TANPA
-   @layer — aturan unlayered menang atas aturan ber-layer, jadi specificity
-   harus dinaikkan manual. */
-@layer components {
-  .swal2-container .sw-actions {
-    @apply flex flex-row flex-wrap items-center justify-center gap-3;
-  }
-  .swal2-container .sw-btn {
-    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2 text-sm font-semibold transition-colors;
-  }
-  .swal2-container .sw-btn-primary {
-    @apply bg-primary text-white hover:bg-primary-hover;
-  }
-  .swal2-container .sw-btn-danger {
-    @apply bg-red-600 text-white hover:bg-red-700;
-  }
-  /* Batal = outline netral, selalu jelas berbeda dari tombol aksi. */
-  .swal2-container .sw-btn-ghost {
-    @apply border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
-  }
-  .swal2-container .sw-danger .swal2-icon {
-    @apply !border-red-500 !text-red-500;
-  }
-  .swal2-container .sw-danger .swal2-title {
-    @apply !text-red-600 dark:!text-red-400;
-  }
+   PENTING: blok ini SENGAJA DI LUAR @layer. CSS swal di-inject TANPA @layer,
+   dan aturan unlayered selalu menang atas aturan ber-layer apa pun
+   spesifisitasnya — aturan yang berada di dalam @layer components tidak akan
+   pernah mengalahkannya. Selectivity dinaikkan dengan prefix .swal2-container. */
+
+/* Ukuran & ruang diseragamkan dengan .modal (styles.css): default swal
+   512px / ikon 80px / judul 30px terlalu gemuk untuk konfirmasi kasir yang
+   muncul puluhan kali dalam satu shift. */
+.swal2-container {
+  --swal2-width: 24rem;
+  --swal2-padding: 0 0 1.125em;
+  --swal2-title-padding: 0.75em 1.25em 0;
+  --swal2-html-container-padding: 0.4em 1.5em 0.25em;
+  --swal2-actions-margin: 1.125em auto 0;
+  --swal2-border-radius: 1rem;
+  --swal2-background: #fff;
+  --swal2-color: #71717a;
+  --swal2-backdrop: rgb(24 24 27 / 0.5);
+  --swal2-backdrop-transition: background-color 180ms ease-out;
+  /* Animasi memakai keyframe modal-in/modal-out yang SAMA dengan modal
+     generik: mendarat dengan pantulan halus (back-out), keluar lebih cepat.
+     Swal menunggu `animationend` untuk melepas popup, jadi durasi di sini
+     ikut menentukan kapan dialog dilepas — dan saat animasinya dimatikan
+     (reduced-motion) Swal langsung melepas nodenya sendiri, karena
+     hasCssAnimation(popup) jadi false. */
+  --swal2-show-animation: modal-in 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --swal2-hide-animation: modal-out 120ms ease-in forwards;
+}
+/* Sama dengan backdrop-blur-sm pada .modal-overlay supaya scrim seragam. */
+.swal2-container.swal2-backdrop-show {
+  backdrop-filter: blur(4px);
+}
+/* Ikon 80 -> 56px. Yang diskalakan adalah font-size, BUKAN hanya box-nya:
+   geometri ikon (mis. garis X pada ikon error dihitung `top: 2.3125em`)
+   diukur dalam em terhadap font-size ikon, jadi mengecilkan lebar/tinggi
+   saja akan membuat isinya meluber keluar lingkaran. */
+.swal2-container .swal2-popup .swal2-icon {
+  font-size: 0.7rem;
+  margin-top: 1.75em;
+}
+/* Judul 30 -> 18px. Warna ditetapkan eksplisit: .swal2-title mewarisi
+   --swal2-color, dan var itu sekarang memakai teks muted milik kita. */
+.swal2-container .swal2-popup .swal2-title {
+  font-size: 1.125em;
+  color: #18181b;
+}
+/* Isi 16 -> 14px (setara .modal-body yang memakai text-sm). */
+.swal2-container .swal2-popup .swal2-html-container {
+  font-size: 0.875em;
+}
+/* .modal memakai rounded-2xl + shadow-xl; popup ikut sama supaya rasa
+   dialognya satu keluarga (token radius/ shadow yang sudah ada — bukan baru). */
+.swal2-container .swal2-popup {
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+[data-theme="dark"] .swal2-container {
+  --swal2-background: #18181b;
+  --swal2-color: #a1a1aa;
+}
+[data-theme="dark"] .swal2-container .swal2-popup .swal2-title {
+  color: #fafafa;
+}
+
+.swal2-container .sw-actions {
+  @apply flex flex-row flex-wrap items-center justify-center gap-3;
+}
+.swal2-container .sw-btn {
+  @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2 text-sm font-semibold transition;
+}
+/* Umpan balik tekan — sama dengan .btn:active, supaya rasanya seragam. */
+.swal2-container .sw-btn:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: 90ms;
+}
+.swal2-container .sw-btn-primary {
+  @apply bg-primary text-white hover:bg-primary-hover;
+}
+.swal2-container .sw-btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700;
+}
+/* Batal = outline netral, selalu jelas berbeda dari tombol aksi. */
+.swal2-container .sw-btn-ghost {
+  @apply border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
+}
+/* Wajib SETELAH aturan judul di atas: selector sama (0,3,0), jadi yang
+   menang adalah urutan — dan milik .sw-danger sudah memakai !important. */
+.swal2-container .sw-danger .swal2-icon {
+  @apply !border-red-500 !text-red-500;
+}
+.swal2-container .sw-danger .swal2-title {
+  @apply !text-red-600 dark:!text-red-400;
 }
 
 /* ---------- Komponen tabel, form, modal, toast (halaman data) ---------- */
@@ -498,21 +571,29 @@
   }
   .modal-overlay.is-open {
     @apply flex;
-    animation: modal-scrim-in 160ms ease-out;
+    animation: modal-scrim-in 180ms ease-out;
   }
   /* Sisi KELUAR butuh kelas .is-closing (dipasang modal.ts). Kalau cumu melepas
      .is-open, display langsung balik ke none dan animasi keluar tidak pernah
      sempat jalan — display tidak bisa ditransisikan. Kelas ini menahan
-     display:flex selama 140ms animasi, baru modal.ts melepas node-nya. */
+     display:flex selama 120ms animasi, baru modal.ts melepas node-nya.
+     pointer-events: none supaya scrim yang sudah tak terlihat namun masih
+     menempel (buffer sebelum node dilepas) tidak menelan klik halaman di
+     belakangnya. */
   .modal-overlay.is-closing {
     @apply flex;
-    animation: modal-scrim-out 140ms ease-in forwards;
+    animation: modal-scrim-out 120ms ease-in forwards;
+    pointer-events: none;
   }
   .modal-overlay.is-open .modal {
-    animation: modal-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    /* back-out = pantulan halus melewati 1 sebelum settle — dialog terasa
+       "mendarat", bukan melayang datar. */
+    animation: modal-in 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   .modal-overlay.is-closing .modal {
-    animation: modal-out 140ms ease-in forwards;
+    /* Keluar harus LEBIH CEPAT dari masuk: kasir menutup dialog berulang kali
+       dalam satu shift, dan animasi panjang di sisi keluar terasa antrean. */
+    animation: modal-out 120ms ease-in forwards;
   }
   @keyframes modal-scrim-in {
     from {
@@ -533,7 +614,7 @@
   @keyframes modal-in {
     from {
       opacity: 0;
-      transform: translateY(8px) scale(0.97);
+      transform: translateY(6px) scale(0.95);
     }
     to {
       opacity: 1;
@@ -547,7 +628,7 @@
     }
     to {
       opacity: 0;
-      transform: translateY(4px) scale(0.98);
+      transform: translateY(3px) scale(0.97);
     }
   }
   /* Modal: HANYA .modal-body yang menggulir — header & footer dibekukan.
@@ -605,12 +686,20 @@
 /* prefers-reduced-motion: matikan animasi modal. Sengaja di LUAR @layer —
    aturan unlayered menang atas ber-layer, jadi menimpa .modal-overlay.is-open
    tanpa perlu mengandalkan urutan atau !important. Pemanggilan di modal.ts
-   ikut menyesuaikan (langsung remove node, tanpa jeda 200ms). */
+   ikut menyesuaikan (langsung remove node, tanpa jeda 160ms). */
 @media (prefers-reduced-motion: reduce) {
   .modal-overlay.is-open,
   .modal-overlay.is-open .modal,
   .modal-overlay.is-closing,
   .modal-overlay.is-closing .modal {
     animation: none;
+  }
+  /* SweetAlert2: cukup matikan lewat variabelnya. Dampaknya dua arah —
+     dialog tampil/hilang seketika, dan karena animation-name jadi `none`,
+     hasCssAnimation(popup) ikut false sehingga Swal melepas popup-nya
+     seketika juga (bukan menunggu animationend yang tak akan pernah datang). */
+  .swal2-container {
+    --swal2-show-animation: none;
+    --swal2-hide-animation: none;
   }
 }
