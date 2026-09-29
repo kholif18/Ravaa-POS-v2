@@ -47,7 +47,7 @@ function cekPathAbsolut() {
 }
 
 const SUITE = [
-  ['importcsv-test.ts', 138],
+  ['importcsv-test.ts', 139],
   ['escpos-test.ts', 55],
   ['sku-urut-test.mjs', 17],
   ['product-delete-test.mjs', 31],

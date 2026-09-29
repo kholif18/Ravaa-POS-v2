@@ -327,11 +327,12 @@ console.log('=== I. Ekspor produk: kolom identik dengan template impor ===');
 console.log('=== J. Ekspor stok ===');
 {
   eq('csvStok kosong = header saja', csvStok([]), HEADER_STOK);
-  const t = csvStok([{ sku: 'PRD00001', name: 'Pulpen', stock: 50, min_stock: 5 }]);
-  eq('4 kolom', parseTable(t).rows[0].length, 4);
-  eq('Stok minimum = kolom ke-4', parseTable(t).rows[0][3], '5');
+  eq('header tanpa kolom yang tidak dibaca', HEADER_STOK, 'SKU,Nama,Stok');
+  const t = csvStok([{ sku: 'PRD00001', name: 'Pulpen', stock: 50 }]);
+  eq('3 kolom', parseTable(t).rows[0].length, 3);
+  eq('Stok = kolom ke-3', parseTable(t).rows[0][2], '50');
   ok('nama berkoma ikut dikutip RFC4180',
-    csvStok([{ sku: 'X', name: 'Kopi, hitam', stock: 1, min_stock: 0 }]).includes('"Kopi, hitam"'));
+    csvStok([{ sku: 'X', name: 'Kopi, hitam', stock: 1 }]).includes('"Kopi, hitam"'));
 }
 
 console.log('=== K. Pembaca stok: kolom lain dilewati, pemisah dideteksi ===');

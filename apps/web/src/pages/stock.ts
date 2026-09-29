@@ -493,9 +493,11 @@ function importStokForm(): void {
         </p>
         <p class="text-xs text-gray-500 dark:text-gray-400">
           Baris pertama = judul kolom. Wajib ada <b>SKU</b> dan <b>Stok</b>;
-          kolom lain (<b>Nama</b>, <b>Stok minimum</b>) boleh ada dan dilewati —
-          jadi hasil unduh halaman Stok maupun halaman Produk bisa langsung
-          dipakai. Bisa juga tempel tabel langsung dari Excel.
+          kolom lain (<b>Nama</b>, atau sisa kolom ekspor Produk) boleh ada dan
+          dilewati — jadi hasil unduh halaman Stok maupun halaman Produk bisa
+          langsung dipakai. Bisa juga tempel tabel langsung dari Excel.
+          <b>Stok minimum</b> sengaja tidak ada di sini: kolom itu tidak pernah
+          dibaca proses ini, dan mengubahnya hanya lewat halaman Produk.
         </p>
         <textarea id="st-text" rows="6" class="input font-mono text-xs" placeholder="${HEADER_STOK}" aria-label="Data stok CSV"></textarea>
         <div class="flex flex-wrap items-center gap-2">

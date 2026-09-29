@@ -132,8 +132,11 @@ try {
   ]);
   ok('nama file ekspor', /stok-ravaa\.csv$/.test(dl.suggestedFilename()), dl.suggestedFilename());
   const isi = fs.readFileSync(await dl.path(), 'utf8');
-  ok('ekspor memuat judul SKU,Nama,Stok,Stok minimum',
-    isi.includes('SKU,Nama,Stok,Stok minimum'));
+  // Judul diekstrak eksak (bukan includes) supaya kolom tambahan di belakangnya
+  // tidak ikut lolos — regressi: kolom "Stok minimum" pernah ikut terbawa
+  // padahal tidak pernah dibaca bacaStok().
+  const judul = isi.replace(/^\uFEFF/, '').split(/\r?\n/)[0];
+  ok('ekspor memuat judul SKU,Nama,Stok', judul === 'SKU,Nama,Stok', judul);
   const barisEkspor = isi.replace(/^\uFEFF/, '').split(/\r?\n/).filter(Boolean);
   ok('ekspor ikut filter pencarian (judul + 1 baris)',
     barisEkspor.length === 2, String(barisEkspor.length));

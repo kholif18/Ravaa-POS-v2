@@ -337,18 +337,22 @@ export function csvProduk(list: ProdukEkspor[]): string {
   return [HEADER_TEMPLATE, ...baris].join('\r\n');
 }
 
-/** Header ekspor stok. Hanya `SKU` dan `Stok` yang DIHARAPKAN oleh pembaca;
- *  dua kolom sisanya untuk manusia, dan sengaja dilewati saat impor — lihat
- *  `bacaStok`. */
-export const HEADER_STOK = 'SKU,Nama,Stok,Stok minimum';
+/** Header ekspor & template stok. Hanya `SKU` dan `Stok` yang DIHARAPKAN oleh
+ *  pembaca (`bacaStok`); `Nama` sekadar keterangan manufaktur. Kolom
+ *  `Stok minimum` DIBUANG 2026-09-29: ekspor pernah menulisnya tetapi impor
+ *  tidak pernah membacanya, jadi user yang mengubahnya lalu mengimpor ulang
+ *  mendapat diam-diam tanpa efek apa pun — kolom yang tidak diproses lebih
+ *  baik tidak ditawarkan sama sekali. Ambang minimum tetap diubah lewat form
+ *  Produk atau impor Produk (`min_stock` memang dibaca di sana). */
+export const HEADER_STOK = 'SKU,Nama,Stok';
 
 export interface StokEkspor {
-  sku: string; name: string; stock: number; min_stock: number;
+  sku: string; name: string; stock: number;
 }
 
 /** Isi CSV ekspor stok (halaman Stok): hanya produk `track_stock=1`. */
 export function csvStok(list: StokEkspor[]): string {
-  const baris = list.map((p) => [p.sku, p.name, p.stock, p.min_stock].map(sel).join(','));
+  const baris = list.map((p) => [p.sku, p.name, p.stock].map(sel).join(','));
   return [HEADER_STOK, ...baris].join('\r\n');
 }
 
@@ -371,8 +375,9 @@ export interface HasilBacaStok {
 /** Baca CSV/TSV daftar stok. Hanya kolom `SKU` dan `Stok` yang dipakai —
  *  kolom lain (termasuk seluruh kolom ekspor produk) dilewati, jadi file hasil
  *  unduh halaman Stok MAUPUN halaman Produk bisa ditempel apa adanya.
- *  Nama kolom dinormalisasi dulu (`stok-minimum` dan `Stok minimum` sama), dan
- *  fallback `stock`/`qty` dipakai supaya file ekspor Aronium lama tetap masuk. */
+ *  Nama kolom dinormalisasi dulu (huruf besar/kecil, titik/garis/kurung-bayang
+ *  diabaikan), dan fallback `stock`/`qty` dipakai supaya file ekspor Aronium
+ *  lama tetap masuk. */
 export function bacaStok(text: string): HasilBacaStok {
   const tb = parseTable(text);
   const norm = (s: string) => s.trim().toLowerCase().replace(/[.\-_]+/g, ' ');
