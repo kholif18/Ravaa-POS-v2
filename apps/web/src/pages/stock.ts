@@ -19,6 +19,7 @@
 import { apiGet, apiPost, HttpError } from '../api';
 import { getCachedProducts, type Category, type Product } from '../store';
 import { icon } from '../ui/icons';
+import { waktu } from '../ui/waktu';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { HEADER_STOK, bacaStok, csvStok, unduhCSV, type BarisStok } from '../importcsv';
@@ -453,16 +454,10 @@ const ALASAN: Record<StockMove['reason'], string> = {
   rusak: 'Rusak / hilang',
 };
 
-/** Waktu dari SQLite `datetime('now')` (UTC) ditampilkan APA ADANYA, tanpa
- *  dikonversi ke zona lokal. Konversi malah menipu: laporan harian juga memakai
- *  `date(created_at)` di sisi server, jadi angka tanggal di riwayat dan di
- *  laporan harus membaca jam yang sama. */
-function waktu(s: unknown): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(s ?? ''));
-  if (!m) return String(s ?? '—');
-  const bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-  return `${Number(m[3])} ${bulan[Number(m[2]) - 1]} ${m[1]} · ${m[4]}:${m[5]}`;
-}
+/** Waktu mutasi pakai `waktu()` dari `ui/waktu.ts` (satu sumber bersama dengan
+ *  halaman Riwayat transaksi): UTC ditampilkan apa adanya, tanpa konversi
+ *  zona lokal, supaya tanggal riwayat selalu sebidang dengan laporan harian
+ *  yang memakai `date(created_at)` di sisi server. */
 
 /** Keterangan kolom — alasan angka bergerak, plus rujukan bila ada. */
 function ket(m: StockMove): string {

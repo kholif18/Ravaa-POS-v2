@@ -37,6 +37,10 @@ apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync).
 apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
+apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
+                         linimasa penjualan + topup/tarik per hari; daftar dari
+                         GET /api/sales & /api/topups (filter hari sama dengan
+                         /api/reports/daily), isi nota dibuka lewat GET /api/sales/:id.
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
 apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): saklar
@@ -327,13 +331,35 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `sale_items` menyimpan `qty` & `price` DALAM SATUAN JUAL plus kolom `unit`
     (snapshot), sehingga laporan tidak mencampur "2 pack" dan "3 btl" jadi satu
     angka. Harga produk non-dinamis TIDAK boleh ditentukan client.
-* `GET /api/sales/:id`
+* `GET /api/sales/:id` -> `{data:{sale,items}}` (isi lengkap satu nota)
+* `GET /api/sales?date=&limit=&offset=`
+  -> `{data:[{id,shift_id,created_at,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
+  - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).
+    Read-only: tidak mengubah `products.version` dan tidak perlu.
+  - `date` default hari UTC (`YYYY-MM-DD`). Divalidasi round-trip
+    (`date('2026-02-31')` = NULL di SQLite -> halaman kosong palsu) -> selain
+    itu **400** `"date harus format YYYY-MM-DD"`.
+  - Filter `date(created_at)=date(?)` **SAMA PERSIS** dengan
+    `/api/reports/daily` — angka baris di Riwayat dan `sales.n` di Laporan
+    tidak boleh bisa berbeda.
+  - `limit` default 50, maks 200 (dibatasi server); `offset` default 0;
+    `total` = jumlah baris tanpa limit.
+  - `n_items` = jumlah `sale_items` per nota (subquery). Daftar sengaja TIDAK
+    menarik isi itemnya — isi diambil saat baris dibuka lewat `GET /api/sales/:id`,
+    jadi satu hari ratusan nota tidak ditarik sekaligus.
+  - Urutan `created_at DESC, rowid DESC` (yang terbaru di atas).
 * `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor,nominal>0,admin>=0,pay_method?,shift_id?,cashier?}`
   - `provider` = **kode jenis layanan** (bukan brand). Nilai yang digunakan POS:
     `E-WALLET | PULSA | PLN-TOKEN | PLN-BILL` (kind=topup) dan `TARIK-EWALLET | TARIK-BANK` (kind=tarik).
     Kontrak API tidak berubah; kolom tetap TEXT non-kosong. Penambahan brand
     (DANA/OVO/GoPay/BCA) dilakukan sebagai kolom baru jika dibutuhkan, bukan
     dengan mengubah `provider` menjadi opsional.
+* `GET /api/topups?date=&limit=&offset=` -> `{data:[<baris topup_txns>], total}`
+  - Daftar topup/tarik untuk menu **Riwayat transaksi**; aturan `date`
+    (validasi round-trip, default hari UTC, filter `date(created_at)=date(?)`),
+    `limit`/`offset`, dan urutan **sama persis** dengan `GET /api/sales`
+    di atas, supaya keduanya bisa digabung jadi satu linimasa tanpa tanggal
+    yang bertengkar.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
   -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock}}`

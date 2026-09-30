@@ -61,6 +61,7 @@ const SUITE = [
   ['e2e-duplikat.mjs', 37],
   ['e2e-aksi.mjs', 34],
   ['kategori-expiry-test.mjs', 14],
+  ['history-test.mjs', 23],
 ];
 
 let total = 0;

@@ -1,7 +1,7 @@
 import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'reports' | 'shifts' | 'settings';
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'history' | 'reports' | 'shifts' | 'settings';
 export type Route = 'pos' | AdminRoute;
 
 interface NavItem {
@@ -21,6 +21,8 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
       { route: 'labels', label: 'Label harga', icon: 'print' },
       { route: 'satuan', label: 'Satuan', icon: 'categories' },
       { route: 'stock', label: 'Stok', icon: 'stock' },
+      // Linimasa penjualan + topup/tarik per hari (baru 2026-09-30).
+      { route: 'history', label: 'Riwayat transaksi', icon: 'receipt' },
       { route: 'reports', label: 'Laporan', icon: 'reports' },
       { route: 'shifts', label: 'Shift Kasir', icon: 'shifts' },
     ],
@@ -40,6 +42,7 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   labels: 'Label harga',
   satuan: 'Satuan',
   stock: 'Stok',
+  history: 'Riwayat transaksi',
   reports: 'Laporan',
   shifts: 'Shift Kasir',
   settings: 'Pengaturan',
@@ -52,6 +55,7 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   labels: ['Menu', 'Label harga'],
   satuan: ['Menu', 'Satuan'],
   stock: ['Menu', 'Stok'],
+  history: ['Menu', 'Riwayat transaksi'],
   reports: ['Menu', 'Laporan'],
   shifts: ['Menu', 'Shift Kasir'],
   settings: ['Sistem', 'Pengaturan'],
@@ -64,6 +68,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   labels: 'Cetak label harga 32 kolom — alat di kiri, pratinjau label di kanan.',
   satuan: 'Master satuan untuk struk; form produk memilih dari daftar ini.',
   stock: 'Pantau stok menipis dan riwayat restock.',
+  history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
   reports: 'Laporan penjualan harian, per kategori, dan produk terlaris.',
   shifts: 'Buka dan tutup shift kasir beserta modalnya.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',

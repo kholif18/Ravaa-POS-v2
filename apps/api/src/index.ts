@@ -925,6 +925,48 @@ app.post('/api/sales', async (c) => {
   }
 });
 
+// ---------- riwayat transaksi (menu "Riwayat transaksi") ----------
+// Filter hari memakai `date(created_at) = date(?)` yang SAMA dengan
+// /api/reports/daily, dan defaultnya juga hari UTC yang sama
+// (`new Date().toISOString().slice(0,10)`), supaya jumlah baris di halaman
+// Riwayat dan angka `sales.n` di Laporan tidak mungkin berbeda.
+const RE_TGL = /^\d{4}-\d{2}-\d{2}$/;
+
+type Hari = { ok: true; hari: string; limit: number; offset: number } | { ok: false; error: string };
+
+function bacaHari(query: (k: string) => string | undefined): Hari {
+  const hari = query('date') ?? new Date().toISOString().slice(0, 10);
+  // Tanggal rusak harus 400, bukan diam-diam: `date('rabu')` = NULL di SQLite
+  // dan `date('2026-02-31')` ikut NULL — hasilnya halaman kosong yang seolah
+  // hari itu memang tidak ada transaksi. Round-trip memakai pola yang sama
+  // dengan validasi `expiry_date` (lihat POST /api/products).
+  const d = new Date(`${hari}T00:00:00Z`);
+  if (!RE_TGL.test(hari) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== hari) {
+    return { ok: false, error: 'date harus format YYYY-MM-DD' };
+  }
+  const limit = Math.min(Math.max(Number(query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(query('offset') ?? 0) || 0, 0);
+  return { ok: true, hari, limit, offset };
+}
+
+app.get('/api/sales', (c) => {
+  const h = bacaHari((k) => c.req.query(k));
+  if (!h.ok) return c.json({ error: h.error }, 400);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sales WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { n: number }).n;
+  // `n_items` dihitung per baris lewat subquery: daftar riwayat hanya perlu
+  // TAHU jumlah item ("3 item") — isi barisnya diambil saat dibuka lewat
+  // GET /api/sales/:id, jadi satu hari ratusan nota tidak ditarik sekaligus.
+  const data = db.prepare(
+    `SELECT s.*, (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS n_items
+       FROM sales s
+      WHERE date(s.created_at)=date(?)
+      ORDER BY s.created_at DESC, s.rowid DESC
+      LIMIT ? OFFSET ?`,
+  ).all(h.hari, h.limit, h.offset);
+  return c.json({ data, total });
+});
+
 app.get('/api/sales/:id', (c) => {
   const sale = db.prepare('SELECT * FROM sales WHERE id=?').get(c.req.param('id'));
   if (!sale) return c.json({ error: 'tidak ditemukan' }, 404);
@@ -956,6 +998,23 @@ app.post('/api/topups', async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan topup' }, 400);
   }
+});
+
+// Riwayat topup/tarik — aturan hari & halaman yang sama dengan GET /api/sales
+// di atas (lihat bacaHari), supaya keduanya digabung jadi satu linimasa tanpa
+// tanggal yang saling bertengkar.
+app.get('/api/topups', (c) => {
+  const h = bacaHari((k) => c.req.query(k));
+  if (!h.ok) return c.json({ error: h.error }, 400);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM topup_txns WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT * FROM topup_txns
+      WHERE date(created_at)=date(?)
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT ? OFFSET ?`,
+  ).all(h.hari, h.limit, h.offset);
+  return c.json({ data, total });
 });
 
 // Saran admin default (boleh diubah kasir per transaksi)

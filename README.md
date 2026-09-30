@@ -315,6 +315,27 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
       seperti dilakukan manual lewat tombol truk.
   - Hanya produk kategori `track_stock=1` yang tampil — jasa/cetak/desain/topup
     tidak punya stok.
+* **Riwayat transaksi** (`#/history`, menu **Riwayat transaksi** di sidebar,
+  baru 2026-09-30) — linimasa **penjualan + topup/tarik** digabung per hari:
+  - **Pemilih hari**: tanggal + tombol sebelumnya/berikutnya + **Hari ini**.
+    Harinya memakai UTC persis seperti `GET /api/reports/daily` (filter
+    `date(created_at)=date(?)`), jadi baris di halaman ini dan angka halaman
+    Laporan **tidak mungkin berbeda**. Tanggal rusak (`2026-02-31`, `rabu`)
+    ditolak 400 — bukan menghasilkan hari kosong palsu.
+  - **Ringkasan** kanan atas diambil dari `GET /api/reports/daily` (jumlah &
+    omzet penjualan, jumlah topup/tarik + nominal + admin) — bukan dihitung dari
+    daftar, supaya tetap benar walau daftar dibatasi 200 baris.
+  - **Tabel**: Waktu · Jenis (badge Penjualan / Topup / Tarik) · Keterangan
+    (`n item · Nota …` atau `layanan · nomor`) · Metode · Total. Klik baris ->
+    rincian terbuka: penjualan menarik **isi nota** lewat `GET /api/sales/:id`
+    (item + diskon per baris, subtotal, diskon transaksi, total, uang
+    diterima/kembali, kasir, shift) — hanya saat dibuka, jadi seratus nota
+    tidak ditarik sekaligus; topup/tarik menampilkan nominal/admin/nomor dari
+    baris yang sudah ada di daftar.
+  - **Tanpa pembatalan/refund**: riwayat bersifat catatan, sama seperti riwayat
+    mutasi stok. Koreksi lewat stok opname + transaksi baru.
+  - Endpoint baru: `GET /api/sales` dan `GET /api/topups`, keduanya berparameter
+    `date` / `limit` / `offset` (kontrak lengkap di AGENTS §3).
 * **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — satu kartu yang
   tumbuh sendiri: **Stok boleh minus** (`settings.allow_negative_stock`).
   Daring = penjualan boleh membuat stok menembus nol (stok jadi angka minus dan

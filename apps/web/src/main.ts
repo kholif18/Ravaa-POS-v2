@@ -1,4 +1,5 @@
 import { mountLabelsPage, unmountLabelsPage } from './pages/labels';
+import { mountHistoryPage } from './pages/history';
 import { mountPosPage, unmountPosPage } from './pages/pos';
 import { mountProductsPage } from './pages/products';
 import { mountSatuanPage } from './pages/satuan';
@@ -60,6 +61,11 @@ const PAGES: Record<AdminRoute, PagePlan> = {
     icon: 'stock',
     intro: 'Pantau stok menipis dan riwayat restock.',
     todo: ['Filter stok kritis', 'Riwayat restock', 'Stok opname'],
+  },
+  history: {
+    icon: 'receipt',
+    intro: 'Linimasa penjualan dan topup/tarik per hari — klik baris untuk membuka isinya.',
+    todo: ['Pilih hari (prev / next / Hari ini)', 'Gabung penjualan + topup/tarik', 'Ringkasan seangka halaman Laporan', 'Rincian item nota & pembayaran'],
   },
   reports: {
     icon: 'reports',
@@ -145,6 +151,9 @@ function render(): void {
   } else if (route === 'stock') {
     // Halaman Stok: ringkasan + restock/opname, state sendiri -> di-mount.
     void mountStockPage(page);
+  } else if (route === 'history') {
+    // Riwayat transaksi: linimasa penjualan + topup/tarik, state sendiri.
+    void mountHistoryPage(page);
   } else if (route === 'pos') {
     // POS: gate shift + keranjang, state sendiri -> di-mount.
     void mountPosPage(page);
