@@ -21,3 +21,46 @@ export function jam(s: unknown): string {
   const m = /[ T](\d{2}):(\d{2})/.exec(String(s ?? ''));
   return m ? `${m[1]}:${m[2]}` : '—';
 }
+
+/* ---------- pemilih hari (UTC) ----------
+ *
+ * Dipakai halaman Riwayat transaksi, Laporan, dan Dashboard. SATU implementasi
+ * untuk ketiganya supaya aturan harinya tidak bisa menyeleweng diam-diam:
+ * hari = UTC (`new Date().toISOString().slice(0,10)`, sama dengan default
+ * `date` di server dan filter `date(created_at)=date(?)`), geser hari pakai
+ * aritmetika UTC (tidak kena pergantian zona waktu lokal).
+ * Pindah dari salinan per-halaman 2026-09-30 saat halaman Dashboard dibuat. */
+
+/** Hari UTC hari ini — sama persis dengan default `date` di server. */
+export function hariIni(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Geser satu hari (delta boleh negatif) dengan aritmetika UTC. */
+export function geser(iso: string, delta: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return hariIni();
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+/** "30 September 2026" untuk judul pemilih hari. Input rusak dikembalikan apa adanya. */
+export function tglPanjang(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+/** "30/9" — label sumbu-X grafik yang lebarnya terbatas. */
+export function tglPendek(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'numeric', timeZone: 'UTC' });
+}
+
+/** "Sen" — hari pendek untuk label grafik. */
+export function hariPendek(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'UTC' });
+}

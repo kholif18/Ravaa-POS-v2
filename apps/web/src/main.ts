@@ -1,4 +1,5 @@
 import { mountLabelsPage, unmountLabelsPage } from './pages/labels';
+import { mountDashboardPage } from './pages/dashboard';
 import { mountHistoryPage } from './pages/history';
 import { mountReportsPage } from './pages/reports';
 import { mountPosPage, unmountPosPage } from './pages/pos';
@@ -41,7 +42,7 @@ const PAGES: Record<AdminRoute, PagePlan> = {
   dashboard: {
     icon: 'dashboard',
     intro: 'Ringkasan penjualan hari ini, shift berjalan, dan produk stok menipis.',
-    todo: ['Kartu ringkasan omzet', 'Grafik penjualan 7 hari', 'Status shift & outbox'],
+    todo: ['Kartu omzet, laba, topup & antrian offline', 'Grafik penjualan 7 hari (CSS)', 'Status shift kasir & outbox', 'Stok menipis'],
   },
   labels: {
     icon: 'print',
@@ -147,6 +148,9 @@ function render(): void {
   if (route === 'products') {
     // Halaman Produk punya state sendiri (filter, form, sync) -> di-mount, bukan string statis.
     void mountProductsPage(page);
+  } else if (route === 'dashboard') {
+    // Dashboard: 7 laporan harian + shift + outbox, state sendiri.
+    void mountDashboardPage(page);
   } else if (route === 'satuan') {
     void mountSatuanPage(page);
   } else if (route === 'stock') {

@@ -18,6 +18,7 @@
 
 import { apiGet, HttpError } from '../api';
 import { icon } from '../ui/icons';
+import { hariIni, geser, tglPanjang } from '../ui/waktu';
 import { unduhCSV } from '../importcsv';
 import { rp } from '../escpos';
 
@@ -63,24 +64,8 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : 'terjadi kesalahan';
 }
 
-/** Hari UTC hari ini — sama dengan default `date` di server. */
-function hariIni(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** Geser satu hari (prev/next) dengan aritmetika UTC. */
-function geser(iso: string, delta: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return hariIni();
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
-function tglPanjang(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-}
+// hariIni()/geser()/tglPanjang() pindah ke ui/waktu.ts 2026-09-30 — satu
+// implementasi UTC untuk Riwayat, Laporan, dan Dashboard.
 
 const METODE: Record<string, string> = { tunai: 'Tunai', qris: 'QRIS', transfer: 'Transfer' };
 const metode = (m: string) => METODE[m] ?? m;

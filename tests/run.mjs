@@ -63,6 +63,7 @@ const SUITE = [
   ['kategori-expiry-test.mjs', 14],
   ['history-test.mjs', 23],
   ['laporan-test.mjs', 16],
+  ['dashboard-test.mjs', 19],
 ];
 
 let total = 0;

@@ -315,6 +315,26 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
       seperti dilakukan manual lewat tombol truk.
   - Hanya produk kategori `track_stock=1` yang tampil — jasa/cetak/desain/topup
     tidak punya stok.
+* **Dashboard** (`#/dashboard`, rute pembuka `#/`, baru 2026-09-30) — halaman
+  pertama yang terbuka, ringkas untuk pemilik & kasir:
+  - **4 kartu**: Omzet hari ini (+jumlah transaksi), Laba hari ini, Topup &
+    tarik (nominal + admin), dan **Antrian offline** (`outboxCount()` dari
+    localStorage — naik otomatis kalau POS gagal menembak server; disegarkan
+    tiap 5 detik selama halaman terpasang, jadi angkanya tidak basi).
+  - **Grafik penjualan 7 hari**: batang **murni CSS** (tanpa chart-lib —
+    dilarang repo), tinggi relatif terhadap hari terlaris, hari ini ditandai
+    warna penuh; tiap batang membawa `data-tgl`/`data-omzet`/`data-n` dan
+    `title` lengkap, jadi angkanya bisa dicek tanpa membaca tinggi bar.
+  - **Status shift** dari `GET /api/shifts/open?cashier=` — **endpoint yang
+    sama dengan gerbang POS**, jadi "shift terbuka" di sini = shift yang
+    benar-benar bisa dipakai jualan; tanpa shift tersedia tombol ke POS.
+    Gagal cek (offline) hanya mengosongkan kartu ini, dashboard tetap tampil.
+  - **Stok menipis** (tautan ke halaman Stok) + tombol **Segarkan**.
+  - **Tanpa endpoint baru**: 7 pemanggilan paralel
+    `GET /api/reports/daily?date=` (hari ini + 6 sebelumnya) — seluruh angka
+    diambil apa adanya, tidak dihitung ulang di klien, jadi mustahil beda
+    dengan halaman Laporan. Hari UTC lewat `ui/waktu.ts` (satu implementasi
+    untuk Riwayat, Laporan, dan Dashboard).
 * **Riwayat transaksi** (`#/history`, menu **Riwayat transaksi** di sidebar,
   baru 2026-09-30) — linimasa **penjualan + topup/tarik** digabung per hari:
   - **Pemilih hari**: tanggal + tombol sebelumnya/berikutnya + **Hari ini**.

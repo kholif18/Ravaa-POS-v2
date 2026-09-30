@@ -37,6 +37,11 @@ apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync).
 apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
+apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
+                          omzet/laba/topup/outbox, grafik 7 hari murni CSS
+                          (7x GET /api/reports/daily paralel), status shift
+                          (GET /api/shifts/open?cashier=) + stok menipis.
+                          Seluruh angka diambil apa adanya dari API.
 apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          linimasa penjualan + topup/tarik per hari; daftar dari
                          GET /api/sales & /api/topups (filter hari sama dengan
@@ -59,7 +64,12 @@ apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                          default :9100). Dipanggil dari halaman Label harga dan dari
                          pay()/submitTopup() POS. PENTING: `teks()` tidak
                          menambah baris baru — setiap baris struk HARUS diakhiri
-                         LF, kalau tidak seluruh struk menempel jadi satu baris.
+                          LF, kalau tidak seluruh struk menempel jadi satu baris.
+apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
+                         adanya), hariIni()/geser()/tglPanjang()/tglPendek()/
+                         hariPendek() — SATU aturan hari UTC untuk Riwayat,
+                         Laporan, dan Dashboard (jangan tulis ulang di halaman
+                         baru: aritmetika tanggal harus lewat file ini).
 apps/print-agent/server.js  HTTP :9100 -> tulis bytes ke PRINTER_PATH|/dev/usb/lp0|file. TANPA deps.
 tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        run.mjs MENOLAK file hilang / crash / 0 asersi / jumlah
