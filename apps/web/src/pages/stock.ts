@@ -798,6 +798,11 @@ async function load(): Promise<void> {
             name: p.category_name,
             track_stock: p.track_stock,
             sort: 0,
+            // Fallback offline tanpa jawaban server: pengaturan `use_expiry`
+            // tidak ikut terbawa produk, jadi dianggap mati (field kadaluarsa
+            // disembunyikan) sampai GET /api/categories terjawab — lebih baik
+            // menebak nol daripada menampilkan kolom yang tidak diminta kategori.
+            use_expiry: 0,
           });
       }
       state.categories = [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'id'));

@@ -33,6 +33,8 @@ app.get('/api/categories', (c) => {
 
 // Tambah / ubah kategori (upsert by slug; slug tidak bisa diganti setelah dibuat).
 // track_stock=1 berarti SEMUA produk kategori ini melacak stok (butuh konfirmasi di UI).
+// use_expiry=1  berarti form produk kategori ini MENAMPILKAN "Tanggal kadaluarsa"
+//   (lihat kolom `categories.use_expiry`) — ini yang menggantikan hardcode snack/eskrim.
 // slug opsional: kalau kosong, diturunkan otomatis dari name (huruf kecil + strip).
 app.post('/api/categories', async (c) => {
   try {
@@ -52,13 +54,21 @@ app.post('/api/categories', async (c) => {
     if (!/^[a-z0-9-]+$/.test(slug)) return c.json({ error: 'slug hanya huruf kecil, angka, strip' }, 400);
     const track = body?.track_stock ? 1 : 0;
     const sort = Number(body?.sort ?? 0) || 0;
-    const existed = db.prepare('SELECT id FROM categories WHERE slug = ?').get(slug) as { id: number } | undefined;
+    const cur = db.prepare('SELECT id, use_expiry FROM categories WHERE slug = ?').get(slug) as
+      { id: number; use_expiry: number } | undefined;
+    // `use_expiry` DIKECUALIKAN dari pola "tidak dikirim = reset": tidak dikirim
+    // berarti TIDAK DIUBAH. Kalau direset seperti track_stock, skrip/upsert yang
+    // hanya mengganti nama kategori akan diam-diam mematikan tanggal kadaluarsa
+    // kategori — dan seluruh produknya mendadak kehilangan field itu di form.
+    const useExpiry =
+      body?.use_expiry === undefined ? (cur?.use_expiry ?? 0) : body.use_expiry ? 1 : 0;
     const row = db.prepare(
-      `INSERT INTO categories (slug, name, track_stock, sort) VALUES (?, ?, ?, ?)
-       ON CONFLICT(slug) DO UPDATE SET name = excluded.name, track_stock = excluded.track_stock, sort = excluded.sort
+      `INSERT INTO categories (slug, name, track_stock, sort, use_expiry) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(slug) DO UPDATE SET name = excluded.name, track_stock = excluded.track_stock,
+         sort = excluded.sort, use_expiry = excluded.use_expiry
        RETURNING *`,
-    ).get(slug, name, track, sort);
-    return c.json({ data: row }, existed ? 200 : 201);
+    ).get(slug, name, track, sort, useExpiry);
+    return c.json({ data: row }, cur ? 200 : 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan kategori' }, 400);
   }

@@ -29,7 +29,10 @@ export type Product = {
  *  satuan alternatif) atau satuan yang dipilih dari chip. */
 export type SaleUnit = { unit: string; factor: number; price: number | null };
 
-export type Category = { id: number; slug: string; name: string; track_stock: number; sort: number };
+/** `use_expiry` = 1: form produk kategori ini menampilkan "Tanggal kadaluarsa"
+ *  (lihat kolom `categories.use_expiry`). Nilai lama yang belum punya kolom ini
+ *  dibaca sebagai 0, jadi cache basi tidak perlu dinormalisasi. */
+export type Category = { id: number; slug: string; name: string; track_stock: number; sort: number; use_expiry: number };
 
 /** Master satuan. Tidak di-cache di IndexedDB (sama seperti kategori): diambil
  *  fresh dari server tiap buka halaman — daftarnya kecil dan jarang berubah. */

@@ -1,13 +1,15 @@
 -- Seed master awal. Dijalankan via apps/api/src/seed.ts (jangan sqlite3 manual di prod).
-INSERT OR IGNORE INTO categories (slug, name, track_stock, sort) VALUES
-  ('atk',    'ATK',            1, 10),
-  ('cetak',  'Cetak',          0, 20),
-  ('desain', 'Desain',         0, 30),
-  ('jasa',   'Jasa Ketik & Service', 0, 40),
-  ('topup',  'Topup & Tarik Tunai',  0, 50),
-  ('eskrim', 'Es Krim & Minuman',    1, 60),
-  ('snack',  'Snack',          1, 70),
-  ('rokok',  'Rokok',          1, 80);
+-- `use_expiry` = tampilkan field "Tanggal kadaluarsa" di form produk kategori tsb
+-- (pengganti hardcode snack/eskrim — bisa diubah pemilik lewat form Kategori).
+INSERT OR IGNORE INTO categories (slug, name, track_stock, sort, use_expiry) VALUES
+  ('atk',    'ATK',            1, 10, 0),
+  ('cetak',  'Cetak',          0, 20, 0),
+  ('desain', 'Desain',         0, 30, 0),
+  ('jasa',   'Jasa Ketik & Service', 0, 40, 0),
+  ('topup',  'Topup & Tarik Tunai',  0, 50, 0),
+  ('eskrim', 'Es Krim & Minuman',    1, 60, 1),
+  ('snack',  'Snack',          1, 70, 1),
+  ('rokok',  'Rokok',          1, 80, 0);
 
 -- Master satuan (WAJIB sebelum produk: products.unit REFERENCES units(slug)).
 -- '-' dipakai produk tanpa satuan (shortcut topup/tarik) -> ditampilkan kosong di UI.

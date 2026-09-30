@@ -65,17 +65,24 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
 
 * Master (kategori/produk/harga) hanya diubah via API server, client hanya cache.
   Kategori di-CRUD dari **sidebar Kategori di halaman Produk** (slug tak bisa
-  diganti; hapus ditolak bila masih ada produk). Kategori baru dari UI dev wajib
-  dituangkan juga ke `db/seed.sql` agar STB baru mulai dari master yang sama.
+  diganti; hapus ditolak bila masih ada produk). Dialognya memuat dua centang:
+  **Lacak stok** dan **Gunakan tanggal kadaluarsa** — yang kedua adalah
+  pengaturan server (`categories.use_expiry`) yang menentukan tampil/hilangnya
+  kolom **Tanggal kadaluarsa** di form produk kategori itu. Kategori baru dari UI
+  dev wajib dituangkan juga ke `db/seed.sql` agar STB baru mulai dari master yang sama.
 * **Master satuan** (`#/satuan`, menu sidebar): CRUD satuan struk (pcs, lembar,
   dus, ...). Tambah/ubah/hapus lewat UI; `slug` diturunkan otomatis dari nama dan
   terkunci setelah dibuat; satuan yang masih dipakai produk tidak bisa dihapus
   (server menolak dengan 400). Jumlah "Dipakai" dihitung server, jadi dialog hapus
   tidak pernah bilang "tidak dipakai" padahal ada produknya. Urutan tampil mengikuti
   alfabetis nama. Seed: 13 satuan, termasuk `Tanpa satuan` untuk shortcut topup/tarik.
-* **Form produk** (`#/products` -> Tambah/Edit) mengikuti layout Aronium: dua
-  seksi — **Detail produk** (nama, SKU, barcode, kategori, satuan) dan **Harga**
-  (harga beli, markup %, harga jual) — lalu blok **Stok** yang hanya muncul kalau
+* **Form produk** (`#/products` -> Tambah/Edit) memakai **modal 2 kolom ala
+  RPOS** (lebar `max-w-5xl`): kolom **kiri = kotak foto persegi** (seluruh kotak
+  diklik untuk pilih berkas; mode Tambah/Duplikat menampilkan placeholder karena
+  endpoint foto butuh id produk), kolom **kanan = form berseksi** — **Detail
+  produk** (nama, SKU, barcode, kategori, satuan), **Harga**
+  (harga beli, markup %, harga jual), **Diskon**, **Satuan jual**, lalu blok
+  **Stok** yang hanya muncul kalau
   kategori pilihan itu `track_stock=1`. Price change allowed ditulis "Boleh ubah
   harga saat jual" (switch, bukan checkbox kotak). `cost` + `markup` + `price`
   disimpan semua: mengubah `cost`/`markup` menghitung ulang `price` (dibulatkan
@@ -100,10 +107,14 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
      kolom Harga; **POS memakai harga yang sama** (`hargaDiskon()`), jadi harga
      diskon tidak perlu diketik ulang di kasir. `pct` dibulatkan ke ratusan,
      `rp` dibatasi setara harga (tampilan tidak boleh menampilkan harga minus).
-   - **Tanggal kadaluarsa** (`expiry_date`, `YYYY-MM-DD`): isian muncul untuk
-     kategori **snack & eskrim** (`KATEGORI_KADALUARSA`) — produk yang sudah
-     punya tanggal tetap menampilkan isian walau kategorinya berubah. Baris
-     tabel menandainya: merah *lewat kadaluarsa*, amber *kadaluarsa ≤ 30 hari*.
+    - **Tanggal kadaluarsa** (`expiry_date`, `YYYY-MM-DD`): isian muncul kalau
+      **kategori**-nya menyalakan centang *Gunakan tanggal kadaluarsa* di form
+      Kategori (seed: **snack & eskrim** menyala, sisanya mati). Aturannya ada di
+      server (`categories.use_expiry`), bukan daftar hardcode di klien — kategori
+      baru seperti Frozen food cukup dicentang pemilik. Produk yang sudah punya
+      tanggal tetap menampilkan isian walau kategorinya berubah atau pengaturan
+      dimatikan. Baris
+      tabel menandainya: merah *lewat kadaluarsa*, amber *kadaluarsa ≤ 30 hari*.
 * Layar kasir (`#/pos`) **tidak memakai grid produk**. Satu input scan/ketik
   (barcode persis → SKU persis → nama mengandung) dengan dropdown hasil: ArrowUp /
   ArrowDown menyorot, Enter atau klik memasukkan ke keranjang, Escape menutup.

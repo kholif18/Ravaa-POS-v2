@@ -33,7 +33,7 @@ const STATUSES: { key: StatusFilter; label: string }[] = [
   { key: 'semua', label: 'Semua' },
 ];
 
-type EditCat = { isNew: boolean; slug: string; name: string; track_stock: number };
+type EditCat = { isNew: boolean; slug: string; name: string; track_stock: number; use_expiry: number };
 
 /** Kolom yang bisa diurutkan dengan klik header. Default `nama` asc = urutan yang
  *  selama ini dipakai (load & sync mengurutkan nama), jadi tidak ada perubahan
@@ -179,12 +179,18 @@ function tglExpiry(iso: string): string {
   return new Date(t).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-/** Kategori yang memunculkan field Tanggal kadaluarsa (keputusan user:
- *  snack & es krim). Produk yang SUDAH punya tanggal tetap menampilkan fieldnya
- *  walau kategorinya berubah — data jangan pernah disembunyikan begitu saja. */
-const KATEGORI_KADALUARSA = new Set(['snack', 'eskrim']);
+/** Field "Tanggal kadaluarsa" di form produk tampil bila kategorinya MENYALAKAN
+ *  pengaturan `use_expiry` (checkbox "Gunakan tanggal kadaluarsa" di form
+ *  Kategori — lihat kolom `categories.use_expiry`). Pengganti daftar hardcode
+ *  snack/eskrim: kategori baru (mis. Frozen food) tinggal dicentang pemilik,
+ *  tanpa menyentuh kode.
+ *
+ *  Produk yang SUDAH punya tanggal tetap menampilkan fieldnya walau
+ *  kategorinya dipindah atau pengaturannya dimatikan — data jangan pernah
+ *  disembunyikan begitu saja (nilainya masih terkirim saat Simpan). */
 function perluExpiry(slug: string, adaNilai: boolean): boolean {
-  return adaNilai || KATEGORI_KADALUARSA.has(slug);
+  if (adaNilai) return true;
+  return state.categories.find((c) => c.slug === slug)?.use_expiry === 1;
 }
 
 
@@ -911,11 +917,7 @@ function productForm(
           <div class="field-sm">
             <label class="label" for="f-exp">Tanggal kadaluarsa</label>
             <input id="f-exp" type="date" class="input input-sm" value="${esc(d?.expiry_date ?? '')}" />
-            <span class="hint" id="f-exp-hint">${
-              perluExpiry(d?.category_slug ?? '', !!d?.expiry_date)
-                ? 'Diisi untuk snack &amp; es krim — tampil di tabel Produk dan dipakai peringatan stok.'
-                : 'Kategori ini tidak termasuk snack/eskrim, tapi tanggal tetap boleh diisi.'
-            }            </span>
+            <span class="hint" id="f-exp-hint"></span>
           </div>
         </div>
         </div><!-- /kolom kanan (form) -->
@@ -940,6 +942,7 @@ function productForm(
       const stockWrap = el.querySelector('#f-stock-wrap') as HTMLElement;
       const expWrap = el.querySelector('#f-exp-wrap') as HTMLElement;
       const expInput = el.querySelector('#f-exp') as HTMLInputElement;
+      const expHint = el.querySelector('#f-exp-hint') as HTMLElement;
       const discType = el.querySelector('#f-disc-type') as HTMLSelectElement;
       const discInput = el.querySelector('#f-disc') as HTMLInputElement;
       const discHint = el.querySelector('#f-disc-hint') as HTMLElement;
@@ -953,11 +956,18 @@ function productForm(
         trackHint.textContent = t
           ? 'Kategori ini melacak stok, jadi blok Stok di bawah aktif.'
           : `Kategori "${cats.find((c) => c.slug === catSel.value)?.name ?? ''}" tidak melacak stok (jasa/cetak/topup) — stok diisi lewat penjualan, bukan master.`;
-        // Kadaluarsa: hanya snack & es krim yang ditawari, TAPI produk yang sudah
-        // punya tanggal tetap menampilkan fieldnya — data tidak boleh disembunyikan
-        // begitu kategorinya dipindah (perluExpiry menilai keduanya).
+        // Kadaluarsa: tampil bila KATEGORI menyalakan `use_expiry` (checkbox di
+        // form Kategori). TAPI produk yang sudah punya tanggal tetap
+        // menampilkan fieldnya — data tidak boleh disembunyikan begitu
+        // kategorinya dipindah (perluExpiry menilai keduanya).
         const adaNilai = expInput.value.trim() !== '';
+        const nyalakan = cats.find((c) => c.slug === catSel.value)?.use_expiry === 1;
         expWrap.hidden = !perluExpiry(catSel.value, adaNilai);
+        expHint.textContent = nyalakan
+          ? 'Diisi untuk barang cepat basi — tampil di tabel Produk dan dipakai peringatan stok.'
+          : adaNilai
+            ? 'Kategori ini tidak menyalakan tanggal kadaluarsa, tapi produk ini sudah punya tanggal — kolomnya tetap ditampilkan supaya datanya tidak tersembunyi.'
+            : 'Kategori ini belum menyalakan tanggal kadaluarsa — centang di form Kategori bila produknya butuh.';
       };
 
       // --- harga: modal <-> markup <-> harga jual saling mengisi -------------
@@ -1527,11 +1537,18 @@ function categoryForm(cat: EditCat, cats: Category[]): void {
         <span>Lacak stok untuk semua produk kategori ini
           <span class="block text-xs text-gray-500 dark:text-gray-400">Hanya untuk barang fisik (ATK, es krim, snack, rokok). Jasa/cetak/desain/topup tidak melacak stok.</span>
         </span>
+      </label>
+      <label class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200">
+        <input id="c-exp" type="checkbox" class="mt-0.5 size-4 accent-primary" ${cat.use_expiry ? 'checked' : ''} />
+        <span>Gunakan tanggal kadaluarsa (expired)
+          <span class="block text-xs text-gray-500 dark:text-gray-400">Menampilkan kolom <b>Tanggal kadaluarsa</b> di form produk kategori ini — untuk barang cepat basi (snack, es krim, frozen food).</span>
+        </span>
       </label>`,
     onMount: ({ el, ok, close }) => {
       const name = el.querySelector('#c-name') as HTMLInputElement;
       const slug = el.querySelector('#c-slug') as HTMLInputElement;
       const track = el.querySelector('#c-track') as HTMLInputElement;
+      const pakaiExp = el.querySelector('#c-exp') as HTMLInputElement;
       // Slug SELALU diturunkan dari nama (kategori baru). Kolomnya readonly,
       // jadi tidak mungkin tidak sinkron dengan nama.
       if (cat.isNew) {
@@ -1559,6 +1576,7 @@ function categoryForm(cat: EditCat, cats: Category[]): void {
             slug: s,
             name: n,
             track_stock: track.checked ? 1 : 0,
+            use_expiry: pakaiExp.checked ? 1 : 0,
             sort: prev?.sort ?? 0,
           });
           toast(cat.isNew ? 'Kategori ditambahkan' : 'Kategori diperbarui', 'success');
@@ -1761,12 +1779,12 @@ function bind(): void {
     }),
   );
   find('#cat-new')?.addEventListener('click', () =>
-    categoryForm({ isNew: true, slug: '', name: '', track_stock: 0 }, state.categories),
+    categoryForm({ isNew: true, slug: '', name: '', track_stock: 0, use_expiry: 0 }, state.categories),
   );
   host.querySelectorAll<HTMLElement>('[data-cat-edit]').forEach((b) =>
     b.addEventListener('click', () => {
       const c = state.categories.find((x) => x.slug === b.dataset.catEdit);
-      if (c) categoryForm({ isNew: false, slug: c.slug, name: c.name, track_stock: c.track_stock }, state.categories);
+      if (c) categoryForm({ isNew: false, slug: c.slug, name: c.name, track_stock: c.track_stock, use_expiry: c.use_expiry }, state.categories);
     }),
   );
   host.querySelectorAll<HTMLElement>('[data-cat-del]').forEach((b) =>

@@ -8,7 +8,11 @@ CREATE TABLE IF NOT EXISTS categories (
   slug        TEXT NOT NULL UNIQUE,   -- atk, cetak, desain, jasa, topup, eskrim, snack, rokok
   name        TEXT NOT NULL,
   track_stock INTEGER NOT NULL DEFAULT 0,  -- 1 = barang fisik (kurangi stok saat jual)
-  sort        INTEGER NOT NULL DEFAULT 0
+  sort        INTEGER NOT NULL DEFAULT 0,
+  -- 1 = form produk kategori ini MENAMPILKAN "Tanggal kadaluarsa".
+  -- Pengganti daftar hardcode snack/eskrim: pemilik bisa menyalakan kategori
+  -- mana pun (mis. Frozen food) tanpa menyentuh kode.
+  use_expiry  INTEGER NOT NULL DEFAULT 0
 );
 
 -- Master satuan (CRUD di halaman #/satuan). Dipakai form produk sebagai dropdown.

@@ -16,6 +16,9 @@
   atau butuh tulis remote concurrent berat.
 * Stok dilacak HANYA untuk barang fisik (`categories.track_stock=1`):
   atk, eskrim, snack, rokok. Jasa/cetak/desain/topup: `track_stock=0`.
+* Tanggal kadaluarsa ditawarkan HANYA untuk kategori `categories.use_expiry=1`
+  (seed: snack + eskrim) — disetel pemilik lewat centang di form Kategori, bukan
+  hardcode.
 * Rokok: SKU bungkus dan ketengan TERPISAH (cth `PRD00015` bungkus vs `PRD00016` ketengan).
 * Topup/tarik: `nominal` bebas + `admin` editable per transaksi.
   `nominal` = mutasi modal, `admin` = pendapatan jasa, `total = nominal + admin`.
@@ -60,10 +63,19 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
 ## 3. Kontrak API (eksak — jangan mengarang endpoint lain)
 
 * `GET /health` -> `{ok:true}`
-* `GET /api/categories`
-* `POST /api/categories` `{name,slug?,track_stock?,sort?}` (upsert by slug; `slug` OPSIONAL —
+* `GET /api/categories` -> `{data}` (baris memuat `track_stock`, `sort`, **`use_expiry`**)
+* `POST /api/categories` `{name,slug?,track_stock?,sort?,use_expiry?}` (upsert by slug; `slug` OPSIONAL —
   bila kosong server turunkan otomatis dari `name` (lowercase `[a-z0-9-]`), client kirim
-  slug readonly. 200 update / 201 baru. Slum tidak bisa diganti setelah dipakai)
+  slug readonly. 200 update / 201 baru. Slug tidak bisa diganti setelah dipakai)
+  - **`use_expiry` (0/1)**: 1 = form produk kategori ini **menampilkan** kolom
+    `Tanggal kadaluarsa`. Aturannya DATA di server (kolom `categories.use_expiry`,
+    seed: snack + eskrim = 1), menggantikan daftar hardcode `KATEGORI_KADALUARSA`
+    yang pernah ada di klien. **DIKECUALIKAN dari pola "tidak dikirim = reset"**:
+    nilai lama dipertahankan — kalau di-reset seperti `track_stock`, upsert yang
+    hanya mengganti nama kategori akan diam-diam mematikan tanggal kadaluarsa
+    seluruh produk kategori itu. Dibaca klien lewat `perluExpiry()` di
+    `apps/web/src/pages/products.ts` (produk yang sudah punya tanggal tetap
+    menampilkan fieldnya).
 * `DELETE /api/categories/:slug` (400 bila masih ada produk — FK `products.category_id`, `foreign_keys=ON`; kategori bekas pakai praktis permanen)
 * `GET /api/units` -> `{data}` (urutan `name` alfabetis) + kolom **`dipakai`**
   (jumlah produk per satuan, dihitung server-side). WAJIB pakai angka ini untuk dialog hapus: menghitung dari cache
@@ -388,7 +400,14 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-09-29 (foto + diskon + kadaluarsa + pengaturan):**
+  **Migrasi terakhir 2026-09-30 (saklar kadaluarsa per kategori):** kolom
+  **`categories.use_expiry`** (re-create penuh, backup
+  `data.db.bak.use-expiry`) — seed menyalakannya untuk `snack` + `eskrim`.
+  Catatan: API `POST /api/categories` berjalan via **tsx watch**, jadi setelah
+  file DB diganti proses API **harus di-restart** (proses lama masih memegang
+  inode DB lama yang sudah terhapus) — `pkill -f 'tsx [w]atch'` lalu
+  `npm run dev:api`.
+  Migrasi sebelumnya 2026-09-29 (foto + diskon + kadaluarsa + pengaturan):
   kolom `products.image`, `products.discount_type`, `products.discount`,
   `products.expiry_date`, kolom `sale_items.discount`, dan **tabel `settings`**
   (re-create penuh, backup `data.db.bak.foto-diskon-kadaluarsa`). Seeder juga
@@ -423,6 +442,12 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   ```
   Folder thumbnail `apps/api/data/img/` dibuat sendiri oleh API saat unggah
   pertama — tidak perlu dibuat manual.
+  Migrasi 2026-09-30 (`categories.use_expiry`) di install yang TIDAK boleh
+  di-recreate:
+  ```sql
+  ALTER TABLE categories ADD COLUMN use_expiry INTEGER NOT NULL DEFAULT 0;
+  UPDATE categories SET use_expiry = 1 WHERE slug IN ('snack', 'eskrim');
+  ```
 
 ## 6. Troubleshooting yang sudah diketahui (fakta, bukan tebakan)
 
