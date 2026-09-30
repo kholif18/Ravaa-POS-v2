@@ -138,6 +138,15 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     daftar maks 3 produk yang `stock ≤ min_stock` + tombol **Buka Stok** yang
     menuju `#/stock`. Hanya kategori yang melacak stok; tanpa kandidat strip
     tidak dirender sama sekali.
+  - **Strip peringatan kadaluarsa** di bawahnya (juga mode Penjualan saja):
+    produk yang tanggalnya sudah lewat (**merah**, urutan pertama) atau
+    ≤ 30 hari (**kuning**) diambil dari cache `products.expiry_date` — tanpa
+    panggilan API, sama seperti strip stok menipis. Tombol **Buka Produk**
+    menuju `#/products`. Setiap **baris keranjang** ikut memakai badge yang sama
+    (`lewat kadaluarsa 20 Sep 2026` / `kadaluarsa 14 Okt 2026`), jadi kasir
+    melihatnya tepat saat barang diambil. Ambang & format tanggal dipakai
+    bersama dengan tabel Produk lewat `apps/web/src/ui/expiry.ts`
+    (`statusExpiry`, `tglExpiry`, `AMBAT_EXPIRY = 30`).
 * Tiap device kasir pakai **nama kasir berbeda** dan buka **shift sendiri**
   (1 shift terbuka per kasir, ditegakkan DB). Laporan harian menggabungkan semua shift.
 * Stok hanya untuk barang fisik (ATK, es krim/minuman/snack, rokok). Jasa/topup/cetak/desain `stock_track=0`.

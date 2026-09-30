@@ -24,6 +24,7 @@ import { kirimPrint, struk, type Struk } from '../escpos';
 import { toast } from '../ui/toast';
 import { openModal } from '../ui/modal';
 import { icon } from '../ui/icons';
+import { AMBAT_EXPIRY, statusExpiry, tglExpiry } from '../ui/expiry';
 
 /* ---------- tipe ---------- */
 
@@ -394,6 +395,55 @@ function stripStokMenipis(): string {
     </a>`;
 }
 
+/** Strip peringatan kadaluarsa di layar kasir — teman `stripStokMenipis()`.
+ *
+ *  Diambil dari cache lokal (produk + `expiry_date`, lihat `ui/expiry.ts`),
+ *  tanpa panggilan API, supaya layar kasir tidak pernah menunggu jaringan
+ *  untuk peringatan — persis alasan yang sama dengan strip stok menipis.
+ *  `lewat` (tanggal sudah dilewati) tampil MERAH dan didahulukan karena
+ *  barangnya tidak boleh terjual sama sekali; `dekat` (<= 30 hari) KUNING,
+ *  daftarnya urut begitu juga. Tanpa tanggal = tidak ikut dihitung. */
+function stripKadaluarsa(): string {
+  const daftar = products
+    .map((p) => ({ p, iso: p.expiry_date, s: statusExpiry(p.expiry_date) }))
+    .filter((x) => x.s === 'lewat' || x.s === 'dekat')
+    .sort((a, b) => (a.s === b.s ? 0 : a.s === 'lewat' ? -1 : 1));
+  if (!daftar.length) return '';
+  const adaLewat = daftar.some((x) => x.s === 'lewat');
+  const nLewat = daftar.filter((x) => x.s === 'lewat').length;
+  const nDekat = daftar.length - nLewat;
+  const tiga = daftar.slice(0, 3)
+    .map((x) => `${esc(x.p.name)} (${x.iso ? tglExpiry(x.iso) : '-'})`).join(', ');
+  const sisa = daftar.length > 3 ? `, +${daftar.length - 3} lainnya` : '';
+  const kepala = adaLewat
+    ? `<b>${nLewat} produk LEWAT kadaluarsa</b>${nDekat ? ` + ${nDekat} kadaluarsa ${AMBAT_EXPIRY} hari` : ''}`
+    : `<b>${nDekat} produk kadaluarsa ${AMBAT_EXPIRY} hari ke depan</b>`;
+  const warna = adaLewat
+    ? 'border-red-300 bg-red-50 text-red-800 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20'
+    : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20';
+  // Class `strip-low` WAJIB: ikonnya diukur dari `.strip-low svg` (styles.css),
+  // sama seperti strip stok menipis.
+  return `<a href="#/products" class="strip-low flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold ${warna}">
+      ${icon('alert')}
+      <span class="min-w-0 flex-1">${kepala}: ${tiga}${sisa}</span>
+      <span class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">Buka Produk ${icon('chevR')}</span>
+    </a>`;
+}
+
+/** Badge kadaluarsa untuk SATU baris keranjang: kasir melihatnya tepat saat
+ *  produk diambil, bukan setelah struk keluar. Item manual & produk tanpa
+ *  tanggal tidak menghasilkan apa-apa. */
+function expBarisKeranjang(product_id: number | null): string {
+  if (product_id === null) return '';
+  const p = products.find((x) => x.id === product_id);
+  if (!p || !p.expiry_date) return '';
+  const s = statusExpiry(p.expiry_date);
+  if (s !== 'lewat' && s !== 'dekat') return '';
+  return s === 'lewat'
+    ? ` · <span class="font-semibold text-red-600 dark:text-red-400">lewat kadaluarsa ${tglExpiry(p.expiry_date)}</span>`
+    : ` · <span class="font-semibold text-amber-600 dark:text-amber-400">kadaluarsa ${tglExpiry(p.expiry_date)}</span>`;
+}
+
 function cartHtml(): string {
   const scanBar = `
       <div class="card !p-3">
@@ -431,7 +481,7 @@ function cartHtml(): string {
   return `
   <div class="flex h-full min-h-0 flex-col gap-3">
     ${scanBar}
-    ${mode === 'jual' ? stripStokMenipis() : ''}
+    ${mode === 'jual' ? stripStokMenipis() + stripKadaluarsa() : ''}
     ${body}
   </div>`;
 }
@@ -645,7 +695,7 @@ function cartRows(): string {
       return `<tr data-key="${l.key}">
       <td class="td">
         <div class="cell-strong">${esc(l.name)}</div>
-        <div class="cell-sub">${l.sku}${l.product_id === null ? ' · item manual' : l.track_stock ? '' : ' · jasa'}${l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` · jual per ${l.unit}` : ''}</div>
+        <div class="cell-sub">${l.sku}${l.product_id === null ? ' · item manual' : l.track_stock ? '' : ' · jasa'}${l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` · jual per ${l.unit}` : ''}${expBarisKeranjang(l.product_id)}</div>
       </td>
       <td class="td td-num">${rp(l.price)}</td>
       <td class="td">

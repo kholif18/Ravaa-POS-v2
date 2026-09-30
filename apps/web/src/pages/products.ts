@@ -11,6 +11,7 @@ import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
+import { statusExpiry, tglExpiry } from '../ui/expiry';
 import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
 
 const SIDE_KEY = 'ravaa.prodside';
@@ -163,21 +164,8 @@ function hargaDiskon(p: Product): number | null {
   return d > 0 ? p.price - d : null;
 }
 
-/** Status kadaluarsa: `lewat` (melewati hari ini) / `dekat` (<= 30 hari) / `jauh`. */
-function statusExpiry(iso: string | null): 'lewat' | 'dekat' | 'jauh' | null {
-  if (!iso) return null;
-  const t = Date.parse(`${iso}T23:59:59`);
-  if (Number.isNaN(t)) return null;
-  const hari = (t - Date.now()) / 86_400_000;
-  return hari < 0 ? 'lewat' : hari <= 30 ? 'dekat' : 'jauh';
-}
-
-/** Tanggal kadaluarsa pendek ("15 Okt 2026"). */
-function tglExpiry(iso: string): string {
-  const t = Date.parse(`${iso}T00:00:00`);
-  if (Number.isNaN(t)) return iso;
-  return new Date(t).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-}
+/** Status kadaluarsa & format tanggalnya dipakai bersama dengan layar POS —
+ *  lihat `ui/expiry.ts` (statusExpiry, tglExpiry). */
 
 /** Field "Tanggal kadaluarsa" di form produk tampil bila kategorinya MENYALAKAN
  *  pengaturan `use_expiry` (checkbox "Gunakan tanggal kadaluarsa" di form
