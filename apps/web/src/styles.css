@@ -219,6 +219,15 @@
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300;
   }
+  /* Ikon di dalam chip harus DIPEGANG ukurannya: `icon()` sengaja tidak
+     menulis width/height (diatur CSS wadah — lihat komentar .strip-low svg),
+     dan tanpa aturan ini svg melebar mengikuti kontainer fleks. Terbukti sebelum
+     diperbaiki: chip ringkasan halaman Riwayat transaksi dan chip "Shift #1 ·
+     kasir" di POS jadi 40–90px tingginya. Pola yang sama dengan .btn svg,
+     .row-btn svg, dan .strip-low svg. */
+  .chip svg {
+    @apply size-4 shrink-0;
+  }
   .skel {
     @apply h-3 w-full animate-pulse rounded-full bg-gray-200 dark:bg-gray-700;
   }
