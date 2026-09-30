@@ -69,7 +69,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   satuan: 'Master satuan untuk struk; form produk memilih dari daftar ini.',
   stock: 'Pantau stok menipis dan riwayat restock.',
   history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
-  reports: 'Laporan penjualan harian, per kategori, dan produk terlaris.',
+  reports: 'Omzet, laba, HPP, rekap metode bayar, produk terlaris, dan stok menipis.',
   shifts: 'Buka dan tutup shift kasir beserta modalnya.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
 };

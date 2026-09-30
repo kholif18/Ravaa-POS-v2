@@ -1,5 +1,6 @@
 import { mountLabelsPage, unmountLabelsPage } from './pages/labels';
 import { mountHistoryPage } from './pages/history';
+import { mountReportsPage } from './pages/reports';
 import { mountPosPage, unmountPosPage } from './pages/pos';
 import { mountProductsPage } from './pages/products';
 import { mountSatuanPage } from './pages/satuan';
@@ -69,8 +70,8 @@ const PAGES: Record<AdminRoute, PagePlan> = {
   },
   reports: {
     icon: 'reports',
-    intro: 'Laporan penjualan harian, per kategori, dan produk terlaris.',
-    todo: ['Filter tanggal', 'Rekap per metode bayar', 'Ekspor CSV'],
+    intro: 'Laporan harian pemilik toko: omzet, laba, HPP, metode bayar, dan produk terlaris.',
+    todo: ['Filter tanggal (prev / next / Hari ini)', 'Kartu omzet, laba, HPP, diskon', 'Rekap per metode bayar', 'Topup & tarik di luar omzet', 'Produk terlaris 10 besar', 'Stok menipis', 'Ekspor CSV'],
   },
   shifts: {
     icon: 'shifts',
@@ -154,6 +155,9 @@ function render(): void {
   } else if (route === 'history') {
     // Riwayat transaksi: linimasa penjualan + topup/tarik, state sendiri.
     void mountHistoryPage(page);
+  } else if (route === 'reports') {
+    // Laporan harian: angka diambil utuh dari GET /api/reports/daily.
+    void mountReportsPage(page);
   } else if (route === 'pos') {
     // POS: gate shift + keranjang, state sendiri -> di-mount.
     void mountPosPage(page);

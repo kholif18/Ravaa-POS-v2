@@ -40,7 +40,12 @@ apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          linimasa penjualan + topup/tarik per hari; daftar dari
                          GET /api/sales & /api/topups (filter hari sama dengan
-                         /api/reports/daily), isi nota dibuka lewat GET /api/sales/:id.
+                          /api/reports/daily), isi nota dibuka lewat GET /api/sales/:id.
+apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
+                          pemilik — 4 kartu (omzet/laba/HPP/diskon), rekap metode
+                          bayar, topup & tarik, produk terlaris, stok menipis,
+                          ekspor CSV. SELURUH angka dari GET /api/reports/daily
+                          apa adanya (tanpa hitung ulang di klien).
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
 apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): saklar
