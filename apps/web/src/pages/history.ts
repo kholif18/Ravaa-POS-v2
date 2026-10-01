@@ -318,7 +318,10 @@ function renderTabel(): string {
 function paint(): void {
   const body = host?.querySelector('#h-body');
   if (!body) return;
-  body.innerHTML = kepala() + renderTabel();
+  // Jarak antar blok: kartu toolbar (kepala) dan tabel — persis pola halaman
+  // Dashboard/Laporan/Shift (`kepala() + <div class="mt-3 …">`). Tanpa pembungkus
+  // ini kartu toolbar menempel langsung ke card-flush (tidak ada celah sama sekali).
+  body.innerHTML = kepala() + `<div class="mt-3">${renderTabel()}</div>`;
   bind();
 }
 
