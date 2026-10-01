@@ -54,6 +54,11 @@ try {
     ok('isi nota (GET /api/sales/:id) cocok dengan n_items di daftar',
       isi.status === 200 && isi.body.data.items.length === b0.n_items,
       `items=${isi.body.data.items?.length} n_items=${b0.n_items}`);
+    // base_unit ikut terkirim sejak cetak ulang struk (P3/F1): struk hanya
+    // mencetak unit penjualan bila berbeda dari satuan dasar produknya.
+    ok('isi nota memuat base_unit (dasar cetak ulang struk)',
+      isi.status === 200 && isi.body.data.items.every((it) => 'base_unit' in it),
+      JSON.stringify(isi.body.data.items?.[0] ?? null).slice(0, 200));
   }
 
   console.log('=== B. limit/offset & tanggal rusak ===');
@@ -123,6 +128,19 @@ try {
       await page.locator('#page tbody tr[data-trx]').first().click();
       await page.waitForTimeout(1000);
       ok('klik baris -> rincian terbuka', await page.locator('#page tbody tr.det-row').count() === 1);
+
+      // Cetak ulang struk (P3/F1): tombol ada di kartu Pembayaran rincian nota.
+      // Print-agent (:9100) boleh hidup (toast sukses) atau mati (toast gagal) —
+      // dua-duanya memuat kata "Struk", yang dilarang hanya error console/crash.
+      await page.waitForSelector('[data-reprint]', { timeout: 8000 });
+      const nTombol = await page.locator('[data-reprint]').count();
+      ok('rincian penjualan punya tombol "Cetak ulang struk"', nTombol === 1,
+        `jumlah=${nTombol}`);
+      await page.locator('[data-reprint]').click();
+      await page.waitForTimeout(2500);
+      const toastTxt = (await page.locator('#toast-root .toast').allInnerTexts()).join(' ');
+      ok('klik cetak ulang -> toast "Struk ..." (sukses/tidak tercetak)',
+        /Struk/i.test(toastTxt), toastTxt.slice(0, 160));
     }
 
     const sebelum = await page.locator('#h-date').inputValue();

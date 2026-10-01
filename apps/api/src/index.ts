@@ -1017,7 +1017,16 @@ app.get('/api/sales', (c) => {
 app.get('/api/sales/:id', (c) => {
   const sale = db.prepare('SELECT * FROM sales WHERE id=?').get(c.req.param('id'));
   if (!sale) return c.json({ error: 'tidak ditemukan' }, 404);
-  const items = db.prepare('SELECT * FROM sale_items WHERE sale_id=?').all(c.req.param('id'));
+  // base_unit (LEFT JOIN products) ditambahkan 2026-10-01 untuk CETAK ULANG
+  // struk dari halaman Riwayat: struk asli hanya mencetak `unit` bila satuan
+  // jualnya BUKAN satuan dasar, dan sale_items hanya menyimpan satuan jual —
+  // tanpa satuan dasar saat ini, riwayat tidak bisa memutuskan sama persis
+  // seperti yang dilakukan POS. Produk terhapus pun tetap ikut (LEFT JOIN).
+  const items = db.prepare(
+    `SELECT si.*, p.unit AS base_unit
+       FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
+      WHERE si.sale_id=?`,
+  ).all(c.req.param('id'));
   return c.json({ data: { sale, items } });
 });
 

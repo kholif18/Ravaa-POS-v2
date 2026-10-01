@@ -61,7 +61,7 @@ const SUITE = [
   ['e2e-duplikat.mjs', 37],
   ['e2e-aksi.mjs', 34],
   ['kategori-expiry-test.mjs', 14],
-  ['history-test.mjs', 23],
+  ['history-test.mjs', 26],
   ['laporan-test.mjs', 16],
   ['dashboard-test.mjs', 19],
   ['shift-test.mjs', 19],

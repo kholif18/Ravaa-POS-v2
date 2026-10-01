@@ -17,7 +17,9 @@
 import { apiGet, HttpError } from '../api';
 import { icon } from '../ui/icons';
 import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
-import { rp } from '../escpos';
+import { toast } from '../ui/toast';
+import { getToko } from '../ui/user';
+import { rp, struk, kirimPrint, type Struk } from '../escpos';
 
 /* ---------- tipe ---------- */
 
@@ -36,6 +38,9 @@ type TopupRow = {
 type ItemRow = {
   id: number; sale_id: string; product_id: number | null; name: string;
   qty: number; price: number; amount: number; discount: number; unit: string;
+  /** Satuan dasar produk SAAT INI (GET /api/sales/:id, LEFT JOIN products).
+   *  Dipakai cetak ulang: struk hanya mencetak `unit` bila bukan satuan dasar. */
+  base_unit?: string | null;
 };
 
 type Ringkas = {
@@ -198,6 +203,9 @@ function detailJual(s: SaleRow): string {
       <div class="mt-2 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500">
         Nota ${esc(s.id)}<br />${esc(waktu(s.created_at))}
       </div>
+      <button type="button" data-reprint="${esc(s.id)}" class="btn btn-primary mt-3 w-full justify-center">
+        ${icon('print')}<span>Cetak ulang struk</span>
+      </button>
     </div>
   </div>`;
 }
@@ -359,6 +367,14 @@ function bind(): void {
       else paint();
     }),
   );
+  // Cetak ulang struk (P3): baris detail adalah <tr> TERPISAH tanpa data-trx,
+  // jadi klik tombol di dalamnya tidak ikut menutup/membuka baris linimasa.
+  root.querySelectorAll<HTMLElement>('[data-reprint]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const s = state.sales.find((x) => x.id === b.dataset.reprint);
+      if (s) void cetakUlang(s);
+    }),
+  );
 }
 
 /** Ambil isi nota sekali per baris yang dibuka (GET /api/sales/:id sudah ada
@@ -375,6 +391,66 @@ async function bukaDetail(id: string): Promise<void> {
   }
   state.detMuat = false;
   if (host?.isConnected) paint();
+}
+
+/** Waktu untuk baris meta struk: created_at disimpan UTC (datetime('now')),
+ *  diformat ulang sebagai waktu LOKAL dengan format yang sama persis seperti
+ *  struk asli dari POS (waktuStruk di pos.ts) — struk ulang terlihat identik. */
+function waktuStrukRiwayat(createdAt: string): string {
+  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(createdAt) || createdAt.includes('T')
+    ? createdAt
+    : `${createdAt.replace(' ', 'T')}Z`;
+  return new Date(t).toLocaleString('id-ID', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+/** Cetak ulang struk satu nota dari data Riwayat. Susunan Struk MENIRU pay()
+ *  di pos.ts (judul/meta/item/subtotal-diskon-total/tunai) supaya hasilnya sama
+ *  dengan struk asli saat penjualan. Gagal cetak TIDAK membatalkan apa pun —
+ *  hanya toast, seperti alur POS. */
+async function cetakUlang(s: SaleRow): Promise<void> {
+  try {
+    // Item dipakai kalau rincian nota ini sudah termuat; kalau belum (klik
+    // kilat selesai GET), ambil sendiri — struk tanpa baris item = struk bohong.
+    let items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
+    if (!items.length) {
+      const j = await apiGet<{ data: { items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
+      items = j.data.items;
+    }
+    const discBaris = Math.max(0, s.subtotal - s.discount - s.total); // lihat detailJual
+    const strukUlang: Struk = {
+      judul: getToko(),
+      meta: [
+        `${waktuStrukRiwayat(s.created_at)} · No. ${s.id.slice(0, 8)}`,
+        `Kasir: ${s.cashier}`,
+        `Shift: ${s.shift_id ?? '—'}`,
+      ],
+      items: items.map((i) => ({
+        name: i.name, qty: i.qty, price: i.price,
+        // Cetak unit hanya bila bukan satuan dasar — aturan yang sama dengan
+        // StrukItem.unit di pos.ts (dasar via base_unit dari server).
+        ...(i.unit && i.base_unit && i.unit !== i.base_unit ? { unit: i.unit } : {}),
+      })),
+      baris: [
+        { kiri: 'Subtotal', kanan: rp(s.subtotal) },
+        ...(discBaris > 0 ? [{ kiri: 'Diskon item', kanan: `-${rp(discBaris)}` }] : []),
+        ...(s.discount > 0 ? [{ kiri: 'Diskon', kanan: `-${rp(s.discount)}` }] : []),
+        { kiri: 'TOTAL', kanan: rp(s.total), tebal: true },
+        ...(s.pay_method === 'tunai' && s.cash_in > 0
+          ? [
+              { kiri: 'Tunai', kanan: rp(s.cash_in) },
+              { kiri: 'Kembalian', kanan: rp(s.change) },
+            ]
+          : [{ kiri: metode(s.pay_method), kanan: rp(s.total) }]),
+      ],
+      kaki: ['Terima kasih sudah berbelanja'],
+    };
+    await kirimPrint(struk(strukUlang));
+    toast(`Struk ${s.id.slice(0, 8)} dicetak ulang`, 'success');
+  } catch (e) {
+    toast(`Struk tidak tercetak: ${errMsg(e)}`, 'warning', 9000);
+  }
 }
 
 /* ---------- muat ---------- */
