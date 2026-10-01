@@ -69,5 +69,8 @@ UNION ALL SELECT c.id, 'PRD00018', 'Tarik tunai (nominal bebas)', '-', 0, 1 FROM
 
 -- Pengaturan default. '0' = stok TIDAK boleh minus (penjualan melebihi stok
 -- ditolak 400 — perilaku asli repo); pemilik mengubahnya lewat halaman #/settings.
+-- '0' kedua = barang kadaluarsa MASIH boleh terjual (hanya strip/badge visual di
+-- POS); '1' = POST /api/sales menolak baris yang expiry_date-nya sudah lewat.
 -- INSERT OR IGNORE: seed ulang tidak mereset pilihan yang sudah diubah pemilik.
 INSERT OR IGNORE INTO settings (key, value) VALUES ('allow_negative_stock', '0');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('tolak_jual_kadaluarsa', '0');

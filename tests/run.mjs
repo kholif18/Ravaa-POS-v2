@@ -66,6 +66,7 @@ const SUITE = [
   ['dashboard-test.mjs', 19],
   ['shift-test.mjs', 19],
   ['foto-tambah-test.mjs', 10],
+  ['kadaluarsa-jual-test.mjs', 17],
 ];
 
 let total = 0;

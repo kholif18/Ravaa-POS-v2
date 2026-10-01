@@ -819,8 +819,14 @@ const insertSale = db.transaction((sale: {
 
   // Dibaca sekali per penjualan, langsung dari DB: aturan stok tidak boleh
   // berdasarkan cache client, karena client bisa offline dan berbeda pendapat
-  // dengan server tentang boleh-tidaknya stok minus.
+  // dengan server tentang boleh-tidaknya stok minus. Aturan kadaluarsa dibaca
+  // dengan cara yang sama.
   const bolehMinus = settingBool(K_STOK_MINUS, false);
+  const tolakKadaluarsa = settingBool(K_TOLAK_KADALUARSA, false);
+  // Satu aturan hari UTC (sama dengan history/reports/dashboard): hari
+  // kadaluarsa = expiry_date yang sama dengan hari ini MASIH sah, hanya
+  // tanggal yang sudah lewat yang ditolak.
+  const hariIniUtc = new Date().toISOString().slice(0, 10);
 
   let subtotal = 0;
   let totalDiscBaris = 0;
@@ -838,10 +844,17 @@ const insertSale = db.transaction((sale: {
         `SELECT p.*, c.track_stock FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=? AND p.is_active=1`,
       ).get(pid) as {
         id: number; name: string; unit: string; price: number; price_dynamic: number; stock: number;
-        track_stock: number; avg_cost: number;
+        track_stock: number; avg_cost: number; expiry_date: string | null;
       } | undefined;
       if (!p) throw new Error(`produk #${pid} tidak aktif/tidak ada`);
       name = p.name;
+      // Tolak jual kadaluarsa (pengaturan, default MATI): pantau per baris,
+      // bukan per transaksi — satu keranjang campuran (snack basi + minuman
+      // segar) tetap ditolak seluruhnya dengan nama barang yang jelas. Item
+      // manual (pid=null) tidak punya tanggal, jadi tidak kena cek ini.
+      if (tolakKadaluarsa && p.expiry_date && p.expiry_date < hariIniUtc) {
+        throw new Error(`barang kadaluarsa: ${p.name} (berakhir ${p.expiry_date})`);
+      }
       // Resolusi SATUAN & HARGA sepenuhnya di server. Client hanya mengirim
       // unit terpilih + (untuk produk dinamis) harga; harga produk non-dinamis
       // tidak boleh ditentukan dari client.
@@ -1064,26 +1077,45 @@ app.get('/api/topups/suggest-admin', (c) => {
 // sebagai boolean betulan, karena menebak '1'/true/'ya' dari client adalah
 // cara pasti membuat dua device memahami aturan yang berbeda.
 const K_STOK_MINUS = 'allow_negative_stock';
+const K_TOLAK_KADALUARSA = 'tolak_jual_kadaluarsa';
 
 function settingBool(key: string, bawaan: boolean): boolean {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row ? row.value === '1' : bawaan;
 }
 
-app.get('/api/settings', (c) => c.json({ data: { allow_negative_stock: settingBool(K_STOK_MINUS, false) } }));
+app.get('/api/settings', (c) => c.json({ data: {
+  allow_negative_stock: settingBool(K_STOK_MINUS, false),
+  tolak_jual_kadaluarsa: settingBool(K_TOLAK_KADALUARSA, false),
+} }));
 
+// Kedua kunci OPSIONAL: yang tidak dikirim TIDAK diubah (update parsial),
+// minimal satu wajib ada. Angka 0/1, "ya", null tetap ditolak — client harus
+// mengirim boolean sungguhan untuk setiap kirimannya.
 app.post('/api/settings', async (c) => {
   try {
     const body = await c.req.json();
-    const v = body?.allow_negative_stock;
-    if (typeof v !== 'boolean') {
+    const vMinus = body?.allow_negative_stock;
+    const vKadaluarsa = body?.tolak_jual_kadaluarsa;
+    if (vMinus !== undefined && typeof vMinus !== 'boolean') {
       return c.json({ error: 'allow_negative_stock harus boolean (true|false)' }, 400);
     }
-    db.prepare(
+    if (vKadaluarsa !== undefined && typeof vKadaluarsa !== 'boolean') {
+      return c.json({ error: 'tolak_jual_kadaluarsa harus boolean (true|false)' }, 400);
+    }
+    if (vMinus === undefined && vKadaluarsa === undefined) {
+      return c.json({ error: 'tidak ada pengaturan yang dikirim (allow_negative_stock / tolak_jual_kadaluarsa)' }, 400);
+    }
+    const simpan = db.prepare(
       `INSERT INTO settings (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    ).run(K_STOK_MINUS, v ? '1' : '0');
-    return c.json({ data: { allow_negative_stock: v } });
+    );
+    if (vMinus !== undefined) simpan.run(K_STOK_MINUS, vMinus ? '1' : '0');
+    if (vKadaluarsa !== undefined) simpan.run(K_TOLAK_KADALUARSA, vKadaluarsa ? '1' : '0');
+    return c.json({ data: {
+      allow_negative_stock: settingBool(K_STOK_MINUS, false),
+      tolak_jual_kadaluarsa: settingBool(K_TOLAK_KADALUARSA, false),
+    } });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengaturan' }, 400);
   }
