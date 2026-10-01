@@ -346,7 +346,9 @@ export async function mountDashboardPage(el: HTMLElement): Promise<void> {
   host = el;
   state.hari = hariIni();
   state.outbox = outboxCount();
-  el.innerHTML = `<div class="mx-auto max-w-5xl space-y-3"><div id="db-body"></div></div>`;
+  // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
+  // halaman Stok & Produk; card/grafik di dalamnya sudah pakai grid responsif.
+  el.innerHTML = `<div class="space-y-3"><div id="db-body"></div></div>`;
   paint();
   // Outbox berubah tiap kali flush 5 detik dari api.ts — segarkan angka tanpa
   // memuat ulang 7 laporan, cukup paint() ulang bila jumlahnya berubah.

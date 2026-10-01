@@ -370,7 +370,9 @@ async function load(): Promise<void> {
 
 export async function mountReportsPage(el: HTMLElement): Promise<void> {
   host = el;
-  el.innerHTML = `<div class="mx-auto max-w-5xl space-y-3"><div id="rp-body"></div></div>`;
+  // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
+  // halaman Stok & Produk; tabel rekap makin lega di layar lebar.
+  el.innerHTML = `<div class="space-y-3"><div id="rp-body"></div></div>`;
   paint();
   await load();
 }

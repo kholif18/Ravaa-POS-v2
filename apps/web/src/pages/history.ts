@@ -403,8 +403,10 @@ async function load(): Promise<void> {
 
 export async function mountHistoryPage(el: HTMLElement): Promise<void> {
   host = el;
+  // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
+  // halaman Stok & Produk.
   el.innerHTML = `
-    <div class="mx-auto max-w-5xl space-y-4">
+    <div class="space-y-4">
       <div id="h-body"></div>
     </div>`;
   paint();

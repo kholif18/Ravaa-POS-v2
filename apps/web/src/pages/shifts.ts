@@ -324,7 +324,9 @@ async function load(): Promise<void> {
 
 export async function mountShiftsPage(el: HTMLElement): Promise<void> {
   host = el;
-  el.innerHTML = `<div class="mx-auto max-w-6xl space-y-3"><div id="sh-body"></div></div>`;
+  // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
+  // halaman Stok & Produk; tabel 10 kolom jadi tidak sempit di desktop.
+  el.innerHTML = `<div class="space-y-3"><div id="sh-body"></div></div>`;
   paint();
   await load();
 }

@@ -24,9 +24,11 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : 'terjadi kesalahan';
 }
 
+// Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
+// halaman Stok & Produk.
 function renderPage(): string {
   return `
-  <div class="mx-auto max-w-4xl space-y-4">
+  <div class="space-y-4">
     <div class="card">
       <div>
         <h2 class="text-base font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
