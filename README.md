@@ -78,8 +78,9 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   alfabetis nama. Seed: 13 satuan, termasuk `Tanpa satuan` untuk shortcut topup/tarik.
 * **Form produk** (`#/products` -> Tambah/Edit) memakai **modal 2 kolom ala
   RPOS** (lebar `max-w-5xl`): kolom **kiri = kotak foto persegi** (seluruh kotak
-  diklik untuk pilih berkas; mode Tambah/Duplikat menampilkan placeholder karena
-  endpoint foto butuh id produk), kolom **kanan = form berseksi** — **Detail
+  diklik untuk pilih berkas — di mode Tambah/Duplikat pilihan ditahan di memori
+  lalu diunggah otomatis setelah produk disimpan, lihat butir Foto di bawah),
+  kolom **kanan = form berseksi** — **Detail
   produk** (nama, SKU, barcode, kategori, satuan), **Harga**
   (harga beli, markup %, harga jual), **Diskon**, **Satuan jual**, lalu blok
   **Stok** yang hanya muncul kalau
@@ -94,14 +95,22 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
   server menomori sendiri `PRD00001`, `PRD00002`, ... (`PRD` + 5 digit, dihitung
   dari MAX yang ada di DB), jadi dua produk tidak mungkin diam-diam saling
    menimpa. SKU tetap boleh diketik manual; form sengaja membiarkannya kosong.
-   - **Foto produk** (kolom `image`): DB hanya menyimpan **nama file**
-     (`apps/api/data/img/`), bukan isi gambar — jadi foto tidak ikut naik-turun
-     lewat delta sync setiap penjualan. Upload lewat
-     `POST /api/products/:id/image` (data URL `image/jpeg|png|webp`; server yang
-     memperkecil ke thumbnail JPEG maks 512px), hapus dengan nilai `""`.
-     Isi gambarnya diunduh sekali lalu di-cache IndexedDB, jadi thumbnail tetap
-     tampil **offline**. Yang boleh dikirim lewat kolom `image` hanya nama
-     filenya (dicek regex anti path-traversal).
+    - **Foto produk** (kolom `image`): DB hanya menyimpan **nama file**
+      (`apps/api/data/img/`), bukan isi gambar — jadi foto tidak ikut naik-turun
+      lewat delta sync setiap penjualan. Upload lewat
+      `POST /api/products/:id/image` (data URL `image/jpeg|png|webp` —
+      **client** yang me-resize ke thumbnail JPEG maks 512px, server menulis byte
+      apa adanya dengan batas 300KB), hapus dengan nilai `""`.
+      Isi gambarnya diunduh sekali lalu di-cache IndexedDB, jadi thumbnail tetap
+      tampil **offline**. Yang boleh dikirim lewat kolom `image` hanya nama
+      filenya (dicek regex anti path-traversal).
+      **Mode Tambah/Duplikat (baru 2026-10-01)**: kotak foto kini hidup — foto
+      dipilih kapan saja, disimpan sementara di memori (`fotoPending`), lalu
+      **diunggah otomatis setelah `POST /api/products` sukses** (endpointnya
+      butuh id produk, jadi tidak mungkin lebih awal). **Batal** membuang
+      pilihan tanpa menyentuh server; kalau unggah foto gagal setelah produk
+      tersimpan, kasir diberi toast peringatan terpisah dan tinggal mengunggah
+      ulang lewat mode Ubah (produk TIDAK ikut dibatalkan).
    - **Diskon permanen** (`discount_type` + `discount`): `rp` (Rp1.500) atau
      `pct` (10%). Tampil sebagai badge `-10%` / `-Rp500` dan harga coret di
      kolom Harga; **POS memakai harga yang sama** (`hargaDiskon()`), jadi harga
@@ -262,8 +271,9 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     - **Barcode** — dikosongkan, karena 1 barcode = 1 produk.
     - **Stok** — direset `0`. Varian baru belum tentu ada barang fisiknya;
       menyalin angkanya berarti menciptakan persediaan yang tidak ada.
-    - **Foto** — blok Foto hanya dirender mode Ubah (unggah butuh `product_id`,
-      dan endpointnya memang per id), jadi varian baru mulai tanpa foto.
+    - **Foto** — foto produk sumber **tidak ikut disalin**, tetapi kotak foto
+      di form Duplikat hidup: pilih foto varian sekarang, ia diunggah otomatis
+      begitu produk barunya disimpan (aturan sama dengan mode Tambah).
   - **SKU wajib unik**: hint di bawah kolom menandai `unik` / `sudah dipakai!`
     secara live, dan tombol Simpan ditolak dengan toast bila SKU sudah dipakai
     produk lain. Tanpa cek ini, `POST /api/products` yang meng-*upsert* by SKU

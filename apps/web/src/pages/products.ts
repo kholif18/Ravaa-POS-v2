@@ -670,35 +670,58 @@ function importForm(): void {
   });
 }
 
+/** Foto terpilih di form Tambah/Duplikat yang BELUM punya id produk:
+ *  thumbnail dataURL disimpan di sini, diunggah otomatis SETELAH
+ *  `POST /api/products` sukses (endpoint fotonya butuh id produk).
+ *  Dibuang (tanpa jejak server) saat form dibatalkan — ini keunggulan mode
+ *  Tambah dibanding mode Ubah yang mengunggah seketika.
+ *  Di-reset di awal `productForm()`, jadi pilihan lama tidak pernah bocor ke
+ *  form berikutnya. */
+let fotoPending: string | null = null;
+
 /** Kolom KIRI form produk: kotak foto persegi (modal 2 kolom ala RPOS — kiri
  *  gambar, kanan form).
  *
  *  Mode Ubah (`d != null`) kotaknya hidup: seluruh kotak diklik = pilih berkas,
- *  tombol hapus melayang di pojok kanan atas. Mode Tambah/Duplikat BELUM punya
- *  id produk sehingga endpoint fotonya belum bisa dipanggil — yang tampil
- *  placeholder dengan catatan jujur, bukan tombol yang kelihatan hidup tapi
- *  tidak melakukan apa-apa.
+ *  tombol hapus melayang di pojok kanan atas, unggah SEKETIKA ke
+ *  `POST /api/products/:id/image` (lihat catatan di bawah).
  *
- *  Kenapa unggaH LANGSUNG tersimpan (bukan menunggu tombol Simpan): endpoint
- *  fotonya terpisah (`POST /api/products/:id/image`), dan menunda berarti
- *  menggabungkan dua operasi jadi satu tombol — bila simpan produk gagal, foto
- *  ikut hilang; bila simpan sukses tapi foto gagal, kasir tidak tahu mana yang
- *  benar. Dengan simpan seketika, hasilnya terlihat di tempat dan bisa diulang
+ *  Mode Tambah/Duplikat (`d == null`) kotaknya juga HIDUP sejak 2026-10-01
+ *  (E: foto saat Tambah): pilihan ditahan di `fotoPending` dan diunggah
+ *  otomatis setelah produk disimpan. Endpoint fotonya memang butuh id produk,
+ *  jadi TIDAK mungkin unggah saat ini juga — yang ditampilkan pratinjau dari
+ *  dataURL di memori. Batal = foto dibuang tanpa menyentuh server.
+ *
+ *  Kenapa mode Ubah mengunggah LANGSUNG (bukan menunggu tombol Simpan): kalau
+ *  ditunda, dua operasi jadi satu tombol — simpan produk gagal = foto ikut
+ *  hilang; simpan sukses tapi foto gagal = kasir tidak tahu mana yang benar.
+ *  Dengan simpan seketika, hasilnya terlihat di tempat dan bisa diulang
  *  sendiri. Keterbatasannya DITULIS apa adanya di hint: tombol Batal tidak
  *  mengembalikan foto yang sudah terlanjur terunggah. */
 function fotoKolom(d: Product | null, mode: ModeForm): string {
   if (!d) {
-    const ket =
-      mode === 'copy'
-        ? 'Foto sumber <b>tidak ikut disalin</b> — unggah setelah produk baru disimpan.'
-        : 'Foto baru bisa diunggah <b>setelah produk disimpan</b> — endpoint fotonya butuh id produk.';
+    // Tambah/Duplikat: kotak hidup, tanpa tombol hapus server (belum ada foto
+    // tersimpan) — tombolnya dipakai untuk MEMBUANG pilihan (lihat handler).
     return `
         <p class="form-sec">Foto</p>
-        <div class="foto-kotak foto-kotak-off" aria-hidden="true">
-          ${icon('products')}
-          <span>tanpa foto</span>
+        <div class="relative">
+          <label class="foto-kotak" title="Klik untuk memilih foto">
+            <input id="f-photo-file" type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" />
+            <img id="f-photo" alt="Pratinjau foto produk" class="foto-kotak-img" hidden />
+            <span id="f-photo-empty" class="foto-kotak-empty">${icon('upload')}<span>Klik untuk pilih foto</span></span>
+          </label>
+          <button type="button" id="f-photo-del" class="foto-kotak-x hidden"
+            title="Buang foto terpilih" aria-label="Buang foto terpilih">${icon('trash')}</button>
         </div>
-        <p class="hint mt-1.5">${ket}</p>`;
+        <p class="hint mt-1.5">
+          Pilih foto sekarang juga boleh — ia disimpan dulu di memori lalu
+          <b>diunggah otomatis setelah produk disimpan</b> (endpoint fotonya butuh
+          id produk). <b>Batal</b> membuang pilihan tanpa mengirim apa pun ke
+          server. Foto dikecilkan jadi thumbnail &le;512px JPEG supaya ringan
+          dibuka HP kasir${
+            mode === 'copy' ? '; foto produk sumber <b>tidak ikut disalin</b>.' : '.'
+          }
+        </p>`;
   }
   const src = d.image ? `/api/products/${d.id}/image?v=${d.version}` : '';
   return `
@@ -769,6 +792,9 @@ function productForm(
   mode: ModeForm = p === 'new' ? 'new' : 'edit',
 ): void {
   const d = p === 'new' ? null : p;
+  // Form baru = pilihan foto baru juga. Tanpa reset ini, foto yang dibatalkan
+  // di form sebelumnya ikut terunggah ke produk berikutnya yang disimpan.
+  fotoPending = null;
   const salin = mode === 'copy';
   const bisaEditSku = mode !== 'edit';
   const trackDefault = d ? d.track_stock : (cats[0]?.track_stock ?? 0);
@@ -1079,7 +1105,7 @@ function productForm(
         // Di-reset dulu: kalau tidak, memilih berkas yang sama dua kali tidak
         // memicu event change (nilai DOM identik) dan terlihat seperti tombol mati.
         inp.value = '';
-        if (!f || !d) return;
+        if (!f) return;
         if (!f.type.startsWith('image/')) {
           toast('Berkas harus gambar (PNG, JPG, atau WebP)', 'warning');
           return;
@@ -1088,36 +1114,52 @@ function productForm(
         if (btn) btn.classList.add('pointer-events-none', 'opacity-60');
         try {
           const dataUrl = await kecilkanFoto(f);
-          const res = await apiPost<{ data: { image: string } }>(
-            `/api/products/${d.id}/image`,
-            { image: dataUrl },
-          );
-          d.image = res.data.image;
-          tampilFoto(`/api/products/${d.id}/image?v=${Date.now()}`);
-          toast('Foto tersimpan', 'success');
+          if (mode === 'edit' && d) {
+            // Ubah: unggah seketika (produk sudah punya id) — lihat catatan fotoKolom.
+            const res = await apiPost<{ data: { image: string } }>(
+              `/api/products/${d.id}/image`,
+              { image: dataUrl },
+            );
+            d.image = res.data.image;
+            tampilFoto(`/api/products/${d.id}/image?v=${Date.now()}`);
+            toast('Foto tersimpan', 'success');
+          } else {
+            // Tambah/Duplikat: tahan di memori, unggah SETELAH produk disimpan
+            // (blok Simpan di bawah). Mode copy sengaja TIDAK mengunggah ke
+            // `d` — `d` di sini adalah produk SUMBER, bukan hasil salinan.
+            fotoPending = dataUrl;
+            tampilFoto(dataUrl);
+            toast('Foto dipilih — akan diunggah otomatis setelah produk disimpan', 'info');
+          }
         } catch (err) {
-          toast(`Gagal unggah foto: ${errMsg(err)}`, 'error');
+          toast(`Gagal memproses foto: ${errMsg(err)}`, 'error');
         } finally {
           if (btn) btn.classList.remove('pointer-events-none', 'opacity-60');
         }
       });
       fotoDel?.addEventListener('click', async () => {
-        if (!d) return;
-        const yes = await confirmDialog({
-          title: 'Hapus foto produk?',
-          message: 'Foto dihapus dari produk ini dan tidak bisa dikembalikan — masih bisa diunggah ulang kapan saja.',
-          okLabel: 'Hapus foto',
-          danger: true,
-        });
-        if (!yes) return;
-        try {
-          await apiPost(`/api/products/${d.id}/image`, { image: '' });
-          d.image = null;
-          tampilFoto(null);
-          toast('Foto dihapus', 'success');
-        } catch (e) {
-          toast(`Gagal hapus foto: ${errMsg(e)}`, 'error');
+        if (mode === 'edit' && d) {
+          const yes = await confirmDialog({
+            title: 'Hapus foto produk?',
+            message: 'Foto dihapus dari produk ini dan tidak bisa dikembalikan — masih bisa diunggah ulang kapan saja.',
+            okLabel: 'Hapus foto',
+            danger: true,
+          });
+          if (!yes) return;
+          try {
+            await apiPost(`/api/products/${d.id}/image`, { image: '' });
+            d.image = null;
+            tampilFoto(null);
+            toast('Foto dihapus', 'success');
+          } catch (e) {
+            toast(`Gagal hapus foto: ${errMsg(e)}`, 'error');
+          }
+          return;
         }
+        // Tambah/Duplikat: belum ada apa-apa di server — buang pilihan saja.
+        fotoPending = null;
+        tampilFoto(null);
+        toast('Foto dibuang', 'info');
       });
 
       catSel.addEventListener('change', syncTrack);
@@ -1298,9 +1340,22 @@ function productForm(
           });
           // SKU bisa dibuat server saat kolomnya dikosongkan -> tampilkan apa
           // yang benar-benar tersimpan, bukan tebakan client.
+          // Foto mode Tambah/Duplikat: unggah SEKETIKA setelah produk punya id
+          // (kotak foto penuh di mode ini memang menjanjikan ini — lihat fotoKolom).
+          let fotoGagal = '';
+          if (mode !== 'edit' && fotoPending) {
+            try {
+              await apiPost(`/api/products/${res.data.id}/image`, { image: fotoPending });
+              fotoPending = null;
+            } catch (fe) {
+              // Produk SUDAH tersimpan — jangan dibatalkan hanya karena foto.
+              // Kasir diberi tahu terpisah dan bisa mengunggah ulang lewat mode Ubah.
+              fotoGagal = ` · foto gagal diunggah: ${errMsg(fe)}`;
+            }
+          }
           toast(
-            `${mode === 'edit' ? 'Produk diperbarui' : salin ? 'Produk diduplikat' : 'Tersimpan'} · ${res?.data?.sku ?? ''}`,
-            'success',
+            `${mode === 'edit' ? 'Produk diperbarui' : salin ? 'Produk diduplikat' : 'Tersimpan'} · ${res?.data?.sku ?? ''}${fotoGagal}`,
+            fotoGagal ? 'warning' : 'success',
           );
           close();
           await reload(true);
