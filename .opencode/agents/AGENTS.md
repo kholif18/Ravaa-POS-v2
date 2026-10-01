@@ -42,6 +42,12 @@ apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           (7x GET /api/reports/daily paralel), status shift
                           (GET /api/shifts/open?cashier=) + stok menipis.
                           Seluruh angka diambil apa adanya dari API.
+apps/web/src/pages/shifts.ts  Halaman #/shifts (menu Shift Kasir): tabel
+                          riwayat dari GET /api/shifts (agregat penjualan/
+                          topup per baris), filter status, dialog Buka shift
+                          (POST /api/shifts/open) & Tutup shift
+                          (POST /api/shifts/:id/close + selisih polos
+                          modal_akhir − modal_awal).
 apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          linimasa penjualan + topup/tarik per hari; daftar dari
                          GET /api/sales & /api/topups (filter hari sama dengan
@@ -310,6 +316,25 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   (409 hanya bila kasir yang sama masih punya shift open — ditegakkan UNIQUE INDEX
   `idx_shifts_open_cashier`, bukan cek SELECT; jangan kembalikan ke pola cek-manual)
   | `POST /api/shifts/:id/close` `{modal_akhir}`
+* `GET /api/shifts?status=&cashier=&limit=&offset=` -> `{data, total}`
+  - **Daftar riwayat shift (menu "Shift Kasir")** (baru 2026-10-01).
+    Read-only: tidak mengubah `products.version`.
+  - `status` default `semua`. Nilai sah `open|closed|semua`; selain itu
+    **400** `"status harus open|closed|semua"` (seperti pola `status` produk).
+  - `cashier` opsional (filter persis per kasir); `limit` default 50 maks 200;
+    `offset` default 0; `total` = jumlah baris tanpa limit.
+  - Urutan **`id DESC`** (shift terbaru di atas).
+  - Tiap baris = kolom `shifts` + **agregat via subquery** (satu kali baca,
+    bukan N+1): `n_sales`, `omzet` (SUM total penjualan yang `shift_id`-nya
+    cocok), `tunai` (bagian `pay_method='tunai'` saja — pembanding kas di
+    dialog tutup shift), `n_topup` (jumlah topup_txns shift ini).
+  - Agregat dihitung **all-time** (bukan per hari), sehingga penjualan offline
+    yang masuk lewat outbox ikut terhitung begitu tersimpan dengan `shift_id`.
+  - **Selisih tutup shift BUKAN formula baku**: belum ada aturan bisnis soal
+    expected-cash (topup/tarik punya gerak modal sendiri, di luar omzet).
+    Client menampilkan fakta + `selisih = modal_akhir − modal_awal`
+    (`hitungSelisih()` di `pages/shifts.ts`). Bila rumus berubah, ubah satu
+    fungsi itu — jangan menyebar rumus ke tempat lain.
 * `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?}],pay_method,discount?,cash_in?,cashier?}`
   - **Diskon PER BARIS `discount?`** (baru 2026-09-29): nilai rupiah mutlak.
     Diisi client (prefill dari `products.discount` tipe `rp`/`pct`, boleh

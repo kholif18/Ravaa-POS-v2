@@ -744,6 +744,40 @@ app.get('/api/shifts/open', (c) => {
   return c.json({ data: row ?? null });
 });
 
+// Riwayat shift (menu "Shift Kasir"): daftar + agregat penjualan/topup per
+// shift lewat subquery — satu kali baca, bukan N+1. Agregat berasal dari baris
+// yang memang terikat `shift_id` (penjualan offline yang masuk lewat outbox
+// ikut terhitung setelah tersimpan, karena ikut membawa shift_id).
+app.get('/api/shifts', (c) => {
+  const status = c.req.query('status') ?? 'semua';
+  if (!['semua', 'open', 'closed'].includes(status)) {
+    return c.json({ error: 'status harus open|closed|semua' }, 400);
+  }
+  const cashier = c.req.query('cashier');
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  const where: string[] = [];
+  const params: (string | number)[] = [];
+  if (status !== 'semua') { where.push(`s.status=?`); params.push(status); }
+  if (cashier) { where.push(`s.cashier=?`); params.push(cashier); }
+  const klausul = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM shifts s ${klausul}`)
+    .get(...params) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT s.*,
+            (SELECT COUNT(*) FROM sales sl WHERE sl.shift_id = s.id) AS n_sales,
+            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl WHERE sl.shift_id = s.id) AS omzet,
+            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
+              WHERE sl.shift_id = s.id AND sl.pay_method='tunai') AS tunai,
+            (SELECT COUNT(*) FROM topup_txns t WHERE t.shift_id = s.id) AS n_topup
+       FROM shifts s
+       ${klausul}
+      ORDER BY s.id DESC
+      LIMIT ? OFFSET ?`,
+  ).all(...params, limit, offset);
+  return c.json({ data, total });
+});
+
 app.post('/api/shifts/open', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const cashier = body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir';

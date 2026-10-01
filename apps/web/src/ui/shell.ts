@@ -70,7 +70,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   stock: 'Pantau stok menipis dan riwayat restock.',
   history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
   reports: 'Omzet, laba, HPP, rekap metode bayar, produk terlaris, dan stok menipis.',
-  shifts: 'Buka dan tutup shift kasir beserta modalnya.',
+  shifts: 'Riwayat shift + buka/tutup shift dengan modal awal & modal akhir.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
 };
 

@@ -5,6 +5,7 @@ import { mountReportsPage } from './pages/reports';
 import { mountPosPage, unmountPosPage } from './pages/pos';
 import { mountProductsPage } from './pages/products';
 import { mountSatuanPage } from './pages/satuan';
+import { mountShiftsPage } from './pages/shifts';
 import { mountSettingsPage } from './pages/settings';
 import { mountStockPage, unmountStockPage } from './pages/stock';
 import { icon, type IconName } from './ui/icons';
@@ -77,7 +78,7 @@ const PAGES: Record<AdminRoute, PagePlan> = {
   shifts: {
     icon: 'shifts',
     intro: 'Buka/tutup shift kasir dengan modal awal dan modal akhir.',
-    todo: ['Modal buka shift', 'Modal tutup shift + selisih', 'Riwayat shift'],
+    todo: ['Tabel riwayat + agregat penjualan/topup per shift', 'Filter status', 'Modal buka shift', 'Modal tutup shift + selisih'],
   },
   settings: {
     icon: 'settings',
@@ -156,6 +157,9 @@ function render(): void {
   } else if (route === 'stock') {
     // Halaman Stok: ringkasan + restock/opname, state sendiri -> di-mount.
     void mountStockPage(page);
+  } else if (route === 'shifts') {
+    // Shift Kasir: riwayat + buka/tutup shift, state sendiri.
+    void mountShiftsPage(page);
   } else if (route === 'history') {
     // Riwayat transaksi: linimasa penjualan + topup/tarik, state sendiri.
     void mountHistoryPage(page);

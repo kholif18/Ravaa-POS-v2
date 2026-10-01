@@ -372,6 +372,25 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     dari data yang sedang tampil — tiga blok berurutan: Ringkasan, Metode
     bayar, Produk terlaris.
   - **Tanpa endpoint baru**: memakai `GET /api/reports/daily` yang sudah ada.
+* **Shift Kasir** (`#/shifts`, menu **Shift Kasir** di sidebar, baru 2026-10-01)
+  — riwayat shift + buka/tutup shift dari satu layar:
+  - **Tabel riwayat** dari endpoint baru `GET /api/shifts?status=…` — tiap baris
+    sudah membawa agregatnya (`n_sales`, `omzet`, `tunai`, `n_topup`) lewat
+    subquery, jadi tabel tidak memicu N+1. Filter **Semua / Terbuka / Tutup**
+    dikirim ke server (enum `open|closed|semua`, selain itu 400), bukan
+    disaring di klien.
+  - **Buka shift**: kasir (default nama kasir device) + modal awal ->
+    `POST /api/shifts/open`. 409 = kasir ini masih punya shift terbuka
+    (UNIQUE INDEX `idx_shifts_open_cashier`) — pesan server langsung ditampilkan.
+  - **Tutup shift**: dialog menampilkan fakta shift (modal awal, penjualan
+    tunai/non-tunai, jumlah topup/tarik) lalu input modal akhir dengan
+    **selisih live**. Rumus selisih sengaja polos dan eksplisit:
+    `selisih = modal_akhir − modal_awal` — repo ini belum punya aturan baku
+    expected-cash (gerak modal topup/tarik di luar omzet), jadi tidak ada
+    formula yang dikarang; kalau toko menentukan rumus lain, ubah satu fungsi
+    `hitungSelisih()` di `apps/web/src/pages/shifts.ts`.
+  - Shift `kasir` yang dipakai layar POS tidak tersentuh oleh halaman ini
+    (test memakai kasir uji sendiri).
 * **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — satu kartu yang
   tumbuh sendiri: **Stok boleh minus** (`settings.allow_negative_stock`).
   Daring = penjualan boleh membuat stok menembus nol (stok jadi angka minus dan
