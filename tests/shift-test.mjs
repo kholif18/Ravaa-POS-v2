@@ -4,12 +4,28 @@
 // (dipakai suite POS) TIDAK boleh tersentuh — test ini memakai kasir uji sendiri.
 // Jalankan: node shift-test.mjs   (butuh API :3001 + vite :5656 hidup)
 import { chromium } from 'playwright-core';
+import { execFileSync } from 'node:child_process';
+import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
+const DB = path0.join(REPO, 'apps/api/data/data.db');
 const WEB = 'http://localhost:5656';
 const API = 'http://localhost:3001';
 const rp = (n) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 const KASIR_UJI = `shift-uji-${Date.now().toString(36)}`;
+
+/** Hapus keras artefak uji lewat sqlite3 langsung (test-only, pola sama
+ *  dengan product-delete/sku-urut). shift-uji% tidak pernah punya sales /
+ *  topup_txns (FK aman); shift `kasir` (dipakai suite POS) tidak tersentuh. */
+const bersihShiftUji = () => {
+  try {
+    execFileSync('sqlite3', [DB, "DELETE FROM shifts WHERE cashier LIKE 'shift-uji%'"]);
+    return execFileSync('sqlite3', [DB,
+      `SELECT (SELECT COUNT(*) FROM shifts WHERE cashier LIKE 'shift-uji%')||'|'||(SELECT COUNT(*) FROM shifts WHERE cashier='kasir')`],
+      { encoding: 'utf8' }).trim();
+  } catch (e) { return 'gagal: ' + String(e).slice(0, 120); }
+};
 
 const get = async (u) => {
   const r = await fetch(API + u);
@@ -31,6 +47,9 @@ const ok = (n, cond, info = '') => {
 };
 
 try {
+  // Bersihkan sisa run sebelumnya (termasuk run yang crash di tengah) supaya
+  // total/urutan di bawah tidak dibawa-bawa artefak lama.
+  bersihShiftUji();
   console.log('=== A. Kontrak GET /api/shifts ===');
   const semua = await get('/api/shifts?status=semua');
   ok('200 + {data, total}', semua.status === 200 && Array.isArray(semua.body.data)
@@ -155,6 +174,13 @@ try {
   gagal++;
   console.log('  CRASH', String(e.message || e).slice(0, 400));
 } finally {
+  // Cleanup keras di akhir (juga jalan saat crash): DB dev harus kembali
+  // tanpa baris shift-uji, dan shift `kasir` wajib masih ada — invarian suite
+  // ini, sama seperti "0 sisa UJI-% / 0 tombstone" di product-delete-test.
+  const akhir = bersihShiftUji();
+  const [nUji, nKasir] = akhir.split('|').map(Number);
+  console.log(`\ncleanup shift-uji: sisa uji=${nUji}, shift kasir=${nKasir} (harus 0|>=1)`);
+  ok('cleanup: 0 sisa shift-uji & shift kasir tetap ada', nUji === 0 && nKasir >= 1, akhir);
   const nama = fileURLToPath(import.meta.url).split('/').pop();
   console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})  [${nama}]`);
   if (gagal) process.exit(1);
