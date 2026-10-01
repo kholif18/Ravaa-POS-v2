@@ -51,7 +51,9 @@ apps/web/src/pages/shifts.ts  Halaman #/shifts (menu Shift Kasir): tabel
 apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          linimasa penjualan + topup/tarik per hari; daftar dari
                          GET /api/sales & /api/topups (filter hari sama dengan
-                          /api/reports/daily), isi nota dibuka lewat GET /api/sales/:id.
+                          /api/reports/daily), isi nota dibuka lewat GET /api/sales/:id,
+                          plus tombol **Cetak ulang struk** (bangun ulang Struk
+                          dari isi nota + `base_unit`, kirimPrint seperti POS).
 apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
                           pemilik — 4 kartu (omzet/laba/HPP/diskon), rekap metode
                           bayar, topup & tarik, produk terlaris, stok menipis,
@@ -59,8 +61,10 @@ apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
                           apa adanya (tanpa hitung ulang di klien).
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
-apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): saklar
-                         "Stok boleh minus" -> GET/POST /api/settings.
+apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
+                         saklar — "Stok boleh minus" + "Tolak jual kadaluarsa"
+                         -> GET/POST /api/settings (update PARSIAL: satu kunci
+                         per toggle, konfirmasi swal tiap perubahan).
 apps/web/src/escpos.ts   ESC/POS 58mm (32 kolom): label harga + struk + POST ke print-agent.
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                          produk dan panel mode POS.
@@ -237,13 +241,23 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Urutan `created_at DESC, id DESC` (yang terbaru di atas).
   - Data sudah ada sejak awal (`stock_moves` diisi oleh sale/restock/opname) —
     endpoint ini hanya MEMBUKANYA, bukan memodifikasi riwayat.
-* `GET /api/settings` -> `{data:{allow_negative_stock:false}}` (selalu ada —
-  default di-seed oleh `db/seed.sql`, `INSERT OR IGNORE` jadi seed ulang tidak
-  mereset pilihan pemilik)
-* `POST /api/settings` `{allow_negative_stock: boolean}` -> `{data:{...}}` (200)
-  - **Satu-satunya pembaca aturan stok di server ada di `POST /api/sales`.**
-    400 bila `allow_negative_stock` bukan boolean (angka 0/1, `"ya"`, `null`
-    semua ditolak — memaksa client mengirim boolean sungguhan).
+* `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false}}`
+  (selalu ada — kedua baris default di-seed `db/seed.sql` lewat `INSERT OR IGNORE`
+  jadi seed ulang tidak mereset pilihan pemilik)
+* `POST /api/settings` `{allow_negative_stock?:boolean, tolak_jual_kadaluarsa?:boolean}`
+  -> `{data:{...}}` (200)
+  - **Update PARSIAL (sejak 2026-10-01)**: kunci yang TIDAK dikirim TIDAK
+    diubah — berbeda dengan `POST /api/products` yang mereset kolom tak-dikirim.
+    Alasan: halaman #/settings punya dua saklar terpisah; client hanya mengirim
+    kunci yang diubah, dan `{tolak_jual_kadaluarsa:true}` tidak boleh mereset
+    `allow_negative_stock` milik pemilik diam-diam.
+  - 400 bila payload `{}` (minimal satu kunci). Tiap kunci yang dikirim wajib
+    boolean **sungguhan** -> 400 bila bukan (angka 0/1, `"ya"`, `null` semua
+    ditolak, memaksa client mengirim `true`/`false`).
+  - **Keduanya hanya dibaca di `POST /api/sales`** (dari DB SETIAP penjualan,
+    bukan cache): `allow_negative_stock` = boleh stok minus, lihat aturan stok
+    di kontrak penjualan; `tolak_jual_kadaluarsa` = tolak barang lewat
+    `expiry_date`, lihat aturan kadaluarsa di kontrak penjualan. Default `false`.
 * `POST /api/products/import` `{rows:[<payload POST /api/products>], dry_run?:bool}` -> `{data:{total,ok,baru,update,gagal,errors:[{baris,sku,error}]}}` (200)
   - Tiap baris di-upsert lewat **fungsi yang sama** dengan `POST /api/products`
     (kategori/satuan/turunan SKU jadi satu sumber kebenaran, bukan versi kedua).
@@ -353,13 +367,26 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     tercatat minus dan `version` tetap naik (minus menyeberang ke device lain
     lewat `?since=`). Pengaturan dibaca dari DB **setiap penjualan** — bukan
     cache — supaya keputusan server tidak pernah terpecah dari isi tabel.
+  - **Tolak jual kadaluarsa — tunduk pada `GET/POST /api/settings`
+    `tolak_jual_kadaluarsa`** (baru 2026-10-01, default `false`):
+    `false` = penjualan barang lewat tanggal kadaluarsa BOLEH (layar kasir
+    hanya strip/badge peringatan).
+    `true` = tiap baris dengan `products.expiry_date` dicek per penjualan:
+    `expiry_date < hari UTC` -> **400**
+    `"barang kadaluarsa: <nama> (berakhir <tanggal>)"`.
+    **Hari kadaluarsa == hari ini masih SAH** (kemarin boleh untuk stok yang
+    habis terjual hari ini; hanya yang SUDAH lewat yang ditolak). Item manual
+    (tanpa `product_id`, tanpa tanggal) bebas cek. Dibaca dari DB setiap
+    penjualan seperti `allow_negative_stock`. Saklar UI: kartu "Tolak jual
+    kadaluarsa" di halaman #/settings (konfirmasi swal, update parsial).
   - **HPP di-snapshot per baris**: `sale_items.cost` = `products.avg_cost` saat
     jual (0 untuk item manual). WAJIB snapshot, bukan dibaca ulang saat laporan
     di-query — `avg_cost` berubah tiap restock, kalau dibaca ulang laba hari lalu
     ikut berubah retroaktif. `laba baris = (amount - discount) - qty*cost`.
   Idempotent per `id`. Error 400 bila: items kosong, qty<=0, stok kurang
   (bila `allow_negative_stock=false`), harga dinamis kosong,
-  item manual tanpa name+price, diskon baris > jumlah baris, diskon transaksi > subtotal bersih.
+  item manual tanpa name+price, diskon baris > jumlah baris, diskon transaksi > subtotal bersih,
+  barang kadaluarsa (bila `tolak_jual_kadaluarsa=true`, lihat aturan di atas).
   - **`unit` (opsional, fitur #3)** = satuan jual TERPILIH; kosong = satuan dasar.
     **Resolusi sepenuhnya di server** — client hanya mengirim unit; faktor & harga
     diambil dari `product_units`:
@@ -372,6 +399,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     (snapshot), sehingga laporan tidak mencampur "2 pack" dan "3 btl" jadi satu
     angka. Harga produk non-dinamis TIDAK boleh ditentukan client.
 * `GET /api/sales/:id` -> `{data:{sale,items}}` (isi lengkap satu nota)
+  - Tiap baris `items` memuat **`base_unit`** (satuan dasar produk lewat
+    `LEFT JOIN products`, `NULL` untuk item manual) sejak 2026-10-01 — dipakai
+    tombol **Cetak ulang struk** di halaman Riwayat: struk hanya mencetak
+    `unit` bila berbeda dari `base_unit` (aturan sama dengan struk POS).
 * `GET /api/sales?date=&limit=&offset=`
   -> `{data:[{id,shift_id,created_at,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).

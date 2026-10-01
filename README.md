@@ -156,6 +156,8 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     melihatnya tepat saat barang diambil. Ambang & format tanggal dipakai
     bersama dengan tabel Produk lewat `apps/web/src/ui/expiry.ts`
     (`statusExpiry`, `tglExpiry`, `AMBAT_EXPIRY = 30`).
+    Strip ini **murni visual** — blokir keras (400 dari server) adalah pilihan
+    terpisah: **Pengaturan → Tolak jual kadaluarsa**, lihat bagian Pengaturan.
 * Tiap device kasir pakai **nama kasir berbeda** dan buka **shift sendiri**
   (1 shift terbuka per kasir, ditegakkan DB). Laporan harian menggabungkan semua shift.
 * Stok hanya untuk barang fisik (ATK, es krim/minuman/snack, rokok). Jasa/topup/cetak/desain `stock_track=0`.
@@ -362,6 +364,13 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     diterima/kembali, kasir, shift) — hanya saat dibuka, jadi seratus nota
     tidak ditarik sekaligus; topup/tarik menampilkan nominal/admin/nomor dari
     baris yang sudah ada di daftar.
+  - **Cetak ulang struk** (baru 2026-10-01): kartu Pembayaran rincian penjualan
+    punya tombol **Cetak ulang struk**. Struk dibangun **ulang dari isi nota**
+    (waktu `created_at` diformat lokal, nomor/kasir/shift, item — satuan non-dasar
+    tercetak lewat `base_unit` dari `GET /api/sales/:id` — subtotal, diskon item,
+    diskon transaksi, total, uang diterima/kembali persis seperti struk asli)
+    lalu dikirim ke print-agent lewat `kirimPrint()` seperti alur POS. Gagal
+    cetak hanya toast peringatan — riwayat tidak berubah apa pun.
   - **Tanpa pembatalan/refund**: riwayat bersifat catatan, sama seperti riwayat
     mutasi stok. Koreksi lewat stok opname + transaksi baru.
   - Endpoint baru: `GET /api/sales` dan `GET /api/topups`, keduanya berparameter
@@ -401,13 +410,23 @@ Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
     `hitungSelisih()` di `apps/web/src/pages/shifts.ts`.
   - Shift `kasir` yang dipakai layar POS tidak tersentuh oleh halaman ini
     (test memakai kasir uji sendiri).
-* **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — satu kartu yang
-  tumbuh sendiri: **Stok boleh minus** (`settings.allow_negative_stock`).
-  Daring = penjualan boleh membuat stok menembus nol (stok jadi angka minus dan
-  langsung terlihat di filter **Stok minus** halaman Stok); mati = `POST /api/sales`
-  menolak dengan 400 seperti perilaku lama. Nilainya disimpan lewat
-  `GET/POST /api/settings` (boolean sungguhan — angka `0`/`"ya"`/`null` ditolak
-  400), jadi HP kasir yang offline tetap memakai keputusan terakhir.
+* **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — dua kartu saklar,
+  masing-masing dengan penjelasan sendiri (bukan lagi satu kartu):
+  - **Stok boleh minus** (`settings.allow_negative_stock`): daring = penjualan
+    boleh membuat stok menembus nol (stok jadi angka minus dan langsung terlihat
+    di filter **Stok minus** halaman Stok); mati = `POST /api/sales` menolak
+    dengan 400 seperti perilaku lama.
+  - **Tolak jual kadaluarsa** (`settings.tolak_jual_kadaluarsa`, baru
+    2026-10-01, bawaan **mati**): daring = server **menolak** penjualan yang
+    memuat barang lewat tanggal kadaluarsa — 400
+    `barang kadaluarsa: <nama> (berakhir <tanggal>)`, bukan sekadar strip
+    peringatan; **hari kadaluarsa sendiri masih boleh dijual**. Mati = layar
+    kasir hanya menampilkan strip/badge seperti sebelumnya.
+  Keduanya disimpan lewat `GET/POST /api/settings` (boolean **sungguhan** —
+  angka `0`/`"ya"`/`null` ditolak 400) dengan **update parsial**: tiap saklar
+  hanya mengirim kuncinya sendiri, jadi mengubah satu TIDAK mereset yang lain.
+  Aturan dibaca server dari DB pada **setiap penjualan** — keputusan tidak
+  pernah terpecah antar device.
 * **HPP & laba (modal rata-rata)** — menutup celah "HPP rata-rata" di bawah.
   - Restock kini menerima **`harga_beli`** (opsional, isian "Harga beli / nota"
     di dialog stok, mode **Masuk barang**). Tidak diisi = rata-rata modal tidak
