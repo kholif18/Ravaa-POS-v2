@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { db, dbPath, migrate } from './db.js';
 
 migrate();
@@ -1128,6 +1129,164 @@ app.post('/api/settings', async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengaturan' }, 400);
   }
+});
+
+// ---------- backup DB ----------
+// Salin konsisten lewat online backup API better-sqlite3 (`db.backup()` —
+// async, snapshot WAL-aman, boleh menimpa file yang sudah ada). File disimpan
+// di `backups/` SEBELAH file DB (ikut DB_PATH — pola sama dengan folder img/),
+// jadi Docker / install native / test DB_PATH khusus tidak saling menimpa.
+const BACKUP_DIR = path.join(path.dirname(dbPath), 'backups');
+const KEEP = 14; // retensi: simpan 14 file terbaru
+// Nama: data-YYYY-MM-DD-HHMMSS.db (komponen UTC — satu aturan hari UTC dengan
+// seluruh repo). Fixed-width -> urut leksikografis = urut kronologis.
+const POLA_BACKUP = /^data-\d{4}-\d{2}-\d{2}-\d{6}\.db$/;
+// Nama yang sedang/sudah dipilih proses ini (lihat buatBackup) — dua POST pada
+// detik yang sama jangan berebut satu nama file dan saling menimpa.
+const NAMA_BACKUP_TERPAKAI = new Set<string>();
+
+function backupDir(): string {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  return BACKUP_DIR;
+}
+
+function daftarBackup(): { nama: string; ukuran: number; waktu: string }[] {
+  const dir = backupDir();
+  return fs.readdirSync(dir)
+    .filter((n) => POLA_BACKUP.test(n))
+    .sort().reverse() // terbaru dulu (leksikografis = kronologis utk format ini)
+    .map((nama) => {
+      const st = fs.statSync(path.join(dir, nama));
+      const t = st.mtime.toISOString();
+      return { nama, ukuran: st.size, waktu: t };
+    });
+}
+
+// Buat satu backup + verifikasi + retensi. Hanya dipanggil dari jalankanBackup
+// supaya aturan "backup yang rusak jangan disimpan" ada di SATU tempat.
+async function buatBackup(): Promise<{ nama: string; ukuran: number; waktu: string }> {
+  const dir = backupDir();
+  // Nama = detik UTC saat dibuat. Dua backup pada detik YANG SAMA (klik ganda /
+  // scheduler + klik manual) akan berebut satu nama dan yang kedua MENIMPA yang
+  // pertama — padahal POST dijanjikan selalu membuat file BARU. Reservasi nama
+  // sinkron (cek + catat sebelum await pertama): di satu proses Node tidak ada
+  // jeda antar-langkah sinkron, jadi klien yang masuk beruntun tidak bisa lolos
+  // cek yang sama. Kalau nama sudah terpakai, geser +1 detik (masih urut
+  // leksikografis = kronologis, dan detik "ke depan" itu unik sampai dilewati
+  // waktu nyata — sementara file sudah ada, jadi cek berikutnya menolaknya).
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const bentuk = (t: Date) =>
+    `data-${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}` +
+    `-${pad(t.getUTCHours())}${pad(t.getUTCMinutes())}${pad(t.getUTCSeconds())}.db`;
+  let t = new Date();
+  let nama = bentuk(t);
+  while (NAMA_BACKUP_TERPAKAI.has(nama) || fs.existsSync(path.join(dir, nama))) {
+    t = new Date(t.getTime() + 1000);
+    nama = bentuk(t);
+  }
+  NAMA_BACKUP_TERPAKAI.add(nama);
+  const file = path.join(dir, nama);
+  try {
+    await db.backup(file);
+  } catch (e) {
+    NAMA_BACKUP_TERPAKAI.delete(nama); // gagal total -> nama bebas dipakai lagi
+    throw e;
+  }
+
+  // Source dalam WAL -> file backup ikut header WAL, jadi setelah dibuka
+  // meninggalkan pendamping .db-shm/.db-wal. Restore manual (salin-satu-file)
+  // jadi tidak portabel & folder backups ikut kotor. Dipaksa ke DELETE:
+  // SQLite checkpoint + menghapus -wal/-shm sendiri saat ganti mode.
+  // Integrity check file HASIL dilakukan sesudahnya — file rusak (disk penuh
+  // dsb) dibuang, jangan menumpuk sebagai "backup" yang ternyata tidak bisa
+  // direstore. Bukan 'ok' -> lempar error (ditangkap pemanggil).
+  let parah = false;
+  try {
+    const cek = new Database(file, { fileMustExist: true });
+    cek.pragma('journal_mode = DELETE');
+    const hasil = cek.pragma('integrity_check') as { integrity_check: string }[];
+    parah = hasil.length !== 1 || hasil[0].integrity_check !== 'ok';
+    cek.close();
+  } catch {
+    parah = true;
+  }
+  if (parah) {
+    fs.rmSync(file, { force: true });
+    fs.rmSync(`${file}-shm`, { force: true });
+    fs.rmSync(`${file}-wal`, { force: true });
+    throw new Error('integrity check gagal — file backup dibuang');
+  }
+
+  // Retensi: buang semua kecuali KEEP terbaru (urutan nama = kronologis).
+  // Pendamping -shm/-wal (sisa file versi lama) ikut dibuang supaya bersih.
+  const semua = fs.readdirSync(dir).filter((n) => POLA_BACKUP.test(n)).sort().reverse();
+  for (const lama of semua.slice(KEEP)) {
+    fs.rmSync(path.join(dir, lama), { force: true });
+    fs.rmSync(path.join(dir, `${lama}-shm`), { force: true });
+    fs.rmSync(path.join(dir, `${lama}-wal`), { force: true });
+  }
+  // Pengaman pembersihan: walau journal_mode=DELETE seharusnya sudah menghapus
+  // pendamping, buang sisa apa pun (mis. dari file lama sebelum aturan ini).
+  fs.rmSync(`${file}-shm`, { force: true });
+  fs.rmSync(`${file}-wal`, { force: true });
+
+  const st = fs.statSync(file);
+  return { nama, ukuran: st.size, waktu: st.mtime.toISOString() };
+}
+
+// Jadwal harian IDEMPOTEN: cek "sudah ada file data-<hari-UTC>-*.db?"
+// Bukan sekadar setInterval(24 jam) — API sering di-restart (tsx watch),
+// interval murni bisa tidak pernah mencapai 24 jam atau menumpuk saat restart.
+// Cek per jam: gap maksimal ±25 jam, restart bebas berapa kali.
+function backupHarian(): void {
+  try {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const hari =
+      `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    const sudah = fs.readdirSync(backupDir())
+      .some((n) => n.startsWith(`data-${hari}-`) && POLA_BACKUP.test(n));
+    if (sudah) return;
+    void buatBackup()
+      .then((r) => console.log(`[backup] ${r.nama} (${r.ukuran} byte)`))
+      .catch((e) => console.error('[backup] GAGAL:', e instanceof Error ? e.message : e));
+  } catch (e) {
+    console.error('[backup] GAGAL:', e instanceof Error ? e.message : e);
+  }
+}
+backupHarian(); // sekali saat API hidup (idempoten — restart aman)
+setInterval(backupHarian, 60 * 60 * 1000); // lalu cek tiap jam
+
+// Daftar file backup (terbaru dulu).
+app.get('/api/backup', (c) => c.json({ data: daftarBackup() }));
+
+// Backup manual — selalu membuat file BARU (tanpa cek "hari ini sudah ada";
+// cek harian hanya untuk scheduler). Integrity check + retensi tetap berlaku.
+app.post('/api/backup', async (c) => {
+  try {
+    return c.json({ data: await buatBackup() }, 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'backup gagal' }, 500);
+  }
+});
+
+// Unduh satu file backup. Guard GANDA (pola sama dengan endpoint foto):
+// path.basename MEMASTIKAN tidak bisa keluar folder backups/, lalu whitelist
+// pola nama file — nama lain (termasuk traversal yang sudah dinormalisasi)
+// tetap 404. Jangan pernah menerima nama file apa pun yang ditulis client.
+app.get('/api/backup/:nama', (c) => {
+  const nama = c.req.param('nama');
+  if (path.basename(nama) !== nama || !POLA_BACKUP.test(nama)) {
+    return c.json({ error: 'file backup tidak ada' }, 404);
+  }
+  const file = path.join(backupDir(), nama);
+  if (!fs.existsSync(file)) return c.json({ error: 'file backup tidak ada' }, 404);
+  const buf = fs.readFileSync(file);
+  return c.body(new Uint8Array(buf), 200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Disposition': `attachment; filename="${nama}"`,
+    'Cache-Control': 'no-store',
+  });
 });
 
 // ---------- laporan harian ----------

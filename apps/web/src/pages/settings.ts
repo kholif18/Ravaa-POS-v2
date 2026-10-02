@@ -12,10 +12,15 @@ import { confirmDialog } from '../ui/confirm';
 import { icon } from '../ui/icons';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
+import { waktu } from '../ui/waktu';
 
 type Settings = { allow_negative_stock: boolean; tolak_jual_kadaluarsa: boolean };
+type BarisBackup = { nama: string; ukuran: number; waktu: string };
 
-const state = { loading: true, error: '', minus: false, kadaluarsa: false };
+const state = {
+  loading: true, error: '', minus: false, kadaluarsa: false,
+  backups: [] as BarisBackup[], backupErr: '', backupJalan: false,
+};
 
 let host: HTMLElement | null = null;
 
@@ -98,7 +103,58 @@ function renderBody(): string {
         <div class="shrink-0">${switchHtml('set-kadaluarsa', state.kadaluarsa, state.kadaluarsa ? 'Aktif' : 'Nonaktif')}</div>
       </div>
     </div>
+    ${kartuBackup()}
   </div>`;
+}
+
+// Format ukuran file: 12 KB / 3,4 MB (id-ID).
+function ukuranFile(n: number): string {
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toLocaleString('id-ID', { maximumFractionDigits: 1 })} MB`;
+}
+
+// Kartu Backup (fitur 1.2): tombol backup manual + daftar file terakhir +
+// unduh. BUKAN kartu saklar — tidak ada konfirmasi swal (backup non-destruktif,
+// boleh diklik berulang), pola tetap kartu + tombol .btn yang sudah ada.
+function kartuBackup(): string {
+  const daftar = state.backups.length
+    ? `<ul class="mt-3 divide-y divide-gray-100 dark:divide-gray-700" data-backup-list>
+        ${state.backups.map((b) => `
+        <li class="flex items-center justify-between gap-3 py-2" data-nama="${esc(b.nama)}">
+          <div class="min-w-0">
+            <div class="truncate text-sm text-gray-700 dark:text-gray-300">${esc(b.nama)}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">${waktu(b.waktu)} · ${ukuranFile(b.ukuran)}</div>
+          </div>
+          <a class="btn btn-outline btn-sm shrink-0" href="/api/backup/${encodeURIComponent(b.nama)}" download>
+            ${icon('download')}<span>Unduh</span>
+          </a>
+        </li>`).join('')}
+      </ul>`
+    : `<p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-backup-kosong>
+         Belum ada file backup. Klik "Backup sekarang" untuk membuat satu —
+         atau tunggu jadwal otomatis (dicek tiap jam, 1× sehari).
+       </p>`;
+  const err = state.backupErr
+    ? `<p class="mt-2 text-xs text-red-600 dark:text-red-400">${esc(state.backupErr)}</p>` : '';
+  return `
+    <div class="card">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Backup data</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Salinan utuh database toko disimpan otomatis <b>1× sehari</b> (yang terbaru
+            disimpan <b>14 file</b>, sisanya dibuang sendiri). File ada di folder
+            <code>backups</code> sebelah database — restore = salin manual saat API
+            mati (lihat README).
+          </p>
+          ${err}
+          ${daftar}
+        </div>
+        <button type="button" id="set-backup" class="btn btn-outline shrink-0" ${state.backupJalan ? 'disabled' : ''}>
+          ${icon('sync')}<span>${state.backupJalan ? 'Membuat backup…' : 'Backup sekarang'}</span>
+        </button>
+      </div>
+    </div>`;
 }
 
 function esc(s: unknown): string {
@@ -171,18 +227,54 @@ function bind(): void {
       }
     });
   }
+
+  // Tombol Backup sekarang: POST -> refresh daftar -> toast. Tanpa konfirmasi
+  // (non-destruktif; retensi 14 file di server yang menjaga jumlah).
+  host?.querySelector('#set-backup')?.addEventListener('click', async () => {
+    if (state.backupJalan) return;
+    state.backupJalan = true;
+    state.backupErr = '';
+    paint();
+    try {
+      const r = await apiPost<{ data: BarisBackup }>('/api/backup', {});
+      toast(`Backup dibuat: ${r.data.nama} (${ukuranFile(r.data.ukuran)})`, 'success');
+      await muatBackup();
+    } catch (e) {
+      state.backupErr = `Gagal backup: ${errMsg(e)}`;
+      toast(state.backupErr, 'error');
+    } finally {
+      state.backupJalan = false;
+      if (host?.isConnected) paint();
+    }
+  });
+}
+
+// Ambil daftar backup — gagal TIDAK menggagalkan halaman (kartu saklar tetap
+// jalan), cukup pesan inline di kartu Backup.
+async function muatBackup(): Promise<void> {
+  try {
+    const r = await apiGet<{ data: BarisBackup[] }>('/api/backup');
+    state.backups = Array.isArray(r.data) ? r.data : [];
+    state.backupErr = '';
+  } catch (e) {
+    state.backupErr = `Gagal memuat daftar backup: ${errMsg(e)}`;
+  }
 }
 
 async function load(): Promise<void> {
   state.loading = true;
   state.error = '';
   paint();
-  try {
-    const s = await apiGet<{ data: Settings }>('/api/settings');
-    state.minus = s.data?.allow_negative_stock === true;
-    state.kadaluarsa = s.data?.tolak_jual_kadaluarsa === true;
-  } catch (e) {
-    state.error = errMsg(e);
+  // Settings dan daftar backup paralel — daftar tidak memblokir kartu saklar.
+  const [s, _] = await Promise.allSettled([
+    apiGet<{ data: Settings }>('/api/settings'),
+    muatBackup(),
+  ]);
+  if (s.status === 'fulfilled') {
+    state.minus = s.value.data?.allow_negative_stock === true;
+    state.kadaluarsa = s.value.data?.tolak_jual_kadaluarsa === true;
+  } else {
+    state.error = errMsg(s.reason);
   }
   state.loading = false;
   if (host?.isConnected) paint();
