@@ -94,6 +94,13 @@ const jual = async (paket) => {
 try {
   const salesSebelum = await (await fetch('http://localhost:3001/api/reports/daily')).json();
 
+  // Kunci layout THERMAL untuk suite ini: puluhan asersi di bawah menguji
+  // kolom 32 + ekor CUT, jadi jangan bergantung pada nilai default pref yang
+  // bisa berubah. Layout A4 diuji terpisah di section E.
+  await page.addInitScript(() => {
+    try { localStorage.setItem('ravaa.struklayout', 'thermal'); } catch { /* */ }
+  });
+
   console.log('=== A. Saklar & penjualan ===');
   await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 20000 });
@@ -207,6 +214,32 @@ try {
   const n1 = salesSebelum?.data?.sales?.n ?? 0;
   const n2 = laporan?.data?.sales?.n ?? 0;
   ok(`3 penjualan tercatat di server (${n1} -> ${n2})`, n2 - n1 === 3, JSON.stringify({ n1, n2 }));
+
+  console.log('=== E. Layout A4 (Epson L3110): eject tanpa potong ===');
+  // Section D meninggalkan mode gagal-cetak; kembalikan ke sukses dulu.
+  gagalCetak = false;
+  await page.evaluate(() => {
+    try { localStorage.setItem('ravaa.struklayout', 'a4'); } catch { /* */ }
+  });
+  await page.click('[data-mode="jual"]');
+  await page.waitForSelector('#pos-q', { timeout: 8000 });
+  await jual({ q: 'PRD00013', tunai: 20000 });
+  ok('struk A4 dikirim', tercetak.length === 4, tercetak.length);
+  const s4 = Buffer.from(tercetak[3], 'base64');
+  ok('A4: diawali INIT', s4[0] === 0x1b && s4[1] === 0x40);
+  ok('A4: diakhiri Form Feed 0x0C (eject inkjet)', s4[s4.length - 1] === 0x0c, s4.slice(-4));
+  ok('A4: TANPA perintah potong (inkjet tanpa pisau)',
+    !s4.some((_, i) => s4[i] === 0x1d && s4[i + 1] === 0x56 && s4[i + 2] === 0x00));
+  const t4 = teksDari(s4);
+  const b4 = barisStruk(s4);
+  ok('A4: isi struk lengkap', /No\. \w{8}/.test(t4) && t4.includes('TOTAL') && /Kasir:/.test(t4), b4[0]);
+  ok('A4: garis pemisah 64 kolom', t4.includes('-'.repeat(64)));
+  const lewat4 = b4.filter((x) => x.length > 64);
+  ok(`A4: semua baris <= 64 kolom (maks ${Math.max(0, ...b4.map((x) => x.length))})`, lewat4.length === 0, lewat4);
+  // Bersih-bersih pref (browser ditutup di finally — ini sekadar kebersihan).
+  await page.evaluate(() => {
+    try { localStorage.setItem('ravaa.struklayout', 'thermal'); } catch { /* */ }
+  });
 
   ok('tanpa error halaman', errs.length === 0, errs.slice(0, 3));
 } catch (e) {

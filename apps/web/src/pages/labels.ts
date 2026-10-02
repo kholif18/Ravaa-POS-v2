@@ -13,7 +13,7 @@
 
 import { apiGet, HttpError } from '../api';
 import { getCachedProducts, type Category, type Product } from '../store';
-import { COLS, gabungLabel, kirimPrint, teksLabel, urlAgent, type ProdukLabel } from '../escpos';
+import { COLS, gabungLabel, kirimPrint, sesuaikanPrinter, teksLabel, urlAgent, type ProdukLabel } from '../escpos';
 import { icon } from '../ui/icons';
 import { toast } from '../ui/toast';
 
@@ -293,7 +293,9 @@ async function cetak(): Promise<void> {
   state.cetak = true;
   sync();
   try {
-    const via = await kirimPrint(gabungLabel(layakDipilih.map(keLabel)));
+    // sesuaikanPrinter: di device layout A4 label kehilangan perintah potong
+    // (inkjet tanpa pisau) dan batch ditutup Form Feed supaya kertas keluar.
+    const via = await kirimPrint(sesuaikanPrinter(gabungLabel(layakDipilih.map(keLabel))));
     toast(`${layakDipilih.length} label dikirim${via ? ` · ${via}` : ''}`, 'success');
   } catch (e) {
     toast(`Gagal cetak: ${errMsg(e)}`, 'error');

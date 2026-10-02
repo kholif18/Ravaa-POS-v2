@@ -1,8 +1,8 @@
 // Test modul ESC/POS (apps/web/src/escpos.ts).
 // Jalankan: npx tsx escpos-test.ts
 import {
-  COLS, ascii, rp, potong, tengah, kanan, labelHarga, teksLabel, gabungLabel,
-  keBase64, struk, type ProdukLabel,
+  COLS, COLS_A4, ascii, rp, potong, tengah, kanan, labelHarga, teksLabel, gabungLabel,
+  keBase64, struk, strukA4, strukUntuk, sesuaikanPrinter, type ProdukLabel,
 } from '../apps/web/src/escpos.ts';
 
 let lolos = 0, gagal = 0;
@@ -211,6 +211,45 @@ const strukJual = {
   const barisItem = s2.split(/\n|\r/).find((x) => x.includes('Rp4.500'));
   ok('item panjang tidak menggeser kolom uang', barisItem !== undefined && barisItem.trimEnd().length <= COLS,
     barisItem);
+}
+
+console.log('=== G. struk A4 (Epson L3110) & pilihan layout ===');
+{
+  const b = strukA4(strukJual);
+  const s2 = teksDari(b);
+  ok('A4: diawali INIT', b[0] === 0x1b && b[1] === 0x40);
+  // Akhir WAJIB 1b 64 03 0c — FEED margin lalu Form Feed (eject inkjet).
+  ok('A4: diakhiri FEED(3) + Form Feed 0x0C',
+    b[b.length - 4] === 0x1b && b[b.length - 3] === 0x64 && b[b.length - 2] === 0x03 && b[b.length - 1] === 0x0c,
+    b.slice(-6));
+  ok('A4: TANPA perintah potong (GS V 0)',
+    !b.some((_, i) => b[i] === 0x1d && b[i + 1] === 0x56 && b[i + 2] === 0x00));
+  ok('A4: judul dobel lebar (GS ! 0x10)',
+    b.some((_, i) => b[i] === 0x1d && b[i + 1] === 0x21 && b[i + 2] === 0x10));
+  ok('A4: judul + kasir + TOTAL + kaki lengkap',
+    s2.includes('TOKO MAJU JAYA') && s2.includes('Kasir: Budi') && s2.includes('TOTAL') && s2.includes('Rp15.000')
+      && s2.includes('Terima kasih sudah berbelanja'));
+  ok('A4: item dgn qty tetap ada', s2.includes('2 x Aqua 600ml'));
+  ok('A4: garis pemisah 64 kolom', s2.includes('-'.repeat(COLS_A4)));
+  const barisA4 = s2.match(/[\x20-\x7E]+/g) ?? [];
+  const lewatA4 = barisA4.filter((x) => x.length > COLS_A4);
+  ok('A4: semua baris <= 64 kolom', lewatA4.length === 0, lewatA4.slice(0, 3));
+}
+{
+  // strukUntuk: node tidak punya localStorage -> pref = thermal (default),
+  // dan parameter eksplisit harus memilih builder yang tepat.
+  eq('strukUntuk tanpa pref = struk thermal', strukUntuk(strukJual), struk(strukJual));
+  eq('strukUntuk(..., "thermal") = struk thermal', strukUntuk(strukJual, 'thermal'), struk(strukJual));
+  eq('strukUntuk(..., "a4") = strukA4', strukUntuk(strukJual, 'a4'), strukA4(strukJual));
+}
+{
+  // sesuaikanPrinter (dipakai jalur label): thermal = identik, a4 = buang CUT + ekor FF.
+  const label = gabungLabel([contoh, contoh]);
+  eq('sesuaikanPrinter thermal = stream apa adanya', sesuaikanPrinter(label, 'thermal'), label);
+  const a4 = sesuaikanPrinter(label, 'a4');
+  ok('sesuaikanPrinter a4: 0 potongan', !a4.some((_, i) => a4[i] === 0x1d && a4[i + 1] === 0x56 && a4[i + 2] === 0x00));
+  ok('sesuaikanPrinter a4: ditutup Form Feed', a4[a4.length - 1] === 0x0c, a4.slice(-4));
+  ok('sesuaikanPrinter a4: isi label tetap utuh', teksDari(a4).includes('Sampoerna Mild') && teksDari(a4).includes('Rp4.000'));
 }
 
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);

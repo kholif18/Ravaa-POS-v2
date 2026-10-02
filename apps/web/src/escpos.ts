@@ -1,4 +1,11 @@
-// ESC/POS 58mm — cetak label harga (dan kerangka perintah struk).
+// ESC/POS — cetak label harga & struk. DUA layout struk (sejak 2026-10-02):
+//
+//   * `thermal` (bawaan) — 58mm, 32 kolom, diakhiri FEED + CUT. Perangkat
+//     bawaan toko: printer termal dengan pisau potong.
+//   * `a4` — Epson L3110 (inkjet A4), 64 kolom, diakhiri Form Feed (0x0C)
+//     TANPA perintah potong. Inkjet tidak punya pisau; tanpa FF kertas tercetak
+//     tapi tidak pernah keluar (bug nyata di L3110). Dipilih lewat panel
+//     Sistem -> Cetak struk (lihat ui/print-pref.ts).
 //
 // Modul ini TIDAK ADA padahal tercatat di AGENTS §2 sejak lama (dibuat ulang
 // 2026-09-27 bersama fitur label). Web tidak menulis device: cukup POST
@@ -6,11 +13,15 @@
 // bytes ke PRINTER_PATH. Bila tak ada printer, agent menyimpannya sebagai file,
 // jadi alur ini tetap bisa diuji tanpa hardware.
 //
-// Lebar kolom TETAP 32 (58mm, font 12 kolom/inch). Setiap baris WAJIB <= 32
-// karakter setelah `ascii()`, karena byte di luar 0x20-0x7E bisa menggeser
-// posisi cetak di firmware thermal.
+// Setiap baris WAJIB <= kolom layout-nya setelah `ascii()`, karena byte di luar
+// 0x20-0x7E bisa menggeser posisi cetak di firmware printer.
+
+import { getStrukLayout, type LayoutStruk } from './ui/print-pref';
 
 export const COLS = 32;
+/** Lebar struk layout A4 (Epson L3110) — 64 kolom aman jauh di bawah lebar
+ *  baris printer (±80 kolom pada font bawaan), jadi tidak pernah wrap sendiri. */
+export const COLS_A4 = 64;
 
 /** ESC/POS dasar. INIT mengembalikan printer ke state bawaan — dikirim setiap
  *  kali supaya sisa perintah struk sebelumnya tidak mewarisi ukuran huruf/align. */
@@ -21,6 +32,10 @@ const FEED = (n: number) => [0x1b, 0x64, n];
 /** Akhir baris. TANPA ini semua baris struk menempel jadi SATU baris memanjang:
  *  firmware thermal mencetak teks begitu diterima, pemisah barisnya adalah LF. */
 const LF = [0x0a];
+/** Form Feed — injeksikan halaman berikutnya. Untuk inkjet (L3110) inilah
+ *  perintah EJECT: tanpa GS V (yang tidak ada gunanya di printer tanpa pisau)
+ *  kertas menumpuk di dalam setelah baris terakhir tercetak. */
+const FF = [0x0c];
 /** Kolom uang di struk (subtotal/total/kembalian). Sama untuk dua-kolom & item
  *  supaya seluruh angka rata pada kolom yang sama. */
 const KOL_UANG = 14;
@@ -219,6 +234,84 @@ export function struk(s: Struk): number[] {
 
   out.push(...FEED(4), ...CUT);
   return out;
+}
+
+const garisA4 = () => '-'.repeat(COLS_A4);
+
+/** Baris dua kolom versi A4 — urutan yang sama dengan `duaKiriKanan`:
+ *  uang dipotong dulu lalu menempel di tepi kanan kolom 64. */
+function duaKiriKananA4(kiri: string, kanan_: string): string {
+  const r = potong(kanan_, KOL_UANG);
+  const l = potong(kiri, COLS_A4 - r.length - 1);
+  return l + sp(COLS_A4 - l.length - r.length) + r;
+}
+
+/** Struk layout A4 (Epson L3110): INIT -> judul dobel-lebar -> item ->
+ *  rincian (TOTAL tebal) -> kaki -> FEED -> Form Feed. TANPA perintah potong —
+ *  inkjet tidak punya pisau, dan barisnya 64 kolom (lihat header berkas).
+ *  Menerima Struk yang SAMA dengan `struk()`; hanya penyajiannya berbeda. */
+export function strukA4(s: Struk): number[] {
+  const out: number[] = [...INIT, ...ALIGN(1)];
+
+  const baris = (teksBaris: string) => out.push(...teks(teksBaris), ...LF);
+
+  // Judul dobel lebar (GS ! 0x10) + tebal: kertas A4 lega. Padding dihitung
+  // setengah lebar (32) karena tiap karakter tercetak 2 kolom — kalau dipakai
+  // tengah(64) barisnya akan meluber dua baris dan tidak lagi rata tengah.
+  out.push(
+    ...SIZE(2, 1), ...BOLD(true),
+    ...teks(tengah(potong(s.judul, COLS_A4 / 2), COLS_A4 / 2)), ...LF,
+    ...SIZE(1, 1), ...BOLD(false),
+  );
+  if (s.subjudul) baris(tengah(potong(s.subjudul, COLS_A4)));
+  for (const m of s.meta) baris(tengah(potong(m, COLS_A4)));
+
+  // Struk topup/tarik tanpa item: blok item + dua garisnya dilewati (aturan
+  // yang sama dengan struk thermal — tidak ada "(tanpa item)"/garis ganda).
+  if (s.items.length) {
+    out.push(...teks(garisA4()), ...LF);
+    for (const it of s.items) {
+      const qty = `${it.qty}${it.unit ? ` ${it.unit}` : ''} x `;
+      const nama = potong(qty + it.name, COLS_A4 - KOL_UANG - 1);
+      baris(kanan(nama, COLS_A4 - KOL_UANG - 1) + ' ' + kanan(rp(it.qty * it.price), KOL_UANG));
+    }
+  }
+  out.push(...teks(garisA4()), ...LF);
+
+  for (const b of s.baris) {
+    out.push(...BOLD(!!b.tebal));
+    baris(duaKiriKananA4(b.kiri, b.kanan));
+    out.push(...BOLD(false));
+  }
+
+  out.push(...teks(garisA4()), ...LF);
+  for (const k of s.kaki ?? []) baris(tengah(potong(k, COLS_A4)));
+
+  // Akhir: feed 3 baris (margin bawah) + Form Feed. BUKAN CUT.
+  out.push(...FEED(3), ...FF);
+  return out;
+}
+
+/** Pilih layout struk sesuai preferensi device ini (panel Sistem -> Cetak).
+ *  Parameter `layout` bisa ditimpa untuk test unit tanpa localStorage. */
+export function strukUntuk(s: Struk, layout: LayoutStruk = getStrukLayout()): number[] {
+  return layout === 'a4' ? strukA4(s) : struk(s);
+}
+
+/** Sesuaikan stream NON-struk (label harga dsb.) dengan printer aktif:
+ *  thermal = apa adanya; a4 = buang SEMUA perintah potong (inkjet tanpa pisau)
+ *  lalu tutup dengan Form Feed, supaya kertas keluar setelah batch selesai. */
+export function sesuaikanPrinter(bytes: number[], layout: LayoutStruk = getStrukLayout()): number[] {
+  if (layout !== 'a4') return bytes;
+  const out: number[] = [];
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] === 0x1d && bytes[i + 1] === 0x56 && bytes[i + 2] === 0x00) {
+      i += 2; // lompati GS V 0x00
+      continue;
+    }
+    out.push(bytes[i]);
+  }
+  return [...out, ...FEED(2), ...FF];
 }
 
 /** Gabung beberapa label jadi SATU stream (dipotong per label di dalamnya). */

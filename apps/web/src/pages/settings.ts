@@ -6,10 +6,15 @@
 // dipakai kasir di HP maupun di PC. Karena itu aturan yang menyangkut data
 // (stok, harga, dsb) tidak boleh disimpan di localStorage — dua device bisa
 // berbeda pendapat dan penjualan jadi tidak konsisten.
+//
+// PENGECUALIAN SATU-SATUNYA: kartu "Cetak struk" — sifatnya justru per-device
+// (printer tiap PC kasir beda: thermal 58mm, Epson L3110, atau tanpa printer),
+// jadi disimpan lewat ui/print-pref.ts di localStorage browser ini.
 
 import { apiGet, apiPost, HttpError } from '../api';
 import { confirmDialog } from '../ui/confirm';
 import { icon } from '../ui/icons';
+import { getAutoPrint, getStrukLayout, setAutoPrint, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
@@ -103,8 +108,52 @@ function renderBody(): string {
         <div class="shrink-0">${switchHtml('set-kadaluarsa', state.kadaluarsa, state.kadaluarsa ? 'Aktif' : 'Nonaktif')}</div>
       </div>
     </div>
+    ${kartuCetak()}
     ${kartuBackup()}
   </div>`;
+}
+
+// Kartu "Cetak struk" — preferensi PER DEVICE (localStorage lewat
+// ui/print-pref.ts), BUKAN POST /api/settings: printer tiap PC kasir beda
+// (thermal 58mm vs Epson L3110 vs HP tanpa printer), jadi menyimpannya
+// di server justru memaksa semua device ikut. Tanpa konfirmasi swal —
+// non-destruktif dan langsung bisa dibalik (alasan sama dengan kartu Backup).
+function kartuCetak(): string {
+  const nyala = getAutoPrint();
+  const layout = getStrukLayout();
+  const isiSaklar = nyala
+    ? `Struk langsung dicetak setiap penjualan/topup berhasil — pelanggan menerima
+       bukti tanpa klik apa pun. Matikan saklar bila device ini tidak punya printer;
+       penjualan tetap berjalan (cetak otomatis tidak pernah membatalkan transaksi).`
+    : `Struk <b>tidak</b> dicetak otomatis. Kasir tetap bisa mencetak ulang kapan
+       saja lewat menu Riwayat transaksi. Nyalakan lagi kalau device ini sudah
+       terpasang printer.`;
+  const isiLayout = layout === 'a4'
+    ? `Sedang memakai <b>Epson L3110 (A4)</b>: 64 kolom, tanpa potong, ditutup eject
+       supaya kertas keluar — cocok untuk inkjet yang tidak punya pisau potong.`
+    : `Sedang memakai <b>Thermal 58mm</b>: 32 kolom, diakhiri potong kertas — cocok
+       untuk printer termal bawaan (Caysn/dll).`;
+  return `
+    <div class="card">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Cetak struk</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiSaklar}</p>
+          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">${isiLayout}</p>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            Berlaku untuk <b>device ini saja</b> (tersimpan di browser, tidak ikut ke
+            kasir lain) — karena dua PC bisa menempel pada printer yang berbeda.
+          </p>
+        </div>
+        <div class="flex shrink-0 flex-col items-end gap-2">
+          ${switchHtml('set-cetak', nyala, nyala ? 'Aktif' : 'Nonaktif')}
+          <select id="set-layout" class="input input-sm" aria-label="Layout struk">
+            <option value="thermal"${layout === 'thermal' ? ' selected' : ''}>Thermal 58mm</option>
+            <option value="a4"${layout === 'a4' ? ' selected' : ''}>Epson L3110 (A4)</option>
+          </select>
+        </div>
+      </div>
+    </div>`;
 }
 
 // Format ukuran file: 12 KB / 3,4 MB (id-ID).
@@ -227,6 +276,26 @@ function bind(): void {
       }
     });
   }
+
+  // Kartu "Cetak struk": dua preferensi per-device, langsung tersimpan tanpa
+  // konfirmasi (non-destruktif & bisa dibalik — alasan sama dengan Backup).
+  // Di-paint ulang supaya label saklar ("Aktif"/"Nonaktif") ikut terbarui.
+  host?.querySelector<HTMLInputElement>('#set-cetak')?.addEventListener('change', (e) => {
+    const nyala = (e.target as HTMLInputElement).checked;
+    setAutoPrint(nyala);
+    toast(nyala ? 'Cetak otomatis: aktif (device ini)' : 'Cetak otomatis: nonaktif (device ini)', 'success');
+    paint();
+  });
+  host?.querySelector<HTMLSelectElement>('#set-layout')?.addEventListener('change', (e) => {
+    const v = (e.target as HTMLSelectElement).value;
+    const layout: LayoutStruk = v === 'a4' ? 'a4' : 'thermal';
+    setStrukLayout(layout);
+    toast(
+      layout === 'a4' ? 'Layout struk: Epson L3110 (A4) — eject tanpa potong' : 'Layout struk: Thermal 58mm',
+      'success',
+    );
+    paint();
+  });
 
   // Tombol Backup sekarang: POST -> refresh daftar -> toast. Tanpa konfirmasi
   // (non-destruktif; retensi 14 file di server yang menjaga jumlah).

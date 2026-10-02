@@ -20,7 +20,8 @@ import { apiGet, apiPost, uuid, HttpError } from '../api';
 import { getCachedProducts, syncMaster, type Product } from '../store';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
-import { kirimPrint, struk, type Struk } from '../escpos';
+import { getAutoPrint, setAutoPrint } from '../ui/print-pref';
+import { kirimPrint, strukUntuk, type Struk } from '../escpos';
 import { toast } from '../ui/toast';
 import { openModal } from '../ui/modal';
 import { icon } from '../ui/icons';
@@ -101,17 +102,11 @@ let active = 0;
 
 /* ---------- cetak struk ---------- */
 
-const KEY_CETAK = 'ravaa.cetak';
-/** Cetak struk otomatis setelah tiap penjualan/topup. Default NYALA — toko
- *  punya printer termal dan pelanggan mengharapkan struk; matikan lewat saklar
- *  di panel bayar kalau device ini memang tidak punya printer. */
-let autoPrint = (() => {
-  try {
-    return localStorage.getItem(KEY_CETAK) !== '0';
-  } catch {
-    return true;
-  }
-})();
+/** Cetak otomatis setelah tiap penjualan/topup. Pref-nya per device
+ *  (localStorage lewat ui/print-pref.ts) — bisa juga diganti dari panel
+ *  Sistem -> Cetak struk, jadi mountPosPage WAJIB membaca ulang tiap kali
+ *  (nilai modul ini tidak usang walau kasir mengubah pref di halaman lain). */
+let autoPrint = getAutoPrint();
 /** Peringatan "printer tidak bisa dijangkau" cukup SEKALI per sesi — kalau
  *  setiap penjualan memunculkan toast yang sama, kasir jadi acuh dan justru
  *  kehilangan pesan penting. Reset tiap kali cetak berhasil. */
@@ -762,11 +757,7 @@ function paint(): void {
   // `autoPrint` tidak ikut, sehingga struk diam-diam tidak dicetak.
   host.querySelector('#pos-autoprint')?.addEventListener('change', (e) => {
     autoPrint = (e.target as HTMLInputElement).checked;
-    try {
-      localStorage.setItem(KEY_CETAK, autoPrint ? '1' : '0');
-    } catch {
-      /* abaikan */
-    }
+    setAutoPrint(autoPrint);
   });
   if (!shift) {
     bindShiftGate();
@@ -1074,7 +1065,7 @@ async function pay(): Promise<void> {
       ],
       kaki: ['Terima kasih sudah berbelanja'],
     };
-    void cetak(struk(strukJual));
+    void cetak(strukUntuk(strukJual));
     cart = [];
     discount = 0;
     cashIn = 0;
@@ -1181,7 +1172,7 @@ async function submitTopup(): Promise<void> {
       ],
       kaki: [mode === 'topup' ? 'Simpan struk ini sebagai bukti' : 'Cek kembali nominal sebelum meninggalkan loket'],
     };
-    void cetak(struk(strukTop));
+    void cetak(strukUntuk(strukTop));
     toast(
       `${res.duplicate ? 'Sudah tercatat' : mode === 'topup' ? 'Topup' : 'Tarik'} ${j.ringkas} · ${nomor} · ${rp(total)}` +
         (kembali > 0 ? ` · kembalian ${rp(kembali)}` : ''),
@@ -1486,6 +1477,9 @@ export function unmountPosPage(): void {
 /** Dipanggil router untuk route `pos`. */
 export async function mountPosPage(el: HTMLElement): Promise<void> {
   host = el;
+  // Pref cetak per device bisa saja diubah di panel Sistem sejak mount
+  // terakhir — baca ulang supaya saklar scan bar & perilaku cetak ikut.
+  autoPrint = getAutoPrint();
   // Kasir tidak boleh bergantung pada halaman Manage: perangkat baru wajib punya
   // cache produk. Tarik delta dari server (?since=maxVersion), lalu baca cache.
   // Kalau gagal (offline) tetap jalan dengan cache terakhir.

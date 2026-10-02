@@ -19,7 +19,7 @@ import { icon } from '../ui/icons';
 import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
 import { getToko } from '../ui/user';
-import { rp, struk, kirimPrint, type Struk } from '../escpos';
+import { rp, strukUntuk, kirimPrint, type Struk } from '../escpos';
 
 /* ---------- tipe ---------- */
 
@@ -446,7 +446,7 @@ async function cetakUlang(s: SaleRow): Promise<void> {
       ],
       kaki: ['Terima kasih sudah berbelanja'],
     };
-    await kirimPrint(struk(strukUlang));
+    await kirimPrint(strukUntuk(strukUlang));
     toast(`Struk ${s.id.slice(0, 8)} dicetak ulang`, 'success');
   } catch (e) {
     toast(`Struk tidak tercetak: ${errMsg(e)}`, 'warning', 9000);

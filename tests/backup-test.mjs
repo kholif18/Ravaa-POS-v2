@@ -169,6 +169,30 @@ try {
       atasSebelum, { timeout: 8000 },
     );
     ok('daftar ter-refresh: baris paling atas = file baru', true);
+
+    // Kartu "Cetak struk" — preferensi per-device (localStorage lewat
+    // ui/print-pref.ts), bukan POST /api/settings. Diuji di sini karena satu
+    // halaman dengan kartu Backup; API tidak disentuh, jadi aman di tengah test.
+    const judulCetak = await page.locator('.card h3', { hasText: 'Cetak struk' }).count();
+    ok('kartu "Cetak struk" tampil', judulCetak === 1, `jumlah=${judulCetak}`);
+    ok('saklar #set-cetak & select #set-layout ada',
+      (await page.locator('#set-cetak').count()) === 1 && (await page.locator('#set-layout').count()) === 1);
+    await page.click('label[for="set-cetak"]');
+    await page.waitForFunction(
+      () => document.querySelector('#toast-root')?.textContent?.includes('device ini'), { timeout: 8000 });
+    ok('saklar cetak otomatis bisa DIMATIKAN', !(await page.isChecked('#set-cetak')));
+    ok('pref auto-cetak tersimpan di localStorage device ini',
+      (await page.evaluate(() => localStorage.getItem('ravaa.cetak'))) === '0');
+    await page.selectOption('#set-layout', 'a4');
+    await page.waitForFunction(
+      () => document.querySelector('#toast-root')?.textContent?.includes('Epson L3110'), { timeout: 8000 });
+    ok('layout A4 tersimpan per device',
+      (await page.evaluate(() => localStorage.getItem('ravaa.struklayout'))) === 'a4');
+    // Kembalikan seperti semula; browser per test ini juga ditutup di finally.
+    await page.click('label[for="set-cetak"]');
+    await page.selectOption('#set-layout', 'thermal');
+    ok('pref bisa dikembalikan (saklar nyala lagi)', await page.isChecked('#set-cetak'));
+
     ok('tanpa error console', errs.length === 0, errs.slice(0, 3).join(' | '));
   } finally {
     await browser.close();
