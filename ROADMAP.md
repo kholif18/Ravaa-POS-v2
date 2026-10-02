@@ -25,13 +25,17 @@
 |---|-------|-----------------|
 | 1.1 | **Bagikan struk & rekap harian via WhatsApp** | Gap diverifikasi (grep `wa.me\|whatsapp` = 0 di `apps/web/src`); tren pasar 2026 (rekap-ke-pemilik via WA = fitur andalan app Indonesia); murni client-side — **tidak ada endpoint/skema baru**, risiko paling kecil |
 | 1.2 | **Backup otomatis DB** | Gap diverifikasi (grep `backup` = 0 di `apps/api/src/index.ts`); meniru Aronium "automatic database backups"; data toko hidup di satu file SQLite — kehilangan = toko mati |
-| 1.3 | **Expected-cash saat tutup shift** | Gap yang diakui repo sendiri (`apps/web/src/pages/shifts.ts:14,20` komentar + README §shift); **[KEPUTUSAN]** rumus arah kas topup/tarik harus dipastikan pemilik sebelum coding |
+| 1.3 | **Expected-cash saat tutup shift** | Gap yang diakui repo sendiri (`apps/web/src/pages/shifts.ts:14,20` komentar + README §shift); **keputusan pemilik sudah lengkap 2026-10-01** (lihat §1.3) — tinggal eksekusi setelah 1.2 |
 
-**Eksekusi berurutan: 1.1 → 1.2 → 1.3.** Setelah Fase 1 hijau, lanjut Fase 2
+**Eksekusi berurutan: ~~1.1~~ → 1.2 → 1.3.** (1.1 **dicoret pemilik 2026-10-01**:
+toko kecil tidak perlu notif/rekap WhatsApp.) Setelah Fase 1 hijau, lanjut Fase 2
 (laporan per jam/kategori dulu — tanpa keputusan baru), lalu Fase 3 hanya
 butir yang sudah di-ACC pemilik.
 
-### 1.1 Bagikan struk & rekap harian via WhatsApp
+### ~~1.1 Bagikan struk & rekap harian via WhatsApp~~ **DICORET (2026-10-01)**
+> Alasan pemilik: untuk toko kecil, notif/rekap WhatsApp tidak perlu.
+> Rincian desain di bawah dipertahankan sebagai arsip — jangan dikerjakan
+> tanpa permintaan baru.
 - **Isi:** tombol **Bagikan** (a) di rincian nota halaman Riwayat — teks nota
   rapi (waktu/no/kasir/item/total/tunai-kembali) siap tempel ke chat; (b) di
   Laporan/Dashboard — ringkasan harian (omzet/laba/topup/stok menipis) untuk
@@ -59,19 +63,27 @@ butir yang sudah di-ACC pemilik.
   sehat (jalankan `PRAGMA integrity_check`), restore = salin file manual
   (didokumentasikan), test suite baru + `ekspek` naik.
 
-### 1.3 Expected-cash tutup shift **[KEPUTUSAN]**
-- **Isi:** hitung **kas yang seharusnya di laci** = `modal_awal + penjualan
-  tunai ± gerak kas topup/tarik` lalu bandingkan dengan `modal_akhir`; tampil
-  rincian (omzet tunai, QRIS/transfer dihitung terpisah, gerak topup/tarik)
-  di dialog Tutup shift. Ubah satu fungsi `hitungSelisih()` (`shifts.ts:67`).
-- **[KEPUTUSAN] yang harus dijawab pemilik dulu:**
-  1. Topup e-wallet di toko ini dibayar pelanggan dengan **tunai** (kas naik
-     nominal+admin? atau kas keluar saat di-topup-kan ke e-wallet?) —
-     dua arah kas berbeda, rumus berbeda.
-  2. Tarik tunai: kas toko **keluar** sebesar nominal (+admin?), atau kas
-     diterima dulu lalu dibayarkan? — sama, dua arah.
-  3. QRIS/transfer: dana masuk rekening (bukan laci) — dipisah, TIDAK masuk
-     expected-cash laci (konfirmasi).
+### 1.3 Expected-cash tutup shift **[KEPUTUSAN TERJAWAB 2026-10-01 — tinggal eksekusi]**
+- **Isi:** hitung **kas yang seharusnya di laci** = `modal_awal + gerak kas`
+  lalu bandingkan dengan `modal_akhir`; tampil rincian di dialog Tutup shift.
+  Ubah satu fungsi `hitungSelisih()` (`shifts.ts:67`).
+- **Keputusan pemilik (2026-10-01), tercatat:**
+  1. **Topup e-wallet = tunai** — pelanggan bayar tunai (nominal + admin) ->
+     laci **NAIK**. Admin **fleksibel per transaksi** (kontrak sudah:
+     `admin` editable; tarif indikatif pemilik: <49rb→2.000, 50–100rb→3.000,
+     101–500rb→5.000, ≥501rb→10.000 — beda provider bisa beda tarif.
+     Saat eksekusi: samakan default `GET /api/topups/suggest-admin`
+     dengan tangga ini **bila pemilik ACC**).
+  2. **Tarik tunai JANGAN mengurangi laci** — cukup **dicatat** sebagai
+     info transaksi, jangan masuk hitungan expected-cash. Alasan pemilik:
+     kalau baru buka shift (modal kecil) lalu ada tarik tunai besar,
+     expected-cash bisa jadi minus. Catatan: konsekuensinya selisih kas
+     akhir TIDAK mencerminkan arus tarik tunai — tampilkan saja angka
+     fakta per baris tanpa membawanya ke rumus.
+  3. **QRIS/transfer TETAP masuk hitungan laci** (kebalikan dari asumsi
+     awal riset yang menganggapnya dana rekening) — **dan wajib tercatat**
+     sumbernya transfer/QRIS. `sales.pay_method` sudah menyimpan ini;
+     rincian per metode tinggal ditampilkan di dialog tutup shift.
 - **DoD:** rumus disepakati tertulis di README + kontrak; angka contoh dari
   data asli diverifikasi dengan `curl`; test shift-test menambah asersi rincian.
 

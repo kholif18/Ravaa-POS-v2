@@ -59,7 +59,18 @@ docker compose up -d --build
 # web: http://<ip-server>:5656, api: http://<ip-server>:3001
 ```
 
-Backup DB (SQLite file): copy `apps/api/data/data.db` tiap hari via cron.
+Backup DB: API membuat **backup otomatis** — sekali saat hidup lalu cek tiap
+jam (idempoten per hari UTC), file baru juga dari tombol **Backup sekarang**
+di `#/settings`. File ada di `apps/api/data/backups/` (retensi 14 terbaru).
+
+**Restore (manual):** matikan API -> salin file backup pilihan menjadi
+`apps/api/data/data.db` -> hidupkan lagi -> buka shift baru. Contoh:
+
+```bash
+systemctl --user stop ravaa-api   # atau Ctrl+C proses dev:api
+cp apps/api/data/backups/data-2026-10-02-140135.db apps/api/data/data.db
+npm run dev:api
+```
 
 ## Aturan main
 

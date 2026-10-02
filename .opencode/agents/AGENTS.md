@@ -64,7 +64,11 @@ apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
 apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
                          saklar — "Stok boleh minus" + "Tolak jual kadaluarsa"
                          -> GET/POST /api/settings (update PARSIAL: satu kunci
-                         per toggle, konfirmasi swal tiap perubahan).
+                         per toggle, konfirmasi swal tiap perubahan), PLUS kartu
+                         **Backup data** (tombol "Backup sekarang" ->
+                         POST /api/backup + daftar file + Unduh per baris dari
+                         GET /api/backup; tanpa swal — non-destruktif; daftar
+                         gagal-muat tidak mematahkan halaman).
 apps/web/src/escpos.ts   ESC/POS 58mm (32 kolom): label harga + struk + POST ke print-agent.
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                          produk dan panel mode POS.
@@ -445,6 +449,45 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     jadi satu baris qty=5 campur satuan.
   - Jasa/cetak/desain punya `cost = 0` (tidak ada persediaan) -> penjualannya
     seluruhnya dihitung laba. Topup/tarik TIDAK masuk omzet (lihat §domain).
+* **Backup DB (fitur 1.2, sejak 2026-10-02)** — file backup disimpan di folder
+  `backups/` sebelah database (`path.join(path.dirname(dbPath),'backups')`,
+  pola `IMG_DIR`), nama `data-<YYYY-MM-DD>-<HHMMSS>.db` (semua **UTC**),
+  whitelist regex `^data-\d{4}-\d{2}-\d{2}-\d{6}\.db$`.
+  * `GET /api/backup` -> `{data:[{nama,ukuran,waktu}]}` (urutan **nama DESC** =
+    terbaru dulu; `waktu` = mtime ISO). Read-only, tidak menyentuh
+    `products.version`.
+  * `POST /api/backup` `{}` -> **201** `{data:{nama,ukuran,waktu}}` — selalu
+    membuat file **BARU** (tanpa cek "hari ini sudah ada" — cek harian itu
+    milik scheduler, bukan endpoint ini). **Nama detik-kuantum dijamin unik**:
+    dua POST pada detik yang sama (klik ganda / scheduler + manual) dahulu
+    menghasilkan nama identik sehingga backup KEDUA MENIMPA yang pertama —
+    kini reservasi sinkron `NAMA_BACKUP_TERPAKAI` + `existsSync` menggeser
+    nama +1 detik sampai bebas (urut leksikografis = kronologis tetap utuh).
+    Gagal (disk penuh/integrity rusak) -> **500** `{error}` dan file rusak
+    **dibuang** (bukan ditinggal sebagai "backup" yang tak bisa direstore).
+  * `GET /api/backup/:nama` -> byte file + `Content-Type: application/octet-stream`
+    + `Content-Disposition: attachment`. **Guard GANDA**: `path.basename(nama)
+    !== nama` ATAU tidak cocok pola whitelist -> **404**; file tidak ada ->
+    404. Jangan pernah menerima `:nama` apa pun dari client.
+  * Mekanisme: `db.backup()` (better-sqlite3, async) -> paksa file hasil ke
+    `journal_mode=DELETE` (source WAL meninggalkan pendamping `-shm`/`-wal`
+    yang membuat restore manual tidak portabel) -> `integrity_check` koneksi
+    terpisah; selain `'ok'` -> file + pendamping dihapus + error.
+  * **Retensi `KEEP = 14`** (konstanta di `apps/api/src/index.ts`, BUKAN
+    `/api/settings` — kontrak settings tervalidasi boolean): tiap backup
+    membuang 15+ terbesar (urutan nama = kronologis) beserta `-shm`/`-wal`.
+  * **Scheduler idempoten harian**: `backupHarian()` jalan sekali saat API
+    hidup + `setInterval` tiap 1 jam; cek "sudah ada `data-<hari-UTC>-*.db`?"
+    sebelum membuat — restart `tsx watch` tidak menggandakan backup, gap
+    maksimal ±25 jam.
+  * **Restore = manual dokumentasi** (tanpa endpoint, disengaja): matikan API,
+    ganti `data.db` dengan file backup, hidupkan lagi. Jangan menambah endpoint
+    restore tanpa diskusi — menulis DB dari body request = risiko keamanan baru.
+* Endpoints backup diuji `tests/backup-test.mjs` (21 asersi, terdaftar di
+  `tests/run.mjs`): daftar/POST/unduh+integrity/guard 3×404/retensi 16
+  dummy/UI kartu. Test MEMINDAHKAN file asli ke snapshot lalu mengembalikan
+  file asli di `finally` — jangan menghapus file `backups/` milik pemilik di
+  luar test.
 
 Aturan DB: tulis HANYA lewat prepared statement + transaction di `index.ts`.
 DILARANG: query string concat dari input user, tabel/kolom baru tanpa update `db/schema.sql`.
