@@ -25,9 +25,10 @@
 |---|-------|-----------------|
 | 1.1 | **Bagikan struk & rekap harian via WhatsApp** | Gap diverifikasi (grep `wa.me\|whatsapp` = 0 di `apps/web/src`); tren pasar 2026 (rekap-ke-pemilik via WA = fitur andalan app Indonesia); murni client-side — **tidak ada endpoint/skema baru**, risiko paling kecil |
 | 1.2 | **Backup otomatis DB** | Gap diverifikasi (grep `backup` = 0 di `apps/api/src/index.ts`); meniru Aronium "automatic database backups"; data toko hidup di satu file SQLite — kehilangan = toko mati |
-| 1.3 | **Expected-cash saat tutup shift** | Gap yang diakui repo sendiri (`apps/web/src/pages/shifts.ts:14,20` komentar + README §shift); **keputusan pemilik sudah lengkap 2026-10-01** (lihat §1.3) — tinggal eksekusi setelah 1.2 |
+| 1.3 | **Expected-cash saat tutup shift** | Gap yang diakui repo sendiri (`apps/web/src/pages/shifts.ts:14,20` komentar + README §shift); **keputusan pemilik sudah lengkap 2026-10-01** (lihat §1.3) — **SELESAI 2026-10-02** |
 
-**Eksekusi berurutan: ~~1.1~~ → 1.2 → 1.3.** (1.1 **dicoret pemilik 2026-10-01**:
+**Eksekusi berurutan: ~~1.1~~ → ~~1.2~~ → ~~1.3~~ (Fase 1 SELESAI 2026-10-02).**
+(1.1 **dicoret pemilik 2026-10-01**:
 toko kecil tidak perlu notif/rekap WhatsApp.) Setelah Fase 1 hijau, lanjut Fase 2
 (laporan per jam/kategori dulu — tanpa keputusan baru), lalu Fase 3 hanya
 butir yang sudah di-ACC pemilik.
@@ -63,10 +64,13 @@ butir yang sudah di-ACC pemilik.
   sehat (jalankan `PRAGMA integrity_check`), restore = salin file manual
   (didokumentasikan), test suite baru + `ekspek` naik.
 
-### 1.3 Expected-cash tutup shift **[KEPUTUSAN TERJAWAB 2026-10-01 — tinggal eksekusi]**
+### 1.3 Expected-cash tutup shift **[SELESAI 2026-10-02]**
 - **Isi:** hitung **kas yang seharusnya di laci** = `modal_awal + gerak kas`
   lalu bandingkan dengan `modal_akhir`; tampil rincian di dialog Tutup shift.
-  Ubah satu fungsi `hitungSelisih()` (`shifts.ts:67`).
+  Rumus di dua fungsi `kasSeharusnya()` + `hitungSelisih()`
+  (`apps/web/src/pages/shifts.ts`); agregatnya (`qris`, `transfer`,
+  `topup_nominal/admin`, `tarik_nominal/admin`) ditambahkan ke subquery
+  `GET /api/shifts`.
 - **Keputusan pemilik (2026-10-01), tercatat:**
   1. **Topup e-wallet = tunai** — pelanggan bayar tunai (nominal + admin) ->
      laci **NAIK**. Admin **fleksibel per transaksi** (kontrak sudah:
@@ -86,6 +90,10 @@ butir yang sudah di-ACC pemilik.
      rincian per metode tinggal ditampilkan di dialog tutup shift.
 - **DoD:** rumus disepakati tertulis di README + kontrak; angka contoh dari
   data asli diverifikasi dengan `curl`; test shift-test menambah asersi rincian.
+  **Terpenuhi 2026-10-02** — curl `GET /api/shifts` vs sqlite langsung
+  (shift #1: expected = 100000 + 100000 + 950000 + 95000 = **Rp1.245.000**),
+  `shift-test.mjs` 19 → **23** asersi (2 agregat + 2 dialog), README §shift +
+  kontrak §3 diperbarui, `npm test` SEMUA HIJAU.
 
 ---
 

@@ -1,6 +1,9 @@
 // Halaman Shift Kasir (#/shifts) + endpoint baru GET /api/shifts.
-// Kunci: agregat per shift (n_sales/omzet/tunai/n_topup) harus sama dengan
-// data nyata; buka & tutup shift lewat UI harus mengubah server; shift `kasir`
+// Kunci: agregat per shift (n_sales/omzet/tunai/qris/transfer, n_topup,
+// topup_nominal/admin, tarik_nominal/admin) harus sama dengan data nyata;
+// rumus "kas seharusnya" di dialog tutup = modal_awal + omzet + topup_nominal
+// + topup_admin (keputusan pemilik 2026-10-01, tarik di luar hitungan);
+// buka & tutup shift lewat UI harus mengubah server; shift `kasir`
 // (dipakai suite POS) TIDAK boleh tersentuh — test ini memakai kasir uji sendiri.
 // Jalankan: node shift-test.mjs   (butuh API :3001 + vite :5656 hidup)
 import { chromium } from 'playwright-core';
@@ -54,7 +57,9 @@ try {
   const semua = await get('/api/shifts?status=semua');
   ok('200 + {data, total}', semua.status === 200 && Array.isArray(semua.body.data)
     && typeof semua.body.total === 'number', `status=${semua.status}`);
-  const wajib = ['id', 'opened_at', 'modal_awal', 'cashier', 'status', 'n_sales', 'omzet', 'tunai', 'n_topup'];
+  const wajib = ['id', 'opened_at', 'modal_awal', 'cashier', 'status',
+    'n_sales', 'omzet', 'tunai', 'qris', 'transfer', 'n_topup',
+    'topup_nominal', 'topup_admin', 'tarik_nominal', 'tarik_admin'];
   ok('baris memuat kolom shift + agregat', semua.body.data.every((s) => wajib.every((k) => k in s)),
     JSON.stringify(Object.keys(semua.body.data[0] ?? {})));
   const ids = semua.body.data.map((s) => s.id);
@@ -100,6 +105,25 @@ try {
     `api n=${target.n_sales} omzet=${target.omzet} vs hitung n=${baris.length} omzet=${omzet} (rentang ${rentang[0]}..${rentang.at(-1)})`);
   ok(`shift #${target.id}: tunai cocok (${rp(tunai)})`, target.tunai === tunai,
     `api=${target.tunai} vs ${tunai}`);
+  const qris = baris.filter((sl) => sl.pay_method === 'qris').reduce((a, sl) => a + sl.total, 0);
+  const transfer = baris.filter((sl) => sl.pay_method === 'transfer').reduce((a, sl) => a + sl.total, 0);
+  ok(`shift #${target.id}: qris & transfer cocok (${rp(qris)} / ${rp(transfer)})`,
+    target.qris === qris && target.transfer === transfer,
+    `api=${target.qris}/${target.transfer} vs ${qris}/${transfer}`);
+  // Agregat topup/tarik diverifikasi langsung ke sqlite (GET /api/topups
+  // memfilter per hari, sedangkan agregat shift ALL-TIME).
+  const tt = execFileSync('sqlite3', [DB,
+    `SELECT COALESCE(SUM(CASE WHEN kind='topup' THEN nominal END),0)||'|'||
+            COALESCE(SUM(CASE WHEN kind='topup' THEN admin  END),0)||'|'||
+            COALESCE(SUM(CASE WHEN kind='tarik' THEN nominal END),0)||'|'||
+            COALESCE(SUM(CASE WHEN kind='tarik' THEN admin  END),0)
+     FROM topup_txns WHERE shift_id=${Number(target.id)}`],
+    { encoding: 'utf8' }).trim();
+  const [tn, ta, kn, ka] = tt.split('|').map(Number);
+  ok(`shift #${target.id}: agregat topup/tarik cocok sqlite (topup ${rp(tn)}+${rp(ta)}, tarik ${rp(kn)}+${rp(ka)})`,
+    target.topup_nominal === tn && target.topup_admin === ta
+    && target.tarik_nominal === kn && target.tarik_admin === ka,
+    `api=${target.topup_nominal}|${target.topup_admin}|${target.tarik_nominal}|${target.tarik_admin} sql=${tt}`);
 
   console.log('=== C. UI: render & filter ===');
   const kasirSebelum = await get('/api/shifts/open?cashier=kasir');
@@ -147,13 +171,31 @@ try {
     ok('baris shift uji muncul di tabel',
       (await page.locator('#sh-body tbody tr', { hasText: KASIR_UJI }).count()) === 1);
 
-    console.log('=== E. Tutup shift (UI): selisih + POST close ===');
+    console.log('=== E. Tutup shift (UI): kas seharusnya + selisih + POST close ===');
+    // Dialog shift KASIR (data nyata: 5 nota + 19 topup) — hanya MEMBACA
+    // rumus expected-cash, lalu Batal. Shift kasir tidak boleh tertutup.
+    const kasirRow = (await get('/api/shifts?status=open')).body.data
+      .find((s) => s.cashier === 'kasir');
+    await page.locator(`#sh-body tbody tr[data-shift="${kasirId}"] [data-tutup]`).click();
+    await page.waitForTimeout(350);
+    const harusKasir = await page.locator('#sh-harus').innerText();
+    const expectedKasir = kasirRow.modal_awal + kasirRow.omzet
+      + kasirRow.topup_nominal + kasirRow.topup_admin;
+    ok(`dialog kasir: kas seharusnya = modal+omzet+topup (${rp(expectedKasir)})`,
+      harusKasir === rp(expectedKasir),
+      `dialog=${harusKasir} hitung=${rp(expectedKasir)} (modal=${kasirRow.modal_awal} omzet=${kasirRow.omzet} topup=${kasirRow.topup_nominal}+${kasirRow.topup_admin})`);
+    await page.click('.modal-overlay [data-x]'); // Batal — shift kasir tetap open
+    await page.waitForTimeout(350);
+
     await page.locator('#sh-body tbody tr', { hasText: KASIR_UJI }).locator('[data-tutup]').click();
     await page.waitForTimeout(350);
-    await page.fill('#sh-akhir', '47000'); // 47000 - 40000 = Rp7.000
+    const harusUji = await page.locator('#sh-harus').innerText();
+    ok('dialog uji: kas seharusnya = modal awal (Rp40.000, tanpa transaksi)',
+      harusUji === rp(40000), `dialog=${harusUji}`);
+    await page.fill('#sh-akhir', '47000'); // kas seharusnya 40000; 47000 - 40000 = Rp7.000
     await page.waitForTimeout(200);
     const selisih = await page.locator('#sh-selisih').innerText();
-    ok('selisih live = kas fisik − modal awal (Rp7.000)', selisih.includes('7.000'), selisih);
+    ok('selisih live = kas fisik − kas seharusnya (Rp7.000)', selisih.includes('7.000'), selisih);
     await page.click('.modal-overlay [data-ok]');
     await page.waitForTimeout(1200);
     const uji2 = await get(`/api/shifts?cashier=${encodeURIComponent(KASIR_UJI)}`);

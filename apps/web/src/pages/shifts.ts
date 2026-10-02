@@ -1,7 +1,8 @@
 // Halaman Shift Kasir (#/shifts): riwayat shift + buka/tutup shift.
 //
 // Daftar dari `GET /api/shifts?status=` (endpoint baru) — tiap baris sudah
-// membawa agregatnya (n_sales, omzet, tunai, n_topup) lewat subquery, jadi
+// membawa agregatnya (n_sales, omzet, tunai/qris/transfer, n_topup,
+// topup_nominal/admin, tarik_nominal/admin) lewat subquery, jadi
 // tabel tidak memicu N+1. Filter status memakai enum yang sama dengan server
 // (`open|closed|semua`), bukan menyaring di klien.
 //
@@ -10,14 +11,18 @@
 //             masih punya shift open — UNIQUE INDEX, bukan cek SELECT).
 //   Tutup  -> POST /api/shifts/:id/close {modal_akhir}.
 //
-// PERHATIAN soal "selisih": repo ini belum punya aturan baku perhitungan kas
-// perkiraan (formula expected-cash per toko bisa berbeda — topup/tarik punya
-// gerak modal sendiri yang di luar omzet). Supaya TIDAK mengarang aturan
-// bisnis, dialog menampilkan fakta apa adanya (modal awal, penjualan tunai /
-// non-tunai, jumlah topup/tarik) dan selisih didefinisikan polos:
-//   selisih = modal_akhir − modal_awal
-// dengan label yang menyebut rumusnya. Bila toko menentukan rumus lain,
-// tinggal ganti satu fungsi `hitungSelisih()` di bawah.
+// PERHATIAN soal "selisih": rumus expected-cash mengikuti KEPUTUSAN PEMILIK
+// 2026-10-01 (ROADMAP §1.3), tidak dikarang sendiri:
+//   1. Topup = pelanggan bayar tunai -> laci NAIK (nominal + admin).
+//   2. Tarik tunai JANGAN mengurangi laci — cukup dicatat (kalau dimasukkan,
+//      expected bisa minus saat shift baru dibuka lalu ada tarik besar).
+//   3. QRIS/transfer TETAP masuk hitungan laci (bukan dana rekening terpisah);
+//      sumbernya wajib tercatat dan ditampilkan per metode.
+// Jadi:
+//   kas seharusnya = modal_awal + penjualan (SEMUA metode) + topup (nominal+admin)
+//   selisih        = modal_akhir − kas seharusnya
+// Rumusnya ada di DUA fungsi kecil di bawah (kasSeharusnya/hitungSelisih) —
+// bila keputusan berubah, ubah di situ, jangan menyebar ke tempat lain.
 
 import { apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
@@ -32,7 +37,10 @@ import { rp } from '../escpos';
 type ShiftRow = {
   id: number; opened_at: string; closed_at: string | null;
   modal_awal: number; modal_akhir: number | null; cashier: string; status: string;
-  n_sales: number; omzet: number; tunai: number; n_topup: number;
+  n_sales: number; omzet: number; tunai: number; qris: number; transfer: number;
+  n_topup: number;
+  topup_nominal: number; topup_admin: number;
+  tarik_nominal: number; tarik_admin: number;
 };
 
 type Filter = 'semua' | 'open' | 'closed';
@@ -62,10 +70,17 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : 'terjadi kesalahan';
 }
 
-/** Selisih kas. RUMUS EKSPLISIT (lihat komentar kepala file): kas fisik −
- *  modal awal. Angka penjualan di dialog hanya pembanding informasi. */
-function hitungSelisih(modalAkhir: number, modalAwal: number): number {
-  return modalAkhir - modalAwal;
+/** Kas yang SEHARUSNYA ada di laci menurut keputusan pemilik 2026-10-01
+ *  (lihat komentar kepala file): modal awal + penjualan semua metode +
+ *  topup (nominal + admin, dua angka dipisah di tampilan tapi keduanya
+ *  masuk laci). Tarik tunai sengaja TIDAK ikut. */
+function kasSeharusnya(s: ShiftRow): number {
+  return s.modal_awal + s.omzet + s.topup_nominal + s.topup_admin;
+}
+
+/** Selisih kas = kas fisik − kas seharusnya (rumus di satu tempat). */
+function hitungSelisih(modalAkhir: number, kasSeharusnyaDiLaci: number): number {
+  return modalAkhir - kasSeharusnyaDiLaci;
 }
 
 const FILTER_LABEL: Record<Filter, string> = { semua: 'Semua', open: 'Terbuka', closed: 'Tutup' };
@@ -156,7 +171,9 @@ function tabel(): string {
   <p class="text-xs text-gray-500 dark:text-gray-400">
     Menampilkan ${state.rows.length} dari ${state.total} shift (maks 200 per muat).
     Penjualan & topup dihitung dari baris yang terikat shift ini — penjualan
-    offline ikut terhitung setelah tersinkron. Topup/tarik di luar omzet.
+    offline ikut terhitung setelah tersinkron. Topup/tarik di luar omzet,
+    tapi topup (nominal + admin) ikut hitungan "kas seharusnya" di dialog
+    Tutup shift — rinciannya di sana.
   </p>`;
 }
 
@@ -246,27 +263,43 @@ function dialogBuka(): void {
 
 function dialogTutup(s: ShiftRow): void {
   const nonTunai = s.omzet - s.tunai;
+  const kasHarus = kasSeharusnya(s);
+  const baris = (label: string, nilai: number, kelas = '') =>
+    `<div class="flex justify-between gap-3"><span>${label}</span><b class="tabular-nums text-gray-900 dark:text-white ${kelas}">${rp(nilai)}</b></div>`;
   openModal({
     title: `Tutup shift #${s.id} — ${s.cashier}`,
     okLabel: 'Tutup shift',
     body: `
       <div class="space-y-1 text-sm text-gray-600 dark:text-gray-300">
         <div class="flex justify-between gap-3"><span>Modal awal</span><b class="tabular-nums text-gray-900 dark:text-white">${rp(s.modal_awal)}</b></div>
-        <div class="flex justify-between gap-3"><span>Penjualan tunai (${s.n_sales} nota)</span><b class="tabular-nums text-gray-900 dark:text-white">${rp(s.tunai)}</b></div>
-        <div class="flex justify-between gap-3"><span>Penjualan non-tunai</span><b class="tabular-nums text-gray-900 dark:text-white">${rp(nonTunai)}</b></div>
-        <div class="flex justify-between gap-3"><span>Topup/tarik (di luar omzet)</span><b class="tabular-nums text-gray-900 dark:text-white">${s.n_topup} tx</b></div>
+        <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Penjualan (semua metode — masuk laci)</div>
+        ${baris(`Tunai (${s.n_sales} nota)`, s.tunai)}
+        ${baris('QRIS', s.qris)}
+        ${baris('Transfer', s.transfer)}
+        ${nonTunai !== s.qris + s.transfer ? baris('Metode lain', s.omzet - s.tunai - s.qris - s.transfer) : ''}
+        <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Topup — pelanggan bayar, laci naik</div>
+        ${baris('Nominal', s.topup_nominal)}
+        ${baris('Admin', s.topup_admin)}
+        <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tarik tunai — dicatat saja, di luar hitungan</div>
+        ${baris('Nominal', s.tarik_nominal)}
+        ${baris('Admin', s.tarik_admin)}
+        <div class="mt-2 flex justify-between gap-3 border-t border-gray-200 pt-2 dark:border-gray-700">
+          <span class="font-medium text-gray-900 dark:text-white">Kas seharusnya di laci</span>
+          <b id="sh-harus" class="tabular-nums text-gray-900 dark:text-white">${rp(kasHarus)}</b>
+        </div>
       </div>
       <div class="field mt-4">
         <label class="label" for="sh-akhir">Modal akhir (hitung fisik di laci) *</label>
         <input id="sh-akhir" class="input" type="number" inputmode="numeric" min="0" step="1" placeholder="isi setelah uang dihitung" />
       </div>
       <p class="mt-2 text-sm">
-        <span class="text-gray-500 dark:text-gray-400">Selisih (kas fisik − modal awal):</span>
+        <span class="text-gray-500 dark:text-gray-400">Selisih (kas fisik − kas seharusnya):</span>
         <b id="sh-selisih" class="ml-1 tabular-nums">—</b>
       </p>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Angka penjualan di atas hanya pembanding; topup/tarik punya gerak modal
-        sendiri dan tidak dihitung dalam selisih ini.
+        Kas seharusnya = modal awal + penjualan (semua metode) + topup
+        (nominal + admin), sesuai keputusan pemilik 2026-10-01. Tarik tunai
+        tidak mengurangi laci — hanya dicatat sebagai info.
       </p>`,
     onMount: ({ el, ok, close }) => {
       const akhir = el.querySelector('#sh-akhir') as HTMLInputElement;
@@ -275,7 +308,7 @@ function dialogTutup(s: ShiftRow): void {
       akhir.addEventListener('input', () => {
         const v = akhir.value.trim();
         if (v === '' || !Number.isFinite(Number(v))) { sel.textContent = '—'; sel.className = 'ml-1 tabular-nums'; return; }
-        const d = hitungSelisih(Number(v), s.modal_awal);
+        const d = hitungSelisih(Number(v), kasHarus);
         sel.textContent = `${d >= 0 ? '' : '−'}${rp(Math.abs(d))}`;
         sel.className = `ml-1 tabular-nums ${d === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`;
       });

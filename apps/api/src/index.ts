@@ -770,7 +770,28 @@ app.get('/api/shifts', (c) => {
             (SELECT COALESCE(SUM(sl.total),0) FROM sales sl WHERE sl.shift_id = s.id) AS omzet,
             (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
               WHERE sl.shift_id = s.id AND sl.pay_method='tunai') AS tunai,
-            (SELECT COUNT(*) FROM topup_txns t WHERE t.shift_id = s.id) AS n_topup
+            -- Rincian per metode (keputusan pemilik 2026-10-01: QRIS/transfer
+            -- TETAP masuk hitungan laci, wajib tercatat sumbernya) — selain
+            -- tunai di atas, supaya dialog tutup shift bisa menampilkan
+            -- "per sumber" tanpa menghitung ulang di klien.
+            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
+              WHERE sl.shift_id = s.id AND sl.pay_method='qris') AS qris,
+            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
+              WHERE sl.shift_id = s.id AND sl.pay_method='transfer') AS transfer,
+            (SELECT COUNT(*) FROM topup_txns t WHERE t.shift_id = s.id) AS n_topup,
+            -- Gerak kas topup/tarik TERPISAH per kolom & per angka (keputusan
+            -- pemilik 2026-10-01): topup = tunai pelanggan -> laci NAIK
+            -- (nominal + admin, keduanya dihitung tapi dilaporkan terpisah);
+            -- tarik = JANGAN mengurangi laci (cukup dicatat) jadi tidak pernah
+            -- masuk rumus expected-cash di klien.
+            (SELECT COALESCE(SUM(t.nominal),0) FROM topup_txns t
+              WHERE t.shift_id = s.id AND t.kind='topup') AS topup_nominal,
+            (SELECT COALESCE(SUM(t.admin),0) FROM topup_txns t
+              WHERE t.shift_id = s.id AND t.kind='topup') AS topup_admin,
+            (SELECT COALESCE(SUM(t.nominal),0) FROM topup_txns t
+              WHERE t.shift_id = s.id AND t.kind='tarik') AS tarik_nominal,
+            (SELECT COALESCE(SUM(t.admin),0) FROM topup_txns t
+              WHERE t.shift_id = s.id AND t.kind='tarik') AS tarik_admin
        FROM shifts s
        ${klausul}
       ORDER BY s.id DESC

@@ -64,7 +64,7 @@ const SUITE = [
   ['history-test.mjs', 26],
   ['laporan-test.mjs', 16],
   ['dashboard-test.mjs', 19],
-  ['shift-test.mjs', 19],
+  ['shift-test.mjs', 23],
   ['foto-tambah-test.mjs', 10],
   ['kadaluarsa-jual-test.mjs', 17],
   ['backup-test.mjs', 21],
