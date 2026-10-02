@@ -254,7 +254,7 @@ function renderTabel(): string {
   const rows = baris();
   if (!rows.length) {
     return `<div class="card">
-      <div class="empty">${icon('receipt')}
+      <div class="empty empty-hero">${icon('receipt')}
         <span>Belum ada transaksi pada ${esc(tglPanjang(state.date))}. Pilih hari lain, atau mulai jualan di layar Kasir.</span>
       </div>
     </div>`;

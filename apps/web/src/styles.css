@@ -737,6 +737,23 @@
   .empty {
     @apply flex flex-col items-center gap-2 px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400;
   }
+  /* Ikon empty-state harus DIPEGANG ukurannya: `icon()` sengaja tidak menulis
+     width/height (kebijakan repo — dikontrol CSS wadah, lihat komentar
+     .chip svg), jadi tanpa aturan ini svg melebar mengikuti kontainer.
+     Pola identik pernah bikin chip ringkasan Riwayat 40–90px.
+     Base size-5 (20px) untuk empty-state inline/kecil (tabel, kartu info). */
+  .empty svg {
+    @apply size-5 shrink-0;
+  }
+  /* Empty-state HERO (mis. "Belum ada transaksi" di halaman Riwayat):
+     ikon MEDIUM = 25% lebar layar — permintaan pemilik 2026-10-01
+     (setelah 20px dinilai "kecil sekali", sebelumnya dinilai "terlalu besar").
+     Modifier terpisah supaya empty-state di dalam tabel / kartu sempit
+     tidak ikut meledak. vw = lebar viewport ("screen page"). */
+  .empty-hero svg {
+    width: 25vw;
+    height: 25vw;
+  }
 }
 
 /* prefers-reduced-motion: matikan animasi modal. Sengaja di LUAR @layer —
