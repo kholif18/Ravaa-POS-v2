@@ -62,23 +62,44 @@ apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
 apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
-                         saklar — "Stok boleh minus" + "Tolak jual kadaluarsa"
-                         -> GET/POST /api/settings (update PARSIAL: satu kunci
-                         per toggle, konfirmasi swal tiap perubahan), PLUS kartu
-                         **Backup data** (tombol "Backup sekarang" ->
-                         POST /api/backup + daftar file + Unduh per baris dari
-                         GET /api/backup; tanpa swal — non-destruktif; daftar
-                         gagal-muat tidak mematahkan halaman).
-apps/web/src/escpos.ts   ESC/POS 58mm (32 kolom): label harga + struk + POST ke print-agent.
-apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
-                         produk dan panel mode POS.
-                         Berisi: label harga (labelHarga/teksLabel/gabungLabel),
-                         struk 32 kolom (struk/StrukBaris), ascii()/potong/baris
-                         dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
+                          saklar SERVER — "Stok boleh minus" + "Tolak jual
+                          kadaluarsa" -> GET/POST /api/settings (update PARSIAL:
+                          satu kunci per toggle, konfirmasi swal tiap
+                          perubahan), PLUS kartu **Cetak struk** (preferensi
+                          PER-DEVICE lewat ui/print-pref.ts: saklar auto-print
+                          + select layout thermal/A4, tanpa swal & tanpa API —
+                          printer tiap PC kasir beda, jangan dipindah ke
+                          server), PLUS kartu
+                          **Backup data** (tombol "Backup sekarang" ->
+                          POST /api/backup + daftar file + Unduh per baris dari
+                          GET /api/backup; tanpa swal — non-destruktif; daftar
+                          gagal-muat tidak mematahkan halaman).
+apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print-agent.
+                          Layout struk: `thermal` 32 kolom (COLS) ekor FEED+CUT —
+                          bawaan toko; `a4` 64 kolom (COLS_A4) ekor FEED+Form
+                          Feed 0x0C TANPA CUT — untuk Epson L3110 (inkjet tanpa
+                          pisau; tanpa FF kertas menumpuk di dalam). Pemilihan:
+                          strukUntuk() (panggil dari tiap pencetakan struk) &
+                          sesuaikanPrinter() untuk stream non-struk (label),
+                          pref di ui/print-pref.ts.
+                          Berisi: label harga (labelHarga/teksLabel/gabungLabel),
+                          struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
+                          dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
                          default :9100). Dipanggil dari halaman Label harga dan dari
                          pay()/submitTopup() POS. PENTING: `teks()` tidak
                          menambah baris baru — setiap baris struk HARUS diakhiri
                           LF, kalau tidak seluruh struk menempel jadi satu baris.
+apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
+                          produk, panel mode POS, dan kartu Sistem.
+apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
+                          getAutoPrint/setAutoPrint (`ravaa.cetak`, default
+                          nyala — matikan lewat panel Sistem -> Cetak struk
+                          atau scan bar POS; penjualan TIDAK PERNAH dibatalkan
+                          oleh gagal cetak) dan getStrukLayout/setStrukLayout
+                          (`ravaa.struklayout` = `thermal`|`a4`, default
+                          `thermal`). SATU sumber untuk panel Sistem + scan bar
+                          POS + strukUntuk()/sesuaikanPrinter() — jangan baca
+                          localStorage langsung dari halaman lain.
 apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
                          adanya), hariIni()/geser()/tglPanjang()/tglPendek()/
                          hariPendek() — SATU aturan hari UTC untuk Riwayat,
@@ -344,15 +365,27 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Urutan **`id DESC`** (shift terbaru di atas).
   - Tiap baris = kolom `shifts` + **agregat via subquery** (satu kali baca,
     bukan N+1): `n_sales`, `omzet` (SUM total penjualan yang `shift_id`-nya
-    cocok), `tunai` (bagian `pay_method='tunai'` saja — pembanding kas di
-    dialog tutup shift), `n_topup` (jumlah topup_txns shift ini).
+    cocok), `tunai` / `qris` / `transfer` (bagian `pay_method` masing-masing —
+    rincian per metode di dialog tutup shift; ketiganya semua masuk omzet),
+    `n_topup` (JUMLAH semua `topup_txns` shift ini — **semua kind**, makna
+    lama tidak berubah), `topup_nominal` / `topup_admin` (SUM kind=`topup`
+    saja), `tarik_nominal` / `tarik_admin` (SUM kind=`tarik` saja).
+    `topup`/`tarik` terpisah dua kolom karena aturan domain: **jangan satukan
+    nominal+admin jadi satu angka di laporan**.
   - Agregat dihitung **all-time** (bukan per hari), sehingga penjualan offline
     yang masuk lewat outbox ikut terhitung begitu tersimpan dengan `shift_id`.
-  - **Selisih tutup shift BUKAN formula baku**: belum ada aturan bisnis soal
-    expected-cash (topup/tarik punya gerak modal sendiri, di luar omzet).
-    Client menampilkan fakta + `selisih = modal_akhir − modal_awal`
-    (`hitungSelisih()` di `pages/shifts.ts`). Bila rumus berubah, ubah satu
-    fungsi itu — jangan menyebar rumus ke tempat lain.
+  - **Rumus selisih tutup shift = expected-cash (keputusan pemilik
+    2026-10-01, lihat ROADMAP §1.3)** — bukan lagi `modal_akhir − modal_awal`:
+    1. Topup (kind=`topup`): laci **NAIK** `nominal + admin`.
+    2. Tarik (kind=`tarik`): **DI LUAR rumus** — hanya dicatat (kalau ikut,
+       expected bisa minus saat shift baru lalu ada tarik besar).
+    3. Penjualan **semua metode** (tunai/qris/transfer) masuk hitungan laci
+       — keputusan #3, kebalikan dari asumsi awal yang memisahkan dana
+       rekening; rincian per metode wajib ditampilkan.
+    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin`
+    dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
+    `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shifts.ts`)
+    — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
 * `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?}],pay_method,discount?,cash_in?,cashier?}`
   - **Diskon PER BARIS `discount?`** (baru 2026-09-29): nilai rupiah mutlak.
     Diisi client (prefill dari `products.discount` tipe `rp`/`pct`, boleh
@@ -523,8 +556,10 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
 * Tailwind CSS v4 DISETUJUI 2026-09-25 (hanya build-time `@tailwindcss/vite` di `apps/web`,
   tanpa CDN; logika tetap vanilla-TS, tanpa Alpine/jQuery/chart-lib/font-icon).
 * DILARANG menambah dependency print-agent — harus tetap nol-deps (node:http + node:fs).
-* Perubahan struk: lebar TETAP 32 kolom (`apps/web/src/escpos.ts:COLS`). Uji dengan
-  `node -e` atau tampilkan modal dan ukur tiap baris <= 32 char.
+* Perubahan struk: layout `thermal` lebar TETAP 32 kolom (`apps/web/src/escpos.ts:COLS`),
+  layout `a4` TETAP 64 kolom (`COLS_A4`) — lebar masing-masing tidak boleh berubah
+  tanpa menyesuaikan test (`escpos-test.ts`, `e2e-struk.mjs`). Uji dengan
+  `npx tsx tests/escpos-test.ts` (asersi kolom) atau ukur tiap baris di test.
 * Setiap perubahan API: update kontrak §3 file ini + README bila endpoint berubah.
 * **Migrasi skema (kebijakan 2026-09-26): karena masih dev, TULIS kolom langsung
   di `db/schema.sql` (CREATE TABLE) lalu buat ulang DB — jangan pakai ALTER

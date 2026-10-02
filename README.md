@@ -243,14 +243,25 @@ npm run dev:api
   - Tanpa printer, print-agent menyimpan ke `apps/print-agent/out/*.bin`
     (bisa dicek/CUPS-kan manual), jadi alur ini bisa diuji tanpa hardware.
 * **Cetak struk otomatis** (saklar **Cetak struk otomatis** pada baris **Mode**,
-  tampil di semua mode): setiap penjualan dan topup/tarik mengirim struk ke
-  print-agent **sebelum** keranjang/state direset.
-  - Struk disusun `struk()` di `apps/web/src/escpos.ts` — INIT -> nama toko
+  tampil di semua mode; bisa juga dimatikan per device lewat **Sistem →
+  Cetak struk**): setiap penjualan dan topup/tarik mengirim struk ke
+  print-agent **sebelum** keranjang/state direset. Gagal cetak **tidak pernah**
+  membatalkan transaksi (cukup toast peringatan sekali per sesi).
+  - **Dua layout struk** — dipilih per device di **Sistem → Cetak struk**
+    (default *Thermal*):
+    - **Thermal 58mm** (bawaan): 32 kolom, diakhiri FEED + **CUT** — printer
+      termal dengan pisau potong (Caysn/dll).
+    - **Epson L3110 (A4)**: 64 kolom, judul dobel lebar, **tanpa CUT**, ditutup
+      **Form Feed (0x0C)**. Inkjet tidak punya pisau potong — tanpa perintah
+      eject ini kertas tercetak tapi menumpuk di dalam printer (bug nyata di
+      L3110). Cetak ulang dari Riwayat dan label harga otomatis ikut layout
+      yang sama (potongan label dibuang, batch ditutup FF).
+  - Struk disusun `struk()`/`strukA4()` di `apps/web/src/escpos.ts` — INIT -> nama toko
     (bold, rata tengah) -> tanggal/no transaksi/kasir/shift -> garis 32 kolom ->
     item (`qty x nama` + line total; baris yang didiskon memunculkan baris
     **Diskon item -Rp…** tepat di bawahnya) -> Subtotal/Diskon (total item +
     diskon transaksi, bila ada)/**TOTAL** (bold)/Tunai/
-    Kembalian -> kaki -> FEED -> CUT.
+    Kembalian -> kaki -> FEED -> CUT (thermal) / Form Feed (A4).
   - **Setiap baris diakhiri LF**; tanpa LF seluruh struk menempel jadi satu baris
     memanjang (firmware thermal memisah baris dengan LF, bukan FEED). Semua baris
     dijamin <= 32 kolom, dan kolom uang (14) selalu menempel di tepi kanan supaya
@@ -405,24 +416,29 @@ npm run dev:api
 * **Shift Kasir** (`#/shifts`, menu **Shift Kasir** di sidebar, baru 2026-10-01)
   — riwayat shift + buka/tutup shift dari satu layar:
   - **Tabel riwayat** dari endpoint baru `GET /api/shifts?status=…` — tiap baris
-    sudah membawa agregatnya (`n_sales`, `omzet`, `tunai`, `n_topup`) lewat
-    subquery, jadi tabel tidak memicu N+1. Filter **Semua / Terbuka / Tutup**
+    sudah membawa agregatnya (`n_sales`, `omzet`, `tunai`/`qris`/`transfer`,
+    `n_topup`, `topup_nominal`/`topup_admin`, `tarik_nominal`/`tarik_admin`)
+    lewat subquery, jadi tabel tidak memicu N+1. Filter **Semua / Terbuka / Tutup**
     dikirim ke server (enum `open|closed|semua`, selain itu 400), bukan
     disaring di klien.
   - **Buka shift**: kasir (default nama kasir device) + modal awal ->
     `POST /api/shifts/open`. 409 = kasir ini masih punya shift terbuka
     (UNIQUE INDEX `idx_shifts_open_cashier`) — pesan server langsung ditampilkan.
-  - **Tutup shift**: dialog menampilkan fakta shift (modal awal, penjualan
-    tunai/non-tunai, jumlah topup/tarik) lalu input modal akhir dengan
-    **selisih live**. Rumus selisih sengaja polos dan eksplisit:
-    `selisih = modal_akhir − modal_awal` — repo ini belum punya aturan baku
-    expected-cash (gerak modal topup/tarik di luar omzet), jadi tidak ada
-    formula yang dikarang; kalau toko menentukan rumus lain, ubah satu fungsi
-    `hitungSelisih()` di `apps/web/src/pages/shifts.ts`.
+  - **Tutup shift**: dialog menampilkan rincian lengkap — modal awal,
+    penjualan per metode (tunai/QRIS/transfer), topup terpisah nominal +
+    admin, tarik tunai sebagai catatan di luar hitungan — lalu input modal
+    akhir dengan **selisih live** terhadap **kas seharusnya di laci**
+    (keputusan pemilik 2026-10-01, ROADMAP §1.3):
+    `kas seharusnya = modal_awal + penjualan (semua metode) + topup
+    (nominal + admin)`; `selisih = modal_akhir − kas seharusnya`.
+    Tarik tunai sengaja tidak mengurangi laci (hanya dicatat). Rumus ada di
+    `kasSeharusnya()` + `hitungSelisih()` di `apps/web/src/pages/shifts.ts`
+    — bila keputusan berubah, ubah di situ saja.
   - Shift `kasir` yang dipakai layar POS tidak tersentuh oleh halaman ini
     (test memakai kasir uji sendiri).
-* **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — dua kartu saklar,
-  masing-masing dengan penjelasan sendiri (bukan lagi satu kartu):
+* **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — dua kartu saklar
+  server + satu kartu preferensi device, masing-masing dengan penjelasan
+  sendiri (bukan lagi satu kartu):
   - **Stok boleh minus** (`settings.allow_negative_stock`): daring = penjualan
     boleh membuat stok menembus nol (stok jadi angka minus dan langsung terlihat
     di filter **Stok minus** halaman Stok); mati = `POST /api/sales` menolak
@@ -438,6 +454,13 @@ npm run dev:api
   hanya mengirim kuncinya sendiri, jadi mengubah satu TIDAK mereset yang lain.
   Aturan dibaca server dari DB pada **setiap penjualan** — keputusan tidak
   pernah terpecah antar device.
+  - **Cetak struk** (baru — satu-satunya kartu **per device**): saklar
+    **Cetak struk otomatis** + pilihan layout struk (**Thermal 58mm** /
+    **Epson L3110 (A4)**, lihat bagan struk di atas). TIDAK lewat API: keduanya
+    disimpan di browser device ini (localStorage `ravaa.cetak` dan
+    `ravaa.struklayout`, lihat `apps/web/src/ui/print-pref.ts`) — karena dua PC
+    bisa menempel pada printer yang berbeda, dan HP fallback mungkin tanpa
+    printer sama sekali.
 * **HPP & laba (modal rata-rata)** — menutup celah "HPP rata-rata" di bawah.
   - Restock kini menerima **`harga_beli`** (opsional, isian "Harga beli / nota"
     di dialog stok, mode **Masuk barang**). Tidak diisi = rata-rata modal tidak
