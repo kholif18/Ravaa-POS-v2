@@ -169,6 +169,42 @@ npm run dev:api
     (`statusExpiry`, `tglExpiry`, `AMBAT_EXPIRY = 30`).
     Strip ini **murni visual** — blokir keras (400 dari server) adalah pilihan
     terpisah: **Pengaturan → Tolak jual kadaluarsa**, lihat bagian Pengaturan.
+  - **Nominal cepat di panel bayar tunai** (gaya Kasir Pintar): chip **Uang
+    pas** + pecahan Rp50.000 / Rp100.000 / Rp200.000 — satu klik mengisi kolom
+    **Uang diterima**, kembalian ikut terhitung, chip yang cocok tersorot.
+    Chip hanya ada di mode tunai (QRIS/transfer tidak butuh nominal).
+  - **Qty item berikutnya** (gaya Aronium *Changing the quantity*): chip
+    **Qty** di scan bar (mode Penjualan) atau tekan **F4** — isi angka, item
+    BERIKUTNYA masuk keranjang dengan qty itu, chip lalu otomatis kembali
+    **Qty 1** (sekali pakai; scan berikutnya tidak ikut kena diam-diam).
+    Chip tersorot selama preset > 1.
+  - **Layar cari produk** (gaya Aronium *Adding a product*): tombol **Cari**
+    di scan bar atau tekan **F3** — modal lebar berisi daftar produk (filter
+    nama/SKU/barcode semua-kata-cocok, ↑↓ pilih, Enter/klik = tambah,
+    **Tambah**/Esc = tutup), daftar awal memuat sampai 100 produk. Hanya mode
+    Penjualan dengan shift terbuka; F3/F4 selalu `preventDefault` (supaya
+    browser tidak membuka find bar) walau modal sedang terbuka — aksinya
+    sendiri dilewati oleh guard modal yang sama dengan F2.
+  - **Catatan per baris** (sejak 2026-10-03, kolom `products.use_note`):
+    produk yang sakelarnya **"Catatan di POS"** menyala (di-set pemilik lewat
+    form produk Tambah/Ubah) menampilkan **input catatan di bawah barisnya**
+    di keranjang — contoh pemilik: produk *Cetak Banner* diketik
+    `ukuran 1 x 3 meter`. Teks dikirim sebagai `items[].note`, di-snapshot
+    server ke `sale_items.note` (maks 200 karakter, di-trim), lalu **ikut
+    tercetak di struk** sebagai baris indented `"  - <note>"` di bawah item
+    (layout thermal 32 kolom maupun A4 64 kolom) dan ikut **Cetak ulang
+    struk** dari halaman Riwayat. Input memakai event `input` live (tanpa
+    paint ulang) supaya fokus tidak lompat di tengah ketikan; produk tanpa
+    saklar tidak menampilkan baris catatan sama sekali.
+  - **Pintasan keyboard level document** (`bindPintasan()` di
+    `apps/web/src/pages/pos.ts`): **F2** = bayar cepat (atau proses topup),
+    **F3** = layar cari produk, **F4** = qty item berikutnya, **Enter** = bayar
+    dari kolom uang diterima / proses topup, **Esc** = fokus
+    kembali ke kolom scan. Dulu listener menempel ke elemen `host`, jadi mati
+    begitu fokus jatuh ke `<body>` (klik area kosong / balik dari modal) —
+    kini didaftarkan sekali per mount di `document` + dibuang di
+    `unmountPosPage()`. Guard: modal terbuka = lepas, tombol/link = aktivasi
+    native, isian teks lain (diskon, nominal admin) tidak ikut kena.
 * Tiap device kasir pakai **nama kasir berbeda** dan buka **shift sendiri**
   (1 shift terbuka per kasir, ditegakkan DB). Laporan harian menggabungkan semua shift.
 * Stok hanya untuk barang fisik (ATK, es krim/minuman/snack, rokok). Jasa/topup/cetak/desain `stock_track=0`.

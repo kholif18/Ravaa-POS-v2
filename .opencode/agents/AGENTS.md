@@ -36,6 +36,15 @@ db/seed.sql              Master awal (8 kategori + contoh SKU).
 apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync).
+apps/web/src/pages/pos.ts  UI kasir utama (rute POS): scan bar + dropdown cari,
+                          keranjang + panel bayar (mode jual/topup/tarik),
+                          strip stok menipis & kadaluarsa, chip nominal cepat,
+                          chip Qty + tombol Cari (F4 = qty item berikutnya
+                          sekali pakai, F3 = layar cari produk), input catatan
+                          per baris (produk `use_note`, ikut ke struk via
+                          `items[].note`), dan pintasan level document di
+                          `bindPintasan()` (F2 bayar, F3/F4, Enter bayar, Esc ke
+                          scan).
 apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS
@@ -162,7 +171,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Client WAJIB menghapus SKU nonaktif dari cache (`removeProductBySku`).
     Untuk produk **dihapus** (tombstone) tidak perlu dipanggil manual:
     `syncMaster()` sudah membuangnya saat menerima `deleted_at` terisi.
-* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?,image?,discount_type?,discount?,expiry_date?}` (upsert by sku, version++)
+* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?,image?,discount_type?,discount?,expiry_date?,use_note?}` (upsert by sku, version++)
   - `sku` **opsional**: kosong berarti server menomori sendiri `PRD00001`,
     `PRD00002`, ... (`PRD` + 5 digit, sejak 2026-09-28 — sebelumnya diturunkan
     dari nama). Nomor = **MAX** SKU `PRD[0-9]+` di DB + 1, **BUKAN COUNT**:
@@ -212,6 +221,13 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - **`discount`/`expiry_date` divalidasi server**: `discount >= 0` dan
     `discount_type ∈ {rp,pct}` (pct juga `<= 100`); `expiry_date` harus
     `''`/null atau pola `YYYY-MM-DD` sah -> selain itu 400.
+  - **`use_note` (0/1, sejak 2026-10-03)**: 1 = baris keranjang POS untuk produk
+    ini menampilkan **input catatan** di bawahnya (contoh pemilik: Cetak Banner
+    -> kasir mengetik "ukuran 1 x 3 meter"). Teks per transaksi DIKIRIM sebagai
+    `items[].note` di `POST /api/sales` (bukan kolom teks master — catatannya
+    bersifat per nota). Field BIASA (ikut aturan reset) -> wajib masuk
+    `payloadToggleAktif()` dan payload form. UI switch: "Catatan di POS" di
+    form produk create/edit.
 * `DELETE /api/products/:id` -> `{data:{id,sku,deleted:true}}` (SOFT delete)
   - Guard: 400 bila produk **pernah terjual** (ada di `sale_items`) dengan pesan
     "produk ini sudah pernah terjual (N baris penjualan) — riwayatnya harus utuh,
@@ -386,7 +402,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shifts.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
-* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?}],pay_method,discount?,cash_in?,cashier?}`
+* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?}`
   - **Diskon PER BARIS `discount?`** (baru 2026-09-29): nilai rupiah mutlak.
     Diisi client (prefill dari `products.discount` tipe `rp`/`pct`, boleh
     diubah kasir per baris) lalu **DI-SNAPSHOT** ke `sale_items.discount` —
@@ -423,7 +439,8 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   Idempotent per `id`. Error 400 bila: items kosong, qty<=0, stok kurang
   (bila `allow_negative_stock=false`), harga dinamis kosong,
   item manual tanpa name+price, diskon baris > jumlah baris, diskon transaksi > subtotal bersih,
-  barang kadaluarsa (bila `tolak_jual_kadaluarsa=true`, lihat aturan di atas).
+  barang kadaluarsa (bila `tolak_jual_kadaluarsa=true`, lihat aturan di atas),
+  catatan baris > 200 karakter (lihat aturan `note` di atas).
   - **`unit` (opsional, fitur #3)** = satuan jual TERPILIH; kosong = satuan dasar.
     **Resolusi sepenuhnya di server** — client hanya mengirim unit; faktor & harga
     diambil dari `product_units`:
@@ -435,11 +452,23 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `sale_items` menyimpan `qty` & `price` DALAM SATUAN JUAL plus kolom `unit`
     (snapshot), sehingga laporan tidak mencampur "2 pack" dan "3 btl" jadi satu
     angka. Harga produk non-dinamis TIDAK boleh ditentukan client.
+  - **`note` (catatan per baris, sejak 2026-10-03)**: teks bebas 0-200 karakter
+    dari input catatan di keranjang (produk `use_note=1`). **DI-TRIM lalu
+    DI-SNAPSHOT** ke `sale_items.note` — sumber struk (baris indented
+    `"  - <note>"`, thermal & A4) dan **Cetak ulang struk** di Riwayat.
+    Validasi: `> 200` karakter -> 400 `"catatan baris terlalu panjang: <nama>
+    (maks 200 karakter)"`. Server TIDAK mengecek flag `use_note` produk (input
+    memang hanya dirender untuk produk yang menyala, tapi payload item manual
+    / outbox lama tidak boleh ditolak karena alasan kosmetik); `''`/absen =
+    tanpa catatan.
 * `GET /api/sales/:id` -> `{data:{sale,items}}` (isi lengkap satu nota)
   - Tiap baris `items` memuat **`base_unit`** (satuan dasar produk lewat
     `LEFT JOIN products`, `NULL` untuk item manual) sejak 2026-10-01 — dipakai
     tombol **Cetak ulang struk** di halaman Riwayat: struk hanya mencetak
     `unit` bila berbeda dari `base_unit` (aturan sama dengan struk POS).
+  - Sejak 2026-10-03 tiap baris juga memuat **`note`** (catatan per baris,
+    `''` bila tanpa) lewat `SELECT si.*` — dipakai cetak ulang supaya baris
+    catatan ikut tercetak persis seperti struk aslinya.
 * `GET /api/sales?date=&limit=&offset=`
   -> `{data:[{id,shift_id,created_at,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).
@@ -575,7 +604,10 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-09-30 (saklar kadaluarsa per kategori):** kolom
+  **Migrasi terakhir 2026-10-03 (catatan per baris di POS):** kolom
+  **`products.use_note`** + **`sale_items.note`** (re-create penuh, backup
+  `data.db.bak.use-note`).
+  Migrasi sebelumnya 2026-09-30 (saklar kadaluarsa per kategori): kolom
   **`categories.use_expiry`** (re-create penuh, backup
   `data.db.bak.use-expiry`) — seed menyalakannya untuk `snack` + `eskrim`.
   Catatan: API `POST /api/categories` berjalan via **tsx watch**, jadi setelah
@@ -622,6 +654,12 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   ```sql
   ALTER TABLE categories ADD COLUMN use_expiry INTEGER NOT NULL DEFAULT 0;
   UPDATE categories SET use_expiry = 1 WHERE slug IN ('snack', 'eskrim');
+  ```
+  Migrasi 2026-10-03 (catatan per baris) di install yang TIDAK boleh
+  di-recreate:
+  ```sql
+  ALTER TABLE products ADD COLUMN use_note INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE sale_items ADD COLUMN note TEXT NOT NULL DEFAULT '';
   ```
 
 ## 6. Troubleshooting yang sudah diketahui (fakta, bukan tebakan)
