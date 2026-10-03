@@ -20,8 +20,10 @@ import { apiGet, apiPost, uuid, HttpError } from '../api';
 import { getCachedProducts, syncMaster, type Product } from '../store';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
-import { getAutoPrint, setAutoPrint } from '../ui/print-pref';
+import { getAutoPrint, setAutoPrint, setStrukLayout } from '../ui/print-pref';
 import { kirimPrint, strukUntuk, type Struk } from '../escpos';
+import { cetakInvoice } from '../invoice';
+import { choiceDialog } from '../ui/confirm';
 import { toast } from '../ui/toast';
 import { openModal } from '../ui/modal';
 import { icon } from '../ui/icons';
@@ -152,6 +154,35 @@ async function cetak(bytes: number[]): Promise<void> {
   }
 }
 
+/** Pilihan cetak SELESAI transaksi (permintaan pemilik 2026-10-03):
+ *  [Thermal] = struk ESC/POS via print-agent (perilaku lama),
+ *  [A4]      = invoice gaya Aronium via window.print() browser (CUPS),
+ *  [Tidak]   = tanpa cetak. Tampil hanya bila "Cetak struk otomatis" ON —
+ *  device tanpa printer tidak pernah diganggu dialog. Pilihan terakhir juga
+ *  disimpan sebagai pref layout (untuk struk topup/tarik berikutnya). */
+async function pilihCetakSelesai(saleId: string, struk: Struk, tot: number, kembalian: number): Promise<void> {
+  const pilihan = await choiceDialog({
+    title: 'Cetak struk?',
+    message: `Total ${rp(tot)}${kembalian > 0 ? ` · kembalian ${rp(kembalian)}` : ''}`,
+    choices: [
+      { key: 'thermal', label: 'Thermal' },
+      { key: 'a4', label: 'A4' },
+    ],
+    cancelLabel: 'Tidak',
+  });
+  if (pilihan === 'thermal') {
+    setStrukLayout('thermal');
+    void cetak(strukUntuk(struk, 'thermal'));
+  } else if (pilihan === 'a4') {
+    setStrukLayout('a4');
+    try {
+      await cetakInvoice(saleId);
+    } catch (e) {
+      toast(`Invoice A4 tidak tercetak: ${e instanceof Error ? e.message : 'gagal memuat nota'}. Penjualan tetap tersimpan.`, 'warning', 9000);
+    }
+  }
+}
+
 /* ---------- state topup / tarik ---------- */
 let mode: Mode = 'jual';
 let topJenis: TopupJenis | '' = '';  // jenis layanan yang dipilih
@@ -190,6 +221,17 @@ const diskonBaris = () => cart.reduce((s, l) => s + l.discount, 0);
 const total = () => Math.max(0, subtotal() - diskonBaris() - discount);
 const count = () => cart.reduce((s, l) => s + l.qty, 0);
 const change = () => Math.max(0, cashIn - total());
+
+/** Kelas warna angka KEMBALIAN (panel kanan ala Aronium: angka besar).
+ *  SATU sumber untuk render awal (cartGridHtml) dan update live (paintCart) —
+ *  dua tempat ini pernah punya kelas terpisah dan bisa berbeda saat dirawat.
+ *  Merah = uang diterima kurang; hijau = cukup/lebih; abu = belum diisi. */
+function kelasKembalian(): string {
+  if (!(cashIn > 0)) return 'text-gray-900 dark:text-white';
+  return cashIn < total()
+    ? 'text-red-600 dark:text-red-400'
+    : 'text-emerald-600 dark:text-emerald-400';
+}
 
 /** Jumlah baris (harga x qty) sebelum diskon. Server menyimpan angka kotor ini
  *  ke `sales.subtotal`, supaya `subtotal - total` = seluruh diskon. */
@@ -514,7 +556,14 @@ function cartGridHtml(): string {
     <div class="grid min-h-0 flex-1 gap-3 lg:grid-cols-[1fr_320px]">
       <div class="card-flush flex min-h-0 flex-col overflow-hidden">
         <div class="table-wrap table-scroll flex-1">
-          <table class="table">
+          <!-- "table-compact" = pola yang sama dengan halaman Produk & Stok
+               (th px-3 py-2, td px-3 py-1.5). Keranjang POS lalu dirapatkan
+               LAGI lewat rule khusus #pos-cart di styles.css (permintaan pemilik
+               2026-10-03) — hanya jarak, teks tetap 14/12px.
+               td baris catatan (.note-row) tanpa class .td (padding preflight
+               0px — input menempel tepi), jadi padding kiri/kanan 12px juga
+               datang dari rule #pos-cart td ini. -->
+          <table id="pos-cart" class="table table-compact">
             <thead>
               <tr>
                 <th class="th th-sticky">Item</th>
@@ -528,7 +577,7 @@ function cartGridHtml(): string {
             <tbody id="pos-rows">${cartRows()}</tbody>
           </table>
         </div>
-        <div class="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+        <div class="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
           <span id="pos-count">${cart.length ? `${count()} item` : 'Keranjang kosong'}</span>
           <button type="button" id="pos-clear" class="row-btn row-btn-danger" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${cart.length ? '' : ' disabled'}>${icon('trash')}</button>
         </div>
@@ -547,9 +596,15 @@ function cartGridHtml(): string {
           <label class="label" for="pos-discount">Diskon transaksi (Rp)</label>
           <input id="pos-discount" class="input input-sm" type="number" inputmode="numeric" min="0" step="500" value="${discount || ''}" placeholder="0" />
         </div>
+        <!-- Panel bayar disusun mengikuti payment screen Aronium (referensi
+             help.aronium.com "Payment" + screenshot paid-amount): hierarki
+             TOTAL besar -> UANG DITERIMA (input besar, placeholder = total,
+             meniru "Paid" yang menampilkan amount due) -> KEMBALIAN angka
+             besar otomatis. Perilaku kunci tetap milik Ravaa (quick cash,
+             diskon transaksi, F2/Enter). -->
         <div class="flex items-baseline justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
           <span class="text-sm font-semibold text-gray-900 dark:text-white">Total</span>
-          <span id="pos-total" class="text-xl font-bold text-primary">${rp(tot)}</span>
+          <span id="pos-total" class="text-2xl font-bold tabular-nums text-primary">${rp(tot)}</span>
         </div>
         <div>
           <span class="label">Metode bayar</span>
@@ -561,7 +616,7 @@ function cartGridHtml(): string {
           payMethod === 'tunai'
             ? `<div>
                  <label class="label" for="pos-cash">Uang diterima (Rp)</label>
-                 <input id="pos-cash" class="input input-sm" type="number" inputmode="numeric" min="0" step="1000" value="${cashIn || ''}" placeholder="0" />
+                 <input id="pos-cash" class="input text-right text-lg font-semibold tabular-nums" type="number" inputmode="numeric" min="0" step="1000" value="${cashIn || ''}" placeholder="${tot}" />
                </div>
                <div>
                  <span class="label">Nominal cepat</span>
@@ -571,7 +626,7 @@ function cartGridHtml(): string {
                </div>
                <div class="flex items-baseline justify-between">
                  <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</span>
-                 <span id="pos-change" class="text-sm font-semibold ${cashIn > 0 && cashIn < tot ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}">${rp(change())}</span>
+                 <span id="pos-change" class="text-xl font-bold tabular-nums ${kelasKembalian()}">${rp(change())}</span>
                </div>`
             : ''
         }
@@ -720,8 +775,11 @@ function cartRows(): string {
       const net = gross - l.discount;
       // Baris catatan (produk use_note=1): input satu baris DI BAWAH baris
       // produk, mis. Cetak Banner -> "ukuran 1 x 3 meter". colspan=6 = seluruh
-      // lebar tabel (Item..Hapus). Disimpan live lewat event `input` (tanpa
-      // paintCart, supaya fokus tidak pindah saat kasir mengetik).
+      // lebar tabel (Item..Hapus). td TANPA class `.td` — padding kiri/kanan
+      // (12px) datang dari `.table-compact td` (table-compact di cartGridHtml);
+      // tanpa itu preflight membuatnya 0px dan input menempel tepi.
+      // Disimpan live lewat event `input` (tanpa paintCart, supaya fokus tidak
+      // pindah saat kasir mengetik).
       const trCatatan = l.useNote ? `
       <tr data-key="${l.key}" class="note-row">
         <td colspan="6">
@@ -825,6 +883,11 @@ function paintCart(): void {
   set('#pos-count', cart.length ? `${count()} item` : 'Keranjang kosong');
   set('#pos-subtotal', rp(subtotal()));
   set('#pos-total', rp(total()));
+  // Placeholder "Uang diterima" menampilkan amount due (pola Aronium) — panel
+  // kanan tidak dirender ulang di paintCart, jadi placeholder harus diikut-
+  // setiap total berubah (render awal selalu 0 karena keranjang masih kosong).
+  const cashEl = host!.querySelector<HTMLInputElement>('#pos-cash');
+  if (cashEl) cashEl.placeholder = String(total());
   set('#pos-change', rp(change()));
   // Baris "Diskon item" dirender sekali lalu ditampilkan/disembunyikan —
   // paintCart tidak mengganti panel kanan, jadi barisnya harus bisa hidup mati
@@ -835,7 +898,9 @@ function paintCart(): void {
   if (dbRow) dbRow.hidden = db === 0;
   const changeEl = host!.querySelector('#pos-change');
   if (changeEl) {
-    changeEl.className = `text-sm font-semibold ${cashIn > 0 && cashIn < total() ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`;
+    // Kelas diambil dari SATU sumber (kelasKembalian) — jangan ditulis ulang di
+    // sini, render awal di cartGridHtml memakai fungsi yang sama.
+    changeEl.className = `text-xl font-bold tabular-nums ${kelasKembalian()}`;
   }
   const pay = host!.querySelector<HTMLButtonElement>('#pos-pay');
   if (pay) pay.disabled = cart.length === 0 || busy;
@@ -1194,9 +1259,22 @@ function openManualItem(): void {
 
 async function pay(): Promise<void> {
   if (!shift || busy || !cart.length) return;
-  if (payMethod === 'tunai' && cashIn > 0 && cashIn < total()) {
-    toast('Uang receivable kurang dari total', 'error');
-    return;
+  // BARRIER TUNAI (keluhan pemilik 2026-10-03): cek lama hanya menolak
+  // `0 < cashIn < total`, jadi uang diterima KOSONG (0) lolos dan transaksi
+  // selesai tanpa kasir menerima uang apa pun. Sekarang metode tunai WAJIB
+  // punya uang diterima > 0 dan tidak kurang dari total — meniru payment
+  // screen Aronium yang tak bisa konfirmasi sebelum Paid amount masuk.
+  if (payMethod === 'tunai') {
+    if (!(cashIn > 0)) {
+      toast('Uang diterima belum diisi — ketik nominal atau tekan "Uang pas"', 'error');
+      host?.querySelector<HTMLInputElement>('#pos-cash')?.focus();
+      return;
+    }
+    if (cashIn < total()) {
+      toast(`Uang diterima kurang dari total ${rp(total())}`, 'error');
+      host?.querySelector<HTMLInputElement>('#pos-cash')?.focus();
+      return;
+    }
   }
   busy = true;
   paintCart();
@@ -1261,7 +1339,10 @@ async function pay(): Promise<void> {
       ],
       kaki: ['Terima kasih sudah berbelanja'],
     };
-    void cetak(strukUntuk(strukJual));
+    // Pilihan cetak SELESAI transaksi — HANYA bila "Cetak struk otomatis" ON.
+    // Device tanpa printer (saklar mati) tidak boleh diganggu dialog; tanpa
+    // guard ini backdrop swal juga memblokir seluruh UI POS (terbukti di test).
+    if (autoPrint) void pilihCetakSelesai(res.data.sale.id, strukJual, tot, kembalian);
     cart = [];
     discount = 0;
     cashIn = 0;
@@ -1321,8 +1402,25 @@ async function submitTopup(): Promise<void> {
     toast('Biaya admin tidak boleh negatif', 'error');
     return;
   }
+  // BARRIER TUNAI topup (sama dengan pay()): uang diterima kasir WAJIB terisi
+  // & cukup. Mode TARIK sengaja dikecualikan — di sana uang MENGALIR KELUAR,
+  // jadi "uang diterima" memang tidak selalu diisi; cek lama (kurang dari
+  // total -> tolak) tetap berlaku untuk keduanya.
+  if (payMethod === 'tunai' && mode === 'topup') {
+    if (!(topTunai > 0)) {
+      toast('Uang diterima belum diisi — ketik nominal uang dari pelanggan', 'error');
+      host.querySelector<HTMLInputElement>('#tp-tunai')?.focus();
+      return;
+    }
+    if (topTunai < total) {
+      toast(`Uang diterima kurang dari total ${rp(total)}`, 'error');
+      host.querySelector<HTMLInputElement>('#tp-tunai')?.focus();
+      return;
+    }
+  }
   if (payMethod === 'tunai' && topTunai > 0 && topTunai < total) {
-    toast('Uang receivable kurang dari total', 'error');
+    toast(`Uang diterima kurang dari total ${rp(total)}`, 'error');
+    host.querySelector<HTMLInputElement>('#tp-tunai')?.focus();
     return;
   }
   busy = true;

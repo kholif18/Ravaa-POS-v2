@@ -137,6 +137,12 @@ try {
       ok('rincian penjualan punya tombol "Cetak ulang struk"', nTombol === 1,
         `jumlah=${nTombol}`);
       await page.locator('[data-reprint]').click();
+      // Cetak ulang kini menawarkan pilihan [Thermal] [A4] [Batal] dulu
+      // (keputusan 2026-10-03, sama seperti POS) — klik Thermal, baru struk
+      // terkirim dan toast "Struk ..." muncul.
+      await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+      await page.click('.swal2-confirm');                      // [Thermal]
+      await page.waitForSelector('.swal2-popup', { state: 'detached', timeout: 8000 });
       await page.waitForTimeout(2500);
       const toastTxt = (await page.locator('#toast-root .toast').allInnerTexts()).join(' ');
       ok('klik cetak ulang -> toast "Struk ..." (sukses/tidak tercetak)',

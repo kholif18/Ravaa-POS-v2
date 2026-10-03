@@ -20,6 +20,8 @@ import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
 import { getToko } from '../ui/user';
 import { rp, strukUntuk, kirimPrint, type Struk } from '../escpos';
+import { cetakInvoice } from '../invoice';
+import { choiceDialog } from '../ui/confirm';
 
 /* ---------- tipe ---------- */
 
@@ -27,6 +29,9 @@ type SaleRow = {
   id: string; shift_id: number | null; created_at: string; pay_method: string;
   subtotal: number; discount: number; total: number; cash_in: number; change: number;
   cashier: string; n_items: number;
+  /** Nomor invoice `YYMM-NNNNNN` (server, di-assign saat INSERT). Bisa null
+   *  untuk baris sangat lama; tampil sebagai '—'. */
+  invoice_no: string | null;
 };
 
 type TopupRow = {
@@ -421,6 +426,27 @@ async function cetakUlang(s: SaleRow): Promise<void> {
       const j = await apiGet<{ data: { items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
       items = j.data.items;
     }
+    // Pilihan gaya Aronium: invoice A4 (window.print) atau struk thermal
+    // (print-agent) — pola sama dengan dialog selesai bayar di POS.
+    const pilihan = await choiceDialog({
+      title: 'Cetak ulang',
+      message: `Invoice ${s.invoice_no ?? s.id.slice(0, 8)}`,
+      choices: [
+        { key: 'thermal', label: 'Thermal' },
+        { key: 'a4', label: 'A4' },
+      ],
+      cancelLabel: 'Batal',
+    });
+    if (pilihan === 'a4') {
+      try {
+        await cetakInvoice(s.id);
+        toast(`Invoice ${s.invoice_no ?? s.id.slice(0, 8)} dibuka untuk dicetak`, 'success');
+      } catch (e) {
+        toast(`Invoice A4 tidak tercetak: ${errMsg(e)}`, 'warning', 9000);
+      }
+      return;
+    }
+    if (pilihan !== 'thermal') return; // Batal / Esc — tidak mencetak apa pun
     const discBaris = Math.max(0, s.subtotal - s.discount - s.total); // lihat detailJual
     const strukUlang: Struk = {
       judul: getToko(),
@@ -451,7 +477,9 @@ async function cetakUlang(s: SaleRow): Promise<void> {
       ],
       kaki: ['Terima kasih sudah berbelanja'],
     };
-    await kirimPrint(strukUntuk(strukUlang));
+    // Eksplisit 'thermal' — pilihan Thermal di dialog tidak boleh tergantung
+    // pref layout per-device (pref 'a4' kini berarti invoice A4, bukan struk).
+    await kirimPrint(strukUntuk(strukUlang, 'thermal'));
     toast(`Struk ${s.id.slice(0, 8)} dicetak ulang`, 'success');
   } catch (e) {
     toast(`Struk tidak tercetak: ${errMsg(e)}`, 'warning', 9000);

@@ -159,6 +159,15 @@ try {
     { timeout: 15000 },
   );
   ok('penjualan sukses (toast Terjual)', true);
+  // Dialog pilihan cetak [Thermal] [A4] [Tidak] muncul setelah bayar (auto-print
+  // bawaan nyala). Wajib diklik — struk section D baru terkirim setelah tombol
+  // Thermal ditekan; tanpa ini overlay swal juga menutupi sisa alur test.
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  await page.click('.swal2-confirm');                       // [Thermal]
+  await page.waitForSelector('.swal2-popup', { state: 'detached', timeout: 8000 });
+  // Poll struk (closure Node, tidak bisa page.waitForFunction).
+  for (let t = 0; tercetak.length < 1 && t < 150; t++) await page.waitForTimeout(100);
+  ok('struk thermal terkirim setelah pilihan Thermal', tercetak.length >= 1, tercetak.length);
   // BALAPAN CDP: handler page.on('response') mengambil body lewat round-trip
   // CDP (Node), sedangkan toast dirender in-page segera setelah fetch selesai —
   // di mesin yang CDP-nya kalah cepat, jualRes masih null saat dibaca di bawah

@@ -966,10 +966,25 @@ const insertSale = db.transaction((sale: {
   const total = subtotal - totalDiscBaris - Math.max(0, sale.discount);
   if (total < 0) throw new Error('diskon melebihi subtotal');
   const change = Math.max(0, sale.cash_in - total);
+  // Nomor invoice gaya Aronium: `YYMM-NNNNNN`, urut per bulan UTC (satu aturan
+  // waktu dengan created_at default). Ambil lewat CAST per urutan angka — bukan
+  // ORDER BY teks ('000010' < '000009' secara lexikal, nomor bisa mundur) dan
+  // bukan COUNT (bisa melompat kalau ada celah). Dihitung SETELAH cek duplikat
+  // di atas, jadi retry idempotent tidak pernah membakar nomor.
+  const now = new Date();
+  const ym = `${String(now.getUTCFullYear()).slice(2)}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const lastInv = db.prepare(
+    `SELECT invoice_no FROM sales
+      WHERE invoice_no LIKE ? || '-%'
+      ORDER BY CAST(substr(invoice_no, 6) AS INTEGER) DESC
+      LIMIT 1`,
+  ).get(ym) as { invoice_no: string } | undefined;
+  const urut = lastInv ? Number(lastInv.invoice_no.slice(6)) + 1 : 1;
+  const invoiceNo = `${ym}-${String(urut).padStart(6, '0')}`;
   const row = db.prepare(
-    `INSERT INTO sales (id, shift_id, pay_method, subtotal, discount, total, cash_in, change, cashier)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-  ).get(sale.id, sale.shift_id, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier);
+    `INSERT INTO sales (id, shift_id, invoice_no, pay_method, subtotal, discount, total, cash_in, change, cashier)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+  ).get(sale.id, sale.shift_id, invoiceNo, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier);
   const insItem = db.prepare(
     `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, discount, cost, unit, note)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1123,23 +1138,46 @@ app.get('/api/topups/suggest-admin', (c) => {
 // cara pasti membuat dua device memahami aturan yang berbeda.
 const K_STOK_MINUS = 'allow_negative_stock';
 const K_TOLAK_KADALUARSA = 'tolak_jual_kadaluarsa';
+// Kop INVOICE A4 (cetak gaya Aronium) — teks biasa, bukan boolean. Empat kunci
+// ini disimpan di server supaya semua device mencetak kop yang sama (beda dengan
+// preferensi cetak per-device yang sifatnya hardware). Seed default = contoh
+// pemilik; diubah lewat kartu "Pengaturan toko" di halaman #/settings.
+const K_STORE = ['store_name', 'store_address', 'store_phone', 'store_email'] as const;
+type KStore = (typeof K_STORE)[number];
+const RE_K_STORE = new Set<string>(K_STORE);
 
 function settingBool(key: string, bawaan: boolean): boolean {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row ? row.value === '1' : bawaan;
 }
 
-app.get('/api/settings', (c) => c.json({ data: {
-  allow_negative_stock: settingBool(K_STOK_MINUS, false),
-  tolak_jual_kadaluarsa: settingBool(K_TOLAK_KADALUARSA, false),
-} }));
+function settingStr(key: KStore): string {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value ?? '';
+}
 
-// Kedua kunci OPSIONAL: yang tidak dikirim TIDAK diubah (update parsial),
-// minimal satu wajib ada. Angka 0/1, "ya", null tetap ditolak — client harus
-// mengirim boolean sungguhan untuk setiap kirimannya.
+function semuaSettings() {
+  return {
+    allow_negative_stock: settingBool(K_STOK_MINUS, false),
+    tolak_jual_kadaluarsa: settingBool(K_TOLAK_KADALUARSA, false),
+    store_name: settingStr('store_name'),
+    store_address: settingStr('store_address'),
+    store_phone: settingStr('store_phone'),
+    store_email: settingStr('store_email'),
+  };
+}
+
+app.get('/api/settings', (c) => c.json({ data: semuaSettings() }));
+
+// Update PARSIAL: kunci yang tidak dikirim TIDAK diubah, minimal satu wajib ada.
+// Boolean harus boolean sungguhan (angka 0/1, "ya", null ditolak); kunci store_*
+// harus TEKS (string) — salah tipe = 400 dengan nama kuncinya.
 app.post('/api/settings', async (c) => {
   try {
     const body = await c.req.json();
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return c.json({ error: 'payload harus object' }, 400);
+    }
     const vMinus = body?.allow_negative_stock;
     const vKadaluarsa = body?.tolak_jual_kadaluarsa;
     if (vMinus !== undefined && typeof vMinus !== 'boolean') {
@@ -1148,19 +1186,29 @@ app.post('/api/settings', async (c) => {
     if (vKadaluarsa !== undefined && typeof vKadaluarsa !== 'boolean') {
       return c.json({ error: 'tolak_jual_kadaluarsa harus boolean (true|false)' }, 400);
     }
-    if (vMinus === undefined && vKadaluarsa === undefined) {
-      return c.json({ error: 'tidak ada pengaturan yang dikirim (allow_negative_stock / tolak_jual_kadaluarsa)' }, 400);
-    }
+    // Kunci toko: hanya empat nama yang dikenal, nilainya teks (di-trim).
     const simpan = db.prepare(
       `INSERT INTO settings (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     );
+    let adaKunci = vMinus !== undefined || vKadaluarsa !== undefined;
+    for (const [k, v] of Object.entries(body ?? {})) {
+      if (k === 'allow_negative_stock' || k === 'tolak_jual_kadaluarsa') continue; // sudah divalidasi di atas
+      if (!RE_K_STORE.has(k)) {
+        return c.json({ error: `pengaturan tidak dikenal: ${k}` }, 400);
+      }
+      if (typeof v !== 'string') {
+        return c.json({ error: `${k} harus teks (string)` }, 400);
+      }
+      simpan.run(k, v.trim());
+      adaKunci = true;
+    }
+    if (!adaKunci) {
+      return c.json({ error: 'tidak ada pengaturan yang dikirim (boleh: allow_negative_stock, tolak_jual_kadaluarsa, store_*)' }, 400);
+    }
     if (vMinus !== undefined) simpan.run(K_STOK_MINUS, vMinus ? '1' : '0');
     if (vKadaluarsa !== undefined) simpan.run(K_TOLAK_KADALUARSA, vKadaluarsa ? '1' : '0');
-    return c.json({ data: {
-      allow_negative_stock: settingBool(K_STOK_MINUS, false),
-      tolak_jual_kadaluarsa: settingBool(K_TOLAK_KADALUARSA, false),
-    } });
+    return c.json({ data: semuaSettings() });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengaturan' }, 400);
   }

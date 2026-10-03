@@ -418,6 +418,28 @@
     @apply px-3 py-1.5;
   }
 
+  /* Keranjang POS (#pos-cart): padatkan SEKALI LAGI dari .table-compact
+     (permintaan pemilik 2026-10-03 "lebih compactkan lagi"). Hanya JARAK
+     yang dipangkas — teks tetap 14px (nama) / 12px (SKU), tombol stepper
+     tetap 32px, jadi batas sentuh & minimal 13px tidak dilanggar.
+     Specificity `#pos-cart td` (1,0,1) menang atas `.table-compact td`
+     (0,1,1); td baris catatan .note-row (tanpa class) ikut kena aturan ini,
+     termasuk padding kiri/kanan 12px-nya. */
+  #pos-cart th {
+    @apply px-3 py-1.5;
+  }
+  #pos-cart td {
+    @apply px-3 py-0.5;
+  }
+  /* Baris item nama + SKU: rapatkan line-height antar dua teks tanpa
+     mengecilkan font — sub-SKU tetap 12px terbaca. */
+  #pos-cart .cell-strong {
+    @apply leading-tight;
+  }
+  #pos-cart .cell-sub {
+    @apply leading-tight;
+  }
+
   /* Sidebar kategori: show/hide dengan animasi — lebar di desktop, tinggi di mobile.
      Wrapper ini tetap di DOM (hanya lebarnya yang 0) supaya bisa dianimasikan;
      conditional render (innerHTML) tidak bisa dianimasikan sama sekali. */

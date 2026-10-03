@@ -34,6 +34,10 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// Invoice A4 memanggil window.print() di popup (htmlInvoice). Stub di SEMUA
+// page (context-wide) supaya popup tidak buntu di headless — alur cetaknya
+// tetap teruji: fetch nota + render HTML + popup terbuka.
+await page.context().addInitScript(() => { window.print = () => {}; });
 const errs = [];
 page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => {
@@ -78,7 +82,25 @@ const jaminStok = async (sku, minimal = 20) => {
 await jaminStok('PRD00013');
 await jaminStok('PRD00014');
 
-const jual = async (paket) => {
+// Tunggu sampai N struk benar-benar terkirim ke /print. `tercetak` hidup di
+// Node (bukan di page), jadi tidak bisa page.waitForFunction — polling manual.
+const tungguTercetak = async (n, ms = 15000) => {
+  const t0 = Date.now();
+  while (tercetak.length < n && Date.now() - t0 < ms) await page.waitForTimeout(100);
+};
+
+// Dialog pilihan [Thermal] [A4] [Tidak] muncul SETELAH bayar bila "Cetak struk
+// otomatis" nyala (pilihan pemilik 2026-10-03). Tanpa klik dialog ini struk
+// tidak pernah terkirim — semua titik bayar suite ini melewatinya.
+const pilihCetak = async (pilihan) => {
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  const sel = pilihan === 'A4' ? '.swal2-deny' : pilihan === 'Tidak' ? '.swal2-cancel' : '.swal2-confirm';
+  await page.click(sel);
+  await page.waitForSelector('.swal2-popup', { state: 'detached', timeout: 8000 });
+};
+
+const jual = async (paket, pilihan = 'Thermal') => {
+  const n0 = tercetak.length;
   await page.fill('#pos-q', paket.q);
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   await page.click('#pos-results .suggest-item');
@@ -89,6 +111,12 @@ const jual = async (paket) => {
     () => document.querySelector('#toast-root')?.textContent?.includes('Terjual'),
     { timeout: 15000 },
   );
+  if (pilihan) {
+    await pilihCetak(pilihan);
+    // Struk Thermal baru terkirim sesudah tombol dialog diklik — tunggu betulan
+    // supaya asersi `tercetak.length` tidak balapan dengan fetch print-agent.
+    if (pilihan === 'Thermal') await tungguTercetak(n0 + 1);
+  }
 };
 
 try {
@@ -143,7 +171,8 @@ try {
   await page.click('label[for="pos-autoprint"]');
   ok('posisi saklar terbaca mati', !(await page.isChecked('#pos-autoprint')));
   // Chitato, bukan Pulpen Hitam: pulpen adalah fixture baseline E2E opname.
-  await jual({ q: 'PRD00014', tunai: 20000 });
+  // pilihan=null: auto-print mati = TIDAK ada dialog pilihan cetak.
+  await jual({ q: 'PRD00014', tunai: 20000 }, null);
   ok('penjualan jalan walau cetak mati', await page.isVisible('#pos-rows'));
   ok('TIDAK ada permintaan cetak tambahan', tercetak.length === 1, tercetak.length);
 
@@ -184,6 +213,9 @@ try {
     () => document.querySelector('#toast-root')?.textContent?.match(/Topup /),
     { timeout: 15000 },
   );
+  // Topup/tarik TANPA dialog pilihan (keputusan: hanya penjualan yang memilih
+  // Thermal/A4) — struk langsung terkirim, tapi tetap ditunggu via polling.
+  await tungguTercetak(2);
   ok('struk topup dikirim', tercetak.length === 2, tercetak.length);
   const s3 = Buffer.from(tercetak[1], 'base64');
   const t3 = teksDari(s3);
@@ -206,6 +238,12 @@ try {
   await page.waitForSelector('#pos-q', { timeout: 8000 });
   await jual({ q: 'PRD00013', tunai: 20000 });
   ok('permintaan cetak tetap dikirim (dicoba)', tercetak.length === 3, tercetak.length);
+  // Toast peringatan muncul SESUDAH tombol dialog Thermal diklik (alur cetak
+  // baru jalan saat itu) — tunggu eksplisit, jangan balapan dengan render.
+  await page.waitForFunction(
+    () => document.querySelector('#toast-root')?.textContent?.includes('Struk tidak tercetak'),
+    { timeout: 15000 },
+  );
   const toast = norm(await page.innerText('#toast-root'));
   ok('toast peringatan cetak muncul', /Struk tidak tercetak/.test(toast), toast);
   ok('penjualan tetap berhasil (toast Terjual)', /Terjual/.test(toast), toast);
@@ -215,31 +253,33 @@ try {
   const n2 = laporan?.data?.sales?.n ?? 0;
   ok(`3 penjualan tercatat di server (${n1} -> ${n2})`, n2 - n1 === 3, JSON.stringify({ n1, n2 }));
 
-  console.log('=== E. Layout A4 (Epson L3110): eject tanpa potong ===');
+  console.log('=== E. Invoice A4 (gaya Aronium) — pilihan A4 setelah bayar ===');
   // Section D meninggalkan mode gagal-cetak; kembalikan ke sukses dulu.
   gagalCetak = false;
-  await page.evaluate(() => {
-    try { localStorage.setItem('ravaa.struklayout', 'a4'); } catch { /* */ }
-  });
   await page.click('[data-mode="jual"]');
   await page.waitForSelector('#pos-q', { timeout: 8000 });
-  await jual({ q: 'PRD00013', tunai: 20000 });
-  ok('struk A4 dikirim', tercetak.length === 4, tercetak.length);
-  const s4 = Buffer.from(tercetak[3], 'base64');
-  ok('A4: diawali INIT', s4[0] === 0x1b && s4[1] === 0x40);
-  ok('A4: diakhiri Form Feed 0x0C (eject inkjet)', s4[s4.length - 1] === 0x0c, s4.slice(-4));
-  ok('A4: TANPA perintah potong (inkjet tanpa pisau)',
-    !s4.some((_, i) => s4[i] === 0x1d && s4[i + 1] === 0x56 && s4[i + 2] === 0x00));
-  const t4 = teksDari(s4);
-  const b4 = barisStruk(s4);
-  ok('A4: isi struk lengkap', /No\. \w{8}/.test(t4) && t4.includes('TOTAL') && /Kasir:/.test(t4), b4[0]);
-  ok('A4: garis pemisah 64 kolom', t4.includes('-'.repeat(64)));
-  const lewat4 = b4.filter((x) => x.length > 64);
-  ok(`A4: semua baris <= 64 kolom (maks ${Math.max(0, ...b4.map((x) => x.length))})`, lewat4.length === 0, lewat4);
-  // Bersih-bersih pref (browser ditutup di finally — ini sekadar kebersihan).
-  await page.evaluate(() => {
-    try { localStorage.setItem('ravaa.struklayout', 'thermal'); } catch { /* */ }
-  });
+  // Bayar dengan pilihan 'A4' -> pilihCetakSelesai -> cetakInvoice() ->
+  // fetch GET /api/sales/:id + /api/settings -> window.open popup berisi
+  // htmlInvoice(). STRUK print-agent TIDAK dikirim (browser/CUPS yang mencetak).
+  const [popup] = await Promise.all([
+    page.waitForEvent('popup'),
+    jual({ q: 'PRD00013', tunai: 20000 }, 'A4'),
+  ]);
+  await popup.waitForLoadState('domcontentloaded');
+  const teksE = await popup.innerText('body');
+  const tokoE = (await (await fetch(API + '/api/settings')).json()).data?.store_name || '';
+  ok('E: popup invoice terbuka (judul INVOICE + kop nama toko)',
+    /INVOICE/.test(teksE) && tokoE !== '' && teksE.includes(tokoE),
+    JSON.stringify({ toko: tokoE, awal: teksE.slice(0, 80) }));
+  ok('E: memuat nomor invoice pola YYMM-NNNNNN', /\b\d{4}-\d{6}\b/.test(teksE),
+    (teksE.match(/\b\d{4}-\d{6}\b/) || [])[0]);
+  ok('E: memuat Bill to + Payment status Lunas',
+    teksE.includes('Bill to') && teksE.includes('Pelanggan Umum') && teksE.includes('Lunas'));
+  ok('E: memuat item terjual + Total ringkasan + Paid amount',
+    teksE.includes('Aqua 600ml') && /Total\b/.test(teksE) && teksE.includes('Paid amount'),
+    teksE.replace(/\s+/g, ' ').slice(-220));
+  ok('E: invoice lewat browser — /print print-agent TIDAK ikut (tetap 3)',
+    tercetak.length === 3, tercetak.length);
 
   console.log('=== F. Nominal cepat + pintasan level document ===');
   // Bug yang ditutup: F2/Enter dulu menempel di `host`, jadi mati begitu fokus
@@ -259,6 +299,43 @@ try {
   await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
   ok('chip nominal cepat tampil (Uang pas + 3 pecahan)', await page.locator('[data-cash]').count() === 4,
     await page.locator('[data-cash]').count());
+
+  // BARRIER tunai (keluhan pemilik 2026-10-03): uang diterima masih KOSONG —
+  // dulu `cashIn=0` lolos cek dan transaksi selesai tanpa menerima uang.
+  const nSebelumBarrier = tercetak.length;   // snapshot: section lama sudah cetak
+  await page.click('#pos-pay');
+  let tolakKosong = false;
+  try {
+    await page.waitForFunction(
+      () => document.querySelector('#toast-root')?.textContent?.includes('Uang diterima belum diisi'),
+      { timeout: 5000 },
+    );
+    tolakKosong = true;
+  } catch { /* toast tidak muncul = barrier gagal */ }
+  ok('bayar dengan uang diterima KOSONG ditolak', tolakKosong, norm(await page.innerText('#toast-root')));
+  ok('struk tidak terkirim (transaksi tidak selesai)', tercetak.length === nSebelumBarrier, tercetak.length);
+  ok('popup pilihan cetak tidak muncul', (await page.locator('.swal2-popup').count()) === 0,
+    await page.locator('.swal2-popup').count());
+  ok('fokus kembali ke input uang diterima',
+    await page.evaluate(() => document.activeElement?.id) === 'pos-cash',
+    await page.evaluate(() => document.activeElement?.id));
+
+  // Uang diterima ADA tapi kurang dari total (Rp1.000 < Rp4.000) tetap ditolak
+  // dengan pesan bahasa Indonesia (pesan lama "Uang receivable..." diganti).
+  await page.fill('#pos-cash', '1000');
+  await page.click('#pos-pay');
+  let tolakKurang = false;
+  try {
+    await page.waitForFunction(
+      (t) => document.querySelector('#toast-root')?.textContent?.includes(`Uang diterima kurang dari total ${t}`),
+      'Rp4.000', { timeout: 5000 },
+    );
+    tolakKurang = true;
+  } catch { /* toast tidak muncul = barrier gagal */ }
+  ok('bayar dengan uang diterima KURANG ditolak + pesan total', tolakKurang,
+    norm(await page.innerText('#toast-root')));
+  ok('struk tetap tidak terkirim setelah dua kali penolakan', tercetak.length === nSebelumBarrier,
+    tercetak.length);
 
   // Pecahan dulu: Rp100.000 -> kembalian 96.000 (total 4.000).
   await page.click('[data-cash="100000"]');
@@ -280,7 +357,8 @@ try {
   await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
   ok('pra-syarat: fokus jatuh ke body', await page.evaluate(() => document.activeElement?.tagName) === 'BODY');
   await page.keyboard.press('F2');
-  await tungguCetak(5);
+  await pilihCetak('Thermal');
+  await tungguCetak(4);
 
   // Enter = bayar dari kolom uang (alur kas: ketik -> Enter), bukan cuma F2.
   await page.fill('#pos-q', 'PRD00013');
@@ -290,7 +368,8 @@ try {
   await page.focus('#pos-cash');
   await page.fill('#pos-cash', '4000');
   await page.keyboard.press('Enter');
-  await tungguCetak(6);
+  await pilihCetak('Thermal');
+  await tungguCetak(5);
 
   console.log('=== G. Qty item berikutnya (F4) + layar cari produk (F3) ===');
   // F4: preset qty dipakai SEKALI untuk item berikutnya lalu kembali ke 1.
@@ -379,8 +458,9 @@ try {
   await page.focus('#pos-cash');
   await page.fill('#pos-cash', '20000');
   await page.click('#pos-pay');
-  await tungguCetak(7);
-  const s7 = Buffer.from(tercetak[6], 'base64');
+  await pilihCetak('Thermal');
+  await tungguCetak(6);
+  const s7 = Buffer.from(tercetak[5], 'base64');
   const t7 = teksDari(s7);
   const b7 = barisStruk(s7);
   ok('struk memuat baris catatan indented di bawah item',
@@ -401,6 +481,25 @@ try {
   ok('server menyimpan note (trimmed)', nAqua?.note === 'ukuran 1 x 3 meter', JSON.stringify(nAqua?.note));
   const nChit = notaH.data?.items?.find((i) => i.product_id === 14);
   ok('baris tanpa catatan disimpan sebagai ""', nChit?.note === '', JSON.stringify(nChit?.note));
+  // Nota membawa nomor invoice bulanan (fitur 2026-10-03): YYMM-NNNNNN.
+  ok('nota membawa invoice_no pola YYMM-NNNNNN',
+    /^\d{4}-\d{6}$/.test(notaH.data?.sale?.invoice_no ?? ''), notaH.data?.sale?.invoice_no);
+
+  console.log('=== I. Pengaturan toko (kop invoice A4) & guard API settings ===');
+  const set0 = (await (await fetch(`${API}/api/settings`)).json()).data || {};
+  ok('GET settings memuat 4 kunci store_* (string, utk kop invoice)',
+    ['store_name', 'store_address', 'store_phone', 'store_email'].every((k) => typeof set0[k] === 'string'),
+    JSON.stringify({ n: set0.store_name, a: set0.store_address, p: set0.store_phone, e: set0.store_email }));
+  const setUji = await jpost('/api/settings', { store_phone: '0000000000' });
+  ok('POST store_* parsial diterima (200 + nilai terpasang)',
+    setUji.s === 200 && setUji.j?.data?.store_phone === '0000000000', JSON.stringify(setUji));
+  ok('kunci store LAIN tidak ikut ter-reset oleh update parsial',
+    setUji.j?.data?.store_name === set0.store_name && setUji.j?.data?.store_email === set0.store_email,
+    JSON.stringify({ n0: set0.store_name, n1: setUji.j?.data?.store_name }));
+  const setAsing = await jpost('/api/settings', { waduh: 'siape' });
+  ok('kunci asing ditolak 400', setAsing.s === 400, JSON.stringify(setAsing));
+  // Kembalikan persis seperti ditemukan (DB dev milik pemilik).
+  await jpost('/api/settings', { store_phone: set0.store_phone });
 
   ok('tanpa error halaman', errs.length === 0, errs.slice(0, 3));
 } catch (e) {

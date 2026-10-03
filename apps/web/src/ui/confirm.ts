@@ -70,3 +70,39 @@ export function alertDialog(o: {
     })
     .then(() => undefined);
 }
+
+/** Pilihan LEBIH DARI DUA — dipakai dialog cetak selesai transaksi
+ *  ([Thermal] [A4] [Tidak]). SweetAlert2 punya tepat tiga slot tombol
+ *  (confirm / deny / cancel), jadi `choices` maksimal tiga: slot pertama
+ *  = konfirmasi (primer), kedua = deny, ketiga = cancel (ghost).
+ *  Resolusi: key tombol yang diklik, atau `null` bila Esc / klik luar. */
+export function choiceDialog(o: {
+  title: string;
+  message?: string;
+  icon?: 'question' | 'info' | 'success' | 'warning';
+  choices: { key: string; label: string }[];
+  cancelLabel?: string;
+}): Promise<string | null> {
+  const [a, b] = o.choices;
+  return base
+    .fire({
+      title: o.title,
+      text: o.message,
+      icon: o.icon ?? 'question',
+      showDenyButton: b !== undefined,
+      showCancelButton: true,
+      confirmButtonText: a?.label ?? 'Ya',
+      denyButtonText: b?.label ?? '',
+      cancelButtonText: o.cancelLabel ?? 'Batal',
+      customClass: {
+        popup: 'sw-popup',
+        actions: 'sw-actions',
+        confirmButton: 'sw-btn sw-btn-primary',
+        denyButton: 'sw-btn sw-btn-ghost',
+        cancelButton: 'sw-btn sw-btn-ghost',
+      },
+      focusCancel: true,
+    })
+    .then((r) => (r.isConfirmed ? a?.key ?? null : r.isDenied ? b?.key ?? null : null))
+    .catch(() => null);
+}

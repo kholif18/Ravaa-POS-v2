@@ -44,7 +44,13 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS): scan bar + dropdown cari,
                           per baris (produk `use_note`, ikut ke struk via
                           `items[].note`), dan pintasan level document di
                           `bindPintasan()` (F2 bayar, F3/F4, Enter bayar, Esc ke
-                          scan).
+                          scan). Setelah penjualan sukses **`pilihCetakSelesai()`**
+                          membuka dialog **[Thermal] [A4] [Tidak]**
+                          (`choiceDialog`, HANYA bila saklar auto-print ON —
+                          guard `if (autoPrint)` wajib, tanpa itu backdrop swal
+                          memblokir seluruh UI): Thermal = struk ESC/POS via
+                          print-agent, A4 = invoice browser (`cetakInvoice`),
+                          pilihan terakhir menyetel pref layout topup berikutnya.
 apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS
@@ -62,7 +68,10 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          GET /api/sales & /api/topups (filter hari sama dengan
                           /api/reports/daily), isi nota dibuka lewat GET /api/sales/:id,
                           plus tombol **Cetak ulang struk** (bangun ulang Struk
-                          dari isi nota + `base_unit`, kirimPrint seperti POS).
+                          dari isi nota + `base_unit`, lalu dialog pilihan
+                          **[Thermal] [A4] [Batal]** — A4 = `cetakInvoice()`,
+                          Thermal = `kirimPrint(strukUntuk(...,'thermal'))`
+                          eksplisit seperti POS).
 apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
                           pemilik — 4 kartu (omzet/laba/HPP/diskon), rekap metode
                           bayar, topup & tarik, produk terlaris, stok menipis,
@@ -74,7 +83,12 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
                           saklar SERVER — "Stok boleh minus" + "Tolak jual
                           kadaluarsa" -> GET/POST /api/settings (update PARSIAL:
                           satu kunci per toggle, konfirmasi swal tiap
-                          perubahan), PLUS kartu **Cetak struk** (preferensi
+                          perubahan), PLUS kartu **Pengaturan toko** (baru
+                          2026-10-03: 4 input nama/alamat/Phone/Email ->
+                          kunci `store_*` di POST /api/settings, tanpa swal —
+                          kop INVOICE A4 tersimpan di server supaya semua
+                          device mencetak kop yang sama), PLUS kartu
+                          **Cetak struk** (preferensi
                           PER-DEVICE lewat ui/print-pref.ts: saklar auto-print
                           + select layout thermal/A4, tanpa swal & tanpa API —
                           printer tiap PC kasir beda, jangan dipindah ke
@@ -87,10 +101,14 @@ apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print
                           Layout struk: `thermal` 32 kolom (COLS) ekor FEED+CUT —
                           bawaan toko; `a4` 64 kolom (COLS_A4) ekor FEED+Form
                           Feed 0x0C TANPA CUT — untuk Epson L3110 (inkjet tanpa
-                          pisau; tanpa FF kertas menumpuk di dalam). Pemilihan:
-                          strukUntuk() (panggil dari tiap pencetakan struk) &
-                          sesuaikanPrinter() untuk stream non-struk (label),
-                          pref di ui/print-pref.ts.
+                          pisau; tanpa FF kertas menumpuk di dalam).
+                          **Sejak 2026-10-03 pilihan A4 penjualan = invoice
+                          browser (`invoice.ts`), BUKAN struk ini** — `strukA4()`
+                          kini hanya dipakai struk topup/tarik saat pref layout
+                          `a4` dan tetap diuji unit di `escpos-test.ts`.
+                          Pemilihan: strukUntuk() (panggil dari tiap pencetakan
+                          struk) & sesuaikanPrinter() untuk stream non-struk
+                          (label), pref di ui/print-pref.ts.
                           Berisi: label harga (labelHarga/teksLabel/gabungLabel),
                           struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
                           dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
@@ -98,6 +116,28 @@ apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print
                          pay()/submitTopup() POS. PENTING: `teks()` tidak
                          menambah baris baru — setiap baris struk HARUS diakhiri
                           LF, kalau tidak seluruh struk menempel jadi satu baris.
+apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
+                          `htmlInvoice(sale, items, toko)` menyusun HTML + CSS
+                          `@page A4 margin 16mm 14mm` (kop INVOICE + nama/
+                          alamat/Phone/Email dari `store_*` + logo lingkaran "R",
+                          Bill to = "Pelanggan Umum", Invoice No. = `sales.invoice_no`,
+                          Payment status Lunas, tabel item + baris `* note`,
+                          ringkasan Discount/Total, footer "Dicetak dari Ravaa
+                          POS"), dan `cetakInvoice(saleId)` = fetch
+                          `GET /api/sales/:id` + `GET /api/settings` -> window.open
+                          -> document.write -> `window.print()` otomatis saat
+                          load. **Tanpa print-agent** (rendering HTML tidak bisa
+                          diserahkan ke server nol-dependensi — cetak lewat
+                          browser/CUPS `lp -d EPSON-L3110-Series`). Lempar Error
+                          bila popup diblokir (POS men-toast, penjualan TIDAK
+                          dibatalkan). Dipanggil dari POS (dialog A4) & Riwayat.
+apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
+                          konfirmasi destruktif), `alertDialog()` (satu tombol),
+                          dan **`choiceDialog({title,message,choices,cancelLabel})`**
+                          (baru 2026-10-03, resolve `key` choice | null) — SweetAlert2
+                          punya tepat 3 slot (confirm/deny/cancel), jadi maks 3
+                          pilihan. Dipakai pilihan cetak POS/Riwayat. Jangan pakai
+                          `confirm()`/`prompt()` native (dilarang frontend-pos).
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                           produk, panel mode POS, dan kartu Sistem.
 apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
@@ -106,7 +146,10 @@ apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                           atau scan bar POS; penjualan TIDAK PERNAH dibatalkan
                           oleh gagal cetak) dan getStrukLayout/setStrukLayout
                           (`ravaa.struklayout` = `thermal`|`a4`, default
-                          `thermal`). SATU sumber untuk panel Sistem + scan bar
+                          `thermal`). `a4` = pref struk topup/tarik + pilihan
+                          terakhir dialog cetak (A4 penjualan sendiri lewat
+                          `invoice.ts`, bukan struk ESC/POS). SATU sumber untuk
+                          panel Sistem + scan bar
                           POS + strukUntuk()/sesuaikanPrinter() — jangan baca
                           localStorage langsung dari halaman lain.
 apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
@@ -282,23 +325,32 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Urutan `created_at DESC, id DESC` (yang terbaru di atas).
   - Data sudah ada sejak awal (`stock_moves` diisi oleh sale/restock/opname) —
     endpoint ini hanya MEMBUKANYA, bukan memodifikasi riwayat.
-* `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false}}`
-  (selalu ada — kedua baris default di-seed `db/seed.sql` lewat `INSERT OR IGNORE`
-  jadi seed ulang tidak mereset pilihan pemilik)
-* `POST /api/settings` `{allow_negative_stock?:boolean, tolak_jual_kadaluarsa?:boolean}`
+* `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false,
+  store_name:"",store_address:"",store_phone:"",store_email:""}}`
+  (selalu ada — dua baris boolean default di-seed `db/seed.sql` lewat `INSERT OR
+  IGNORE` jadi seed ulang tidak mereset pilihan pemilik; empat kunci `store_*`
+  = **kop INVOICE A4** (nama/alamat/Phone/Email toko) juga `INSERT OR IGNORE`
+  dengan data contoh pemilik)
+* `POST /api/settings` `{allow_negative_stock?:boolean, tolak_jual_kadaluarsa?:boolean,
+  store_name?:string, store_address?:string, store_phone?:string, store_email?:string}`
   -> `{data:{...}}` (200)
   - **Update PARSIAL (sejak 2026-10-01)**: kunci yang TIDAK dikirim TIDAK
     diubah — berbeda dengan `POST /api/products` yang mereset kolom tak-dikirim.
-    Alasan: halaman #/settings punya dua saklar terpisah; client hanya mengirim
+    Alasan: halaman #/settings punya kartu-kartu terpisah; client hanya mengirim
     kunci yang diubah, dan `{tolak_jual_kadaluarsa:true}` tidak boleh mereset
     `allow_negative_stock` milik pemilik diam-diam.
   - 400 bila payload `{}` (minimal satu kunci). Tiap kunci yang dikirim wajib
-    boolean **sungguhan** -> 400 bila bukan (angka 0/1, `"ya"`, `null` semua
-    ditolak, memaksa client mengirim `true`/`false`).
-  - **Keduanya hanya dibaca di `POST /api/sales`** (dari DB SETIAP penjualan,
-    bukan cache): `allow_negative_stock` = boleh stok minus, lihat aturan stok
-    di kontrak penjualan; `tolak_jual_kadaluarsa` = tolak barang lewat
-    `expiry_date`, lihat aturan kadaluarsa di kontrak penjualan. Default `false`.
+    tipe yang benar -> 400 dengan nama kuncinya: dua saklar boolean **sungguhan**
+    (angka 0/1, `"ya"`, `null` ditolak, memaksa client mengirim `true`/`false`);
+    empat `store_*` wajib **teks** (string) — nilai di-trim server.
+    Kunci tidak dikenal (mis. `waduh`) -> 400 `"pengaturan tidak dikenal: <k>"`.
+  - **Pembacaan**: dua boolean hanya di `POST /api/sales` (dari DB SETIAP
+    penjualan, bukan cache): `allow_negative_stock` = boleh stok minus, lihat
+    aturan stok di kontrak penjualan; `tolak_jual_kadaluarsa` = tolak barang
+    lewat `expiry_date`, lihat aturan kadaluarsa di kontrak penjualan. Default
+    `false`. Empat `store_*` dibaca client saat **membuka invoice A4**
+    (`cetakInvoice()` di `apps/web/src/invoice.ts`) — satu kop untuk semua
+    device, sengaja di server bukan localStorage.
 * `POST /api/products/import` `{rows:[<payload POST /api/products>], dry_run?:bool}` -> `{data:{total,ok,baru,update,gagal,errors:[{baris,sku,error}]}}` (200)
   - Tiap baris di-upsert lewat **fungsi yang sama** dengan `POST /api/products`
     (kategori/satuan/turunan SKU jadi satu sumber kebenaran, bukan versi kedua).
@@ -403,6 +455,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shifts.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
 * `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?}`
+  - **`invoice_no` (baru 2026-10-03, fitur Invoice A4)**: di-assign **SERVER**,
+    tidak pernah dari client. Format **`YYMM-NNNNNN`** (UTC — tahun 2 digit +
+    bulan 2 digit + `-` + 6 digit urut): `2610-000001`. Urutan dihitung
+    `ORDER BY CAST(substr(invoice_no,6) AS INTEGER) DESC` — **BUKAN COUNT dan
+    BUKAN teks** (`000010 < 000009` secara leksikal) — dan dicek duplikat
+    idempotent dulu (POST ulang `id` yang sama tidak menggandakan nomor).
+    Disimpan di kolom `sales.invoice_no`; muncul di `GET /api/sales`,
+    `GET /api/sales/:id`, dan tercetak di kop invoice A4.
   - **Diskon PER BARIS `discount?`** (baru 2026-09-29): nilai rupiah mutlak.
     Diisi client (prefill dari `products.discount` tipe `rp`/`pct`, boleh
     diubah kasir per baris) lalu **DI-SNAPSHOT** ke `sale_items.discount` —
@@ -462,6 +522,8 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     / outbox lama tidak boleh ditolak karena alasan kosmetik); `''`/absen =
     tanpa catatan.
 * `GET /api/sales/:id` -> `{data:{sale,items}}` (isi lengkap satu nota)
+  - `sale` memuat **`invoice_no`** (`YYMM-NNNNNN`) sejak 2026-10-03 —
+    diambil client oleh `cetakInvoice()` untuk dicetak di kop invoice A4.
   - Tiap baris `items` memuat **`base_unit`** (satuan dasar produk lewat
     `LEFT JOIN products`, `NULL` untuk item manual) sejak 2026-10-01 — dipakai
     tombol **Cetak ulang struk** di halaman Riwayat: struk hanya mencetak
@@ -470,7 +532,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `''` bila tanpa) lewat `SELECT si.*` — dipakai cetak ulang supaya baris
     catatan ikut tercetak persis seperti struk aslinya.
 * `GET /api/sales?date=&limit=&offset=`
-  -> `{data:[{id,shift_id,created_at,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
+  -> `{data:[{id,shift_id,created_at,invoice_no,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).
     Read-only: tidak mengubah `products.version` dan tidak perlu.
   - `date` default hari UTC (`YYYY-MM-DD`). Divalidasi round-trip
@@ -604,7 +666,16 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-03 (catatan per baris di POS):** kolom
+  **Migrasi terakhir 2026-10-03 (Invoice A4 — nomor invoice + kop toko):**
+  kolom **`sales.invoice_no`** + 4 baris `settings store_name/store_address/
+  store_phone/store_email` (re-create penuh, backup `data.db.bak.invoice-no`;
+  seed menanam kop contoh pemilik lewat `INSERT OR IGNORE`, jadi seed ulang
+  tidak menghapus kop yang sudah diisi). **PERINGATAN backup WAL** (bukti dari
+  migrasi ini): `cp data.db data.db.bak` TANPA checkpoint meninggalkan seluruh
+  isi di file pendamping `-wal` — file backup jadi 4096 byte (kosong). Selalu
+  jalankan `sqlite3 data.db 'PRAGMA wal_checkpoint(TRUNCATE);'` (atau
+  `VACUUM INTO 'backup.db'`) SEBELUM menyalin DB.
+  Migrasi sebelumnya 2026-10-03 (catatan per baris di POS): kolom
   **`products.use_note`** + **`sale_items.note`** (re-create penuh, backup
   `data.db.bak.use-note`).
   Migrasi sebelumnya 2026-09-30 (saklar kadaluarsa per kategori): kolom
@@ -660,6 +731,17 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   ```sql
   ALTER TABLE products ADD COLUMN use_note INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE sale_items ADD COLUMN note TEXT NOT NULL DEFAULT '';
+  ```
+  Migrasi 2026-10-03 (Invoice A4) di install yang TIDAK boleh di-recreate —
+  `invoice_no` diisi sendiri oleh `POST /api/sales` berikutnya (lama tetap
+  NULL, tampil `—` di invoice); `store_*` sengaja default kosong, pemilik
+  mengisinya lewat kartu **Pengaturan toko** di `#/settings`:
+  ```sql
+  ALTER TABLE sales ADD COLUMN invoice_no TEXT;
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_name', '');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_address', '');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_phone', '');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_email', '');
   ```
 
 ## 6. Troubleshooting yang sudah diketahui (fakta, bukan tebakan)

@@ -173,6 +173,20 @@ npm run dev:api
     pas** + pecahan Rp50.000 / Rp100.000 / Rp200.000 — satu klik mengisi kolom
     **Uang diterima**, kembalian ikut terhitung, chip yang cocok tersorot.
     Chip hanya ada di mode tunai (QRIS/transfer tidak butuh nominal).
+  - **Panel bayar disusun seperti payment screen Aronium** (referensi
+    help.aronium.com *Payment*): hierarki **Total** angka besar biru ->
+    **Uang diterima** input besar (placeholder = amount due, meniru "Paid"
+    Aronium yang menampilkan total tagihan) -> **Kembalian** angka besar
+    otomatis (hijau saat cukup, merah saat kurang). Layout/masih memakai
+    token & komponen repo (`.chip`, `.btn`, `.input`).
+  - **Barrier uang diterima (tunai)**: tombol **Bayar**/pintasan F2/Enter
+    DITOLAK dengan toast bila uang diterima **kosong** ("Uang diterima belum
+    diisi — ketik nominal atau tekan 'Uang pas'") atau **kurang dari total**
+    ("Uang diterima kurang dari total RpX"); fokus dikembalikan ke kolom
+    uang. Dulu `cashIn=0` lolos cek dan transaksi bisa selesai tanpa menerima
+    uang. Barrier serupa berlaku untuk **topup tunai** (`#tp-tunai`);
+    mode **Tarik dikecualikan** (uang mengalir keluar, kolom boleh kosong).
+    Teruji 6 asersi regresi di `tests/e2e-struk.mjs` (section F).
   - **Qty item berikutnya** (gaya Aronium *Changing the quantity*): chip
     **Qty** di scan bar (mode Penjualan) atau tekan **F4** — isi angka, item
     BERIKUTNYA masuk keranjang dengan qty itu, chip lalu otomatis kembali
@@ -280,18 +294,33 @@ npm run dev:api
     (bisa dicek/CUPS-kan manual), jadi alur ini bisa diuji tanpa hardware.
 * **Cetak struk otomatis** (saklar **Cetak struk otomatis** pada baris **Mode**,
   tampil di semua mode; bisa juga dimatikan per device lewat **Sistem →
-  Cetak struk**): setiap penjualan dan topup/tarik mengirim struk ke
-  print-agent **sebelum** keranjang/state direset. Gagal cetak **tidak pernah**
-  membatalkan transaksi (cukup toast peringatan sekali per sesi).
+  Cetak struk**): setiap **penjualan** selesai, dialog menawarkan pilihan
+  **[Thermal] [A4] [Tidak]** sebelum keranjang/state direset. Gagal cetak
+  **tidak pernah** membatalkan transaksi (cukup toast peringatan sekali per
+  sesi). **Topup/tarik tanpa dialog** — struk langsung dikirim sesuai layout
+  per-device. Device dengan saklar mati tidak diganggu dialog sama sekali.
+  - **Pilihan A4 = INVOICE A4 gaya Aronium** (baru 2026-10-03): membuka tab
+    baru berisi nota invoice A4 (kop **INVOICE** + nama/alamat/Phone/Email
+    toko + logo "R", Bill to *Pelanggan Umum*, **Invoice No. `YYMM-NNNNNN`**
+    nomor urut per bulan yang di-assign server, tabel item + baris catatan
+    `* note`, ringkasan Discount/Total, Payment method/Paid amount/Change)
+    lalu `window.print()` otomatis — **lewat browser/CUPS, bukan print-agent**
+    (`lp -d EPSON-L3110-Series` untuk L3110). Isinya lewat
+    `GET /api/sales/:id` + `GET /api/settings`; kalau nota gagal dimuat hanya
+    toast peringatan, penjualan tetap tersimpan.
+    Kop disimpan **di server** (4 kunci `store_*`) lewat kartu **Pengaturan
+    toko** di **Sistem → Pengaturan toko** — semua device mencetak kop yang
+    sama; nilai awal = contoh pemilik (RAVAA STUDIO) lewat seed.
   - **Dua layout struk** — dipilih per device di **Sistem → Cetak struk**
-    (default *Thermal*):
+    (default *Thermal*; pilihan dialog terakhir juga menyetel pref ini untuk
+    struk topup/tarik berikutnya):
     - **Thermal 58mm** (bawaan): 32 kolom, diakhiri FEED + **CUT** — printer
       termal dengan pisau potong (Caysn/dll).
     - **Epson L3110 (A4)**: 64 kolom, judul dobel lebar, **tanpa CUT**, ditutup
       **Form Feed (0x0C)**. Inkjet tidak punya pisau potong — tanpa perintah
       eject ini kertas tercetak tapi menumpuk di dalam printer (bug nyata di
-      L3110). Cetak ulang dari Riwayat dan label harga otomatis ikut layout
-      yang sama (potongan label dibuang, batch ditutup FF).
+      L3110). Kini khusus struk topup/tarik (penjualan A4 = invoice browser);
+      label harga tetap memakai `sesuaikanPrinter()` (batch ditutup FF).
   - Struk disusun `struk()`/`strukA4()` di `apps/web/src/escpos.ts` — INIT -> nama toko
     (bold, rata tengah) -> tanggal/no transaksi/kasir/shift -> garis 32 kolom ->
     item (`qty x nama` + line total; baris yang didiskon memunculkan baris
@@ -423,12 +452,15 @@ npm run dev:api
     tidak ditarik sekaligus; topup/tarik menampilkan nominal/admin/nomor dari
     baris yang sudah ada di daftar.
   - **Cetak ulang struk** (baru 2026-10-01): kartu Pembayaran rincian penjualan
-    punya tombol **Cetak ulang struk**. Struk dibangun **ulang dari isi nota**
-    (waktu `created_at` diformat lokal, nomor/kasir/shift, item — satuan non-dasar
-    tercetak lewat `base_unit` dari `GET /api/sales/:id` — subtotal, diskon item,
-    diskon transaksi, total, uang diterima/kembali persis seperti struk asli)
-    lalu dikirim ke print-agent lewat `kirimPrint()` seperti alur POS. Gagal
-    cetak hanya toast peringatan — riwayat tidak berubah apa pun.
+    punya tombol **Cetak ulang struk**. Setelah memilih isi nota, dialog
+    menawarkan **[Thermal] [A4] [Batal]** — A4 membuka invoice A4 yang sama
+    seperti POS (`cetakInvoice()`), Thermal membangun **ulang struk dari isi
+    nota** (waktu `created_at` diformat lokal, nomor/kasir/shift, item — satuan
+    non-dasar tercetak lewat `base_unit` dari `GET /api/sales/:id` — subtotal,
+    diskon item, diskon transaksi, total, uang diterima/kembali persis seperti
+    struk asli) lalu dikirim ke print-agent lewat `kirimPrint()` eksplisit
+    layout thermal. Gagal cetak hanya toast peringatan — riwayat tidak
+    berubah apa pun.
   - **Tanpa pembatalan/refund**: riwayat bersifat catatan, sama seperti riwayat
     mutasi stok. Koreksi lewat stok opname + transaksi baru.
   - Endpoint baru: `GET /api/sales` dan `GET /api/topups`, keduanya berparameter
@@ -473,8 +505,8 @@ npm run dev:api
   - Shift `kasir` yang dipakai layar POS tidak tersentuh oleh halaman ini
     (test memakai kasir uji sendiri).
 * **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — dua kartu saklar
-  server + satu kartu preferensi device, masing-masing dengan penjelasan
-  sendiri (bukan lagi satu kartu):
+  server, kartu kop toko, kartu preferensi device, masing-masing dengan
+  penjelasan sendiri (bukan lagi satu kartu):
   - **Stok boleh minus** (`settings.allow_negative_stock`): daring = penjualan
     boleh membuat stok menembus nol (stok jadi angka minus dan langsung terlihat
     di filter **Stok minus** halaman Stok); mati = `POST /api/sales` menolak
@@ -490,6 +522,13 @@ npm run dev:api
   hanya mengirim kuncinya sendiri, jadi mengubah satu TIDAK mereset yang lain.
   Aturan dibaca server dari DB pada **setiap penjualan** — keputusan tidak
   pernah terpecah antar device.
+  - **Pengaturan toko** (baru 2026-10-03): 4 input — **Nama toko, Alamat,
+    Phone, Email** — disimpan di server sebagai kunci `store_name`/
+    `store_address`/`store_phone`/`store_email` (update parsial, teks;
+    kunci asing ditolak 400). Inilah **kop INVOICE A4** yang dicetak di
+    semua device; tombol **Simpan toko** tanpa konfirmasi swal (non-destruktif
+    seperti Backup), nilai tampil kembali persis seperti hasil trim server.
+    Bawaan seed = contoh pemilik (RAVAA STUDIO, alamat Ngluyu Nganjuk).
   - **Cetak struk** (baru — satu-satunya kartu **per device**): saklar
     **Cetak struk otomatis** + pilihan layout struk (**Thermal 58mm** /
     **Epson L3110 (A4)**, lihat bagan struk di atas). TIDAK lewat API: keduanya

@@ -108,6 +108,11 @@ CREATE TABLE IF NOT EXISTS sales (
   id          TEXT PRIMARY KEY,        -- uuid dari client (idempotent, aman retry offline)
   shift_id    INTEGER REFERENCES shifts(id),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Nomor invoice gaya Aronium (2026-10-03): `YYMM-NNNNNN`, urut per bulan UTC
+  -- (satu aturan waktu dengan created_at). Di-assign SERVER saat INSERT, di
+  -- dalam transaksi yang sama — retry idempotent tidak menghitung ulang
+  -- (cek duplikat dijalankan sebelum perhitungan nomor).
+  invoice_no  TEXT,
   pay_method  TEXT NOT NULL DEFAULT 'tunai', -- tunai | qris | transfer
   subtotal    INTEGER NOT NULL,
   discount    INTEGER NOT NULL DEFAULT 0,

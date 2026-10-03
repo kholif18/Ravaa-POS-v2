@@ -19,12 +19,17 @@ import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
 
-type Settings = { allow_negative_stock: boolean; tolak_jual_kadaluarsa: boolean };
+type Settings = {
+  allow_negative_stock: boolean; tolak_jual_kadaluarsa: boolean;
+  store_name: string; store_address: string; store_phone: string; store_email: string;
+};
 type BarisBackup = { nama: string; ukuran: number; waktu: string };
 
 const state = {
   loading: true, error: '', minus: false, kadaluarsa: false,
   backups: [] as BarisBackup[], backupErr: '', backupJalan: false,
+  toko: { store_name: '', store_address: '', store_phone: '', store_email: '' },
+  tokoJalan: false,
 };
 
 let host: HTMLElement | null = null;
@@ -108,9 +113,44 @@ function renderBody(): string {
         <div class="shrink-0">${switchHtml('set-kadaluarsa', state.kadaluarsa, state.kadaluarsa ? 'Aktif' : 'Nonaktif')}</div>
       </div>
     </div>
+    ${kartuToko()}
     ${kartuCetak()}
     ${kartuBackup()}
   </div>`;
+}
+
+// Kartu "Pengaturan toko" — kop INVOICE A4 (cetak gaya Aronium). Disimpan di
+// SERVER (4 kunci store_* di tabel settings) supaya semua device mencetak kop
+// yang sama; nilai awal di-seed dari contoh pemilik. Form biasa + tombol
+// Simpan, tanpa konfirmasi swal (non-destruktif seperti Backup).
+function kartuToko(): string {
+  const t = state.toko;
+  const f = (id: string, label: string, nilai: string, opsional?: boolean, lebar?: boolean) => `
+    <label class="block${lebar ? ' sm:col-span-2' : ''}">
+      <span class="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">${label}${opsional ? ' <span class="font-normal">(opsional)</span>' : ''}</span>
+      <input class="input w-full" id="${id}" value="${esc(nilai)}" maxlength="300" autocomplete="off">
+    </label>`;
+  return `
+    <div class="card">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan toko</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Kop <b>INVOICE A4</b> (cetak gaya Aronium) memakai empat isian ini.
+            Disimpan di <b>server</b>, jadi seluruh device mencetak kop yang sama.
+          </p>
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            ${f('set-toko-nama', 'Nama toko', t.store_name)}
+            ${f('set-toko-telepon', 'Phone', t.store_phone, true)}
+            ${f('set-toko-alamat', 'Alamat', t.store_address, true, true)}
+            ${f('set-toko-email', 'Email', t.store_email, true)}
+          </div>
+        </div>
+        <button type="button" id="set-toko-simpan" class="btn btn-primary shrink-0" ${state.tokoJalan ? 'disabled' : ''}>
+          ${icon('check')}<span>${state.tokoJalan ? 'Menyimpan…' : 'Simpan toko'}</span>
+        </button>
+      </div>
+    </div>`;
 }
 
 // Kartu "Cetak struk" — preferensi PER DEVICE (localStorage lewat
@@ -122,17 +162,19 @@ function kartuCetak(): string {
   const nyala = getAutoPrint();
   const layout = getStrukLayout();
   const isiSaklar = nyala
-    ? `Struk langsung dicetak setiap penjualan/topup berhasil — pelanggan menerima
-       bukti tanpa klik apa pun. Matikan saklar bila device ini tidak punya printer;
-       penjualan tetap berjalan (cetak otomatis tidak pernah membatalkan transaksi).`
-    : `Struk <b>tidak</b> dicetak otomatis. Kasir tetap bisa mencetak ulang kapan
-       saja lewat menu Riwayat transaksi. Nyalakan lagi kalau device ini sudah
-       terpasang printer.`;
+    ? `Setiap penjualan selesai, dialog menawarkan pilihan <b>[Thermal] [A4] [Tidak]</b> —
+        kasir memilih kertas per transaksi (A4 = invoice gaya Aronium). Topup/tarik
+        langsung dicetak sesuai layout di bawah. Matikan bila device ini tanpa printer;
+        penjualan tetap berjalan (cetak tidak pernah membatalkan transaksi).`
+    : `Struk & invoice <b>tidak</b> ditawarkan otomatis. Kasir tetap bisa mencetak ulang
+        (dengan pilihan Thermal/A4) lewat menu Riwayat transaksi. Nyalakan lagi kalau
+        device ini sudah terpasang printer.`;
   const isiLayout = layout === 'a4'
-    ? `Sedang memakai <b>Epson L3110 (A4)</b>: 64 kolom, tanpa potong, ditutup eject
-       supaya kertas keluar — cocok untuk inkjet yang tidak punya pisau potong.`
-    : `Sedang memakai <b>Thermal 58mm</b>: 32 kolom, diakhiri potong kertas — cocok
-       untuk printer termal bawaan (Caysn/dll).`;
+    ? `Layout tersimpan: <b>Epson L3110 (A4)</b> — struk topup/tarik dicetak 64 kolom,
+        tanpa potong, ditutup eject supaya kertas keluar. Pilihan A4 saat penjualan
+        membuka invoice A4 (dicetak lewat browser, bukan print-agent).`
+    : `Layout tersimpan: <b>Thermal 58mm</b> — 32 kolom, diakhiri potong kertas; dipakai
+        untuk struk topup/tarik. Pilihan A4 saat penjualan tetap membuka invoice A4.`;
   return `
     <div class="card">
       <div class="flex flex-wrap items-start justify-between gap-4">
@@ -277,6 +319,37 @@ function bind(): void {
     });
   }
 
+  // Kartu "Pengaturan toko": baca 4 field lalu POST sekali (endpoint menerima
+  // update parsial multi-kunci). Respon dijadikan snapshot state supaya nilai
+  // yang tampil = nilai TRIM hasil server, bukan hasil ketik kasar.
+  host?.querySelector('#set-toko-simpan')?.addEventListener('click', async () => {
+    if (state.tokoJalan) return;
+    const val = (id: string) => (host?.querySelector<HTMLInputElement>(id)?.value ?? '').trim();
+    const payload = {
+      store_name: val('#set-toko-nama'),
+      store_address: val('#set-toko-alamat'),
+      store_phone: val('#set-toko-telepon'),
+      store_email: val('#set-toko-email'),
+    };
+    state.tokoJalan = true;
+    paint();
+    try {
+      const r = await apiPost<{ data: Settings }>('/api/settings', payload);
+      state.toko = {
+        store_name: r.data.store_name ?? '',
+        store_address: r.data.store_address ?? '',
+        store_phone: r.data.store_phone ?? '',
+        store_email: r.data.store_email ?? '',
+      };
+      toast('Pengaturan toko disimpan — kop invoice A4 memakai nilai ini', 'success');
+    } catch (e) {
+      toast(`Gagal simpan pengaturan toko: ${errMsg(e)}`, 'error');
+    } finally {
+      state.tokoJalan = false;
+      if (host?.isConnected) paint();
+    }
+  });
+
   // Kartu "Cetak struk": dua preferensi per-device, langsung tersimpan tanpa
   // konfirmasi (non-destruktif & bisa dibalik — alasan sama dengan Backup).
   // Di-paint ulang supaya label saklar ("Aktif"/"Nonaktif") ikut terbarui.
@@ -342,6 +415,12 @@ async function load(): Promise<void> {
   if (s.status === 'fulfilled') {
     state.minus = s.value.data?.allow_negative_stock === true;
     state.kadaluarsa = s.value.data?.tolak_jual_kadaluarsa === true;
+    state.toko = {
+      store_name: s.value.data?.store_name ?? '',
+      store_address: s.value.data?.store_address ?? '',
+      store_phone: s.value.data?.store_phone ?? '',
+      store_email: s.value.data?.store_email ?? '',
+    };
   } else {
     state.error = errMsg(s.reason);
   }
