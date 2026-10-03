@@ -320,6 +320,7 @@ const upsertProduct = db.transaction((
     price_dynamic?: number; stock?: number; min_stock?: number; is_active?: number;
     units?: unknown[];
     image?: string | null; discount_type?: string; discount?: number; expiry_date?: string | null;
+    use_note?: number;
   },
   opts?: { pertahankanTidakDikirim?: boolean },
 ) => {
@@ -354,6 +355,10 @@ const upsertProduct = db.transaction((
   const stock = amb(input.stock, 'stock', 0);
   const minStock = amb(input.min_stock, 'min_stock', 0);
   const isActive = amb(input.is_active, 'is_active', 1);
+  // Catatan per baris di POS (0/1) — pola sama dengan `use_expiry` kategori:
+  // field biasa, jadi ikut aturan reset (tidak dikirim = kembali default 0)
+  // dan wajib dibawa payloadToggleAktif/form.
+  const useNote = amb(input.use_note, 'use_note', 0) ? 1 : 0;
 
   // ---- Foto: aturan KHUSUS, bukan pakai `amb` ----
   // `undefined` = tidak diubah di SEMUA mode (bukan cuma impor). Kalau pakai
@@ -405,12 +410,12 @@ const upsertProduct = db.transaction((
   if (!existing) {
     const info = db.prepare(
       `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_dynamic, cost, markup, stock, min_stock,
-                             image, discount_type, discount, expiry_date, is_active, updated_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
+                             image, discount_type, discount, expiry_date, use_note, is_active, updated_at, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
          COALESCE((SELECT MAX(version) FROM products), 0) + 1)`,
     ).run(cat.id, sku, barcode, input.name, unit,
       price, priceDynamic, cost, markup, stock, minStock,
-      image, discountType, discount, expiry, isActive);
+      image, discountType, discount, expiry, useNote, isActive);
     pid = Number(info.lastInsertRowid);
   } else {
     pid = existing.id;
@@ -426,13 +431,13 @@ const upsertProduct = db.transaction((
     db.prepare(
       `UPDATE products SET category_id=?, barcode=?, name=?, unit=?, price=?, price_dynamic=?,
          cost=?, markup=?, stock=?, min_stock=?, image=?, discount_type=?, discount=?, expiry_date=?,
-         is_active=?, deleted_at=NULL,
+         use_note=?, is_active=?, deleted_at=NULL,
          updated_at=datetime('now'),
          version=(SELECT COALESCE(MAX(version),0)+1 FROM products)
        WHERE id=?`,
     ).run(cat.id, barcode, input.name, unit,
       price, priceDynamic, cost, markup, stock, minStock,
-      image, discountType, discount, expiry, isActive, pid);
+      image, discountType, discount, expiry, useNote, isActive, pid);
   }
   // units === undefined -> biarkan apa adanya; array (termasuk []) -> ganti semua.
   if (input.units !== undefined) simpanSatuanJual(pid, unit, input.units);
@@ -834,7 +839,7 @@ app.post('/api/shifts/:id/close', async (c) => {
 const insertSale = db.transaction((sale: {
   id: string; shift_id: number | null; pay_method: string; discount: number;
   cash_in: number; cashier: string;
-  items: { product_id?: number; name?: string; qty: number; price?: number; unit?: string; discount?: number }[];
+  items: { product_id?: number; name?: string; qty: number; price?: number; unit?: string; discount?: number; note?: string }[];
 }) => {
   const dup = db.prepare('SELECT * FROM sales WHERE id = ?').get(sale.id);
   if (dup) return { row: dup, duplicate: true };
@@ -852,7 +857,7 @@ const insertSale = db.transaction((sale: {
 
   let subtotal = 0;
   let totalDiscBaris = 0;
-  const lines: { product_id: number | null; name: string; qty: number; price: number; amount: number; discount: number; cost: number; unit: string }[] = [];
+  const lines: { product_id: number | null; name: string; qty: number; price: number; amount: number; discount: number; cost: number; unit: string; note: string }[] = [];
   for (const it of sale.items) {
     const qty = Number(it.qty);
     if (!(qty > 0)) throw new Error('qty harus > 0');
@@ -939,13 +944,22 @@ const insertSale = db.transaction((sale: {
     if (discBaris > amount) {
       throw new Error(`diskon baris melebihi jumlah baris: ${name} (${discBaris} > ${amount})`);
     }
+    // Catatan per baris (POS: input di bawah baris produk use_note=1).
+    // Di-snapshot seperti discount — riwayat & struk ulang tidak ikut berubah.
+    // Server TIDAK mengecek flag use_note produk: inputnya memang hanya dirender
+    // untuk produk yang menyala, tapi payload sah untuk item apa pun (item
+    // manual / outbox lama) tidak boleh ditolak karena alasan kosmetik.
+    const note = String(it.note ?? '').trim();
+    if (note.length > 200) {
+      throw new Error(`catatan baris terlalu panjang: ${name} (maks 200 karakter)`);
+    }
     subtotal += amount;
     totalDiscBaris += discBaris;
     // HPP disnapshot SEKARANG (avg_cost saat jual), bukan dibaca ulang saat
     // laporan di-query — rata-rata modal berubah tiap restock, kalau dibaca ulang
     // maka laba hari lalu ikut berubah setelah pembelian hari ini.
     // Item manual (pid=null) tidak punya persediaan -> HPP 0.
-    lines.push({ product_id: pid, name, qty, price, amount, discount: discBaris, cost, unit: unitJual });
+    lines.push({ product_id: pid, name, qty, price, amount, discount: discBaris, cost, unit: unitJual, note });
   }
   // Nilai BERSIH = kotor - diskon baris - diskon transaksi. `subtotal` yang
   // disimpan ke sales tetap kotor, supaya subtotal - total = seluruh diskon.
@@ -957,11 +971,11 @@ const insertSale = db.transaction((sale: {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
   ).get(sale.id, sale.shift_id, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier);
   const insItem = db.prepare(
-    `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, discount, cost, unit)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, discount, cost, unit, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const l of lines) {
-    insItem.run(sale.id, l.product_id, l.name, l.qty, l.price, l.amount, l.discount, l.cost, l.unit);
+    insItem.run(sale.id, l.product_id, l.name, l.qty, l.price, l.amount, l.discount, l.cost, l.unit, l.note);
   }
   return { row, duplicate: false as const, lines };
 });

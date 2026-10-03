@@ -17,6 +17,9 @@ export type Product = {
   discount: number;
   /** Tanggal kadaluarsa YYYY-MM-DD (snack & es krim). */
   expiry_date: string | null;
+  /** 1 = baris keranjang produk ini punya input catatan (mis. Cetak Banner ->
+   *  "ukuran 1 x 3 meter") yang ikut tercetak di struk (kolom `use_note`). */
+  use_note: number;
   /** Tombstone: diisi = produk sudah dihapus di server -> dibuang dari cache. */
   deleted_at: string | null;
   category_slug: string; category_name: string; track_stock: number; version: number;
@@ -85,6 +88,7 @@ export async function getCachedProducts(): Promise<Product[]> {
     discount_type: p.discount_type ?? 'rp',
     discount: p.discount ?? 0,
     expiry_date: p.expiry_date ?? null,
+    use_note: p.use_note ?? 0,
   }));
 }
 export async function getMaxVersion(): Promise<number> {

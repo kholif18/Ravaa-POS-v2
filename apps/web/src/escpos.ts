@@ -170,6 +170,11 @@ export interface StrukItem {
    *  "1 x Aqua 600ml" tetap "1 x Aqua 600ml", sedangkan "2 pack" jadi
    *  "2 pack x Pulpen Hitam". */
   unit?: string;
+  /** Catatan per baris dari keranjang POS (produk use_note=1), mis.
+   *  "ukuran 1 x 3 meter" untuk Cetak Banner. Tercetak di baris bawah item
+   *  dengan indent "  - ". undefined/' ' = tanpa catatan (baris lama tidak
+   *  berubah). */
+  note?: string;
 }
 /** Satu baris rincian: kiri label, kanan angka. `tebal` untuk TOTAL. */
 export interface StrukBaris { kiri: string; kanan: string; tebal?: boolean }
@@ -187,6 +192,16 @@ export interface Struk {
 }
 
 const garis = () => '-'.repeat(COLS);
+
+/** Baris catatan item (fitur catatan per baris): "  - <teks>".
+ *  `ascii()` dijalankan pada ISI dulu, indent ditambahkan BELAKANGAN — kalau
+ *  dilewatkan lewat teks()/baris() biasa, ascii() menjalankan
+ *  `.replace(/ {2,}/g,' ') + .trim()` (lihat ascii()) dan kedua spasi indent
+ *  ikut terbuang sehingga catatan nempel rata kiri dengan baris item. */
+function byteCatatan(note: string, lebar: number): number[] {
+  const isi = '  - ' + potong(ascii(note.trim()), lebar - 4);
+  return [...isi].map((ch) => ch.charCodeAt(0));
+}
 
 /** Baris dua kolom: kanan (angka uang) selalu utuh menempel di tepi kanan,
  *  kiri dipotong lebih dulu. Tanpa urutan ini, nama panjang menelan kolom uang
@@ -219,6 +234,8 @@ export function struk(s: Struk): number[] {
       // Sebelumnya salah hitung jadi 33, kolom terakhir meluber ke baris berikutnya.
       const nama = potong(qty + it.name, COLS - KOL_UANG - 1);
       baris(kanan(nama, COLS - KOL_UANG - 1) + ' ' + kanan(rp(it.qty * it.price), KOL_UANG));
+      // Catatan baris (mis. "ukuran 1 x 3 meter") — indent "  - " di bawah item.
+      if (it.note?.trim()) out.push(...byteCatatan(it.note, COLS), ...LF);
     }
   }
   out.push(...teks(garis()), ...LF);
@@ -274,6 +291,8 @@ export function strukA4(s: Struk): number[] {
       const qty = `${it.qty}${it.unit ? ` ${it.unit}` : ''} x `;
       const nama = potong(qty + it.name, COLS_A4 - KOL_UANG - 1);
       baris(kanan(nama, COLS_A4 - KOL_UANG - 1) + ' ' + kanan(rp(it.qty * it.price), KOL_UANG));
+      // Aturan sama dengan struk thermal: indent "  - ", dipotong ke 64 kolom.
+      if (it.note?.trim()) out.push(...byteCatatan(it.note, COLS_A4), ...LF);
     }
   }
   out.push(...teks(garisA4()), ...LF);

@@ -57,6 +57,12 @@ CREATE TABLE IF NOT EXISTS products (
   -- isinya cepat basi: snack & eskrim (Es Krim & Minuman). NULL = tidak berlaku
   -- (ATK/cetak/rokok tidak punya tanggal kadaluarsa).
   expiry_date   TEXT,
+  -- Catatan per baris di POS (2026-10-03): 1 = baris keranjang produk ini
+  -- punya input catatan (cth produk "Cetak Banner" -> kasir mengetik
+  -- "ukuran 1 x 3 meter"). Teksnya di-snapshot ke sale_items.note dan ikut
+  -- tercetak di struk — bukan kolom teks master, karena catatan bersifat
+  -- PER TRANSAKSI, bukan per produk.
+  use_note      INTEGER NOT NULL DEFAULT 0,
   is_active     INTEGER NOT NULL DEFAULT 1,
   -- Hapus produk = SOFT delete (tombstone), bukan DELETE keras. Baris sengaja
   -- dibiarkan supaya version++ di bawah bisa menyiarkan "produk ini dihapus"
@@ -134,7 +140,12 @@ CREATE TABLE IF NOT EXISTS sale_items (
   -- menampilkan angka apa adanya padahal satuan aslinya `pack`, dan satuan dasar
   -- produk nanti bisa berubah lalu membengkokkan riwayat. '' = item manual
   -- (tanpa produk) / satuan dasar.
-  unit        TEXT NOT NULL DEFAULT ''
+  unit        TEXT NOT NULL DEFAULT '',
+  -- Catatan PER BARIS dari keranjang POS (produk dengan use_note=1), 0-200
+  -- karakter, di-snapshot saat jual seperti discount/cost: riwayat & struk
+  -- ulang tidak ikut berubah walau isi input berubah di keranjang berikutnya.
+  -- '' = tanpa catatan (mayoritas baris).
+  note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
 

@@ -887,8 +887,11 @@ function productForm(
         </p>` : ''}
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2 pt-0.5">
           ${switchHtml('f-dyn', d ? !!d.price_dynamic : false, 'Boleh ubah harga saat jual')}
+          ${switchHtml('f-note', d ? !!d.use_note : false, 'Catatan di POS')}
           ${mode === 'edit' && d ? switchHtml('f-active', !!d.is_active, 'Aktif') : ''}
         </div>
+        <p class="hint">Aktifkan bila produk ini butuh catatan per transaksi di keranjang POS
+          (mis. Cetak Banner — ukuran, bahan) — teksnya ikut tercetak di struk.</p>
 
         <p class="form-sec">Diskon</p>
         <div class="grid grid-cols-2 gap-2">
@@ -1337,6 +1340,9 @@ function productForm(
             discount_type: tipeDisc,
             discount: nilaiDisc,
             expiry_date: expVal || null,
+            // Catatan di POS: SELALU dikirim (field biasa — absen = reset ke 0
+            // di server), sama alasannya dengan diskon/kadaluarsa di atas.
+            use_note: (el.querySelector('#f-note') as HTMLInputElement).checked ? 1 : 0,
             // `image` sengaja TIDAK ada di payload: server memperlakukan
             // ketidakhadirannya sebagai "tidak diubah", sehingga menyimpan form
             // tidak pernah menghapus foto yang sudah diunggah lewat blok Foto
@@ -1883,6 +1889,7 @@ function payloadToggleAktif(p: Product, isActive: 0 | 1) {
     discount_type: p.discount_type ?? 'rp',
     discount: p.discount ?? 0,
     expiry_date: p.expiry_date ?? null,
+    use_note: p.use_note ?? 0,
     // `image` & `units` sengaja TIDAK dimasukkan. Server memperlakukan
     // ketidakhadirannya sebagai "tidak ada perubahan" (lihat upsertProduct),
     // sehingga toggle status tidak pernah menghapus foto maupun satuan jual —

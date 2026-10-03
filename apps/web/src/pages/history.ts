@@ -41,6 +41,9 @@ type ItemRow = {
   /** Satuan dasar produk SAAT INI (GET /api/sales/:id, LEFT JOIN products).
    *  Dipakai cetak ulang: struk hanya mencetak `unit` bila bukan satuan dasar. */
   base_unit?: string | null;
+  /** Catatan per baris (sale_items.note) — ikut tercetak ulang persis seperti
+   *  struk asli dari POS. '' = tanpa catatan. */
+  note?: string;
 };
 
 type Ringkas = {
@@ -431,6 +434,8 @@ async function cetakUlang(s: SaleRow): Promise<void> {
         // Cetak unit hanya bila bukan satuan dasar — aturan yang sama dengan
         // StrukItem.unit di pos.ts (dasar via base_unit dari server).
         ...(i.unit && i.base_unit && i.unit !== i.base_unit ? { unit: i.unit } : {}),
+        // Catatan baris ikut tercetak ulang (sale_items.note dari server).
+        ...(i.note?.trim() ? { note: i.note.trim() } : {}),
       })),
       baris: [
         { kiri: 'Subtotal', kanan: rp(s.subtotal) },

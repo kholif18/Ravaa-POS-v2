@@ -61,6 +61,12 @@ type CartLine = {
   prefill: { type: 'rp' | 'pct'; value: number } | null;
   /** true = kasir sudah mengubah sendiri -> jangan ditimpa lagi oleh prefill. */
   discManual: boolean;
+  /** Snapshot `products.use_note` saat produk masuk keranjang: 1 = baris ini
+   *  dirender dengan input catatan di bawahnya (mis. Cetak Banner -> ukuran). */
+  useNote: boolean;
+  /** Isi catatan per baris (maks 200 char). Dikirim sebagai `items[].note` dan
+   *  di-snapshot server ke `sale_items.note` — sumber struk & riwayat. */
+  note: string;
 };
 
 type PayMethod = 'tunai' | 'qris' | 'transfer';
@@ -96,9 +102,18 @@ let busy = false;
 // host di-render ulang berkali-kali (ganti metode bayar, dsb). Tanpa abort,
 // listener keydown F2/Escape akan menumpuk dan satu tekan memicu pay() berkali-kali.
 let posAbort: AbortController | null = null;
+// Pintasan keyboard level DOCUMENT (lihat bindPintasan): TERPISAH dari posAbort
+// karena posAbort di-abort tiap paint()/bindCart, sedangkan pintasan cukup
+// didaftarkan sekali per mount — state-nya (mode/cart/shift) dibaca langsung
+// dari memori saat tombol ditekan, jadi selalu ikut terbaru.
+let posKeyAbort: AbortController | null = null;
 // Dropdown hasil pencarian: daftar + indeks yang sedang disorot.
 let results: Product[] = [];
 let active = 0;
+// Qty untuk item BERIKUTNYA (chip "Qty" di scan bar / F4, ala Aronium
+// "Change the quantity"): dipakai SEKALI lalu kembali ke 1, supaya scan
+// berikutnya tidak ikut terpengaruh diam-diam.
+let qtyNext = 1;
 
 /* ---------- cetak struk ---------- */
 
@@ -199,7 +214,9 @@ function hitungPrefill(l: Pick<CartLine, 'prefill' | 'price' | 'qty'>): number {
  *  yang diawali huruf query didahulukan. */
 const MAX_RESULTS = 8;
 
-function queryResults(q: string): Product[] {
+/** `limit` default = dropdown scan bar (8). Layar cari F3 memakai limit besar
+ *  supaya daftar tidak terpotong di 8 baris. */
+function queryResults(q: string, limit = MAX_RESULTS): Product[] {
   const t = q.trim().toLowerCase();
   if (!t) return [];
   const exact =
@@ -219,9 +236,9 @@ function queryResults(q: string): Product[] {
     if (!terms.every((x) => n.includes(x) || s.includes(x) || c.includes(x))) continue;
     if (n.startsWith(t) || terms.some((x) => n.startsWith(x))) starts.push(p);
     else has.push(p);
-    if (starts.length >= MAX_RESULTS) break;
+    if (starts.length >= limit) break;
   }
-  return [...starts, ...has].slice(0, MAX_RESULTS);
+  return [...starts, ...has].slice(0, limit);
 }
 
 function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1): void {
@@ -246,6 +263,7 @@ function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1):
       price, qty, track_stock: p.track_stock,
       unit, baseUnit: p.unit, factor,
       discount: 0, prefill, discManual: false,
+      useNote: !!p.use_note, note: '',
     };
     baris.discount = hitungPrefill(baris);
     cart.push(baris);
@@ -439,6 +457,10 @@ function expBarisKeranjang(product_id: number | null): string {
     : ` · <span class="font-semibold text-amber-600 dark:text-amber-400">kadaluarsa ${tglExpiry(p.expiry_date)}</span>`;
 }
 
+/** Chip nominal cepat di panel bayar tunai — gaya Kasir Pintar: satu klik
+ *  mengisi "Uang diterima", hindari salah ketik nol. `pas` = persis total. */
+const QUICK_CASH: (number | 'pas')[] = ['pas', 50000, 100000, 200000];
+
 function cartHtml(): string {
   const scanBar = `
       <div class="card !p-3">
@@ -453,6 +475,9 @@ function cartHtml(): string {
             <div id="pos-results" class="suggest hidden" role="listbox" aria-label="Hasil pencarian produk"></div>
           </div>
           <button type="button" id="pos-manual" class="btn btn-ghost">${icon('pencil')}<span>Item manual</span></button>
+          ${mode === 'jual' ? `
+          <button type="button" id="pos-cari" class="btn btn-ghost" title="Cari produk penuh (F3)">${icon('search')}<span>Cari</span></button>
+          <button type="button" id="pos-qty" class="chip${qtyNext > 1 ? ' !border-primary !text-primary' : ''}" title="Qty untuk item BERIKUTNYA, dipakai sekali lalu kembali ke 1 (F4)">Qty ${qtyNext}</button>` : ''}
           <span class="chip ml-auto" title="Shift kasir ini">${icon('clock')}<span>Shift #${shift?.id} · ${getCashier()}</span></span>
           ${products.length ? '' : `<a href="#/products" class="chip !border-amber-500 !text-amber-600 dark:!text-amber-400">${icon('alert')}<span>Cache produk kosong — sinkron dulu di Manage</span></a>`}
         </div>
@@ -538,6 +563,12 @@ function cartGridHtml(): string {
                  <label class="label" for="pos-cash">Uang diterima (Rp)</label>
                  <input id="pos-cash" class="input input-sm" type="number" inputmode="numeric" min="0" step="1000" value="${cashIn || ''}" placeholder="0" />
                </div>
+               <div>
+                 <span class="label">Nominal cepat</span>
+                 <div class="flex flex-wrap gap-2">
+                   ${QUICK_CASH.map((c) => `<button type="button" data-cash="${c}" class="chip${cashIn > 0 && cashIn === (c === 'pas' ? tot : c) ? ' !border-primary !text-primary' : ''}">${c === 'pas' ? 'Uang pas' : rp(c)}</button>`).join('')}
+                 </div>
+               </div>
                <div class="flex items-baseline justify-between">
                  <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</span>
                  <span id="pos-change" class="text-sm font-semibold ${cashIn > 0 && cashIn < tot ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}">${rp(change())}</span>
@@ -545,7 +576,7 @@ function cartGridHtml(): string {
             : ''
         }
         <button type="button" id="pos-pay" class="btn btn-primary mt-auto w-full !py-3 text-base"${cart.length ? '' : ' disabled'}>${icon('check')}<span>Bayar</span></button>
-        <p class="text-center text-xs text-gray-500 dark:text-gray-400">Tekan <kbd class="rounded border border-gray-300 px-1 dark:border-gray-600">F2</kbd> untuk bayar cepat</p>
+        <p class="text-center text-xs text-gray-500 dark:text-gray-400">Tekan <kbd class="rounded border border-gray-300 px-1 dark:border-gray-600">F2</kbd> atau <kbd class="rounded border border-gray-300 px-1 dark:border-gray-600">Enter</kbd> untuk bayar cepat</p>
       </div>
     </div>`;
 }
@@ -687,6 +718,19 @@ function cartRows(): string {
     .map((l) => {
       const gross = jumlahBaris(l);
       const net = gross - l.discount;
+      // Baris catatan (produk use_note=1): input satu baris DI BAWAH baris
+      // produk, mis. Cetak Banner -> "ukuran 1 x 3 meter". colspan=6 = seluruh
+      // lebar tabel (Item..Hapus). Disimpan live lewat event `input` (tanpa
+      // paintCart, supaya fokus tidak pindah saat kasir mengetik).
+      const trCatatan = l.useNote ? `
+      <tr data-key="${l.key}" class="note-row">
+        <td colspan="6">
+          <input class="input input-sm w-full" type="text" maxlength="200"
+            data-act="note" data-key="${l.key}" value="${esc(l.note)}"
+            placeholder="Catatan (mis. ukuran 1 x 3 meter)"
+            aria-label="Catatan ${esc(l.name)}" />
+        </td>
+      </tr>` : '';
       return `<tr data-key="${l.key}">
       <td class="td">
         <div class="cell-strong">${esc(l.name)}</div>
@@ -710,7 +754,7 @@ function cartRows(): string {
         <div class="font-semibold text-gray-900 tabular-nums dark:text-white">${rp(net)}</div>
       </td>
       <td class="td"><button type="button" class="row-btn row-btn-danger" data-act="del" data-key="${l.key}" title="Hapus" aria-label="Hapus ${esc(l.name)}">${icon('trash')}</button></td>
-    </tr>`;
+    </tr>${trCatatan}`;
     })
     .join('');
 }
@@ -797,16 +841,24 @@ function paintCart(): void {
   if (pay) pay.disabled = cart.length === 0 || busy;
   const clr = host!.querySelector<HTMLButtonElement>('#pos-clear');
   if (clr) clr.disabled = cart.length === 0;
+  // Chip nominal cepat: sorot yang cocok dengan cashIn ("Uang pas" = total).
+  host!.querySelectorAll<HTMLElement>('[data-cash]').forEach((b) => {
+    const raw = b.dataset.cash ?? '';
+    const nilai = raw === 'pas' ? total() : Number(raw);
+    const aktif = cashIn > 0 && cashIn === nilai;
+    b.classList.toggle('!border-primary', aktif);
+    b.classList.toggle('!text-primary', aktif);
+  });
 }
 
 /* ---------- aksi keranjang ---------- */
 
-function askNumber(title: string, label: string, value: number): Promise<number | null> {
+function askNumber(title: string, label: string, value: number, step = 500): Promise<number | null> {
   return new Promise((resolve) => {
     const m = openModal({
       title,
       body: `<div><label class="label" for="pos-ask">${label}</label>
-        <input id="pos-ask" class="input" type="number" inputmode="numeric" min="0" step="500" value="${value || ''}" /></div>`,
+        <input id="pos-ask" class="input" type="number" inputmode="numeric" min="0" step="${step}" value="${value || ''}" /></div>`,
       okLabel: 'Simpan',
       onMount: (api) => {
         const inp = api.el.querySelector<HTMLInputElement>('#pos-ask');
@@ -864,13 +916,15 @@ function addProduct(p: Product, unitSlug?: string): void {
   if (p.price_dynamic) {
     void askPrice(p, ru ? unit : undefined).then((price) => {
       if (!price || price <= 0) return;
-      addLine(p, price, 1, unit, factor);
+      // qtyNext baru dipakai kalau benar-benar masuk keranjang — batal dialog
+      // harga = preset tidak hilang.
+      addLine(p, price, pakaiQtyNext(), unit, factor);
       paintCart();
       focusScan();
     });
     return;
   }
-  addLine(p, hargaTampil, 1, unit, factor);
+  addLine(p, hargaTampil, pakaiQtyNext(), unit, factor);
   paintCart();
   focusScan();
 }
@@ -892,6 +946,139 @@ function addActive(q: string, unitSlug?: string): void {
 
 function focusScan(): void {
   host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+}
+
+/* ---------- qty item berikutnya (chip Qty / F4) + layar cari (F3) ---------- */
+
+/** Segarkan chip Qty di scan bar TANPA paint penuh — scanBar ikut dirender
+ *  oleh paint(), bukan paintCart(), jadi teksnya harus disegarkan manual. */
+function refreshQtyChip(): void {
+  const b = host?.querySelector<HTMLElement>('#pos-qty');
+  if (!b) return;
+  b.textContent = `Qty ${qtyNext}`;
+  b.classList.toggle('!border-primary', qtyNext > 1);
+  b.classList.toggle('!text-primary', qtyNext > 1);
+}
+
+/** Pakai qtyNext SEKALI lalu kembalikan ke 1 — dipanggil addProduct tepat
+ *  sebelum addLine, jadi preset hilang begitu item masuk (aturan Aronium). */
+function pakaiQtyNext(): number {
+  const q = qtyNext;
+  qtyNext = 1;
+  refreshQtyChip();
+  return q;
+}
+
+/** F4 / klik chip Qty: setel qty untuk item berikutnya. */
+async function setQtyNext(): Promise<void> {
+  const q = await askNumber('Qty untuk item berikutnya', 'Qty produk berikutnya', qtyNext, 1);
+  if (q === null) return; // batal
+  if (!Number.isFinite(q) || q < 1) {
+    toast('Qty minimal 1', 'warning');
+    return;
+  }
+  qtyNext = Math.floor(q);
+  refreshQtyChip();
+  focusScan();
+}
+
+/** Batas baris di layar cari (F3). 100 cukup untuk katalog toko kecil; kalau
+ *  lebih, ketik untuk mempersempit — jangan buang hasil diam-diam. */
+const BATAS_CARI = 100;
+
+function barisCari(p: Product, i: number, aktif: boolean): string {
+  const meta = p.track_stock
+    ? p.stock > 0
+      ? `sisa ${p.stock}`
+      : '<span class="text-red-600 dark:text-red-400">stok habis</span>'
+    : 'tanpa stok';
+  return `<button type="button" class="suggest-item${aktif ? ' is-active' : ''}" data-i="${i}">
+    <span class="min-w-0 flex-1">
+      <span class="cell-strong block truncate">${p.name}</span>
+      <span class="cell-sub block truncate">${p.sku} · ${meta}</span>
+    </span>
+    <span class="shrink-0 text-sm font-semibold text-gray-900 dark:text-white">${rp(p.price)}</span>
+  </button>`;
+}
+
+/** Layar cari produk penuh (F3 / tombol "Cari") — versi layar-lebar dari
+ *  dropdown scan bar, ala Aronium "Adding a product: F3". Filter bebas
+ *  (nama/SKU/barcode, semua kata wajib cocok), ↑↓ + Enter = tambah. */
+function openCariProduk(): void {
+  if (mode !== 'jual') return;
+  let daftar: Product[] = [];
+  let idx = 0;
+  let inp: HTMLInputElement | null = null;
+  let list: HTMLElement | null = null;
+  let info: HTMLElement | null = null;
+
+  const render = () => {
+    const q = inp?.value.trim() ?? '';
+    daftar = q ? queryResults(q, BATAS_CARI) : products.slice(0, BATAS_CARI);
+    if (idx >= daftar.length) idx = Math.max(0, daftar.length - 1);
+    if (list) {
+      list.innerHTML = daftar.length
+        ? daftar.map((p, i) => barisCari(p, i, i === idx)).join('')
+        : '<div class="px-3 py-4 text-center text-sm text-gray-500 dark:text-gray-400">Tidak ada produk yang cocok</div>';
+      list.querySelector('.is-active')?.scrollIntoView({ block: 'nearest' });
+    }
+    if (info) {
+      info.textContent = q
+        ? `${daftar.length} hasil${daftar.length >= BATAS_CARI ? ` (terbatas ${BATAS_CARI} — ketik lebih spesifik)` : ''}`
+        : `${daftar.length} produk ditampilkan${products.length > daftar.length ? ` dari ${products.length} — ketik untuk mempersempit` : ''}`;
+    }
+  };
+
+  openModal({
+    title: 'Cari produk',
+    wide: true,
+    okLabel: 'Tambah',
+    body: `
+      <div class="space-y-3">
+        <div class="search-wrap">${icon('search')}
+          <input id="pc-q" class="input" type="search" autocomplete="off"
+                 placeholder="Nama / SKU / barcode — ↑↓ pilih, Enter tambah" />
+        </div>
+        <p id="pc-info" class="text-xs text-gray-500 dark:text-gray-400"></p>
+        <div id="pc-list" class="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 py-1 dark:border-gray-700"></div>
+      </div>`,
+    onMount: (api) => {
+      inp = api.el.querySelector<HTMLInputElement>('#pc-q');
+      list = api.el.querySelector<HTMLElement>('#pc-list');
+      info = api.el.querySelector<HTMLElement>('#pc-info');
+      const pilih = () => {
+        const p = daftar[idx];
+        if (!p) return;
+        api.close();
+        addProduct(p); // focusScan ikut jalan dari addProduct
+      };
+      inp?.addEventListener('input', () => { idx = 0; render(); });
+      inp?.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (daftar.length) { idx = (idx + 1) % daftar.length; render(); }
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (daftar.length) { idx = (idx - 1 + daftar.length) % daftar.length; render(); }
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation(); // modal punya handler Enter->ok; biar pilih() tak jalan 2x
+          pilih();
+        }
+      });
+      // Klik baris = pilih (pointer/touch).
+      list?.addEventListener('click', (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
+        if (!b) return;
+        idx = Number(b.dataset.i);
+        pilih();
+      });
+      // Tombol OK modal = "Tambah" baris yang disorot.
+      api.ok.addEventListener('click', pilih);
+      inp?.focus();
+      render();
+    },
+  });
 }
 
 /* ---------- dropdown hasil pencarian ---------- */
@@ -984,6 +1171,9 @@ function openManualItem(): void {
           // Item manual tidak punya diskon permanen (bukan produk katalog),
           // tapi kolom Diskon tetap terisi 0 dan bisa diketik kasir.
           discount: 0, prefill: null, discManual: false,
+          // Tanpa input catatan: tidak ada produk use_note-nya (pemilik memang
+          // menandai produk katalog, mis. Cetak Banner — bukan jasa dadakan).
+          useNote: false, note: '',
         });
         api.close();
         paintCart();
@@ -1029,6 +1219,9 @@ async function pay(): Promise<void> {
         // Diskon baris dalam RUPIAH (bukan persen) — server menghitung ulang
         // totalnya sendiri dan menolak bila melebihi jumlah baris.
         discount: l.discount,
+        // Catatan per baris (produk use_note) — server trim + snapshot ke
+        // sale_items.note; '' = tanpa catatan (server menerima apa adanya).
+        note: l.note,
       })),
     });
     const kembalian = payMethod === 'tunai' ? change() : 0;
@@ -1048,6 +1241,9 @@ async function pay(): Promise<void> {
         name: l.name, qty: l.qty, price: l.price,
         // Cetak unit hanya bila bukan satuan dasar (lihat StrukItem.unit).
         ...(l.unit && l.baseUnit && l.unit !== l.baseUnit ? { unit: l.unit } : {}),
+        // Catatan per baris (cth "ukuran 1 x 3 meter") — tercetak di baris
+        // bawah item dengan indent, baik layout thermal maupun A4.
+        ...(l.note.trim() ? { note: l.note.trim() } : {}),
       })),
       baris: [
         { kiri: 'Subtotal', kanan: rp(sub) },
@@ -1276,31 +1472,115 @@ function bindTopup(): void {
 
   host!.querySelector('#tp-submit')?.addEventListener('click', () => void submitTopup());
 
-  // Enter = proses (kecuali di dalam input tuner, mis. saat menjaga nominal).
-  host!.addEventListener(
-    'keydown',
-    (e) => {
-      if (e.key === 'Enter') {
-        const t = e.target as HTMLElement;
-        if (t.id === 'tp-admin' || t.id === 'tp-nominal') return;
-        e.preventDefault();
-        void submitTopup();
-      } else if (e.key === 'F2') {
-        e.preventDefault();
-        void submitTopup();
-      }
-    },
-    { signal },
-  );
+  // Enter/F2 diproses bindPintasan() di level document — dulu menempel di host
+  // sehingga mati saat fokus keluar dari halaman POS.
 }
 
 /* ---------- events ---------- */
+
+/** Pintasan keyboard LEVEL DOCUMENT — bukan `host`.
+ *
+ *  Dulu F2/Escape/Enter menempel di `host` (bindCart/bindTopup), jadi hanya
+ *  hidup selama fokus berADA di dalam halaman POS. Fokus gampang keluar:
+ *  klik area kosong kartu, tutup modal, selesai dari halaman lain — begitu
+ *  fokus jatuh ke `body`, "Tekan F2 untuk bayar cepat" jadi huruf mati.
+ *  Listener di document + dibuang saat unmount (posKeyAbort) = pintasan hidup
+ *  di mana pun fokus, selama route POS masih aktif.
+ *
+ *  Guard: modal terbuka = lepas (modal punya aturan Enter/Esc sendiri);
+ *  tombol/link = biarkan aktivasi native (Enter pada tombol Bayar yang fokus
+ *  sudah memicu klik — memanggil pay() lagi cuma diblokir `busy`, tapi alurnya
+ *  jadi kabur); isian teks = aturan per-field seperti perilaku lama. */
+function bindPintasan(): void {
+  posKeyAbort?.abort();
+  posKeyAbort = new AbortController();
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      // F3/F4 = fitur POS (layar cari / qty berikutnya). preventDefault DULU
+      // sebelum guard modal: walau modal sedang terbuka tombolnya jangan jatuh
+      // ke browser (Chrome membuka find bar), tapi aksinya tetap dilewati di
+      // baris guard di bawah.
+      if (e.key === 'F3' || e.key === 'F4') e.preventDefault();
+      if (document.querySelector('.modal-overlay:not(.is-closing)')) return;
+      const t = e.target as HTMLElement | null;
+      const diIsian =
+        !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+      const diTombol = !!t && t.closest('button, a[href]') !== null;
+
+      if (e.key === 'F3') {
+        // Layar cari produk penuh (alokasi Aronium F3) — mode jual + shift saja
+        // (tanpa shift layar keranjang pun tidak ada).
+        if (mode !== 'jual' || !shift) return;
+        openCariProduk();
+        return;
+      }
+
+      if (e.key === 'F4') {
+        // Qty untuk item BERIKUTNYA (alokasi Aronium F4).
+        if (mode !== 'jual' || !shift) return;
+        void setQtyNext();
+        return;
+      }
+
+      if (e.key === 'F2') {
+        // Bayar cepat (mode jual) / proses topup — boleh dari fokus mana pun,
+        // termasuk sambil mengetik di kolom uang (alur Aronium: ketik -> F2).
+        e.preventDefault();
+        if (!shift) return;
+        if (mode === 'jual') {
+          if (cart.length) void pay();
+        } else {
+          void submitTopup();
+        }
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        // Mode jual: Esc selalu kembalikan fokus ke scan (aturan lama, kini
+        // global). Mode topup/tarik: jangan mencuri fokus dari isian yang
+        // sedang diketik — dulu memang tidak ada handler Esc di sana.
+        if (mode !== 'jual' && diIsian) return;
+        focusScan();
+        return;
+      }
+
+      if (e.key !== 'Enter') return;
+
+      if (mode === 'jual') {
+        // #pos-q: Enter = masukkan hasil pencarian / scanner (handler sendiri
+        // di bindCart) — jangan sampai ikut membayar.
+        if (t?.id === 'pos-q' || diTombol) return;
+        // Isian selain kolom uang (diskon, dll): biarkan. Kolom uang = alur
+        // kas: ketik nominal -> Enter -> bayar (tanpa perlu klik tombol).
+        if (diIsian && t?.id !== 'pos-cash') return;
+        if (!shift || !cart.length) return;
+        e.preventDefault();
+        void pay();
+        return;
+      }
+
+      // Mode topup/tarik: aturan lama dipindahkan utuh — nominal & admin adalah
+      // "input tuner" yang angkanya masih diketik, jadi Enter-nya jangan submit;
+      // nomor HP / tunai dibiarkan (Enter = proses, seperti sebelumnya).
+      if (t?.id === 'tp-admin' || t?.id === 'tp-nominal' || diTombol) return;
+      if (!shift) return;
+      e.preventDefault();
+      void submitTopup();
+    },
+    { signal: posKeyAbort.signal },
+  );
+}
 
 function bindCart(): void {
   posAbort?.abort();
   posAbort = new AbortController();
   const { signal } = posAbort;
   bindModeBar();
+  // Chip Qty (setel qty item berikutnya, F4) & tombol Cari (layar cari, F3).
+  // Keduanya hanya dirender di mode jual — `?.` supaya mode lain aman.
+  host!.querySelector('#pos-qty')?.addEventListener('click', () => void setQtyNext());
+  host!.querySelector('#pos-cari')?.addEventListener('click', openCariProduk);
   const q = host!.querySelector<HTMLInputElement>('#pos-q');
   const box = host!.querySelector<HTMLElement>('#pos-results');
 
@@ -1401,6 +1681,17 @@ function bindCart(): void {
     if (inp) setQty(inp.dataset.key!, Number(inp.value || 0));
   });
 
+  // Catatan per baris (produk use_note): `input` (live), BUKAN `change` —
+  // kasir bisa langsung F2 bayar tanpa blur, dan tanpa event live catatannya
+  // masih kosong di payload. Sengaja TANPA paintCart: paint merender ulang
+  // tbody sehingga input kehilangan fokus di tengah ketikan.
+  host!.querySelector('#pos-rows')?.addEventListener('input', (e) => {
+    const inp = (e.target as HTMLElement).closest<HTMLInputElement>('[data-act="note"]');
+    if (!inp) return;
+    const line = cart.find((l) => l.key === inp.dataset.key);
+    if (line) line.note = inp.value.slice(0, 200);
+  });
+
   host!.querySelector('#pos-discount')?.addEventListener('input', (e) => {
     const v = Number((e.target as HTMLInputElement).value || 0);
     discount = Math.max(0, v);
@@ -1427,6 +1718,20 @@ function bindCart(): void {
     paintCart();
   });
 
+  // Nominal cepat (chip "Uang pas" + pecahan): satu klik mengisi kolom uang
+  // diterima + kembalian, menghindari salah ketik nol saat kas menerima
+  // pecahan besar. paintCart tidak merender ulang panel, jadi input & state
+  // aktif chip dijaga manual di sana.
+  host!.querySelectorAll<HTMLElement>('[data-cash]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const raw = b.dataset.cash ?? '';
+      cashIn = raw === 'pas' ? total() : Number(raw);
+      const inp = host!.querySelector<HTMLInputElement>('#pos-cash');
+      if (inp) inp.value = cashIn ? String(cashIn) : '';
+      paintCart();
+    }),
+  );
+
   host!.querySelector('#pos-pay')?.addEventListener('click', () => void pay());
 
   host!.querySelector('#pos-clear')?.addEventListener('click', () => {
@@ -1438,19 +1743,7 @@ function bindCart(): void {
     host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
   });
 
-  // F2 = bayar cepat,Esc = fokus input scan.
-  host!.addEventListener(
-    'keydown',
-    (e) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        void pay();
-      } else if (e.key === 'Escape') {
-        focusScan();
-      }
-    },
-    { signal },
-  );
+  // F2 = bayar cepat, Esc = fokus input scan: lihat bindPintasan() (document).
 }
 
 /* ---------- load ---------- */
@@ -1469,6 +1762,8 @@ async function loadShift(): Promise<void> {
 export function unmountPosPage(): void {
   posAbort?.abort();
   posAbort = null;
+  posKeyAbort?.abort();
+  posKeyAbort = null;
   results = [];
   host = null;
   shift = null;
@@ -1504,5 +1799,6 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   busy = false;
   await loadShift();
   if (!el.isConnected) return;
+  bindPintasan(); // F2/Enter/Esc level document — didaftarkan sekali per mount
   paint();
 }

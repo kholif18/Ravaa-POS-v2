@@ -241,6 +241,167 @@ try {
     try { localStorage.setItem('ravaa.struklayout', 'thermal'); } catch { /* */ }
   });
 
+  console.log('=== F. Nominal cepat + pintasan level document ===');
+  // Bug yang ditutup: F2/Enter dulu menempel di `host`, jadi mati begitu fokus
+  // jatuh ke <body> (mis. sesudah blur / pindah dari modal). Sekarang listener
+  // di document (bindPintasan) dengan guard modal + field.
+  const tungguCetak = async (n, ms = 15000) => {
+    const t0 = Date.now();
+    while (tercetak.length < n && Date.now() - t0 < ms) await page.waitForTimeout(100);
+    // PERSIS n: kalau pay() ke-trigger dua kali, jumlahnya langsung > n.
+    ok(`struk ke-${n} terkirim tepat sekali (tanpa bayar dobel)`, tercetak.length === n, tercetak.length);
+  };
+  await page.click('[data-mode="jual"]');
+  await page.waitForSelector('#pos-q', { timeout: 8000 });
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  ok('chip nominal cepat tampil (Uang pas + 3 pecahan)', await page.locator('[data-cash]').count() === 4,
+    await page.locator('[data-cash]').count());
+
+  // Pecahan dulu: Rp100.000 -> kembalian 96.000 (total 4.000).
+  await page.click('[data-cash="100000"]');
+  ok('klik pecahan mengisi uang diterima', (await page.inputValue('#pos-cash')) === '100000',
+    await page.inputValue('#pos-cash'));
+  ok('kembalian ikut terhitung', norm(await page.innerText('#pos-change')) === 'Rp96.000',
+    await page.innerText('#pos-change'));
+  // Lalu "Uang pas" = persis total -> kembalian 0, chip tersorot.
+  await page.click('[data-cash="pas"]');
+  ok('"Uang pas" mengisi persis total', (await page.inputValue('#pos-cash')) === '4000',
+    await page.inputValue('#pos-cash'));
+  ok('kembalian jadi Rp0', norm(await page.innerText('#pos-change')) === 'Rp0',
+    await page.innerText('#pos-change'));
+  ok('chip "Uang pas" tersorot sebagai pilihan aktif',
+    (await page.locator('[data-cash="pas"]').getAttribute('class') || '').includes('!border-primary'));
+
+  // Pintasan global: blur ke <body> lalu F2 — dulu host tidak pernah menerima
+  // keydown ini, kasir harus mengklik kolom dulu supaya F2 hidup.
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
+  ok('pra-syarat: fokus jatuh ke body', await page.evaluate(() => document.activeElement?.tagName) === 'BODY');
+  await page.keyboard.press('F2');
+  await tungguCetak(5);
+
+  // Enter = bayar dari kolom uang (alur kas: ketik -> Enter), bukan cuma F2.
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.focus('#pos-cash');
+  await page.fill('#pos-cash', '4000');
+  await page.keyboard.press('Enter');
+  await tungguCetak(6);
+
+  console.log('=== G. Qty item berikutnya (F4) + layar cari produk (F3) ===');
+  // F4: preset qty dipakai SEKALI untuk item berikutnya lalu kembali ke 1.
+  await page.keyboard.press('F4');
+  await page.waitForSelector('#pos-ask', { timeout: 5000 });
+  ok('F4 membuka dialog qty item berikutnya', await page.isVisible('#pos-ask'));
+  await page.fill('#pos-ask', '3');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#pos-ask', { state: 'detached', timeout: 5000 });
+  ok('chip Qty menampilkan 3 + tersorot',
+    norm(await page.innerText('#pos-qty')) === 'Qty 3'
+    && (await page.locator('#pos-qty').getAttribute('class') || '').includes('!border-primary'),
+    await page.innerText('#pos-qty'));
+
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  ok('item pertama masuk dengan qty 3', (await page.inputValue('#pos-rows [data-act="qty"]')) === '3',
+    await page.inputValue('#pos-rows [data-act="qty"]'));
+  ok('qtyNext kembali 1 setelah dipakai (sekali pakai)',
+    norm(await page.innerText('#pos-qty')) === 'Qty 1', await page.innerText('#pos-qty'));
+
+  // F3: layar cari penuh. Filter + Enter = tambah + tutup.
+  await page.keyboard.press('F3');
+  await page.waitForSelector('#pc-q', { timeout: 5000 });
+  ok('F3 membuka layar cari produk', await page.isVisible('#pc-list'));
+  ok('daftar awal terisi', (await page.locator('#pc-list [data-i]').count()) > 0,
+    await page.locator('#pc-list [data-i]').count());
+  await page.fill('#pc-q', 'PRD00014');
+  ok('filter mempersempit ke 1 hasil', (await page.locator('#pc-list [data-i]').count()) === 1,
+    await page.locator('#pc-list [data-i]').count());
+  await page.keyboard.press('Enter');
+  let cariTutup = true;
+  try { await page.waitForSelector('#pc-list', { state: 'detached', timeout: 5000 }); } catch { cariTutup = false; }
+  ok('Enter memilih hasil & menutup layar cari', cariTutup);
+  // `:not(.note-row)` — tr catatan (fitur use_note) juga membawa data-key,
+  // jadi tanpa penyaringan ini hitungannya bocor 1 baris tiap produk use_note.
+  ok('produk terpilih masuk keranjang (2 baris)', (await page.locator('#pos-rows tr[data-key]:not(.note-row)').count()) === 2,
+    await page.locator('#pos-rows tr[data-key]:not(.note-row)').count());
+  ok('fokus kembali ke scan bar', await page.evaluate(() => document.activeElement?.id) === 'pos-q',
+    await page.evaluate(() => document.activeElement?.id));
+
+  // Guard: F3 saat layar cari terbuka tidak membuka modal ganda; Esc menutup.
+  await page.keyboard.press('F3');
+  await page.waitForSelector('#pc-q', { timeout: 5000 });
+  await page.keyboard.press('F3');
+  await page.waitForTimeout(200);
+  ok('F3 saat modal terbuka tidak membuka modal ganda',
+    (await page.locator('.modal-overlay:not(.is-closing)').count()) === 1,
+    await page.locator('.modal-overlay:not(.is-closing)').count());
+  await page.keyboard.press('Escape');
+  let escTutup = true;
+  try { await page.waitForSelector('#pc-q', { state: 'detached', timeout: 5000 }); } catch { escTutup = false; }
+  ok('Esc menutup layar cari', escTutup);
+
+  console.log('=== H. Catatan per baris (use_note -> sale_items.note -> struk) ===');
+  // Nyalakan saklar "Catatan di POS" utk PRD00013 lewat API (payload LENKAP —
+  // POST /api/products me-reset field yang absen, lihat AGENTS §3).
+  const p13h = await cari('PRD00013');
+  const setNote = await jpost('/api/products', { ...p13h, use_note: 1 });
+  ok('API: use_note=1 tersimpan & version naik', setNote.s === 201 && setNote.j?.data?.use_note === 1,
+    JSON.stringify({ s: setNote.s, use_note: setNote.j?.data?.use_note }));
+
+  // Reload = mount ulang POS -> delta sync menarik use_note=1 ke cache;
+  // keranjang juga dikosongkan oleh state in-memory.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#pos-q', { timeout: 20000 });
+
+  // Produk use_note=1 -> input catatan di bawah barisnya; use_note=0 tidak.
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.fill('#pos-q', 'PRD00014');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForFunction(() => document.querySelectorAll('#pos-rows tr[data-key]:not(.note-row)').length >= 2);
+  ok('Aqua (use_note=1) punya input catatan; Chitato tidak — total 1 input',
+    (await page.locator('#pos-rows [data-act="note"]').count()) === 1,
+    await page.locator('#pos-rows [data-act="note"]').count());
+  await page.fill('#pos-rows [data-act="note"]', 'ukuran 1 x 3 meter');
+  ok('isi input catatan masuk ke value', (await page.inputValue('#pos-rows [data-act="note"]')) === 'ukuran 1 x 3 meter',
+    await page.inputValue('#pos-rows [data-act="note"]'));
+
+  await page.focus('#pos-cash');
+  await page.fill('#pos-cash', '20000');
+  await page.click('#pos-pay');
+  await tungguCetak(7);
+  const s7 = Buffer.from(tercetak[6], 'base64');
+  const t7 = teksDari(s7);
+  const b7 = barisStruk(s7);
+  ok('struk memuat baris catatan indented di bawah item',
+    b7.some((x) => x.trim() === '- ukuran 1 x 3 meter'),
+    b7.filter((x) => /ukuran|Aqua|Chitato/.test(x)));
+  ok('hanya 1 baris catatan (Chitato use_note=0 tanpa catatan)',
+    b7.filter((x) => x.startsWith('  - ')).length === 1,
+    b7.filter((x) => x.startsWith('  - ')));
+  const lewat7 = b7.filter((x) => x.length > COLS);
+  ok(`catatan tetap <= 32 kolom (maks ${Math.max(0, ...b7.map((x) => x.length))})`, lewat7.length === 0, lewat7);
+
+  // Snapshot di server: GET /api/sales/:id membawa sale_items.note utk cetak ulang.
+  const hari = new Date().toISOString().slice(0, 10);
+  const daftarH = await (await fetch(`${API}/api/sales?date=${hari}`)).json();
+  const idH = daftarH.data?.[0]?.id;
+  const notaH = await (await fetch(`${API}/api/sales/${encodeURIComponent(idH)}`)).json();
+  const nAqua = notaH.data?.items?.find((i) => i.sku === 'PRD00013' || i.product_id === 13);
+  ok('server menyimpan note (trimmed)', nAqua?.note === 'ukuran 1 x 3 meter', JSON.stringify(nAqua?.note));
+  const nChit = notaH.data?.items?.find((i) => i.product_id === 14);
+  ok('baris tanpa catatan disimpan sebagai ""', nChit?.note === '', JSON.stringify(nChit?.note));
+
   ok('tanpa error halaman', errs.length === 0, errs.slice(0, 3));
 } catch (e) {
   gagal++;
