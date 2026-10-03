@@ -19,6 +19,7 @@
 import { apiGet, apiPost, HttpError } from '../api';
 import { getCachedProducts, type Category, type Product } from '../store';
 import { icon } from '../ui/icons';
+import { toggleNavDrawer } from '../ui/shell';
 import { waktu } from '../ui/waktu';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
@@ -225,6 +226,7 @@ function toolbar(): string {
   return `
     <div class="card !p-3">
       <div class="toolbar">
+        <button type="button" id="nav-toggle" class="side-collapse-btn lg:hidden" title="Buka navigasi" aria-label="Buka navigasi">${icon('dashboard')}</button>
         <button type="button" id="side-toggle" class="side-collapse-btn" title="Tampilkan/sembunyikan kategori" aria-label="Tampilkan atau sembunyikan sidebar kategori" aria-expanded="${state.side}">${icon('menu')}</button>
         <div class="search-wrap">
           ${icon('search')}
@@ -378,6 +380,10 @@ function bind(): void {
 
   // Preferensi sidebar disimpan di kunci yang sama dengan halaman Produk,
   // jadi sekali disembunyikan di satu halaman, halaman lain ikut.
+  // #nav-toggle membuka DRAWER NAVIGASI (bukan sidebar kategori): rute ini
+  // tidak punya header, jadi di layar kecil (< lg) inilah satu-satunya jalan
+  // pindah halaman (lihat toggleNavDrawer di ui/shell.ts).
+  host.querySelector('#nav-toggle')?.addEventListener('click', () => toggleNavDrawer());
   host.querySelector('#side-toggle')?.addEventListener('click', () => {
     state.side = !state.side;
     try {

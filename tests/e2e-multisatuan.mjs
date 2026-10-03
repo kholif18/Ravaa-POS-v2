@@ -159,6 +159,11 @@ try {
     { timeout: 15000 },
   );
   ok('penjualan sukses (toast Terjual)', true);
+  // BALAPAN CDP: handler page.on('response') mengambil body lewat round-trip
+  // CDP (Node), sedangkan toast dirender in-page segera setelah fetch selesai —
+  // di mesin yang CDP-nya kalah cepat, jualRes masih null saat dibaca di bawah
+  // walau penjualan sukses (stok -25, laporan benar). Tunggu sampai terisi.
+  for (let t = 0; !jualRes && t < 75; t++) await page.waitForTimeout(200);
   const saleId = jualRes?.data?.sale?.id;
   ok('respons POST /api/sales tertangkap', !!saleId, JSON.stringify(jualRes).slice(0, 120));
   const detail = saleId ? (await jget(`/api/sales/${saleId}`)).data : null;

@@ -7,6 +7,7 @@
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { fullReset, getCachedProducts, removeProductBySku, syncMaster, type Category, type Product, type Unit } from '../store';
 import { icon } from '../ui/icons';
+import { toggleNavDrawer } from '../ui/shell';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { switchHtml } from '../ui/switch';
@@ -388,8 +389,10 @@ function tableCard(): string {
 }
 
 export function renderProductsPage(): string {
-  // Judul + breadcrumb + subjudul sudah ada di header shell (bukan di body),
-  // supaya area kerja tabel mendapat tinggi penuh.
+  // Rute ini TIDAK punya header sama sekali (lihat TANPA_HEADER di ui/shell):
+  // judul + breadcrumb + tombol tema/user sengaja dibuang supaya area kerja
+  // tabel mendapat tinggi penuh. Navigasi antar-halaman lewat sidebar (selalu
+  // terlihat di >= lg) atau tombol kotak di toolbar (drawer di < lg).
   //
   // Layout (>= lg): halaman TIDAK scroll — hanya tbody tabel yang scroll
   // (.table-scroll). Toolbar, filter status, header tabel, dan footer karena
@@ -426,6 +429,7 @@ export function renderProductsPage(): string {
       <div class="sticky -top-4 sm:-top-6 z-20 -mx-4 -mt-4 shrink-0 bg-canvas px-4 pt-4 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6 dark:bg-gray-900 lg:static">
         <div class="card !p-3">
           <div class="toolbar">
+            <button type="button" id="nav-toggle" class="side-collapse-btn lg:hidden" title="Buka navigasi" aria-label="Buka navigasi">${icon('dashboard')}</button>
             <button type="button" id="side-toggle" class="side-collapse-btn" title="Tampilkan/sembunyikan kategori" aria-label="Tampilkan atau sembunyikan sidebar kategori" aria-expanded="${state.side}">
               ${icon('menu')}
             </button>
@@ -1780,6 +1784,10 @@ function bind(): void {
   });
   // Toggle sidebar kategori: ubah atribut data-open saja (bukan render ulang),
   // supaya animasi CSS berjalan dan isian search tidak hilang/fokus hilang.
+  // #nav-toggle membuka DRAWER NAVIGASI (bukan sidebar kategori): rute ini
+  // tidak punya header, jadi di layar kecil (< lg) inilah satu-satunya jalan
+  // pindah halaman (lihat toggleNavDrawer di ui/shell.ts).
+  find('#nav-toggle')?.addEventListener('click', () => toggleNavDrawer());
   find('#side-toggle')?.addEventListener('click', () => {
     state.side = !state.side;
     try { localStorage.setItem(SIDE_KEY, state.side ? 'shown' : 'hidden'); } catch { /* abaikan */ }

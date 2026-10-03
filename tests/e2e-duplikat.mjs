@@ -158,6 +158,13 @@ try {
   console.log('=== F. Halaman Stok ===');
   await page.goto(`${WEB}/#/stock`, { waitUntil: 'load' });
   await page.waitForSelector('#st-q', { timeout: 15000 });
+  // Tunggu baris terisi dulu: saat skeleton tampil belum ada tbody, dan fetch
+  // server bisa kalah cepat dari hitungan di bawah saat mesin sibuk (full
+  // suite) — tanpa tunggu ini `semua` terbaca 0 lalu semua perbandingan ikut
+  // gagal (flake, terbukti: lolos 37/37 saat dijalankan sendiri).
+  await page.waitForFunction(() => document.querySelectorAll('#page tbody tr').length > 0, {
+    timeout: 15000,
+  });
   ok('ringkasan terender', (await page.locator('.card', { hasText: 'Nilai persediaan' }).count()) > 0);
   const jumlahBaris = async () => page.locator('#page tbody tr').count();
   const semua = await jumlahBaris();

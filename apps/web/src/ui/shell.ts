@@ -74,6 +74,14 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
 };
 
+/** Rute yang tampil TANPA header sama sekali (keputusan pemilik 2026-10-03):
+ *  halaman tabel padat (Produk, Stok) memakai seluruh tinggi layar untuk area
+ *  kerja. Konsekuensinya toggle sidebar, badge outbox, ganti tema, dan menu
+ *  user (profil/keluar) tidak ada di rute ini — di layar kecil (< lg) drawer
+ *  navigasi dibuka lewat tombol #nav-toggle di toolbar masing-masing halaman
+ *  (lihat toggleNavDrawer di bawah). */
+const TANPA_HEADER: readonly AdminRoute[] = ['products', 'stock'];
+
 const ADMIN_ROUTES = new Set<string>(ADMIN_NAV.flatMap((g) => g.items.map((i) => i.route)));
 
 /** Hash router: '#/products' -> 'products'. Default & route POS = 'pos'. */
@@ -206,6 +214,7 @@ function userMenu(name: string): string {
 }
 
 export function renderShell(active: AdminRoute, cashier: string): string {
+  const tanpaHeader = TANPA_HEADER.includes(active);
   return `
   <div class="app-layout">
     <aside class="sidebar" id="sidebar" aria-label="Navigasi utama">
@@ -225,6 +234,7 @@ export function renderShell(active: AdminRoute, cashier: string): string {
     <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
 
     <div class="main-col">
+      ${tanpaHeader ? '' : `
       <header class="app-header">
         ${iconBtn('menu-toggle', 'menu', 'Buka menu')}
         ${titleBlock(active)}
@@ -233,7 +243,7 @@ export function renderShell(active: AdminRoute, cashier: string): string {
           ${iconBtn('theme-toggle', getTheme() === 'dark' ? 'sun' : 'moon', 'Ganti tema')}
           ${userMenu(cashier)}
         </div>
-      </header>
+      </header>`}
       <main class="page" id="page" tabindex="-1"></main>
     </div>
   </div>`;
@@ -290,6 +300,17 @@ function setUserMenu(open: boolean): void {
   dd.hidden = !open;
   btn.setAttribute('aria-expanded', String(open));
   dd.classList.toggle('is-open', open);
+}
+
+/** Buka/tutup drawer navigasi. Dipakai tombol #nav-toggle di toolbar halaman
+ *  tanpa header (Produk, Stok) pada layar kecil — satu-satunya jalan membuka
+ *  navigasi di sana karena #menu-toggle ikut hilang bersama header. */
+export function toggleNavDrawer(): void {
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebar-backdrop');
+  const buka = !sb?.classList.contains('is-open');
+  sb?.classList.toggle('is-open', buka);
+  bd?.classList.toggle('is-open', buka);
 }
 
 export function bindShell(): void {
