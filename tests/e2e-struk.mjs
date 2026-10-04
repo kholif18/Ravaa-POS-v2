@@ -105,6 +105,11 @@ const jual = async (paket, pilihan = 'Thermal') => {
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   await page.click('#pos-results .suggest-item');
   await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  // Form bayar = MODAL sejak permintaan pemilik 2026-10-04 ("pindahkan ke
+  // modal ketika klik bayar") — isian uang ada di dalamnya, jadi form dibuka
+  // dulu lewat tombol Bayar sidebar (#pos-bayar).
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
   if (paket.tunai) await page.fill('#pos-cash', String(paket.tunai));
   await page.click('#pos-pay');
   await page.waitForFunction(
@@ -302,6 +307,13 @@ try {
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   await page.click('#pos-results .suggest-item');
   await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  // Sidebar tak lagi memuat isian pembayaran — klik Bayar = buka FORM BAYAR
+  // (modal). Semua id lama (#pos-cash, data-cash, #pos-pay) pindah ke sana.
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
+  ok('klik Bayar membuka form bayar (modal) berisi metode + uang diterima + chip',
+    (await page.locator('[data-cash]').count()) === 4 && await page.isVisible('#pos-cash'),
+    await page.locator('[data-cash]').count());
   ok('chip nominal cepat tampil (Uang pas + 3 pecahan)', await page.locator('[data-cash]').count() === 4,
     await page.locator('[data-cash]').count());
   // P1 (backlog riset 2026-10-04): uang diterima AUTO-ISA = total selama kasir
@@ -379,11 +391,27 @@ try {
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   await page.click('#pos-results .suggest-item');
   await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  // Form bayar ikut tertutup setelah F2 sukses di atas — buka lagi.
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
   await page.focus('#pos-cash');
   await page.fill('#pos-cash', '4000');
   await page.keyboard.press('Enter');
   await pilihCetak('Thermal');
   await tungguCetak(5);
+
+  // F12 = bayar pas TANPA membuka form (referensi Aronium: "Default payment
+  // can be accessed using F12 key ... automatically close current order").
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.keyboard.press('F12');
+  await pilihCetak('Thermal');
+  await tungguCetak(6);
+  ok('F12 bayar pas selesai tanpa membuka form bayar',
+    (await page.locator('.modal-overlay:not(.is-closing)').count()) === 0,
+    await page.locator('.modal-overlay:not(.is-closing)').count());
 
   console.log('=== G. Qty item berikutnya (F4) + layar cari produk (F3) ===');
   // F4: preset qty dipakai SEKALI untuk item berikutnya lalu kembali ke 1.
@@ -393,8 +421,10 @@ try {
   await page.fill('#pos-ask', '3');
   await page.keyboard.press('Enter');
   await page.waitForSelector('#pos-ask', { state: 'detached', timeout: 5000 });
+  // innerText memuat <kbd>F4</kbd> — refreshQtyChip() kini menyegarkannya lewat
+  // innerHTML (dulu textContent diam-diam membuang label shortcut).
   ok('chip Qty menampilkan 3 + tersorot',
-    norm(await page.innerText('#pos-qty')) === 'Qty 3'
+    norm(await page.innerText('#pos-qty')) === 'Qty 3 F4'
     && (await page.locator('#pos-qty').getAttribute('class') || '').includes('!border-primary'),
     await page.innerText('#pos-qty'));
 
@@ -405,7 +435,7 @@ try {
   ok('item pertama masuk dengan qty 3', (await page.inputValue('#pos-rows [data-act="qty"]')) === '3',
     await page.inputValue('#pos-rows [data-act="qty"]'));
   ok('qtyNext kembali 1 setelah dipakai (sekali pakai)',
-    norm(await page.innerText('#pos-qty')) === 'Qty 1', await page.innerText('#pos-qty'));
+    norm(await page.innerText('#pos-qty')) === 'Qty 1 F4', await page.innerText('#pos-qty'));
 
   // F3: layar cari penuh. Filter + Enter = tambah + tutup.
   await page.keyboard.press('F3');
@@ -469,12 +499,20 @@ try {
   ok('isi input catatan masuk ke value', (await page.inputValue('#pos-rows [data-act="note"]')) === 'ukuran 1 x 3 meter',
     await page.inputValue('#pos-rows [data-act="note"]'));
 
+  // F10 = buka form bayar (referensi Aronium "Payment (F10) opens payment
+  // form") — jalur kedua selain klik tombol Bayar sidebar.
+  await page.keyboard.press('F10');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
+  ok('F10 membuka form bayar (modal)', await page.isVisible('#pos-cash'),
+    await page.evaluate(() => document.activeElement?.id));
   await page.focus('#pos-cash');
   await page.fill('#pos-cash', '20000');
   await page.click('#pos-pay');
   await pilihCetak('Thermal');
-  await tungguCetak(6);
-  const s7 = Buffer.from(tercetak[5], 'base64');
+  await tungguCetak(7);
+  // Indeks ABSOLUT: setiap section menambah penjualan — struk ke-7 = slot 7
+  // (dulu [5] sebelum section F menambah kasus F12 bayar pas).
+  const s7 = Buffer.from(tercetak[6], 'base64');
   const t7 = teksDari(s7);
   const b7 = barisStruk(s7);
   ok('struk memuat baris catatan indented di bawah item',
@@ -516,6 +554,165 @@ try {
   ok('kunci asing ditolak 400', setAsing.s === 400, JSON.stringify(setAsing));
   // Kembalikan persis seperti ditemukan (DB dev milik pemilik).
   await jpost('/api/settings', { store_phone: set0.store_phone });
+
+  console.log('=== J. Bayar pas di side panel + uang kurang = hutang ===');
+  // 1) Permintaan pemilik putaran kedua (2026-10-04): "bayar uang pas
+  //    letakkan di sidepanel bawahnya Bayar F10" — jadi BUKAN isi form lagi.
+  const urutPas = await page.evaluate(() => {
+    const b = document.querySelector('#pos-bayar');
+    const p = document.querySelector('#pos-pay-pas');
+    return { ada: !!b && !!p, diModal: !!p?.closest('.modal-overlay'), berurut: b?.nextElementSibling === p };
+  });
+  ok('Bayar pas ada di side panel, tepat setelah tombol Bayar F10',
+    urutPas.ada && !urutPas.diModal && urutPas.berurut, JSON.stringify(urutPas));
+
+  // 2) Klik Bayar pas = bayar seketika, form bayar tidak ikut terbuka.
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.click('#pos-pay-pas');
+  const cekPas = { pay: await page.locator('#pos-pay').count(), ov: await page.locator('.modal-overlay:not(.is-closing)').count() };
+  ok('Bayar pas membayar tanpa membuka form bayar', cekPas.pay === 0 && cekPas.ov === 0, JSON.stringify(cekPas));
+  await pilihCetak('Thermal');
+  await tungguCetak(8);
+
+  // 3) Uang kurang + pelanggan BAWAAN = tetap ditolak barrier (hutang butuh
+  //    pelanggan nyata) — pesan persis barrier lama, penjualan tidak terkirim.
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
+  await page.fill('#pos-cash', '3000');
+  const jmlSebelum = (await (await fetch(`${API}/api/sales?date=${hari}`)).json()).total;
+  await page.click('#pos-pay');
+  let tolakUmum = false;
+  try {
+    await page.waitForFunction(
+      () => document.querySelector('#toast-root')?.textContent?.includes('Uang diterima kurang dari total Rp4.000'),
+      { timeout: 5000 },
+    );
+    tolakUmum = true;
+  } catch { /* toast tidak muncul = penolakan gagal */ }
+  const jmlSesudah = (await (await fetch(`${API}/api/sales?date=${hari}`)).json()).total;
+  ok('uang kurang + Pelanggan Umum ditolak (penjualan tidak terkirim)',
+    tolakUmum && jmlSesudah === jmlSebelum, JSON.stringify({ tolakUmum, jmlSebelum, jmlSesudah }));
+
+  // 4) Pelanggan NYATA -> dialog konfirmasi -> penjualan + ledger charge.
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.modal-overlay:not(.is-closing)', { state: 'detached', timeout: 5000 });
+  // Pelanggan uji DIPAKAI ULANG tiap run — jangan dihapus: penjualan tadi
+  // membawa customer_id (FK `sales.customer_id -> customers.id` dengan
+  // foreign_keys=ON), jadi DELETE = SQLite constraint error -> 500 (terbukti
+  // saat ditulis pertama kali). Yang dibersihkan hanya baris ledgernya.
+  const preJ = await (await fetch(`${API}/api/customers?q=${encodeURIComponent('UjiHutang POS E2E')}`)).json();
+  let custJ = preJ.data?.[0];
+  if (!custJ) custJ = (await jpost('/api/customers', { name: 'UjiHutang POS E2E', phone: '081999888777' })).j?.data;
+  const cidJ = custJ?.id;
+  ok('pelanggan uji siap (pakai ulang bila sudah ada)', !!cidJ, JSON.stringify(custJ));
+  // Sisa run sebelumnya (gagal di tengah jalan) = buang dulu supaya asersi
+  // `sisa` di bawah benar-benar milik penjualan ini saja.
+  const ledPre = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();
+  for (const r of ledPre.data?.rows ?? []) await fetch(`${API}/api/customer-debts/${r.id}`, { method: 'DELETE' });
+  // Select pelanggan diinfo bar dirender saat mount -> reload supaya pelanggan
+  // baru ikut masuk daftar (pola sama dengan section H).
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#pos-q', { timeout: 20000 });
+  await page.selectOption('#pos-customer', String(cidJ));
+  ok('pelanggan terpilih di info bar', (await page.inputValue('#pos-customer')) === String(cidJ),
+    await page.inputValue('#pos-customer'));
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
+  await page.fill('#pos-cash', '3000');
+  await page.click('#pos-pay');
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  const popupHutang = await page.$('.swal2-popup');
+  const isiPopup = norm(await page.innerText('.swal2-popup'));
+  ok('uang kurang + pelanggan valid -> dialog konfirmasi hutang',
+    /hutang/i.test(isiPopup) && isiPopup.includes('UjiHutang POS E2E'), isiPopup.slice(0, 160));
+  await page.click('.swal2-confirm');
+  // Tunggu POPUP ITU sendiri hilang (state 'hidden' = lepas dari DOM juga),
+  // bukan "tidak ada popup sama sekali": dialog pilihan cetak bisa muncul
+  // lebih cepat dari animasi keluar swal. ('detached' bukan state valid di
+  // Playwright — hanya visible/hidden/stable/enabled/disabled/editable.)
+  await popupHutang.waitForElementState('hidden', { timeout: 8000 });
+  await pilihCetak('Thermal');
+  await tungguCetak(9);
+
+  const daftarJ = await (await fetch(`${API}/api/sales?date=${hari}`)).json();
+  const notaJ = await (await fetch(`${API}/api/sales/${encodeURIComponent(daftarJ.data?.[0]?.id ?? '')}`)).json();
+  ok('penjualan tersimpan: uang diterima < total + pelanggan di-snapshot',
+    notaJ.data?.sale?.cash_in === 3000 && notaJ.data?.sale?.customer_name === 'UjiHutang POS E2E',
+    JSON.stringify({ cash_in: notaJ.data?.sale?.cash_in, total: notaJ.data?.sale?.total, cust: notaJ.data?.sale?.customer_name }));
+
+  const ledJ = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();
+  const sisaJ = (notaJ.data?.sale?.total ?? 0) - 3000;
+  const barisJ = ledJ.data?.rows?.[0];
+  ok('sisa tercatat sebagai HUTANG (charge) di ledger pelanggan',
+    (ledJ.data?.sisa ?? -1) === sisaJ && barisJ?.type === 'charge' && barisJ?.amount === sisaJ,
+    JSON.stringify({ sisa: ledJ.data?.sisa, sisaJ, barisJ }));
+  ok('catatan hutang menyebut nomor nota (invoice_no)',
+    typeof barisJ?.note === 'string' && barisJ.note.includes(notaJ.data?.sale?.invoice_no ?? '~~'),
+    JSON.stringify(barisJ?.note));
+
+  // Bersih-bersih: baris ledger saja. Pelanggan TIDAK dihapus (FK penjualan —
+  // lihat catatan find-or-create di atas) dan tetap dipakai run berikutnya.
+  for (const r of ledJ.data?.rows ?? []) await fetch(`${API}/api/customer-debts/${r.id}`, { method: 'DELETE' });
+  const ledKosong = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();
+  ok('bersih-bersih: ledger pelanggan uji kembali kosong',
+    (ledKosong.data?.rows?.length ?? -1) === 0, JSON.stringify(ledKosong.data?.rows ?? ledKosong));
+
+  // ——— Section K: putaran 7 pemilik 2026-10-04 ———
+  // "baris Subtotal dihapus", "Item manual di scan bar dihapus karena sudah
+  // ada di deretan tombol panel kanan", dan "tambahkan cari pelanggan seperti
+  // cari produk F3" (openCariPelanggan, tombol #pos-cust-cari di info bar).
+  const nSub = await page.locator('#pos-subtotal').count();
+  ok('baris Subtotal di sidebar sudah dihapus', nSub === 0, `#pos-subtotal count=${nSub}`);
+  const nManual = await page.locator('#pos-manual').count();
+  const nQaManual = await page.locator('#pos-qa-manual').count();
+  ok('tombol Item manual ganda di scan bar dihapus (tetap ada di panel kanan)',
+    nManual === 0 && nQaManual === 1, JSON.stringify({ scanBar: nManual, panelKanan: nQaManual }));
+
+  // Reset dulu ke opsi LAIN supaya pemilihan lewat layar cari benar-benar
+  // terbukti mengubah select (bukan kebetulan sudah terpilih).
+  const nilaiLain = await page.$eval('#pos-customer', (s, keep) =>
+    [...s.options].find((o) => o.value !== keep)?.value ?? '', String(cidJ));
+  if (nilaiLain) await page.selectOption('#pos-customer', nilaiLain);
+  await page.click('#pos-cust-cari');
+  await page.waitForSelector('#pcust-q', { timeout: 5000 });
+  const fokusCari = await page.evaluate(() => document.activeElement?.id);
+  ok('tombol Cari membuka layar cari pelanggan (ala F3) + fokus di kolom cari',
+    (await page.locator('#pcust-list').count()) === 1 && fokusCari === 'pcust-q',
+    JSON.stringify({ list: await page.locator('#pcust-list').count(), fokus: fokusCari }));
+
+  await page.fill('#pcust-q', 'UjiHutang');
+  await page.waitForFunction(
+    () => document.querySelectorAll('#pcust-list .suggest-item').length >= 1, { timeout: 5000 },
+  );
+  const nHasil = await page.locator('#pcust-list .suggest-item').count();
+  ok('ketik nama memfilter daftar pelanggan', nHasil >= 1 && nHasil < 50, `n=${nHasil}`);
+
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.modal-overlay:not(.is-closing)', { state: 'detached', timeout: 5000 });
+  const pilihCari = await page.inputValue('#pos-customer');
+  ok('Enter memilih baris -> select pelanggan terisi id itu',
+    pilihCari === String(cidJ), `select=${pilihCari} (cidJ=${cidJ})`);
+
+  // Pencarian tanpa hasil = pesan kosong, modal tetap terbuka (batal = Esc).
+  await page.click('#pos-cust-cari');
+  await page.waitForSelector('#pcust-q', { timeout: 5000 });
+  await page.fill('#pcust-q', 'zzzzzzzzzz');
+  const kosong = norm(await page.innerText('#pcust-list'));
+  ok('pencarian tanpa hasil menampilkan pesan kosong',
+    kosong.includes('Tidak ada pelanggan yang cocok'), kosong);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.modal-overlay:not(.is-closing)', { state: 'detached', timeout: 5000 });
 
   ok('tanpa error halaman', errs.length === 0, errs.slice(0, 3));
 } catch (e) {

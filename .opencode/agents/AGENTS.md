@@ -48,13 +48,19 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           dashboard = `tombolKembaliHtml()` (pos.ts): kiri
                           info bar (mode jual) + kiri baris Mode
                           (topup/tarik, info bar tak dirender) supaya kasir
-                          tidak terkunci di `#/pos`). Scan bar = input `#pos-q` + dropdown
-                          cari, **info bar** (mode Penjualan: kolom kiri =
+                           tidak terkunci di `#/pos`). Scan bar = input `#pos-q` + dropdown
+                           cari (**sintaks `Qty*Kode`**: `3*PRD00001` = 3 pcs —
+                           `bacaQtyKode()`, qty eksplisit menang atas chip
+                           Qty/F4 dan sengaja TIDAK mengosongkan preset itu;
+                           aturan sama untuk Enter & klik hasil; tanpa `*`
+                           perilaku lama dipertahankan), **info bar** (mode Penjualan: kolom kiri =
                           tombol ⬅ + tumpukan dua baris **Waktu** (atas) /
                           **Kasir + Shift** (bawah) — jam live
                           `jamPos()`/`mulaiJam()` — jam lokal konsisten
                           `waktuStruk()`, dihentikan di `unmountPosPage`;
-                          select `#pos-customer` pelanggan,
+                          select `#pos-customer` pelanggan + tombol
+                          `#pos-cust-cari` (Cari pelanggan ala F3 lewat
+                          `openCariPelanggan()`, putaran 7 2026-10-04),
                           default "Pelanggan Umum", dimuat dari
                           `GET /api/customers`;
                           kolom kanan = label TOTAL BELANJA + `#pos-owncount`
@@ -78,46 +84,104 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           catatan & empty `colspan="8"`), chip nominal cepat,
                           chip Qty + tombol
                           Cari (F4 = qty item berikutnya sekali pakai, F3 =
-                          layar cari produk), input catatan per baris (produk
+                          layar cari produk; tombol ganda `#pos-manual` di
+                          scan bar DIHAPUS putaran 7 karena sudah ada di
+                          panel kanan `#pos-qa-manual`), input catatan per
+                          baris (produk
                           `use_note`, ikut ke struk via `items[].note`).
-                           **Panel bayar = SIDEBAR KANAN 320px** (grid
-                           `lg:grid-cols-[1fr_320px]` — putaran 4 2026-10-04:
-                           footer horizontal DITOLAK pemilik, "tetap jadi
-                           sidebar kanan tadi"): ringkasan
-                           Subtotal/Diskon item → **Aksi cepat** → diskon
-                           transaksi F6 → metode + `#pos-cash` uang diterima +
-                           chip nominal + KEMBALIAN → tombol (mt-auto di
-                           dasar). **Baris "Grand total" DIHAPUS** (duplikat
-                           TOTAL BELANJA di info bar — permintaan pemilik
-                           2026-10-04); `#pos-grand` = satu-satunya angka
-                           total besar. **Aksi cepat** (grid 2 kolom):
-                           **Tahan** (`tahanKeranjang()`) + **Pending (n)**
-                           (`bukaTertahan()`, badge `#pos-hold-count`) =
-                           fitur **P5 transaksi tertahan** — snapshot keranjang
-                           (`Hold` type: items/discount/pelanggan) disimpan di
-                           **IndexedDB per device** lewat `getHolds()`/
-                           `saveHolds()` (kv key `'holds'` di `store.ts`,
-                           tanpa endpoint API); modal daftar beraksi
-                           **Lanjutkan** (`muatHold()` — konfirmasi swal bila
-                           keranjang tak kosong, validasi `customerId` ke
-                           master, dorong `manualSeq`) & **Hapus**
-                           (`hapusHold()` + `confirmDialog` danger);
-                           **Item manual** & **Diskon F6** memanggil aksi
-                           lama; **Voucher** & **Cetak ulang** = placeholder
-                           `[data-soon]` (toast "menyusul" — permintaan
-                           pemilik "placeholder dulu, fitur nanti").
-                           **SEMUA id lama dipertahankan**
-                           (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`)
-                           supaya F2/Enter/barrier + suite test tetap jalan.
-                          **`#pos-pay-pas` ("Bayar pas")** = `bayarPas()`
-                          (tunai saja): `cashIn = total()` lalu `pay()` —
-                          tanpa mengubah arti `#pos-pay` (bayar langsung).
-                          `pay()` kirim `customer_id` + struk meta
-                          `Pelanggan: <customer_name>` + reset pilihan ke
-                          Pelanggan Umum. Pintasan level document di
-                          `bindPintasan()` (F2 bayar, F3 cari, F4 qty,
-                          F5 bersihkan, F6 diskon transaksi, Enter bayar, Esc
-                          ke scan — jangan dicuri untuk pelanggan). Setelah
+                            **Panel bayar = SIDEBAR KANAN 320px** (grid
+                            `lg:grid-cols-[1fr_320px]` — putaran 4 2026-10-04:
+                            footer horizontal DITOLAK pemilik, "tetap jadi
+                            sidebar kanan tadi"): ringkasan
+                            **Diskon item** saja (baris Subtotal ikut DIHAPUS
+                            putaran 7 2026-10-04, "ini juga hapus saja" —
+                            subtotal terbaca dari TOTAL BELANJA di info bar) →
+                            **Aksi cepat** → input
+                            diskon transaksi (label polos — chip `<kbd>F6</kbd>`
+                            DIHAPUS, putaran 7 2026-10-04 "ghapus saja,
+                            di atasnya sudah ada label F6 ternyata di tombol
+                            diskon"; pintasan F6 disebut **hanya** di tombol
+                            **Diskon F6** grid Aksi cepat) → **dua tombol bayar
+                            (mt-auto di
+                            dasar, putaran 6 2026-10-04)**. **Baris "Grand
+                            total" DIHAPUS** (duplikat
+                            TOTAL BELANJA di info bar — permintaan pemilik
+                            2026-10-04); `#pos-grand` = satu-satunya angka
+                            total besar. **Aksi cepat** (grid 2 kolom):
+                            **Tahan** (`tahanKeranjang()`) + **Pending (n)**
+                            (`bukaTertahan()`, badge `#pos-hold-count`) =
+                            fitur **P5 transaksi tertahan** — snapshot keranjang
+                            (`Hold` type: items/discount/pelanggan) disimpan di
+                            **IndexedDB per device** lewat `getHolds()`/
+                            `saveHolds()` (kv key `'holds'` di `store.ts`,
+                            tanpa endpoint API); modal daftar beraksi
+                            **Lanjutkan** (`muatHold()` — konfirmasi swal bila
+                            keranjang tak kosong, validasi `customerId` ke
+                            master, dorong `manualSeq`) & **Hapus**
+                            (`hapusHold()` + `confirmDialog` danger);
+                            **Item manual** & **Diskon F6** memanggil aksi
+                            lama; **Voucher** & **Cetak ulang** = placeholder
+                            `[data-soon]` (toast "menyusul" — permintaan
+                            pemilik "placeholder dulu, fitur nanti").
+                            **Isian bayar = FORM BAYAR (modal)** (putaran 5
+                            2026-10-04, permintaan pemilik "pindahkan ke modal
+                            ketika klik bayar" — ala payment screen Aronium
+                            F10): tombol **Bayar `#pos-bayar` (F10)** membuka
+                            `bukaBayar()`, modal `formBayarHtml()` memuat
+                            Total tagihan `#bayar-total`, metode `data-pay`
+                            (Tunai/QRIS/Transfer), `#pos-cash` uang diterima,
+                            chip `data-cash`, KEMBALIAN `#pos-change` +
+                            `#pos-change-ctx`, dan petunjuk hutang; **tombol
+                            OK footer modal = `#pos-pay`** (disetel di
+                            `bukaBayar` — Enter-on-input modal.ts ->
+                            `ok.click()`). **`#pos-pay-pas` ("Bayar pas"
+                            `bayarPas()`; hijau `bg-emerald-600`, `!py-4`,
+                            kbd F12) = PENGECUALIAN: tetap di SIDE PANEL tepat
+                            DI BAWAH `#pos-bayar`** (permintaan pemilik
+                            putaran kedua 2026-10-04 "bayar uang pas
+                            letakkan di sidepanel bawahnya Bayar F10") —
+                            bayar tunai persis total SEKETIKA, tanpa modal.
+                            **Uang lebih** = kembalian dihitung di form.
+                            **Uang kurang = boleh berujung HUTANG**
+                            (permintaan pemilik 2026-10-04): `pay()` memanggil
+                            `cekHutangDiperbolehkan()` — wajib ada pelanggan
+                            terpilih DAN bukan bawaan "Pelanggan Umum"
+                            (`name` persis / `code = CUS-000001`); lolos ->
+                            `confirmDialog` "Uang kurang — catat jadi hutang?"
+                            -> `pay({hutang:true})` melewati barrier ->
+                            penjualan lalu `POST /api/customer-debts`
+                            `{type:'charge', amount:sisa,
+                            note:'Nota <invoice_no> — sisa bayar POS'}` (gagal
+                            ledger = penjualan TETAP sukses + toast penunjuk
+                            halaman Hutang). TIDAK lolos syarat = penolakan
+                            barrier lama **persis** (pesan "Uang diterima
+                            belum diisi/kurang dari total" + buka form + fokus
+                            kolom uang) — jadi uang kurang tidak pernah lolos
+                            diam-diam. Struk memuat baris `Hutang` bila sisa >
+                            0.
+                            **SEMUA id lama dipertahankan**
+                            (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`)
+                            supaya F2/Enter/barrier + suite test tetap jalan.
+                           `pay()` kirim `customer_id` + struk meta
+                           `Pelanggan: <customer_name>` + reset pilihan ke
+                            Pelanggan Umum. Pintasan level document di
+                            `bindPintasan()` (F2 bayar, F3 cari, F4 qty,
+                            F5 bersihkan, F6 diskon transaksi, **F7 tahan**
+                            — alokasi F7 sebab F2/F3 sudah terpakai, label
+                            `<kbd>F7>` ikut tertulis di tombol Tahan,
+                            **F8 fokus kolom scan**, **F10 buka form bayar**,
+                            **F12 bayar pas**, Enter bayar, Esc ke scan —
+                            jangan dicuri untuk pelanggan; **guard swal**:
+                            ada `.swal2-popup` non-toast (konfirmasi hutang /
+                            pilihan cetak) = SELURUH pintasan dilepas dulu,
+                            sebab `.modal-overlay` bisa menemukan form bayar
+                            yang ada di bawah swal)
+                           plus **↑↓ navigasi baris keranjang**
+                           (`pindahBarisKeranjang()`: hanya saat fokus di
+                           dalam `#pos-rows`, baris catatan dilewati, input
+                           catatan dikecualikan karena panah di sana = kursor,
+                           clamp di ujung — referensi KulaPOS "↑↓ Navigasi
+                           Baris"). Setelah
                           penjualan sukses **`pilihCetakSelesai()`** membuka
                           dialog **[Thermal] [A4] [Selesai]**
                           (`choiceDialog`, HANYA bila saklar auto-print ON —
@@ -360,9 +424,15 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       (uang lebih dari utang memang tidak ada; keputusan jadi saldo kredit/
       awal = wewenang pemilik, ditunda). Check + insert dijalankan dalam
       `db.transaction` (skala 1-2 kasir: atomik cukup).
-    - Tidak menyentuh `POST /api/sales` / `pay_method` — hutang dicatat
-      **manual** di halaman Hutang; integrasi POS (piutang saat bayar) belum
-      ada dan jangan ditambah sepihak.
+    - Endpoint ini TIDAK mengubah `POST /api/sales` / `pay_method` — nota
+      tetap tercatat apa adanya. **Sejak 2026-10-04 ada pelanggan KEDUA: POS.**
+      Form bayar (modal) menawarkan "uang kurang = HUTANG" bila pelanggan
+      terpilih bukan bawaan "Pelanggan Umum": setelah penjualan tersimpan,
+      client mengirim **`charge` terpisah** ke endpoint ini dengan
+      `note:'Nota <invoice_no> — sisa bayar POS'` (lihat `pay()` di
+      `apps/web/src/pages/pos.ts`; gagal ledger = penjualan TETAP sukses +
+      toast penunjuk halaman Hutang). Jalur **manual** di halaman Hutang
+      tetap ada untuk koreksi & catatan di luar alur kasir.
   - `DELETE /api/customer-debts/:id` -> `{data:{id,deleted:true}}`
     - Hapus 1 baris mutasi (salah ketik). Sengaja TANPA cek sisa: hapus
       `payment` memperbesar sisa, hapus `charge` memperkecil — dua-duanya

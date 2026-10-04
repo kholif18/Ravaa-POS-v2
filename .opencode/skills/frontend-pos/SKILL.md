@@ -81,6 +81,33 @@ panel topup/laporan, modal struk, atau styling apa pun.
 5. Setelah bayar/topup: coba `sendToPrinter()` dulu; gagal -> modal struk
    (`showReceiptModal`) + tombol Cetak browser. JANGAN diam saat print gagal.
 6. Mode print (`@media print`): hanya modal struk yang tercetak, tombol disembunyikan.
+7. Scan bar POS (`apps/web/src/pages/pos.ts`): sintaks **`Qty*Kode`** (mis. `3*PRD00001`
+   = 3 pcs) lewat `bacaQtyKode()` — dicopot sebelum pencarian supaya dropdown tetap
+   menampilkan produknya; qty eksplisit menang atas chip Qty/F4 untuk baris itu
+   **tanpa** mengosongkan preset F4. Aturan yang sama untuk **Enter maupun klik
+   baris hasil**; tanpa `*` perilaku lama dipertahankan.
+8. Pintasan level document POS: F2 bayar, F3 cari, F4 qty berikutnya, F5 bersihkan,
+   F6 diskon transaksi, **F7 tahan (Pending)**, **F8 fokus kolom scan**, **F10 buka
+   form bayar**, **F12 bayar pas**, Enter bayar, Esc ke scan, dan **↑↓**
+   pindah antar baris keranjang (`pindahBarisKeranjang()` — baris catatan dilewati,
+   input catatan dikecualikan karena panah = kursor). Guard: hanya mode `jual` +
+   shift terbuka; jangan dicuri untuk keperluan lain (mis. F7 untuk pelanggan).
+   Guard lapis kedua: **swal terbuka** (`.swal2-popup` non-toast — konfirmasi
+   hutang, pilihan cetak) = seluruh pintasan dilepas; form bayar yang terbuka
+   mengizinkan hanya F2/F10/F12 (`.modal-overlay` menemukan form bayar yang
+   bisa berada di bawah swal — tanpa guard ini F12 membayar lewat belakang
+   dialog konfirmasi).
+9. Bayar terbagi dua permukaan (permintaan pemilik 2026-10-04, putaran 5-6):
+   **side panel** = `#pos-bayar` (buka form, F10) dan **`#pos-pay-pas` "Bayar
+   pas" tepat DI BAWAHNYA** (hijau `bg-emerald-600`, `!py-4`, F12 — bayar tunai
+   persis total SEKALI ketuk tanpa modal); **modal form bayar** =
+   `formBayarHtml()` (total tagihan, metode `data-pay`, `#pos-cash`, chip
+   `data-cash`, kembalian, petunjuk hutang; OK footer = `#pos-pay`) untuk kasus
+   **uang lebih / uang kurang / metode lain**. Uang kurang boleh jadi HUTANG
+   hanya dengan pelanggan terpilih selain "Pelanggan Umum" — konfirmasi swal
+   dulu, baru `pay({hutang:true})`; penolakannya = toast barrier lama + fokus
+   kolom uang. Id lama (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`)
+   tetap dipertahankan supaya pintasan & suite test tidak patah.
 
 ## Larangan UI
 

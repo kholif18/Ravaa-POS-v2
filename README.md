@@ -190,7 +190,12 @@ npm run dev:api
     daftar `GET /api/customers`, bawaan **Pelanggan Umum** — dipilih kasir
     sebelum bayar, ikut ke `POST /api/sales` sebagai `customer_id` +
     snapshot `customer_name`, di-simpan ke struk/invoice/riwayat, dan
-    **kembali ke Pelanggan Umum** setelah tiap penjualan), serta **kolom
+    **kembali ke Pelanggan Umum** setelah tiap penjualan), **ditemani tombol
+    🔍 Cari** (`#pos-cust-cari`, putaran 7 2026-10-04 *"tambahkan cari
+    seperti cari produk F3"*) yang membuka **layar cari pelanggan**
+    `openCariPelanggan()` — pola identik layar cari produk (input multi-kata
+    nama/HP/nomor urut/catatan, ↑↓ sorot, Enter/klik/**Pilih** = pilih,
+    Esc = tutup), lalu fokus balik ke kolom scan, serta **kolom
     total**: label **TOTAL BELANJA** + "n item (n Qty)" (`#pos-owncount`) di
     **kiri** kolom, angka besar `#pos-grand` di **kanan** — ukuran **kustom
     `text-[48px]` = 2x lipat `text-2xl` lama (24px)**, permintaan pemilik
@@ -208,16 +213,56 @@ npm run dev:api
     kosong") di kiri + tombol **Bersihkan [F5]** (`#pos-clear`) di kanan —
     dipindah dari bawah tabel mengikuti baris "Keranjang … Bersihkan [F5]"
     di referensi (id tidak berubah, `paintCart()` tetap sama).
+  - **Input cepat ala KulaPOS** (sejak 2026-10-04, hasil gap analysis
+    `kula-02-transaksi-pos.png`):
+    * **Sintaks `Qty*Kode`** di kolom scan — `3*PRD00001` atau `2 * aqua`
+      berarti qty 3/2 untuk produk sesudah `*` (`bacaQtyKode()`); placeholder
+      kolom scan ikut mengumumkannya. Qty `0` **ditolak** dengan "Qty minimal
+      1" (tidak diam-diam dianggap 1), kode tak dikenal jatuh ke pesan
+      "tidak ditemukan", dan **tanpa tanda `*` perilaku scan lama utuh**.
+      Qty eksplisit **menang atas chip Qty/F4** untuk baris itu, tapi preset
+      F4 tidak dikosongkan (masih berlaku untuk item berikutnya). Aturan yang
+      sama dipakai **Enter dan klik baris hasil dropdown**.
+    * **↑↓ navigasi antar baris keranjang** (`pindahBarisKeranjang()`) selama
+      fokus berada di dalam tabel: baris catatan (`use_note`) **dilewati**,
+      input catatan dikecualikan (panah di kolom teks = gerak kursor), arah
+      **clamp** di ujung baris. Panah di kolom scan tetap milik dropdown
+      pencarian, dan di luar tabel tetap gulir halaman.
+    * **F7 = Tahan** — pintasan baru untuk fitur tertahan (P5); alokasi F7
+      karena F2/F3 sudah dipakai Bayar/Layar cari, jadi Tahan tidak bisa
+      memakai F3 seperti KulaPOS. Tombolnya ikut berlabel `F7`.
+      Teruji `tests/pos-qtykode-test.mjs` (24 asersi).
+    * **F8 / F10 / F12** — pintasan putaran 5–6 (2026-10-04): **F8** fokus
+      balik ke kolom scan (jalan pendek dari Esc, dua langkah saat dropdown
+      terbuka), **F10** buka form bayar (referensi Aronium *"Payment (F10)
+      opens payment form"*), **F12** bayar pas (*"Default payment … F12"* —
+      tanpa form, tombol hijau di sidebar). Guard: **swal konfirmasi/pilihan
+      cetak yang terbuka menahan seluruh pintasan**, dan form bayar yang
+      terbuka hanya mengizinkan F2/F10/F12.
   - **Panel bayar = sidebar kanan 320px** (grid `lg:grid-cols-[1fr_320px]` —
     revisi pemilik 2026-10-04 putaran 4: footer horizontal ala KulaPOS
     **ditolak**, "tidak usah, tetap jadi sidebar kanan tadi"). Isi panel
-    berurutan vertikal: **Subtotal / Diskon item → Aksi cepat → Diskon
-    transaksi (Rp) F6 → Metode bayar + Uang diterima + chip nominal cepat +
-    Kembalian** (hierarki Aronium) → tombol **Bayar** menempel dasar panel +
-    **"Bayar pas"** (tunai saja: uang diterima persis total, langsung
-    proses — `#pos-pay-pas`; `#pos-pay` tetap berarti "bayar dengan angka
-    yang diketik"). **Baris "Grand total" DIHAPUS** dari sidebar (permintaan
-    pemilik 2026-10-04 — duplikat TOTAL BELANJA di info bar atas).
+    berurutan vertikal: **Diskon item → Aksi cepat → Diskon
+    transaksi (Rp) → dua tombol bayar menempel dasar panel** — pintasan F6
+    disebut **hanya di tombol "Diskon F6" grid Aksi cepat** (chip `<kbd>F6</kbd>`
+    di sebelah label inputnya dihapus, permintaan pemilik putaran 7 2026-10-04
+    "ghapus saja, di atasnya sudah ada label F6 ternyata di tombol diskon").
+    Tombol utama **Bayar F10** (`#pos-bayar`, pembuka **form bayar**) dan **tepat di
+    bawahnya** tombol hijau **Bayar pas F12** (`#pos-pay-pas`: tunai persis
+    total, langsung proses **tanpa form** — permintaan pemilik putaran 6
+    2026-10-04 "bayar uang pas letakkan di sidepanel bawahnya Bayar F10").
+    **Isian bayar pindah ke FORM BAYAR (modal)** (putaran 5, permintaan
+    pemilik "pindahkan ke modal ketika klik bayar", ala payment screen
+    Aronium F10): **Total tagihan → metode bayar → uang diterima + chip
+    nominal cepat → kembalian → petunjuk hutang**, OK modal = `#pos-pay`
+    (Enter/F2/F10 tetap satu aksi). Karena itu sidebar tidak lagi penuh
+    isian; hierarki Aronium tetap utuh di dalam modal. **Baris "Grand
+    total" DIHAPUS** dari sidebar (permintaan
+    pemilik 2026-10-04 — duplikat TOTAL BELANJA di info bar atas) dan
+    **baris "Subtotal" ikut DIHAPUS** (putaran 7, "ini juga hapus saja" —
+    subtotal terbaca dari TOTAL BELANJA + kolom Subtotal per baris tabel;
+    ringkasan sidebar kini hanya **Diskon item**, itupun disembunyikan
+    saat nilainya 0).
     **Aksi cepat** (grid 2 kolom): **Tahan** + **Pending (n)** = fitur
     **transaksi tertahan (P5)** — `tahanKeranjang()` membekukan isi
     keranjang (items/diskon/pelanggan) ke **IndexedDB per device**
@@ -226,7 +271,9 @@ npm run dev:api
     dengan aksi **Lanjutkan** (muat balik ke keranjang — konfirmasi swal
     bila keranjang sedang terisi) dan **Hapus** (konfirmasi danger);
     daftar bertahan setelah reload. **Item manual** & **Diskon** memanggil
-    aksi yang sudah ada; **Voucher** & **Cetak ulang** = tombol placeholder
+    aksi yang sudah ada (putaran 7: tombol ganda `#pos-manual` di scan bar
+    DIHAPUS — yang tetap hanya `#pos-qa-manual` di panel kanan, *"karena di
+    bawah sudah ada pada deretan tombol panel kanan"*); **Voucher** & **Cetak ulang** = tombol placeholder
     (`data-soon` → toast "menyusul") — tombol sudah dulu, fiturnya
     menyusul sesuai permintaan pemilik. Semua id/selector lama
     (`#pos-cash`, `#pos-pay`,
@@ -283,6 +330,18 @@ npm run dev:api
     uang. Barrier serupa berlaku untuk **topup tunai** (`#tp-tunai`);
     mode **Tarik dikecualikan** (uang mengalir keluar, kolom boleh kosong).
     Teruji 6 asersi regresi di `tests/e2e-struk.mjs` (section F).
+  - **Uang kurang = HUTANG (opsional, dengan syarat pelanggan)** — permintaan
+    pemilik 2026-10-04: bila uang diterima < total, form bayar menawarkan
+    jalan catat hutang **asal ada pelanggan terpilih yang bukan bawaan
+    "Pelanggan Umum"**. Syarat terpenuhi -> konfirmasi swal ("Uang kurang —
+    catat jadi hutang?", berisi sisa + nama pelanggan) -> penjualan lalu
+    `POST /api/customer-debts` `type=charge` dengan catatan
+    `Nota <invoice_no> — sisa bayar POS`; **gagal mencatat ledger TIDAK
+    membatalkan penjualan** (toast menunjuk halaman Hutang). Syarat tidak
+    terpenuhi = penolakan barrier lama **persis** (pesan + fokus kolom uang),
+    jadi uang kurang tidak pernah lolos diam-diam. Struk memuat baris
+    `Hutang` bila sisa > 0. Teruji section **J** `tests/e2e-struk.mjs`
+    (penolakan + konfirmasi + ledger + struk).
   - **Qty item berikutnya** (gaya Aronium *Changing the quantity*): chip
     **Qty** di scan bar (mode Penjualan) atau tekan **F4** — isi angka, item
     BERIKUTNYA masuk keranjang dengan qty itu, chip lalu otomatis kembali
@@ -295,6 +354,13 @@ npm run dev:api
     Penjualan dengan shift terbuka; F3/F4 selalu `preventDefault` (supaya
     browser tidak membuka find bar) walau modal sedang terbuka — aksinya
     sendiri dilewati oleh guard modal yang sama dengan F2.
+  - **Layar cari pelanggan** (putaran 7 2026-10-04, *"tambahkan cari seperti
+    cari produk F3"*): tombol **🔍 Cari** (`#pos-cust-cari`) di info bar di
+    sebelah select Pelanggan — modal lebar `openCariPelanggan()` dengan pola
+    identik layar cari produk F3 (filter bebas nama/no.HP/nomor urut/catatan,
+    ↑↓ pilih, Enter/klik/**Pilih** = set `customerId` + nilai select, Esc =
+    tutup), lalu fokus otomatis balik ke kolom scan. Sangat membantu bila
+    kontak pembeli di master sudah panjang (teruji section **K** `tests/e2e-struk.mjs`).
   - **Catatan per baris** (sejak 2026-10-03, kolom `products.use_note`):
     produk yang sakelarnya **"Catatan di POS"** menyala (di-set pemilik lewat
     form produk Tambah/Ubah) menampilkan **input catatan di bawah barisnya**
@@ -309,9 +375,12 @@ npm run dev:api
   - **Pintasan keyboard level document** (`bindPintasan()` di
     `apps/web/src/pages/pos.ts`): **F2** = bayar cepat (atau proses topup),
     **F3** = layar cari produk, **F4** = qty item berikutnya, **F5** =
-    bersihkan keranjang, **F6** = fokus diskon transaksi, **Enter** = bayar
+    bersihkan keranjang, **F6** = fokus diskon transaksi, **F7** = tahan
+    transaksi, **Enter** = bayar
     dari kolom uang diterima / proses topup, **Esc** = fokus
-    kembali ke kolom scan. Dulu listener menempel ke elemen `host`, jadi mati
+    kembali ke kolom scan, serta **↑↓** = pindah baris keranjang (hanya saat
+    fokus di dalam tabel — lihat *Input cepat ala KulaPOS*). Dulu listener
+    menempel ke elemen `host`, jadi mati
     begitu fokus jatuh ke `<body>` (klik area kosong / balik dari modal) —
     kini didaftarkan sekali per mount di `document` + dibuang di
     `unmountPosPage()`. Guard: modal terbuka = lepas, tombol/link = aktivasi

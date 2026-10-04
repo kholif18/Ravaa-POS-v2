@@ -38,11 +38,111 @@ terhapus, bukti utama sudah diekstrak ke laporan chat 2026-10-04).
       live gaya KulaPOS) — client-only, tanpa API.
 
 Tidak diusulkan (alasan tercatat di laporan riset): multi-tata-letak/tema picker,
-member/poin, piutang dari popup bayar POS (kompromi: halaman Hutang manual),
-payment modal terpusat.
+member/poin.
+**Catatan 2026-10-04 (putaran 5–6)**: dua yang dulu "tidak diusulkan" justru
+diminta pemilik dan kini ADA — **piutang saat bayar POS** (uang kurang ->
+hutang, syarat pelanggan bukan "Pelanggan Umum") dan **payment modal**
+(form bayar terpusat ala Aronium F10); daftar di atas dicabut untuk keduanya.
+
+**Catatan 2026-10-04 (putaran 7)**: tiga fitur kecil permintaan pemilik &
+user (saat akhir session):
+- ✅ **Chip `<kbd>F6</kbd>` di label diskon transaksi dihapus** — F6 label ada
+  hanya di tombol "Diskon F6" grid Aksi cepat; `cartGridHtml` / `paintFormBayar`
+  comment diperbarui; screenshot verifikasi.
+- ✅ **Baris Subtotal sidebar dihapus** ("ini juga hapus saja") — ringkasan
+  sidebar kini hanya Diskon item; `const sub`/`const tot` di `cartGridHtml`
+  dihapus; `set('#pos-subtotal')` dihapus.
+- ✅ **Tombol Item manual ganda di scan bar dihapus** — tetap ada hanya di
+  Aksi cepat `#pos-qa-manual` ("sudah ada pada deretan tombol panel kanan");
+  listener `#pos-manual` dihapus.
+- ✅ **Layar cari pelanggan ala F3** — `#pos-cust-cari` button di info bar →
+  `openCariPelanggan()` (pola identik `openCariProduk()`): input multi-kata
+  filter nama/HP/nomor urut/catatan, ↑↓ sorot, Enter/**Pilih**/klik = pilih
+  + set `#pos-customer` value + kembali fokus scan. Cust type extend phone/note.
+- ✅ Docs: AGENTS §2 (info bar + sidebar ringkasan + scan bar), README
+  (info bar + sidebar + Aksi cepat + Layar cari pelanggan bullet), SKILL,
+  pos.ts komentar, TODO catatan ini.
+- ✅ Tests: `e2e-struk.mjs` section K (6 asersi baru: Subtotal/Manual/Cari
+  modal/filter/Enter select/no-match message) → 99 + 6 = **105**, run.mjs
+  ekspek diupdate; **npm test total 883 assertion SEMUA HIJAU**.
+- ✅ **Bug fix bonus**: `skipable()` di `pos-qtykode-test.mjs` memanggil
+  async callback tanpa await (race: note-click paralel dengan fill search
+  dropdown); fixed async + await, test kembali hijau 24/24.
+
+**Gap analysis KulaPOS vs Ravaa POS (2026-10-04)** — sumber: `kula-01..12*.png`
+(khususnya `kula-02-transaksi-pos.png`, `kula-07-pos-kasir.png`) +
+`kulapos-transcript.txt` segmen 35:00–41:00:
+
+* **Sudah setara / selesai**: Pending-Tahan (P5) + pintasan F7, `Qty*Kode`,
+  navigasi ↑↓ baris, Bersihkan F5, diskon faktur F6, pelanggan inline, strip
+  stok/kadaluarsa, cetak struk otomatis, satuan jual, catatan per baris.
+* **Menyusul (sudah tercatat)**: P4 grid katalog, P6 biaya tambahan/voucher,
+  P7 customer display, plus kandidat kecil di section Menyusul
+  (tutup shift dari POS, ganti satuan baris, **hapus duplikat Item manual**,
+  **hapus baris Subtotal sidebar**, **cari pelanggan ala F3** — ketiganya
+  permintaan pemilik 2026-10-04 di akhir section itu).
+* **Ditunda keputusan pemilik**: **pajak PPN 10% + service charge**
+  ("D pajak skip dulu", 2026-10-04) — butuh kolom/setting baru dan menyentuh
+  `POST /api/sales`, laporan, struk, invoice; harga baris bisa diedit kasir
+  (bertabrakan dengan "harga non-dinamis dikunci server").
+* **Di luar ruang lingkup toko ini** (dicatat, tidak dikerjakan): retur &
+  garansi, pengeluaran (kas keluar), supplier/pembelian (PO), Kas In/Out,
+  multi-cabang + transfer stok, payment gateway, notif struk WhatsApp,
+  member/poin.
 
 ## Selesai (ringkas)
 
+- [x] 2026-10-04 **Form bayar (modal) + Bayar pas di side panel + uang
+      kurang = HUTANG** (permintaan pemilik putaran 5–6: "pindahkan ke modal
+      ketika klik bayar" lalu "bayar uang pas letakkan di sidepanel bawahnya
+      Bayar F10 … kalau uang kurang jadi Hutang dengan catatan harus ada
+      customer yang terpilih dan tidak boleh customer default/umum"):
+      * **Side panel** kini hanya berisi **Bayar F10** (`#pos-bayar`, buka
+        form) dan **tepat di bawahnya Bayar pas hijau F12** (`#pos-pay-pas`)
+        — sekali ketuk, tanpa modal.
+      * **Form bayar = modal** (`bukaBayar()`/`formBayarHtml()`): total
+        tagihan, metode `data-pay`, `#pos-cash` + chip `data-cash`,
+        kembalian, petunjuk hutang; **OK modal = `#pos-pay`** (Enter/F2/F10
+        satu aksi). Isian lama dipindah utuh — id & selector tidak berubah.
+      * **Uang kurang -> hutang**: `pay()` menawarkan `confirmDialog`
+        bila `cekHutangDiperbolehkan()` lolos (ada pelanggan terpilih, bukan
+        "Pelanggan Umum"/`CUS-000001`) -> `pay({hutang:true})` melewati
+        barrier -> penjualan + `POST /api/customer-debts` `type=charge`,
+        `note: 'Nota <invoice_no> — sisa bayar POS'`; gagal ledger = nota
+        tetap sukses + toast penunjuk halaman Hutang. Tidak lolos syarat =
+        penolakan barrier lama **persis** (pesan + fokus kolom uang) —
+        teruji barrier lama di section F tetap hijau.
+      * Struk memuat baris **Hutang** bila sisa > 0; **guard pintasan swal**
+        (dialog konfirmasi cetak/hutang menahan F-key, sebab `.modal-overlay`
+        bisa menemukan form bayar di bawah swal — tanpa ini F12 membayar
+        lewat belakang konfirmasi).
+      * Pintasan baru **F8** (fokus kolom scan), **F10** (buka form bayar),
+        **F12** (bayar pas) — rujukan help.aronium.com.
+      * Test: `tests/e2e-struk.mjs` **83 -> 99 asersi** (section J baru:
+        posisi Bayar pas, bayar tanpa form, penolakan pelanggan Umum,
+        dialog konfirmasi, ledger charge = sisa, nota invoice, bersih-bersih)
+        + `tests/e2e-multisatuan.mjs` menyesuaikan alur form; total suite
+        **877 assertion SEMUA HIJAU** (`tests/run.mjs` ekspek 83 -> 99);
+        tsc + `npm run build -w apps/web` lolos. Docs: AGENTS §2 + §3
+        (customer-debts punya pelanggan kedua = POS), README, skill
+        `frontend-pos` pola #8/#9, header pos.ts.
+      * **Catatan DB dev**: pelanggan uji `UjiHutang POS E2E` tidak bisa
+        dihapus (FK `sales.customer_id`) — dipakai ulang tiap run, ledger
+        dibersihkan tiap run.
+
+- [x] 2026-10-04 **Input cepat ala KulaPOS: `Qty*Kode`, navigasi ↑↓ baris,
+      pintasan F7 Tahan** (hasil gap analysis, blok C) — `bacaQtyKode()`
+      memparse `3*PRD00001` / `2 * aqua` di kolom scan (qty eksplisit menang
+      atas chip Qty/F4 tetapi TIDAK mengosongkan preset itu; qty 0 ditolak
+      "Qty minimal 1"; kode tak dikenal -> pesan "tidak ditemukan"; tanpa
+      tanda `*` perilaku scan lama utuh; placeholder kolom scan ikut
+      mengumumkannya), `pindahBarisKeranjang()` ↑↓ selama fokus di dalam
+      `#pos-rows` (baris catatan dilewati, input catatan dikecualikan karena
+      panah = kursor, clamp di ujung; panah kolom scan tetap milik dropdown),
+      **F7** = Tahan (F2/F3 sudah terpakai Bayar/Layar cari) + label `<kbd>F7>`
+      di tombolnya. Test baru **`tests/pos-qtykode-test.mjs` 24 asersi**
+      (terdaftar `tests/run.mjs`; total suite kini **861 assertion**), docs:
+      AGENTS §2 + README + header pos.ts.
 - [x] 2026-10-04 **Info bar: 3 kolom SAMA RATA** (permintaan pemilik "buat
       kolomnya sama rata, jangan lebar di tengah, belum sama rata ukuran
       kolomnya"): grid `lg:grid-cols-[auto_1fr_auto]` → **`lg:grid-cols-3`**
@@ -192,3 +292,33 @@ payment modal terpusat.
       butuh diskusi kontrak `POST /api/sales`) dan **Cetak ulang** (ulang
       struk nota terakhir?) saat ini `data-soon` → toast "menyusul"
       (permintaan pemilik "placeholder/hardcode dulu tidak apa-apa").
+- [ ] **Tutup shift dari dalam POS** (sisa gap analysis) — KulaPOS punya
+      tombol merah "Tutup Sesi Kas" di header POS; shell Ravaa sengaja tanpa
+      menu, jadi kasir harus keluar ke `#/shifts` (halaman Shift Kasir sudah
+      punya dialog tutup + rumus expected-cash). Butuh keputusan bentuk:
+      tombol di info bar / sidebar, atau sekadar tautan.
+- [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
+      KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
+      memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah
+      satuan kini = hapus baris + scan ulang. Butuh keputusan UI (chip
+      satuan per baris vs dialog) — jangan disentuh tanpa itu.
+- [ ] **Hapus duplikat "Item manual"** (permintaan pemilik 2026-10-04) —
+      tombol itu muncul **DUA kali**: di scan bar (`#pos-manual`, tetap) dan
+      lagi di grid **Aksi cepat** sidebar (`#pos-qa-manual`, dipanggil
+      `bindCart()` pos.ts) → **yang di Aksi cepat dihapus** (redundan);
+      pasangannya di `pos.ts` (render `cartGridHtml` + listener) ikut
+      dibuang, bukan hanya tombolnya.
+- [ ] **Hapus baris "Subtotal" di sidebar** (permintaan pemilik 2026-10-04) —
+      `<span id="pos-subtotal">` + baris flex-nya di `cartGridHtml()` dihapus;
+      angka subtotal tetap hidup di ringkasan struk/laporan, jadi tidak ada
+      sumber data yang hilang. `paintCart()` yang menulis `#pos-subtotal`
+      ikut dibersihkan supaya tidak jadi query mati.
+- [ ] **Pelanggan bisa dicari seperti cari produk F3** (permintaan pemilik
+      2026-10-04) — `<select id="pos-customer">` sudah memuat master
+      (`GET /api/customers`) tapi daftarnya makin panjang (banyak kontak
+      supplier/pembeli) dan kasir harus men-scroll; ganti jadi pencarian
+      multi-kata seperti layar cari produk (**F3**) — pola `openCariProduk()`
+      di `pos.ts` (input + listbox + ↑↓ + Enter) atau dropdown hasil cari di
+      samping select. `customer_id` yang terpilih tetap dikirim `pay()`
+      seperti sekarang (server yang men-SNAPSHOT `customer_name`), jadi ini
+      **murni UI** — tidak menyentuh kontrak API.

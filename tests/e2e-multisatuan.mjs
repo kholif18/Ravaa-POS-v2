@@ -152,6 +152,10 @@ try {
   // qty pack jadi 2 lewat tombol + (satu ketukan, tanpa fokus input angka)
   await page.click(`#pos-rows tr[data-key="${PID}:pack"] button[data-act="inc"]`);
   await page.waitForTimeout(150);
+  // Form bayar = MODAL (permintaan pemilik 2026-10-04) — buka dulu lewat
+  // tombol Bayar sidebar, baru isian uang di dalamnya bisa diisi.
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
   await page.fill('#pos-cash', '200000');
   await page.click('#pos-pay');
   await page.waitForFunction(
