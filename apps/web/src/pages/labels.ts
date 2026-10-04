@@ -121,7 +121,7 @@ function alatHtml(): string {
 
     <div class="rounded-lg bg-gray-50 p-2.5 text-xs dark:bg-gray-800/60">
       <p class="text-gray-500 dark:text-gray-400">Label terpilih</p>
-      <p class="text-lg font-semibold tabular-nums text-gray-900 dark:text-white">${n}</p>
+      <p class="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">${n}</p>
       ${diLuar > 0 ? `<p class="mt-0.5 text-amber-600 dark:text-amber-400">${diLuar} di luar filter sekarang (ikut tercetak)</p>` : ''}
     </div>
 
@@ -140,7 +140,7 @@ function alatHtml(): string {
 function gridHtml(): string {
   const list = tampil();
   if (state.loading) {
-    return `<div class="space-y-3 p-4"><div class="skel"></div><div class="skel w-5/6"></div><div class="skel w-2/3"></div></div>`;
+    return `<div class="space-y-3 p-3"><div class="skel"></div><div class="skel w-5/6"></div><div class="skel w-2/3"></div></div>`;
   }
   if (state.error && !state.products.length) {
     return `<div class="empty">${icon('alert')}<span>Gagal memuat produk: ${esc(state.error)}</span></div>`;
@@ -152,7 +152,7 @@ function gridHtml(): string {
         : 'Belum ada produk berharga tetap untuk dicetak labelnya.'
     }</span></div>`;
   }
-  return `<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+  return `<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
     ${list
       .map((p) => {
         const on = state.pilih.has(p.id);
@@ -180,7 +180,7 @@ function paint(): void {
 
   const n = dipilih().length;
   host.innerHTML = `
-    <div class="flex flex-col gap-4 lg:h-full lg:min-h-0 lg:flex-row lg:items-stretch">
+    <div class="flex flex-col gap-3 lg:h-full lg:min-h-0 lg:flex-row lg:items-stretch">
       <aside class="card w-full shrink-0 space-y-3 !p-3 lg:w-[20%] lg:min-w-[228px] lg:max-w-[320px] lg:self-start lg:overflow-y-auto">
         ${alatHtml()}
       </aside>

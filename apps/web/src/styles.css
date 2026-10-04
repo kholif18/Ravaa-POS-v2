@@ -7,6 +7,25 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
+  /* ---------- Skala teks SUPER-COMPACT (permintaan pemilik 2026-10-04) ----------
+     Acuan: KulaPOS + RPOS (`Modules/`), di mana body ≈13px, tabel ≈13px, label/th
+     ≈11px. Nilai bawaan Tailwind (xs 12 / sm 14 / base 16 / lg 18 / xl 20 /
+     2xl 24 / 3xl 30) sudah dipakai mode compact sebelumnya, tapi pemilik menilai
+     masih "terlalu besar" — jadi SELURUH tangga diturunkan satu tingkat di SATU
+     tempat ini. Dampak otomatis ke ±90 pemakaian `text-xs` + ±89 `text-sm` di
+     semua halaman tanpa menyentuh template (th tabel, label, badge, chip, hint
+     ikut 11px; body/isi tabel/tombol ikut 13px).
+     Line-height bawaan Tailwind berupa RATIO unitless (calc(1.25/0.875) dst) —
+     ikut mengecil mengikuti font-size-nya, jadi TIDAK perlu dioverride.
+     Batas: teks apapun jangan turun di bawah 10px (masih terbaca di kasir HP);
+     angka penting (total, kembalian, stok) memakai text-sm = 13px + font-bold. */
+  --text-xs: 0.6875rem; /* 11px — label, th tabel, badge, chip, hint, sub-SKU */
+  --text-sm: 0.8125rem; /* 13px — teks umum, body, isi tabel, tombol (default app) */
+  --text-base: 0.875rem; /* 14px */
+  --text-lg: 0.9375rem; /* 15px */
+  --text-xl: 1.0625rem; /* 17px */
+  --text-2xl: 1.25rem; /* 20px — hanya untuk aksen langka (mis. total besar bila dipakai) */
+  --text-3xl: 1.5rem; /* 24px */
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --color-primary: #0087ff;
   --color-primary-hover: #0070dd;
@@ -66,13 +85,16 @@
     @apply flex min-w-0 flex-1 flex-col transition-[margin] duration-300 ease-out lg:ml-64;
   }
   .app-header {
-    @apply sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4 dark:border-gray-700 dark:bg-gray-800 sm:px-6;
+    /* Compact ala KulaPOS (permintaan pemilik 2026-10-04): header 64 -> 48 -> 44px
+       (h-11), px-4/sm:px-6 -> px-3/sm:px-4. Judul+sub kini text-sm/text-xs =
+       13/11px (±34px) jadi tetap muat di 44px tanpa memotong. */
+    @apply sticky top-0 z-30 flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3 dark:border-gray-700 dark:bg-gray-800 sm:px-4;
   }
   .page {
-    @apply flex-1 overflow-y-auto p-4 sm:p-6;
+    @apply flex-1 overflow-y-auto p-2.5 sm:p-3;
   }
   .page-title {
-    @apply truncate text-lg font-semibold text-gray-900 dark:text-white;
+    @apply truncate text-sm font-semibold text-gray-900 dark:text-white;
   }
   .page-sub {
     @apply truncate text-xs text-gray-500 dark:text-gray-400;
@@ -102,7 +124,7 @@
     @apply hidden max-w-24 truncate text-sm font-medium text-gray-700 sm:block dark:text-gray-200;
   }
   .avatar {
-    @apply inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold uppercase text-white;
+    @apply inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold uppercase text-white;
   }
   .avatar-lg {
     @apply size-11 text-sm;
@@ -133,7 +155,7 @@
     @apply my-1 border-t border-gray-200 dark:border-gray-700;
   }
   .dd-item {
-    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700;
+    @apply flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700;
   }
   .dd-item > svg {
     @apply size-4 shrink-0 text-gray-500 dark:text-gray-400;
@@ -147,47 +169,48 @@
 
   /* Sidebar nav (TailAdmin) */
   .brand {
-    @apply flex h-16 shrink-0 items-center gap-3 border-b border-white/10 px-5;
+    @apply flex h-11 shrink-0 items-center gap-2 border-b border-white/10 px-3;
   }
   .brand-logo {
-    @apply size-9 shrink-0 rounded-xl object-cover;
+    @apply size-7 shrink-0 rounded-xl object-cover;
   }
   .nav-scroll {
-    @apply flex-1 overflow-y-auto px-3 py-5;
+    @apply flex-1 overflow-y-auto px-2.5 py-2;
   }
   .nav-title {
-    @apply mb-2 px-3 text-xs font-semibold tracking-wider text-sidebar-text/60 uppercase;
+    @apply mb-0.5 px-2.5 text-xs font-semibold tracking-wider text-sidebar-text/60 uppercase;
   }
   .nav-link {
-    @apply mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-sidebar-hover hover:text-white;
+    @apply mb-0.5 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors hover:bg-sidebar-hover hover:text-white;
   }
   .nav-link.is-active {
     @apply bg-sidebar-active text-white;
   }
   .nav-link svg {
-    @apply size-5 shrink-0;
+    @apply size-4 shrink-0;
   }
   .nav-label {
     @apply truncate;
   }
   .sidebar-foot {
-    @apply shrink-0 border-t border-white/10 p-3;
+    @apply shrink-0 border-t border-white/10 p-2.5;
   }
 
   /* Kontrol & komponen dasar */
   .icon-btn {
-    @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700;
+    @apply inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700;
   }
   .icon-btn svg {
-    @apply size-5;
+    @apply size-4;
   }
   .btn {
-    /* min-h-[42px] WAJIB: tombol ber-label = 42px, tapi tombol yang hanya
-       berisi ikon (label `hidden sm:inline` lenyap di HP) tingginya 38px, dan
-       tombol tanpa border (btn-primary) 40px. Tanpa batas ini satu baris toolbar
-       bisa campur 38/40/42px, plus 38px di bawah target sentuh 40px.
-       42px = tinggi .input, jadi search, filter, dan tombol aksi sebaris seragam. */
-    @apply inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition;
+    /* Compact super (2026-10-04): 42 -> 38 -> 34px (min-h + py-1.5), sebaris
+       dengan .input. 34px = keputusan mode compact penuh atas target sentuh
+       40px — pemilik memilih kepadatan ala KulaPOS. Tombol KONFIRMASI swal
+       tetap min-h-10 (40px, dijaga test satuan-test.mjs); tombol aksi utama
+       POS (#pos-pay/#tp-submit) tetap memakai !py-3 (±44px) via kelas di
+       template — jangan ubah min-h di sini tanpa memeriksa keduanya. */
+    @apply inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold transition;
   }
   .btn svg {
     @apply size-4;
@@ -214,10 +237,13 @@
     @apply border-primary bg-primary-soft text-primary dark:border-primary dark:bg-primary/15 dark:text-primary;
   }
   .card {
-    @apply rounded-2xl border border-gray-200 bg-white p-5 shadow-xs dark:border-gray-700 dark:bg-gray-800;
+    @apply rounded-2xl border border-gray-200 bg-white p-3 shadow-xs dark:border-gray-700 dark:bg-gray-800;
   }
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300;
+    /* py-1 (±26px), BUKAN py-0.5: chip dipakai sebagai TOMBOL di POS (metode
+       bayar + nominal cepat), jadi tetap butuh badan yang bisa disentuh —
+       yang dikecilkan adalah teksnya (text-xs = 11px), bukan tingginya. */
+    @apply inline-flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300;
   }
   /* Ikon di dalam chip harus DIPEGANG ukurannya: `icon()` sengaja tidak
      menulis width/height (diatur CSS wadah — lihat komentar .strip-low svg),
@@ -226,6 +252,14 @@
      kasir" di POS jadi 40–90px tingginya. Pola yang sama dengan .btn svg,
      .row-btn svg, dan .strip-low svg. */
   .chip svg {
+    @apply size-4 shrink-0;
+  }
+  /* Ikon label di info bar POS (Waktu/Kasir) — pola .chip svg yang sama:
+     `icon()` sengaja tidak menulis width/height (kebijakan repo, dikontrol
+     CSS wadah), jadi tanpa aturan ini svg melebar mengikuti kontainer fleks
+     dan jam/label jadi 40px+. Terbukti 2026-10-04: ikon clock raksasa di
+     info bar kasir. */
+  .info-bar svg {
     @apply size-4 shrink-0;
   }
   .skel {
@@ -264,9 +298,9 @@
 .swal2-container {
   --swal2-width: 24rem;
   --swal2-padding: 0 0 1.125em;
-  --swal2-title-padding: 0.75em 1.25em 0;
+  --swal2-title-padding: 0.5em 1.25em 0;
   --swal2-html-container-padding: 0.4em 1.5em 0.25em;
-  --swal2-actions-margin: 1.125em auto 0;
+  --swal2-actions-margin: 0.875em auto 0;
   --swal2-border-radius: 1rem;
   --swal2-background: #fff;
   --swal2-color: #71717a;
@@ -285,23 +319,28 @@
 .swal2-container.swal2-backdrop-show {
   backdrop-filter: blur(4px);
 }
-/* Ikon 80 -> 56px. Yang diskalakan adalah font-size, BUKAN hanya box-nya:
+/* Ikon 80 -> 56 -> 50 -> 45px (super-compact 2026-10-04: font-size 0.7 ->
+   0.625 -> 0.5625rem; glyph ikon = 3.75em terhadap nilai ini, jadi "!"
+   42 -> 37.5 -> 33.75px — tetap piktogram, bukan teks). Yang diskalakan adalah font-size, BUKAN hanya box-nya:
    geometri ikon (mis. garis X pada ikon error dihitung `top: 2.3125em`)
    diukur dalam em terhadap font-size ikon, jadi mengecilkan lebar/tinggi
    saja akan membuat isinya meluber keluar lingkaran. */
 .swal2-container .swal2-popup .swal2-icon {
-  font-size: 0.7rem;
-  margin-top: 1.75em;
+  font-size: 0.5625rem;
+  margin-top: 1.25em;
 }
-/* Judul 30 -> 18px. Warna ditetapkan eksplisit: .swal2-title mewarisi
+/* Judul 30 -> 18 -> 14 -> 13px (super-compact 2026-10-04: kini seukuran
+   body agar dialog ikut skala global — hierarki vs isi dibangun font-weight
+   600 + warna #18181b, bukan ukuran).
+   Warna ditetapkan eksplisit: .swal2-title mewarisi
    --swal2-color, dan var itu sekarang memakai teks muted milik kita. */
 .swal2-container .swal2-popup .swal2-title {
-  font-size: 1.125em;
+  font-size: 0.8125em;
   color: #18181b;
 }
-/* Isi 16 -> 14px (setara .modal-body yang memakai text-sm). */
+/* Isi 16 -> 14 -> 13px (setara .modal-body yang kini text-sm = 13px). */
 .swal2-container .swal2-popup .swal2-html-container {
-  font-size: 0.875em;
+  font-size: 0.8125em;
 }
 /* .modal memakai rounded-2xl + shadow-xl; popup ikut sama supaya rasa
    dialognya satu keluarga (token radius/ shadow yang sudah ada — bukan baru). */
@@ -351,14 +390,25 @@
   .card-flush {
     @apply overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs dark:border-gray-700 dark:bg-gray-800;
   }
+  /* `relative` (audit compact 2026-10-04): elemen absolute di dalam tabel
+     (mis. `.sr-only` di th kolom Rincian di Riwayat) punya containing block
+     ICB bila tidak ada ancestor positioned — overflow-x-auto TIDAK memotong
+     mereka (aturan CSS2.1 §11.1.1), jadi kotak 1px-nya ikut menggeser
+     documentElement.scrollWidth (terbukti: 721px di layar 356px). Dengan
+     relative, containing block = .table-wrap -> ikut area scroll tabel,
+     bukan halaman. Menu baris (.row-more) pakai position fixed, jadi tidak
+     ikut terpotong — lihat komentar .row-more di bawah. */
   .table-wrap {
-    @apply w-full overflow-x-auto;
+    @apply relative w-full overflow-x-auto;
   }
   .table {
     @apply w-full min-w-[720px] border-collapse text-left text-sm;
   }
+  /* Compact super (2026-10-04): padding baris 16/12 -> 12/8 -> 10/6px.
+      Font .th ikut skala global text-xs = 11px (dulu 12px) — guard
+      satuan-test.mjs §header sudah disesuaikan ke 11px secara sadar. */
   .th {
-    @apply border-b border-gray-200 bg-gray-50 px-4 py-3 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400;
+    @apply border-b border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400;
   }
   /* Header tabel yang nempel di atas area scroll (halaman Produk).
      WAJIB latar opaque: .th dark mode pakai gray-900/40 (transparan), jadi
@@ -391,7 +441,7 @@
     @apply lg:min-h-0 lg:flex-1 lg:overflow-y-auto;
   }
   .td {
-    @apply border-b border-gray-100 px-4 py-3 align-middle text-gray-700 dark:border-gray-700/60 dark:text-gray-300;
+    @apply border-b border-gray-100 px-2.5 py-1.5 align-middle text-gray-700 dark:border-gray-700/60 dark:text-gray-300;
   }
   .tr:hover {
     @apply bg-gray-50 dark:bg-gray-900/30;
@@ -407,32 +457,29 @@
   }
 
   /* Tabel padat (halaman Produk & Stok): padding baris dipangkas supaya lebih
-     banyak baris muat tanpa scroll. Hanya JARAK yang diubah — ukuran teks
-     tetap 14px/12px, jadi batas minimal 13px untuk info penting tidak dilanggar.
-     Specificity `.table-compact th` (0,1,1) menang atas `.th` (0,1,0) yang juga
-     berada di @layer components, jadi urutan deklarasi tidak jadi penentu. */
+     banyak baris muat tanpa scroll. Ukuran teks mengikuti skala global
+     (13px isi / 11px header — super-compact 2026-10-04). */
   .table-compact th {
-    @apply px-3 py-2;
+    @apply px-2.5 py-1.5;
   }
   .table-compact td {
-    @apply px-3 py-1.5;
+    @apply px-2.5 py-1;
   }
-
   /* Keranjang POS (#pos-cart): padatkan SEKALI LAGI dari .table-compact
-     (permintaan pemilik 2026-10-03 "lebih compactkan lagi"). Hanya JARAK
-     yang dipangkas — teks tetap 14px (nama) / 12px (SKU), tombol stepper
-     tetap 32px, jadi batas sentuh & minimal 13px tidak dilanggar.
+     (permintaan pemilik 2026-10-03 "lebih compactkan lagi", 2026-10-04
+     super-compact). Teks kini mengikuti skala global: nama 13px /
+     sub-SKU 11px; stepper tetap 32px.
      Specificity `#pos-cart td` (1,0,1) menang atas `.table-compact td`
      (0,1,1); td baris catatan .note-row (tanpa class) ikut kena aturan ini,
-     termasuk padding kiri/kanan 12px-nya. */
+     termasuk padding kiri/kanannya. */
   #pos-cart th {
-    @apply px-3 py-1.5;
+    @apply px-2.5 py-1;
   }
   #pos-cart td {
-    @apply px-3 py-0.5;
+    @apply px-2 py-0.5;
   }
   /* Baris item nama + SKU: rapatkan line-height antar dua teks tanpa
-     mengecilkan font — sub-SKU tetap 12px terbaca. */
+     mengecilkan font — sub-SKU (text-xs = 11px) tetap terbaca. */
   #pos-cart .cell-strong {
     @apply leading-tight;
   }
@@ -508,10 +555,15 @@
     @apply text-xs font-semibold text-gray-600 dark:text-gray-400;
   }
   .input {
-    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/25 dark:border-gray-600 dark:bg-gray-900 dark:text-white;
+    /* py-2.5 -> py-2 -> py-1.5: tinggi 42 -> 38 -> ±34px, sebaris dengan .btn
+       super-compact (2026-10-04). px-3 -> px-2.5. */
+    @apply w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/25 dark:border-gray-600 dark:bg-gray-900 dark:text-white;
   }
   .input-sm {
-    @apply py-2;
+    /* py-1.25 (±31px): varian lebih pendek dari .input (33px) untuk toolbar
+       & form padat, tapi tidak sampai 29px — badan input form di HP harus
+       tetap terasa sebagai kotak isian. */
+    @apply py-1.25;
   }
   .search-wrap {
     @apply relative min-w-[200px] flex-1;
@@ -529,7 +581,7 @@
     @apply absolute top-full right-0 left-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800;
   }
   .suggest-item {
-    @apply flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left transition;
+    @apply flex w-full cursor-pointer items-center gap-2 px-2.5 py-1 text-left transition;
   }
   .suggest-item:hover,
   .suggest-item.is-active {
@@ -539,7 +591,7 @@
      Baris utama = satuan dasar; chip = pack/dus/dsb. Sengaja TIDAK diberi
      pemisah antar grup supaya tampilan produk tanpa chip tidak berubah. */
   .suggest-units {
-    @apply flex flex-wrap gap-1.5 px-3 pb-2;
+    @apply flex flex-wrap gap-1.5 px-2.5 pb-1.5;
   }
   .suggest-unit {
     @apply cursor-pointer rounded-full border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-600 transition hover:border-primary hover:text-primary dark:border-gray-600 dark:text-gray-300 dark:hover:border-primary dark:hover:text-primary;
@@ -549,7 +601,7 @@
     @apply space-y-1;
   }
   .side-item {
-    @apply flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/60 dark:hover:text-white;
+    @apply flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-700/60 dark:hover:text-white;
   }
   .side-item.is-active {
     @apply bg-primary-soft text-primary dark:bg-primary/15 dark:text-primary;
@@ -620,16 +672,16 @@
   }
 
   .badge-ok {
-    @apply inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400;
+    @apply inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400;
   }
   .badge-low {
-    @apply inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400;
+    @apply inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400;
   }
   .badge-off {
-    @apply inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-500 dark:bg-gray-700 dark:text-gray-300;
+    @apply inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500 dark:bg-gray-700 dark:text-gray-300;
   }
   .badge-dyn {
-    @apply inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary dark:bg-primary/15 dark:text-primary;
+    @apply inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-primary dark:bg-primary/15 dark:text-primary;
   }
 
   /* Strip "N produk stok menipis" di layar POS. `icon()` sengaja TIDAK
@@ -640,7 +692,7 @@
   }
 
   .modal-overlay {
-    @apply fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm;
+    @apply fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/50 p-3 backdrop-blur-sm;
   }
   .modal-overlay.is-open {
     @apply flex;
@@ -724,22 +776,22 @@
     @apply max-w-5xl;
   }
   .modal-header {
-    @apply flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700;
+    @apply flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-2.5 py-2 dark:border-gray-700;
   }
   /* min-h-0 WAJIB: flex-1 tanpa min-h-0 menolak diperkecil, body tidak pernah
      scroll dan isinya terpotong di balik footer. */
   .modal-body {
-    @apply min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3;
+    @apply min-h-0 flex-1 space-y-2 overflow-y-auto px-2.5 py-2;
   }
   .modal-footer {
-    @apply flex shrink-0 justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700;
+    @apply flex shrink-0 justify-end gap-2 border-t border-gray-200 px-2.5 py-2 dark:border-gray-700;
   }
 
   .toast-root {
     @apply pointer-events-none fixed inset-x-0 bottom-0 z-60 flex flex-col items-center gap-2 p-4 sm:inset-x-auto sm:right-0 sm:items-end;
   }
   .toast {
-    @apply pointer-events-auto flex w-full max-w-sm items-center gap-2.5 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100;
+    @apply pointer-events-auto flex w-full max-w-sm items-center gap-2 rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-sm font-medium text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100;
   }
   .toast .tdot {
     @apply size-2 shrink-0 rounded-full;
@@ -757,7 +809,7 @@
     @apply bg-primary;
   }
   .empty {
-    @apply flex flex-col items-center gap-2 px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400;
+    @apply flex flex-col items-center gap-2 px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400;
   }
   /* Ikon empty-state harus DIPEGANG ukurannya: `icon()` sengaja tidak menulis
      width/height (kebijakan repo — dikontrol CSS wadah, lihat komentar

@@ -159,7 +159,7 @@ try {
     { timeout: 15000 },
   );
   ok('penjualan sukses (toast Terjual)', true);
-  // Dialog pilihan cetak [Thermal] [A4] [Tidak] muncul setelah bayar (auto-print
+  // Dialog pilihan cetak [Thermal] [A4] [Selesai] muncul setelah bayar (auto-print
   // bawaan nyala). Wajib diklik — struk section D baru terkirim setelah tombol
   // Thermal ditekan; tanpa ini overlay swal juga menutupi sisa alur test.
   await page.waitForSelector('.swal2-popup', { timeout: 8000 });

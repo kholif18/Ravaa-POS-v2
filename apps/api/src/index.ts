@@ -142,6 +142,227 @@ app.delete('/api/units/:slug', (c) => {
   return c.json({ data: { slug } });
 });
 
+/* ---------- Pelanggan & hutang (piutang) — baru 2026-10-04 ---------- */
+// Halaman #/customers (master kontak) dan #/debts (ledger charge/payment).
+// Prinsip: saldo TIDAK PERNAH disimpan sebagai angka — sisa selalu dihitung
+// `SUM(charge) - SUM(payment)` saat dibaca, supaya hapus 1 baris mutasi tidak
+// meninggalkan angka basi. Baca juga AGENTS.md §3 (kontrak endpoint ini).
+
+app.get('/api/customers', (c) => {
+  const q = (c.req.query('q') ?? '').trim();
+  // Filter multi-kata (pola search produk): SEMUA kata harus cocok di
+  // name/phone/note — tidak harus di field atau urutan yang sama.
+  const kata = q.split(/\s+/).filter(Boolean);
+  const conds = kata.map(() => "(lower(c.name) LIKE ? OR c.phone LIKE ? OR lower(c.note) LIKE ?)");
+  const params: unknown[] = [];
+  for (const k of kata) {
+    const like = `%${k.toLowerCase()}%`;
+    params.push(like, `%${k}%`, like);
+  }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const rows = db
+    .prepare(
+      `SELECT c.* FROM customers c ${where} ORDER BY c.name COLLATE NOCASE, c.id`,
+    )
+    .all(...params);
+  const total = (db.prepare('SELECT COUNT(*) AS n FROM customers').get() as { n: number }).n;
+  return c.json({ data: rows, total });
+});
+
+// Tambah / ubah pelanggan. `id` dikirim = update (200), tanpa id = baru (201).
+// Sengaja TIDAK upsert by phone: dua orang bisa berbagi nomor (keluarga/toko).
+//
+// Nomor urut OTOMATIS (revisi pemilik 2026-10-04): `CUS-000001` = no customer,
+// `SUP-000001` = no supplier (master supplier belum ada — nomornya disimpan di
+// kontak dulu, halaman Supplier menyusul). Diambil dari baris terbesar lewat
+// CAST (pola invoice_no): BUKAN COUNT, jadi celah nomor tidak pernah dipakai
+// ulang. Baris lama yang masih kosong diisi saat pertama disimpan ulang.
+// `pref` SUDAH termasuk tanda '-' — posisi substr/slice dihitung dari panjang
+// prefiks penuh ('CUS-' = 4 -> substr posisi 5 / slice(4) = angkanya saja).
+// Tanpa dash di pref, CAST membaca '-000001' -> -1 untuk semua baris dan nomor
+// selalu kembali ke 000002 (bug yang sempat membuat nomor dobel).
+function nomorUrutPelanggan(kolom: 'code' | 'supplier_no', pref: 'CUS-' | 'SUP-'): string {
+  const last = db
+    .prepare(
+      `SELECT ${kolom} AS n FROM customers
+        WHERE ${kolom} LIKE ? || '%'
+        ORDER BY CAST(substr(${kolom}, ?) AS INTEGER) DESC LIMIT 1`,
+    )
+    .get(pref, pref.length + 1) as { n: string } | undefined;
+  const urut = last ? Number(last.n.slice(pref.length)) + 1 : 1;
+  return `${pref}${String(urut).padStart(6, '0')}`;
+}
+
+app.post('/api/customers', async (c) => {
+  try {
+    const body = await c.req.json();
+    const name = String(body?.name ?? '').trim();
+    const phone = String(body?.phone ?? '').trim();
+    const address = String(body?.address ?? '').trim();
+    const note = String(body?.note ?? '').trim();
+    if (!name) return c.json({ error: 'nama pelanggan wajib diisi' }, 400);
+    const id = body?.id === undefined || body?.id === null || body?.id === '' ? null : Number(body.id);
+    if (id !== null && !Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+    const codeBaru = nomorUrutPelanggan('code', 'CUS-');
+    const supBaru = nomorUrutPelanggan('supplier_no', 'SUP-');
+    if (id !== null) {
+      const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(id) as { id: number } | undefined;
+      if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
+      // Nomor lama DIPERTAHANKAN; hanya baris yang belum bernomor (dibuat sebelum
+      // fitur ini) yang diisi sekarang — nomor tidak boleh berubah begitu terbit.
+      const row = db
+        .prepare(
+          `UPDATE customers SET name = ?, phone = ?, address = ?, note = ?,
+             code = CASE WHEN code = '' THEN ? ELSE code END,
+             supplier_no = CASE WHEN supplier_no = '' THEN ? ELSE supplier_no END,
+             updated_at = datetime('now')
+           WHERE id = ? RETURNING *`,
+        )
+        .get(name, phone, address, note, codeBaru, supBaru, id);
+      return c.json({ data: row }, 200);
+    }
+    const row = db
+      .prepare(
+        `INSERT INTO customers (code, supplier_no, name, phone, address, note)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(codeBaru, supBaru, name, phone, address, note);
+    return c.json({ data: row }, 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pelanggan' }, 400);
+  }
+});
+
+// Hapus pelanggan — DITOLAK bila masih punya catatan hutang (riwayat harus
+// utuh, pola yang sama dengan hapus produk yang pernah terjual).
+app.delete('/api/customers/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(id) as { id: number } | undefined;
+  if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
+  const n = db.prepare('SELECT COUNT(*) AS n FROM customer_debts WHERE customer_id = ?').get(id) as { n: number };
+  if (n.n > 0) {
+    return c.json(
+      { error: `pelanggan ini masih punya ${n.n} catatan hutang — hapus catatannya dulu di halaman Hutang` },
+      400,
+    );
+  }
+  db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+  return c.json({ data: { id, deleted: true } });
+});
+
+// Ringkasan saldo hutang per pelanggan (tabel utama halaman #/debts).
+// `status` default 'open' = hanya yang sisa > 0; 'semua' menampilkan juga
+// riwayat yang sudah lunas (sisa 0). Urutan: sisa terbesar dulu.
+app.get('/api/customer-debts', (c) => {
+  const status = c.req.query('status') ?? 'open';
+  if (!['open', 'semua'].includes(status)) {
+    return c.json({ error: `status harus open|semua (dapat: ${status})` }, 400);
+  }
+  const having = status === 'semua' ? '' : 'HAVING sisa > 0';
+  const rows = db
+    .prepare(
+      `SELECT c.id AS customer_id, c.name, c.phone,
+              COALESCE(SUM(CASE WHEN d.type = 'charge'  THEN d.amount END), 0) AS charge,
+              COALESCE(SUM(CASE WHEN d.type = 'payment' THEN d.amount END), 0) AS bayar,
+              COALESCE(SUM(CASE WHEN d.type = 'charge'  THEN d.amount
+                                ELSE -d.amount END), 0) AS sisa,
+              MAX(d.created_at) AS terakhir
+         FROM customers c
+         JOIN customer_debts d ON d.customer_id = c.id
+        GROUP BY c.id
+       ${having}
+        ORDER BY sisa DESC, terakhir DESC, c.id`,
+    )
+    .all() as { customer_id: number; name: string; phone: string; charge: number; bayar: number; sisa: number; terakhir: string | null }[];
+  const totalSisa = rows.reduce((s, r) => s + r.sisa, 0);
+  return c.json({ data: rows, total: totalSisa });
+});
+
+// Rincian ledger satu pelanggan: baris mutasi + saldo berjalan per baris.
+// Urutan tampil terbaru di atas (DESC); saldo berjalan dihitung dari yang
+// terlama dulu, lalu dibalik — supaya "sisa setelah baris ini" masuk akal.
+app.get('/api/customer-debts/:customerId', (c) => {
+  const customerId = Number(c.req.param('customerId'));
+  if (!Number.isInteger(customerId)) return c.json({ error: 'customer_id harus integer' }, 400);
+  const cust = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId) as
+    | { id: number; name: string; phone: string }
+    | undefined;
+  if (!cust) return c.json({ error: 'pelanggan tidak ada' }, 404);
+  const asc = db
+    .prepare('SELECT * FROM customer_debts WHERE customer_id = ? ORDER BY created_at, id')
+    .all(customerId) as { id: number; type: 'charge' | 'payment'; amount: number; note: string; created_at: string }[];
+  let jalan = 0;
+  const rows = asc.map((r) => {
+    jalan += r.type === 'charge' ? r.amount : -r.amount;
+    return { ...r, sisa: jalan };
+  });
+  rows.reverse();
+  const charge = asc.reduce((s, r) => s + (r.type === 'charge' ? r.amount : 0), 0);
+  const bayar = asc.reduce((s, r) => s + (r.type === 'payment' ? r.amount : 0), 0);
+  return c.json({
+    data: { customer: cust, rows, charge, bayar, sisa: charge - bayar },
+  });
+});
+
+// Catat mutasi hutang: type 'charge' = pelanggan berhutang, 'payment' = bayar.
+// Validasi pembayaran > sisa DITOLAK (400) — uang lebih dari utang memang tidak
+// ada; kalau suatu saat mau jadi saldo awal/kredit, keputusannya ke pemilik dulu.
+const simpanMutasiHutang = db.transaction(
+  (customerId: number, type: 'charge' | 'payment', amount: number, note: string) => {
+    if (type === 'payment') {
+      const s = db
+        .prepare(
+          `SELECT COALESCE(SUM(CASE WHEN type = 'charge' THEN amount ELSE -amount END), 0) AS sisa
+             FROM customer_debts WHERE customer_id = ?`,
+        )
+        .get(customerId) as { sisa: number };
+      if (amount > s.sisa) throw new Error(`pembayaran melebihi sisa hutang (sisa ${s.sisa})`);
+    }
+    return db
+      .prepare('INSERT INTO customer_debts (customer_id, type, amount, note) VALUES (?, ?, ?, ?) RETURNING *')
+      .get(customerId, type, amount, note);
+  },
+);
+
+app.post('/api/customer-debts', async (c) => {
+  try {
+    const body = await c.req.json();
+    const customerId = Number(body?.customer_id);
+    const type = String(body?.type ?? '');
+    const amount = Number(body?.amount);
+    const note = String(body?.note ?? '').trim();
+    if (!Number.isInteger(customerId)) return c.json({ error: 'customer_id harus integer' }, 400);
+    if (type !== 'charge' && type !== 'payment') return c.json({ error: 'type harus charge|payment' }, 400);
+    if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'amount harus angka > 0' }, 400);
+    if (!Number.isInteger(amount)) return c.json({ error: 'amount harus bilangan bulat rupiah' }, 400);
+    if (note.length > 200) return c.json({ error: `catatan terlalu panjang (maks 200 karakter)` }, 400);
+    const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId) as { id: number } | undefined;
+    if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
+    const row = simpanMutasiHutang(customerId, type, amount, note) as Record<string, unknown>;
+    return c.json({ data: row }, 201);
+  } catch (e) {
+    // Pesan "melebihi sisa" sengaja menyebut angka dalam rupiah polos dari
+    // throw di atas — format ulang biar konsisten dengan format server lain.
+    const m = e instanceof Error ? e.message : 'gagal mencatat hutang';
+    const melebihi = /^pembayaran melebihi sisa hutang \(sisa (\d+)\)$/.exec(m);
+    if (melebihi) return c.json({ error: `pembayaran melebihi sisa hutang (sisa Rp${melebihi[1]})` }, 400);
+    return c.json({ error: m }, 400);
+  }
+});
+
+// Hapus satu baris mutasi (salah ketik). Tidak butuh pengecekan sisa:
+// menghapus 'payment' memperbesar sisa, menghapus 'charge' memperkecil — dua-duanya
+// memang diinginkan saat membetulkan kesalahan input.
+app.delete('/api/customer-debts/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const ada = db.prepare('SELECT id FROM customer_debts WHERE id = ?').get(id) as { id: number } | undefined;
+  if (!ada) return c.json({ error: 'catatan hutang tidak ada' }, 404);
+  db.prepare('DELETE FROM customer_debts WHERE id = ?').run(id);
+  return c.json({ data: { id, deleted: true } });
+});
+
 // GET /api/products?since=<version>&category=<slug>&q=<teks>&status=<aktif|nonaktif|semua>
 // since   -> sinkronisasi inkremental master (client simpan maxVersion lokal)
 // status  -> default 'aktif' (WAJIB untuk kasir: produk nonaktif tak boleh muncul di POS).
@@ -730,7 +951,9 @@ app.get('/api/stock-moves', (c) => {
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM stock_moves sm ${where}`).get(...params) as { n: number }).n;
   const data = db.prepare(
     `SELECT sm.id, sm.created_at, sm.product_id, p.sku, p.name, sm.qty, sm.reason,
-            sm.ref_id, sm.unit_cost, sm.cashier
+            sm.ref_id,
+            (SELECT s.invoice_no FROM sales s WHERE s.id = sm.ref_id) AS ref_invoice,
+            sm.unit_cost, sm.cashier
        FROM stock_moves sm JOIN products p ON p.id = sm.product_id
        ${where}
       ORDER BY sm.created_at DESC, sm.id DESC
@@ -839,10 +1062,30 @@ app.post('/api/shifts/:id/close', async (c) => {
 const insertSale = db.transaction((sale: {
   id: string; shift_id: number | null; pay_method: string; discount: number;
   cash_in: number; cashier: string;
+  // Pelanggan terpilih di header POS (revisi pemilik 2026-10-04); absen/null =
+  // transaksi tanpa kontak (invoice jatuh ke "Pelanggan Umum" di client).
+  customer_id?: number | null;
   items: { product_id?: number; name?: string; qty: number; price?: number; unit?: string; discount?: number; note?: string }[];
 }) => {
   const dup = db.prepare('SELECT * FROM sales WHERE id = ?').get(sale.id);
   if (dup) return { row: dup, duplicate: true };
+
+  // Pelanggan di-SNAPSHOT saat jual: `customer_name` ikut tersimpan supaya
+  // cetak ulang struk & invoice A4 tetap menampilkan data pelanggan walau
+  // kontaknya kelak diedit/dihapus (pola sama dengan sale_items.name/cost).
+  // id tak dikenal = 400, bukan diabaikan diam-diam — POS selalu memilih dari
+  // master, jadi id basi berarti payload yang korup (kontrak: unit/produk tak
+  // dikenal juga 400).
+  let customerId: number | null = null;
+  let customerName = '';
+  if (sale.customer_id !== undefined && sale.customer_id !== null) {
+    const cid = Number(sale.customer_id);
+    if (!Number.isInteger(cid)) throw new Error('customer_id harus integer');
+    const cust = db.prepare('SELECT id, name FROM customers WHERE id = ?').get(cid) as { id: number; name: string } | undefined;
+    if (!cust) throw new Error(`pelanggan tidak dikenal: ${cid}`);
+    customerId = cust.id;
+    customerName = cust.name;
+  }
 
   // Dibaca sekali per penjualan, langsung dari DB: aturan stok tidak boleh
   // berdasarkan cache client, karena client bisa offline dan berbeda pendapat
@@ -966,25 +1209,29 @@ const insertSale = db.transaction((sale: {
   const total = subtotal - totalDiscBaris - Math.max(0, sale.discount);
   if (total < 0) throw new Error('diskon melebihi subtotal');
   const change = Math.max(0, sale.cash_in - total);
-  // Nomor invoice gaya Aronium: `YYMM-NNNNNN`, urut per bulan UTC (satu aturan
-  // waktu dengan created_at default). Ambil lewat CAST per urutan angka — bukan
+  // Nomor invoice = kombinasi TAHUN + BULAN + TANGGAL + nomor urut (revisi
+  // pemilik 2026-10-04, sebelumnya `YYMM-NNNNNN` urut per bulan):
+  // `YYMMDD-NNNNNN` — mis. `261004-000001`, urut HARIAN UTC (satu aturan waktu
+  // dengan created_at default). Ambil lewat CAST per urutan angka — bukan
   // ORDER BY teks ('000010' < '000009' secara lexikal, nomor bisa mundur) dan
   // bukan COUNT (bisa melompat kalau ada celah). Dihitung SETELAH cek duplikat
   // di atas, jadi retry idempotent tidak pernah membakar nomor.
+  // Substr offset = panjang prefix (6 digit) + tanda '-' = posisi 8 (SQLite
+  // 1-based) / slice(7) di JS — bukan seperti format lama yang salah satu.
   const now = new Date();
-  const ym = `${String(now.getUTCFullYear()).slice(2)}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const ymd = `${String(now.getUTCFullYear()).slice(2)}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
   const lastInv = db.prepare(
     `SELECT invoice_no FROM sales
       WHERE invoice_no LIKE ? || '-%'
-      ORDER BY CAST(substr(invoice_no, 6) AS INTEGER) DESC
+      ORDER BY CAST(substr(invoice_no, 8) AS INTEGER) DESC
       LIMIT 1`,
-  ).get(ym) as { invoice_no: string } | undefined;
-  const urut = lastInv ? Number(lastInv.invoice_no.slice(6)) + 1 : 1;
-  const invoiceNo = `${ym}-${String(urut).padStart(6, '0')}`;
+  ).get(ymd) as { invoice_no: string } | undefined;
+  const urut = lastInv ? Number(lastInv.invoice_no.slice(7)) + 1 : 1;
+  const invoiceNo = `${ymd}-${String(urut).padStart(6, '0')}`;
   const row = db.prepare(
-    `INSERT INTO sales (id, shift_id, invoice_no, pay_method, subtotal, discount, total, cash_in, change, cashier)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-  ).get(sale.id, sale.shift_id, invoiceNo, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier);
+    `INSERT INTO sales (id, shift_id, invoice_no, pay_method, subtotal, discount, total, cash_in, change, cashier, customer_id, customer_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+  ).get(sale.id, sale.shift_id, invoiceNo, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier, customerId, customerName);
   const insItem = db.prepare(
     `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, discount, cost, unit, note)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1014,6 +1261,9 @@ app.post('/api/sales', async (c) => {
       discount: discTransaksi,
       cash_in: Number(body.cash_in ?? 0),
       cashier: body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir',
+      // OPSIONAL: client lama / outbox yang belum ter-update boleh tidak
+      // mengirim — transaksi tanpa kontak tetap sah (customer_id NULL).
+      customer_id: body.customer_id ?? null,
       items: body.items,
     });
     const items = lines ?? db.prepare('SELECT * FROM sale_items WHERE sale_id=?').all((row as { id: string }).id);

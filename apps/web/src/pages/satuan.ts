@@ -41,11 +41,11 @@ function errMsg(e: unknown): string {
 // halaman Stok & Produk.
 function renderPage(): string {
   return `
-  <div class="space-y-4">
+  <div class="space-y-3">
     <div class="card">
-      <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 class="text-base font-semibold text-gray-900 dark:text-white">Satuan</h2>
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Satuan</h2>
           <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
             Satuan untuk struk. Form produk memilih dari daftar ini.
           </p>
@@ -96,16 +96,18 @@ function renderTable(): string {
 
   return `
   <div class="card-flush">
-    <table class="table">
-      <thead>
-        <tr>
-          <th class="th">Satuan</th>
-          <th class="th">Dipakai</th>
-          <th class="th text-right">Aksi</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="th">Satuan</th>
+            <th class="th">Dipakai</th>
+            <th class="th text-right">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
     ${state.units.length} satuan, urut dari A-Z. Dipakai dropdown satuan di form produk.

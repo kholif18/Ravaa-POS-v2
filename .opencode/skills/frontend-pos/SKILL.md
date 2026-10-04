@@ -15,21 +15,49 @@ panel topup/laporan, modal struk, atau styling apa pun.
 * Palet zinc (ganti total 2026-09-25, referensi bag-ui): bg `#fafafa`,
   kartu `#fff`, garis `#e4e4e7`, teks `#18181b`, muted `#71717a`.
   Primer biru `#2563eb` (aksen kasir, hover `#1d4ed8`), sukses `#16a34a`,
-  warning `#d97706`, danger `#dc2626`. Stok menipis: teks danger 12px semibold.
+  warning `#d97706`, danger `#dc2626`. Stok menipis: teks danger 11px semibold.
   Dark `[data-theme="dark"]` (bg `#09090b`, kartu `#18181b`, garis `#27272a`).
   Font `Inter` self-hosted (`public/fonts/`, offline).
+* **Skala SUPER-COMPACT (permintaan pemilik "ala KulaPOS", 2026-10-04 — SEMUA
+  halaman termasuk POS)**: seluruh tangga teks Tailwind diturunkan SATU tingkat
+  di `@theme` `styles.css`: `--text-xs` **11px** (label, th tabel, badge, chip,
+  hint, sub-teks), `--text-sm` **13px** (judul, body, isi tabel, tombol —
+  default app), `--text-base` 14 / `lg` 15 / `xl` 17 / `2xl` 20 / `3xl` 24.
+  Angka tsb = SATU-SATUNYA sumber ukuran teks (±90 pemakaian `text-xs` + ±89
+  `text-sm` ikut otomatis — jangan set px hardcode baru per template).
+  Hierarki dibangun `font-bold/semibold` + warna, BUKAN ukuran besar.
+  Dilarang `text-base|lg|xl|2xl|3xl` di `apps/web` (sudah 0 sisa — jangan
+  dikembalikan). Angka penting (total, kembalian, angka stok) tetap
+  `text-sm` (13px) + `font-bold tabular-nums`; label/badge boleh 11px;
+  jangan <11px.
 * Komponen (vanilla, tanpa framework): `.btn(.btn-primary/.btn-danger/.btn-outline/
-  .btn-outline-secondary/.btn-sm/.btn-lg)` 36px/teks 14 medium, `.input/.select`
-  40px (deviasi 16px anti-zoom iOS), `.card` radius 10 + shadow-sm,
-  `.table` (th 12px uppercase muted), `.badge-*` 12px medium,
+  .btn-outline-secondary/.btn-sm/.btn-lg)` **34px** (min-h) / teks 13 semibold,
+  `.input` **±33px** (`py-1.5`; deviasi 16px anti-zoom iOS), `.input-sm` **±31px**,
+  `.card` radius 10 + shadow-sm + `p-3`,
+  `.table` (th **11px** uppercase muted — ikut skala; guard
+  `satuan-test.mjs` §header sudah disesuaikan ke 11px secara sadar),
+  `.badge-*` 11px medium, `.chip` teks 11px / badan **±26px** (chip = tombol
+  metode bayar & nominal cepat — jangan dipangkas di bawah 26px),
   `.modal-overlay(.is-open/.is-closing) > .modal(.wide)` (spring-in 180ms,
   keluar 120ms — node dilepas modal.ts setelah 160ms),
   sidebar `#sidebar` 240px (`.collapsed` 72px, drawer HP ≤860px) + `.nav-dropdown(.open)`,
   tabs/pills segmented (kontainer muted, aktif kartu shadow-sm).
+  **Tinggi lain (super-compact)**: header halaman `.app-header` **44px**
+  (h-11), brand sidebar 44px, `.sw-btn` (tombol swal) **tetap 40px**
+  (target sentuh, dijaga test `satuan-test.mjs`), `.icon-btn` **32px**,
+  `.row-btn` 32px. PENTING: bila `.page` padding diubah, ikut sinkronkan
+  sticky wrapper halaman Produk (`-mx/-mt/px/pt` + `-top-*` di products.ts)
+  — selisihnya tak terlihat (sama-sama bg-canvas) tapi toolbar menjorok. `.table-wrap` = `relative` +
+  `overflow-x-auto` (WAJIB bungkus tiap `.table` — tanpa itu kolom kanan
+  terpotong tak bisa digulir di HP, dan `.sr-only` absolute menggeser
+  documentElement; bukti & perbaikan 2026-10-04 di history.ts/satuan.ts).
 * Ikon Lucide autentik inline SVG (`ui/icons.ts`, tanpa runtime dep).
   Teks tombol/stepper: dilarang glyph (`✎×+−`) — pakai ikon.
-* Radius: 10px base / 8px sm / pill penuh. Total POS 24px semibold tabular,
-  struk `ui-monospace 13px`.
+* Radius: 10px base / 8px sm / pill penuh. Total POS = `#pos-grand` **48px bold
+  tabular kustom** (`text-[48px]` arbitrary value — permintaan pemilik
+  2026-10-04 "custom ukuran font, besarkan 2x lipat" dari `text-2xl` 24px;
+  baris "Grand total" duplikat di sidebar sudah DIHAPUS), struk
+  `ui-monospace 13px`.
 * Layout: `#app` max-width 100%; admin full-height (`100dvh`, konten scroll
   sendiri, `body.mode-admin` lock); POS grid `1fr 380px`
   (→330px ≤1020px →1 kolom ≤860px); grid produk
@@ -63,7 +91,9 @@ panel topup/laporan, modal struk, atau styling apa pun.
   `styles.css` — dilarang deklarasi mentah (`justify-content:` dsb) di dalam
   `@apply` (build gagal); dilarang duplikat rule.
 * DILARANG warna/ukuran baru di luar token tanpa update `styles.css` + daftar di sini.
-* DILARANG teks <13px untuk info penting (stok, total, kembalian).
+* DILARANG teks <11px di mana pun. Info penting (total, kembalian, angka stok
+  di tabel) minimal **13px** (`text-sm` + bold bila perlu); 11px (`text-xs`)
+  hanya untuk label/badge/hint/sub-teks.
 * DILARANG dialog `confirm()`/`prompt()` baru selain yang sudah ada
   (harga dinamis, modal shift, nama kasir) — ajukan pola inline dulu.
 * KONFIRMASI WAJIB lewat SweetAlert2 (`apps/web/src/ui/confirm.ts`), bukan `confirm()`.
@@ -79,10 +109,12 @@ panel topup/laporan, modal struk, atau styling apa pun.
   padahal tombolnya tak terlihat).
   Ukuran popup diseragamkan dengan modal (2026-09-29, semua di `styles.css`
   lewat var `--swal2-*`): popup `24rem` (384px) radius 16 + shadow-xl,
-  backdrop `rgb(24 24 27 / .5)` + blur 4px, judul 18px, isi 14px,
-  ikon box 56px (font-size 0.7rem — skalakan `font-size`, bukan cuma box,
-  karena geometri glyph ikon memakai `em`), padding judul `.75em 1.25em`,
-  aksi `1.125em auto 0`. Dark: popup `#18181b`, teks `#a1a1aa`.
+  backdrop `rgb(24 24 27 / .5)` + blur 4px, judul **13px** semibold (skala
+  super-compact 2026-10-04 — 30 → 18 → 14 → 13), isi **13px**,
+   ikon box **45px** (font-size 0.5625rem — skalakan `font-size`, bukan cuma box,
+   karena geometri glyph ikon memakai `em`; glyph "!" 33.75px = piktogram,
+   satu-satunya >13px yang sah), padding judul `.5em 1.25em`,
+   aksi `.875em auto 0`. Dark: popup `#18181b`, teks `#a1a1aa`.
 * CSS SweetAlert2 di-inject TANPA `@layer`; aturan ber-layer (Tailwind) kalah
   specificity. Naikkan specificity, jangan andalkan urutan.
 * Struk layar (modal `<pre>`) dan struk cetak HARUS dari builder yang sama

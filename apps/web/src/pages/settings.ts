@@ -43,10 +43,10 @@ function errMsg(e: unknown): string {
 // halaman Stok & Produk.
 function renderPage(): string {
   return `
-  <div class="space-y-4">
+  <div class="space-y-3">
     <div class="card">
       <div>
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
+        <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
         <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
           Disimpan di <b>server</b>, jadi berlaku untuk semua device kasir — tidak
           seperti Pengaturan Akun yang hanya untuk browser ini.
@@ -88,7 +88,7 @@ function renderBody(): string {
   return `
   <div class="space-y-3">
     <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Stok boleh minus</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiMinus}</p>
@@ -101,7 +101,7 @@ function renderBody(): string {
       </div>
     </div>
     <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Tolak jual kadaluarsa</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiKadaluarsa}</p>
@@ -132,14 +132,14 @@ function kartuToko(): string {
     </label>`;
   return `
     <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan toko</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Kop <b>INVOICE A4</b> (cetak gaya Aronium) memakai empat isian ini.
             Disimpan di <b>server</b>, jadi seluruh device mencetak kop yang sama.
           </p>
-          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+          <div class="mt-3 grid gap-2 sm:grid-cols-2">
             ${f('set-toko-nama', 'Nama toko', t.store_name)}
             ${f('set-toko-telepon', 'Phone', t.store_phone, true)}
             ${f('set-toko-alamat', 'Alamat', t.store_address, true, true)}
@@ -177,7 +177,7 @@ function kartuCetak(): string {
         untuk struk topup/tarik. Pilihan A4 saat penjualan tetap membuka invoice A4.`;
   return `
     <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Cetak struk</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiSaklar}</p>
@@ -211,7 +211,7 @@ function kartuBackup(): string {
   const daftar = state.backups.length
     ? `<ul class="mt-3 divide-y divide-gray-100 dark:divide-gray-700" data-backup-list>
         ${state.backups.map((b) => `
-        <li class="flex items-center justify-between gap-3 py-2" data-nama="${esc(b.nama)}">
+        <li class="flex items-center justify-between gap-2 py-2" data-nama="${esc(b.nama)}">
           <div class="min-w-0">
             <div class="truncate text-sm text-gray-700 dark:text-gray-300">${esc(b.nama)}</div>
             <div class="text-xs text-gray-500 dark:text-gray-400">${waktu(b.waktu)} · ${ukuranFile(b.ukuran)}</div>
@@ -229,7 +229,7 @@ function kartuBackup(): string {
     ? `<p class="mt-2 text-xs text-red-600 dark:text-red-400">${esc(state.backupErr)}</p>` : '';
   return `
     <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Backup data</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">

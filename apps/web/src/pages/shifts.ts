@@ -90,7 +90,7 @@ const FILTER_LABEL: Record<Filter, string> = { semua: 'Semua', open: 'Terbuka', 
 function toolbar(): string {
   return `
   <div class="card">
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter status shift">
         ${(Object.keys(FILTER_LABEL) as Filter[])
           .map(
@@ -265,13 +265,13 @@ function dialogTutup(s: ShiftRow): void {
   const nonTunai = s.omzet - s.tunai;
   const kasHarus = kasSeharusnya(s);
   const baris = (label: string, nilai: number, kelas = '') =>
-    `<div class="flex justify-between gap-3"><span>${label}</span><b class="tabular-nums text-gray-900 dark:text-white ${kelas}">${rp(nilai)}</b></div>`;
+    `<div class="flex justify-between gap-2"><span>${label}</span><b class="tabular-nums text-gray-900 dark:text-white ${kelas}">${rp(nilai)}</b></div>`;
   openModal({
     title: `Tutup shift #${s.id} — ${s.cashier}`,
     okLabel: 'Tutup shift',
     body: `
       <div class="space-y-1 text-sm text-gray-600 dark:text-gray-300">
-        <div class="flex justify-between gap-3"><span>Modal awal</span><b class="tabular-nums text-gray-900 dark:text-white">${rp(s.modal_awal)}</b></div>
+        <div class="flex justify-between gap-2"><span>Modal awal</span><b class="tabular-nums text-gray-900 dark:text-white">${rp(s.modal_awal)}</b></div>
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Penjualan (semua metode — masuk laci)</div>
         ${baris(`Tunai (${s.n_sales} nota)`, s.tunai)}
         ${baris('QRIS', s.qris)}
@@ -283,7 +283,7 @@ function dialogTutup(s: ShiftRow): void {
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tarik tunai — dicatat saja, di luar hitungan</div>
         ${baris('Nominal', s.tarik_nominal)}
         ${baris('Admin', s.tarik_admin)}
-        <div class="mt-2 flex justify-between gap-3 border-t border-gray-200 pt-2 dark:border-gray-700">
+        <div class="mt-2 flex justify-between gap-2 border-t border-gray-200 pt-2 dark:border-gray-700">
           <span class="font-medium text-gray-900 dark:text-white">Kas seharusnya di laci</span>
           <b id="sh-harus" class="tabular-nums text-gray-900 dark:text-white">${rp(kasHarus)}</b>
         </div>

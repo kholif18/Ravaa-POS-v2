@@ -152,3 +152,17 @@ export async function removeProductBySku(sku: string): Promise<void> {
   const cur = await getCachedProducts();
   await kvSet('products', cur.filter((p) => p.sku !== sku));
 }
+
+/* ---------- transaksi tertahan (POS P5) ---------- */
+
+/** Daftar transaksi tertahan (hold/pending) — SIMPANAN PER DEVICE di
+ *  IndexedDB yang sama (key 'holds' di object store kv bebas-kunci; tanpa
+ *  migrasi skema, tanpa endpoint API — keputusan riset P5 2026-10-04).
+ *  Tipe barisnya didefinisikan di pages/pos.ts (`Hold`) — store ini sengaja
+ *  generik supaya modul master tidak tahu isi keranjang kasir. */
+export async function getHolds<T>(): Promise<T[]> {
+  return (await kvGet<T[]>('holds')) ?? [];
+}
+export async function saveHolds(holds: unknown): Promise<void> {
+  await kvSet('holds', holds);
+}

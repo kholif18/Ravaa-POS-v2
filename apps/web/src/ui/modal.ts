@@ -31,7 +31,7 @@ export function openModal(o: {
   overlay.innerHTML = `
     <div class="modal${o.wider ? ' modal-wider' : o.wide ? ' modal-wide' : ''}" role="dialog" aria-modal="true" aria-label="${title}">
       <div class="modal-header">
-        <h3 class="text-base font-semibold text-gray-900 dark:text-white">${title}</h3>
+        <h3 class="text-sm font-semibold text-gray-900 dark:text-white">${title}</h3>
         <button type="button" class="row-btn" data-x aria-label="Tutup">${CLOSE_SVG}</button>
       </div>
       <div class="modal-body">${o.body}</div>

@@ -192,7 +192,7 @@ function ringkasan(): string {
     { label: 'Nilai persediaan', nilai: rp(nilai), sub: 'stok × modal rata-rata', monospace: true },
   ];
 
-  return `<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+  return `<div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
     ${kartu
       .map((k) => {
         const warna =
@@ -203,7 +203,7 @@ function ringkasan(): string {
               : 'text-gray-900 dark:text-white';
         return `<div class="card">
           <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${k.label}</p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums ${warna}${k.monospace ? ' text-lg sm:text-2xl' : ''}">${esc(k.nilai)}</p>
+          <p class="mt-1 text-sm font-semibold tabular-nums ${warna}">${esc(k.nilai)}</p>
           <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${esc(k.sub)}</p>
         </div>`;
       })
@@ -250,14 +250,14 @@ function tableCard(): string {
 
   let isi: string;
   if (state.loading) {
-    isi = `<div class="space-y-2 p-5"><div class="skel"></div><div class="skel w-5/6"></div><div class="skel w-2/3"></div></div>`;
+    isi = `<div class="space-y-2 p-4"><div class="skel"></div><div class="skel w-5/6"></div><div class="skel w-2/3"></div></div>`;
   } else if (!list.length) {
     const pesan = state.error
       ? `Gagal memuat: ${state.error}`
       : state.q || state.filter !== 'semua' || state.cat !== 'all'
         ? 'Tidak ada produk yang cocok dengan filter.'
         : 'Belum ada produk yang melacak stok. Stok hanya dihitung untuk kategori dengan pelacakan stok (ATK, Es krim, Snack, Rokok).';
-    isi = `<div class="p-5"><div class="empty">${icon('stock')}<span>${esc(pesan)}</span></div></div>`;
+    isi = `<div class="p-4"><div class="empty">${icon('stock')}<span>${esc(pesan)}</span></div></div>`;
   } else {
     isi = `
       <div class="table-wrap table-scroll">
@@ -340,11 +340,11 @@ function paint(): void {
   // normal seperti sebelumnya.
   host.innerHTML = `
     <div class="lg:flex lg:h-full lg:min-h-0 lg:flex-col">
-      <div class="shrink-0 space-y-4">
+      <div class="shrink-0 space-y-3">
         ${ringkasan()}
         ${toolbar()}
       </div>
-      <div class="mt-4 flex flex-col items-stretch gap-4 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch">
+      <div class="mt-4 flex flex-col items-stretch gap-3 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch">
         <div class="prod-side-wrap shrink-0" data-open="${state.side}">
           <aside class="card w-64 max-w-full !p-3 lg:overflow-y-auto">${categorySidebar()}</aside>
         </div>
@@ -449,6 +449,10 @@ type StockMove = {
   qty: number; // TANDA: masuk +, keluar - (sale sengaja disimpan negatif)
   reason: 'sale' | 'restock' | 'opname' | 'rusak';
   ref_id: string | null;
+  /** Nomor invoice penjualan (YYMMDD-NNNNNN) bila `reason='sale'` — diisi
+   *  server via subquery `sales.invoice_no`; NULL untuk mutasi non-penjualan
+   *  atau nota lama. Fallback: 8 digit pertama `ref_id`. */
+  ref_invoice: string | null;
   unit_cost: number | null;
   cashier: string | null;
 };
@@ -467,7 +471,9 @@ const ALASAN: Record<StockMove['reason'], string> = {
 
 /** Keterangan kolom — alasan angka bergerak, plus rujukan bila ada. */
 function ket(m: StockMove): string {
-  if (m.reason === 'sale') return m.ref_id ? `Nota ${String(m.ref_id).slice(0, 8)}` : 'Penjualan';
+  if (m.reason === 'sale') {
+    return m.ref_id ? `Nota ${m.ref_invoice ?? String(m.ref_id).slice(0, 8)}` : 'Penjualan';
+  }
   if (m.reason === 'restock') return 'Pembelian masuk';
   if (m.reason === 'opname') return 'Selisih hitung fisik';
   return 'Kerusakan / kehilangan';

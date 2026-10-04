@@ -85,7 +85,7 @@ function toolbar(): string {
   const hariIniKah = state.date === hariIni();
   return `
   <div class="card">
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" data-h="prev" class="row-btn" title="Hari sebelumnya" aria-label="Hari sebelumnya">${icon('chevL')}</button>
         <input id="rp-date" type="date" class="input input-sm !w-44" value="${esc(state.date)}" aria-label="Pilih tanggal laporan" />
@@ -107,13 +107,13 @@ function ringkasan(l: Laporan): string {
     { label: 'HPP', nilai: rp(l.hpp), sub: 'modal rata-rata tertimbang' },
     { label: 'Diskon', nilai: rp(l.sales.diskon), sub: 'transaksi + per baris' },
   ];
-  return `<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+  return `<div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
     ${kartu
       .map((k) => {
         const warna = k.tone === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white';
         return `<div class="card">
           <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${k.label}</p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums ${warna}">${esc(k.nilai)}</p>
+          <p class="mt-1 text-sm font-semibold tabular-nums ${warna}">${esc(k.nilai)}</p>
           <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${esc(k.sub)}</p>
         </div>`;
       })
@@ -237,7 +237,7 @@ function stokMenipis(l: Laporan): string {
         ? `<ul class="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
           ${l.lowStock
             .map(
-              (p) => `<li class="flex items-center justify-between gap-3 py-2">
+              (p) => `<li class="flex items-center justify-between gap-2 py-2">
                 <span class="min-w-0">
                   <span class="block truncate text-sm font-medium text-gray-900 dark:text-white">${esc(p.name)}</span>
                   <span class="cell-sub">${esc(p.sku)}</span>
@@ -257,7 +257,7 @@ function stokMenipis(l: Laporan): string {
 function isi(): string {
   if (state.loading) {
     return `<div class="space-y-3">
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
@@ -273,7 +273,7 @@ function isi(): string {
   if (!l) return '';
   return `
     ${ringkasan(l)}
-    <div class="grid gap-3 lg:grid-cols-2">
+    <div class="grid gap-2 lg:grid-cols-2">
       ${metodeBayar(l)}
       ${topupCard(l)}
       ${produkTerlaris(l)}

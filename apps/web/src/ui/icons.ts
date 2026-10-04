@@ -6,7 +6,7 @@ export type IconName =
   | 'menu' | 'close' | 'search' | 'plus' | 'minus' | 'trash' | 'print' | 'sync'
   | 'clock' | 'users' | 'truck' | 'check' | 'alert' | 'info' | 'chevL' | 'chevR' | 'chevD'
   | 'moon' | 'sun' | 'receipt' | 'pencil' | 'filter' | 'download' | 'calendar' | 'logout' | 'wallet'
-  | 'upload' | 'copy' | 'more' | 'settings';
+  | 'upload' | 'copy' | 'more' | 'settings' | 'pause';
 
 const P: Record<IconName, string> = {
   dashboard: '<rect width="7" height="9" x="3" y="3" rx="1" /> <rect width="7" height="5" x="14" y="3" rx="1" /> <rect width="7" height="9" x="14" y="12" rx="1" /> <rect width="7" height="5" x="3" y="16" rx="1" />',
@@ -24,6 +24,8 @@ const P: Record<IconName, string> = {
   // ellipsis-vertical (titik tiga menegak) — tombol "aksi lain" menu baris.
   more: '<circle cx="12" cy="12" r="1" fill="currentColor" /> <circle cx="12" cy="5" r="1" fill="currentColor" /> <circle cx="12" cy="19" r="1" fill="currentColor" />',
   minus: '<path d="M5 12h14" />',
+  // pause — tombol "Tahan" transaksi (POS, permintaan pemilik 2026-10-04).
+  pause: '<rect x="14" y="4" width="4" height="16" rx="1" /> <rect x="6" y="4" width="4" height="16" rx="1" />',
   trash: '<path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />',
   print: '<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /> <path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6" /> <rect x="6" y="14" width="12" height="8" rx="1" />',
   sync: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" /> <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /> <path d="M8 16H3v5" />',

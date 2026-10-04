@@ -108,8 +108,9 @@ CREATE TABLE IF NOT EXISTS sales (
   id          TEXT PRIMARY KEY,        -- uuid dari client (idempotent, aman retry offline)
   shift_id    INTEGER REFERENCES shifts(id),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  -- Nomor invoice gaya Aronium (2026-10-03): `YYMM-NNNNNN`, urut per bulan UTC
-  -- (satu aturan waktu dengan created_at). Di-assign SERVER saat INSERT, di
+  -- Nomor invoice (2026-10-03, direvisi 2026-10-04): `YYMMDD-NNNNNN` =
+  -- tahun 2 digit + bulan + tanggal + '-' + 6 digit urut, urut HARIAN UTC
+  -- (mis. `261004-000001`). Di-assign SERVER saat INSERT, di
   -- dalam transaksi yang sama — retry idempotent tidak menghitung ulang
   -- (cek duplikat dijalankan sebelum perhitungan nomor).
   invoice_no  TEXT,
@@ -119,7 +120,14 @@ CREATE TABLE IF NOT EXISTS sales (
   total       INTEGER NOT NULL,
   cash_in     INTEGER NOT NULL DEFAULT 0,
   change      INTEGER NOT NULL DEFAULT 0,
-  cashier     TEXT NOT NULL DEFAULT 'kasir'
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  -- Pelanggan pada transaksi (revisi 2026-10-04): POS memilih pelanggan di
+  -- header (bawaan = "Pelanggan Umum"). `customer_name` = SNAPSHOT nama saat
+  -- jual — riwayat / cetak ulang struk & invoice A4 harus tetap menampilkan
+  -- data customer walau kontaknya kelak diubah/dihapus (pola snapshot yang
+  -- sama dengan sale_items.name & sale_items.cost).
+  customer_id   INTEGER REFERENCES customers(id),
+  customer_name TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -194,3 +202,37 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Pelanggan & hutang (piutang toko) — baru 2026-10-04, halaman #/customers & #/debts.
+-- Pelanggan = master kontak terpisah dari data kasir (karyawan) di tabel shifts.
+CREATE TABLE IF NOT EXISTS customers (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Nomor urut OTOMATIS dari server (revisi pemilik 2026-10-04): `CUS-000001`
+  -- untuk no customer, `SUP-000001` untuk no supplier (master supplier belum
+  -- ada — disimpan di kontak dulu, halaman Supplier menyusul). Kosong = baris
+  -- lama; server mengisinya saat pertama kali baris disimpan ulang.
+  code        TEXT NOT NULL DEFAULT '',
+  supplier_no TEXT NOT NULL DEFAULT '',
+  name        TEXT NOT NULL,
+  phone       TEXT NOT NULL DEFAULT '',
+  address     TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Ledger hutang per pelanggan — SATU tabel mutasi dua arah, bukan saldo tersimpan.
+-- type 'charge'  = pelanggan berhutang (beli belum bayar)
+-- type 'payment' = pembayaran pelanggan
+-- saldo = SUM(charge) - SUM(payment), selalu dihitung ulang oleh server —
+-- angka saldo yang disimpan akan selisih begitu salah satu baris diedit/dihapus.
+CREATE TABLE IF NOT EXISTS customer_debts (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  type        TEXT NOT NULL CHECK (type IN ('charge', 'payment')),
+  amount      INTEGER NOT NULL CHECK (amount > 0),
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_customer_debts_customer
+  ON customer_debts(customer_id, created_at, id);

@@ -20,6 +20,9 @@ export interface SaleNota {
   id: string; invoice_no: string | null; created_at: string;
   pay_method: string; subtotal: number; discount: number; total: number;
   cash_in: number; change: number; cashier: string; shift_id: number | null;
+  /** Pelanggan pada transaksi (SNAPSHOT dari server, sejak 2026-10-04).
+   *  '' / absen = baris lama tanpa kontak -> "Pelanggan Umum". */
+  customer_name?: string | null;
 }
 interface Toko {
   store_name: string; store_address: string;
@@ -142,7 +145,7 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko): stri
   <div class="meta">
     <div>
       <div class="ttl">Bill to</div>
-      <div>Pelanggan Umum</div>
+      <div>${esc((sale.customer_name ?? '').trim() || 'Pelanggan Umum')}</div>
     </div>
     <div class="rincian">
       <div class="baris"><span class="lbl">Invoice No.:</span><span>${esc(sale.invoice_no ?? '—')}</span></div>

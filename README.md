@@ -87,6 +87,37 @@ npm run dev:api
   (server menolak dengan 400). Jumlah "Dipakai" dihitung server, jadi dialog hapus
   tidak pernah bilang "tidak dipakai" padahal ada produknya. Urutan tampil mengikuti
   alfabetis nama. Seed: 13 satuan, termasuk `Tanpa satuan` untuk shortcut topup/tarik.
+* **Pelanggan** (`#/customers`, menu **Pelanggan** di sidebar, baru 2026-10-04):
+  master kontak pembeli — **no. customer (`CUS-000001`) & no. supplier
+  (`SUP-000001`) otomatis dari server** (urut, tidak pernah diulang; nomor
+  lama yang masih kosong diisi saat baris pertama disimpan ulang, nomor yang
+  sudah terbit tidak berubah), nama, HP, **alamat**, catatan. Cari multi-kata
+  (semua kata harus cocok di nama/HP/catatan, pola search produk). Tambah/ubah/
+  hapus lewat modal + konfirmasi. **Pelanggan yang masih punya catatan hutang
+  tidak bisa dihapus** (server tolak 400 dan menyuruhnya menghapus catatan di
+  halaman Hutang dulu) — riwayat piutang harus utuh. `id` dikirim = update,
+  tanpa id = baru; sengaja bukan upsert by phone (nomor bisa dipakai bersama
+  keluarga/karyawan). Seed menanam **`Pelanggan Umum`** = pilihan bawaan
+  header POS.
+* **Hutang** (`#/debts`, menu **Hutang** di sidebar, baru 2026-10-04): buku
+  piutang toko — kartu **Total piutang berjalan**, tabel per pelanggan (urut
+  sisa terbesar, toggle tampilan `open|semua`), dan per baris dialog **rincian
+  ledger** (mutasi `charge` = berhutang, `payment` = bayar, masing-masing
+  membawa sisa berjalan; baris salah ketik bisa dihapus). Form **Catat
+  hutang** / **Catat bayar** memilih pelanggan lalu nominal — pembayaran lebih
+  besar dari sisa ditolak server (400). **Saldo tidak pernah disimpan sebagai
+  angka**: sisa selalu dihitung `SUM(charge) − SUM(payment)` saat dibaca, jadi
+   hapus 1 baris tidak pernah meninggalkan angka basi. **Per baris tabel**
+   ada tombol **Bayar** (ikon dompet, hanya pelanggan belum lunas) yang
+   membuka form catat bayar sudah-prefill nama + sisa + pratinjau "Sisa
+   setelah bayar" (netral `—` selama nominal kosong), dan dialog rincian
+   punya tombol **Cetak A4** — dokumen ledger HTML (`@page A4`, kop
+   `store_*` + tabel kronologis + ringkasan sisa) dibuka lewat popup
+   browser `window.print()`, pola sama `invoice.ts`, **tanpa print-agent**
+   (gagal/popup diblokir hanya toast, tidak membatalkan). Hutang dicatat
+   **manual di halaman ini** — POS tidak punya metode bayar piutang
+   (kontrak `POST /api/sales` tidak berubah; integrasinya nanti bila
+   pemilik minta).
 * **Form produk** (`#/products` -> Tambah/Edit) memakai **modal 2 kolom ala
   RPOS** (lebar `max-w-5xl`): kolom **kiri = kotak foto persegi** (seluruh kotak
   diklik untuk pilih berkas — di mode Tambah/Duplikat pilihan ditahan di memori
@@ -141,6 +172,68 @@ npm run dev:api
    Mode: **Penjualan / Topup / Tarik** (bar yang sama). Topup-tarik memakai
    `POST /api/topups`; admin terisi otomatis dari tier toko yang sama dengan
    `GET /api/topups/suggest-admin`, dan bisa diedit kasir.
+  - **Tanpa header judul** (permintaan pemilik 2026-10-04): `renderPosShell()`
+    (`ui/shell.ts`) TIDAK merender `<header>` sama sekali — tidak ada strip
+    "Kasir (POS)"; layar kasir mulai langsung dari baris pertama seperti
+    referensi KulaPOS. **Tombol kembali ke dashboard (⬅) kini ada di
+    konten** lewat `tombolKembaliHtml()` (`pos.ts`): kiri **info bar** pada
+    mode Penjualan, dan kiri **baris Mode** pada mode Topup/Tarik (info bar
+    tidak dirender di sana) — supaya kasir tidak pernah terkunci di `#/pos`.
+    Susunan atas-ke-bawah = referensi: **info bar → scan bar (+ Mode) →
+    label keranjang → tabel ‖ sidebar kanan**.
+  - **Info bar = elemen pertama** (mode Penjualan saja, sejak 2026-10-04,
+    mengikuti layout KulaPOS): kolom kiri = tombol ⬅ + tumpukan dua baris
+    **Waktu** (atas) dan **Kasir + Shift** (bawah, permintaan pemilik
+    "kasir pindah di bawah waktu") — **jam live** berjalan tiap detik (jam
+    lokal, konsisten dengan waktu struk), **select Pelanggan selebar kolom**
+    (revisi pemilik 2026-10-04 — dulu dibatasi `max-w-[520px]`;
+    daftar `GET /api/customers`, bawaan **Pelanggan Umum** — dipilih kasir
+    sebelum bayar, ikut ke `POST /api/sales` sebagai `customer_id` +
+    snapshot `customer_name`, di-simpan ke struk/invoice/riwayat, dan
+    **kembali ke Pelanggan Umum** setelah tiap penjualan), serta **kolom
+    total**: label **TOTAL BELANJA** + "n item (n Qty)" (`#pos-owncount`) di
+    **kiri** kolom, angka besar `#pos-grand` di **kanan** — ukuran **kustom
+    `text-[48px]` = 2x lipat `text-2xl` lama (24px)**, permintaan pemilik
+    2026-10-04 "custom ukuran font, besarkan lagi 2x lipat". **Ketiga kolom
+    info bar dipisah garis vertikal** (`border-l`
+    hanya ≥lg; layar sempit kolom menumpuk jadi garis horizontal).
+  - **Keranjang = tabel 8 kolom**: No / **Kode** (SKU, mono) / Nama barang /
+    Harga / Qty / **Diskon** / Subtotal / **Aksi** (hapus) — deskripsi
+    pendukung (unit, `item manual`, badge kadaluarsa) pindah ke bawah nama.
+    Baris catatan (`use_note`) & baris kosong memakai `colspan="8"`.
+    **Label baris di atas tabel**: `#pos-count` ("n item" / "Keranjang
+    kosong") di kiri + tombol **Bersihkan [F5]** (`#pos-clear`) di kanan —
+    dipindah dari bawah tabel mengikuti baris "Keranjang … Bersihkan [F5]"
+    di referensi (id tidak berubah, `paintCart()` tetap sama).
+  - **Panel bayar = sidebar kanan 320px** (grid `lg:grid-cols-[1fr_320px]` —
+    revisi pemilik 2026-10-04 putaran 4: footer horizontal ala KulaPOS
+    **ditolak**, "tidak usah, tetap jadi sidebar kanan tadi"). Isi panel
+    berurutan vertikal: **Subtotal / Diskon item → Aksi cepat → Diskon
+    transaksi (Rp) F6 → Metode bayar + Uang diterima + chip nominal cepat +
+    Kembalian** (hierarki Aronium) → tombol **Bayar** menempel dasar panel +
+    **"Bayar pas"** (tunai saja: uang diterima persis total, langsung
+    proses — `#pos-pay-pas`; `#pos-pay` tetap berarti "bayar dengan angka
+    yang diketik"). **Baris "Grand total" DIHAPUS** dari sidebar (permintaan
+    pemilik 2026-10-04 — duplikat TOTAL BELANJA di info bar atas).
+    **Aksi cepat** (grid 2 kolom): **Tahan** + **Pending (n)** = fitur
+    **transaksi tertahan (P5)** — `tahanKeranjang()` membekukan isi
+    keranjang (items/diskon/pelanggan) ke **IndexedDB per device**
+    (`getHolds()`/`saveHolds()`, kv `'holds'`, tanpa endpoint API) lalu
+    mengosongkan keranjang; tombol **Pending (n)** membuka modal daftar
+    dengan aksi **Lanjutkan** (muat balik ke keranjang — konfirmasi swal
+    bila keranjang sedang terisi) dan **Hapus** (konfirmasi danger);
+    daftar bertahan setelah reload. **Item manual** & **Diskon** memanggil
+    aksi yang sudah ada; **Voucher** & **Cetak ulang** = tombol placeholder
+    (`data-soon` → toast "menyusul") — tombol sudah dulu, fiturnya
+    menyusul sesuai permintaan pemilik. Semua id/selector lama
+    (`#pos-cash`, `#pos-pay`,
+    `#pos-change`, chip `data-cash`) tetap dipertahankan — pintasan F2/Enter,
+    barrier uang diterima, dan suite test tidak berubah. Di layar sempit
+    (<lg) panel jatuh di bawah keranjang.
+  - **Dialog selesai = uang kembali**: judul **`Kembalian RpX`** (bila
+    uang diterima > total) atau "Pembayaran berhasil", pesan memuat total +
+    uang diterima, tombol **[Thermal] [A4] [Selesai]** — kasir melihat
+    nominal kembalian di layar sebelum menutup transaksi.
   - **Diskon permanen terpakai otomatis di keranjang**: baris yang masuk
     memecut `discount`/`discount_type` produk sebagai **prefill** (diskon Rp
     dihitung per baris, persen dibulatkan ke ratusan), harga coret + harga
@@ -212,7 +305,8 @@ npm run dev:api
     saklar tidak menampilkan baris catatan sama sekali.
   - **Pintasan keyboard level document** (`bindPintasan()` di
     `apps/web/src/pages/pos.ts`): **F2** = bayar cepat (atau proses topup),
-    **F3** = layar cari produk, **F4** = qty item berikutnya, **Enter** = bayar
+    **F3** = layar cari produk, **F4** = qty item berikutnya, **F5** =
+    bersihkan keranjang, **F6** = fokus diskon transaksi, **Enter** = bayar
     dari kolom uang diterima / proses topup, **Esc** = fokus
     kembali ke kolom scan. Dulu listener menempel ke elemen `host`, jadi mati
     begitu fokus jatuh ke `<body>` (klik area kosong / balik dari modal) —
@@ -295,14 +389,18 @@ npm run dev:api
 * **Cetak struk otomatis** (saklar **Cetak struk otomatis** pada baris **Mode**,
   tampil di semua mode; bisa juga dimatikan per device lewat **Sistem →
   Cetak struk**): setiap **penjualan** selesai, dialog menawarkan pilihan
-  **[Thermal] [A4] [Tidak]** sebelum keranjang/state direset. Gagal cetak
+  **[Thermal] [A4] [Selesai]** sebelum keranjang/state direset — judulnya
+  **`Kembalian RpX`** (atau "Pembayaran berhasil") supaya kasir menutup
+  transaksi sambil melihat nominal uang kembali (sejak 2026-10-04). Gagal cetak
   **tidak pernah** membatalkan transaksi (cukup toast peringatan sekali per
   sesi). **Topup/tarik tanpa dialog** — struk langsung dikirim sesuai layout
   per-device. Device dengan saklar mati tidak diganggu dialog sama sekali.
   - **Pilihan A4 = INVOICE A4 gaya Aronium** (baru 2026-10-03): membuka tab
     baru berisi nota invoice A4 (kop **INVOICE** + nama/alamat/Phone/Email
-    toko + logo "R", Bill to *Pelanggan Umum*, **Invoice No. `YYMM-NNNNNN`**
-    nomor urut per bulan yang di-assign server, tabel item + baris catatan
+    toko + logo "R", Bill to pelanggan terpilih — *Pelanggan Umum* bila
+    kosong —, **Invoice No. `YYMMDD-NNNNNN`**
+    (tahun+bulan+tanggal, nomor urut harian yang di-assign server), tabel item
+    + baris catatan
     `* note`, ringkasan Discount/Total, Payment method/Paid amount/Change)
     lalu `window.print()` otomatis — **lewat browser/CUPS, bukan print-agent**
     (`lp -d EPSON-L3110-Series` untuk L3110). Isinya lewat

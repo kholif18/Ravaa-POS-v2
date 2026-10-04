@@ -77,7 +77,7 @@ export function openProfileModal(): void {
     title: 'Pengaturan Akun',
     okLabel: 'Simpan',
     body: `
-      <div class="flex items-center gap-3 rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
+      <div class="flex items-center gap-2 rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
         <span class="avatar avatar-lg" id="pf-avatar">${esc(initials(name))}</span>
         <div class="min-w-0">
           <p class="text-sm font-semibold text-gray-900 dark:text-white">Profil kasir</p>

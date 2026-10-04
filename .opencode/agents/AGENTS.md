@@ -35,22 +35,100 @@ db/schema.sql            SUMBER KEBENARAN skema. Ubah skema = edit file ini + mi
 db/seed.sql              Master awal (8 kategori + contoh SKU).
 apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
-apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync).
-apps/web/src/pages/pos.ts  UI kasir utama (rute POS): scan bar + dropdown cari,
-                          keranjang + panel bayar (mode jual/topup/tarik),
-                          strip stok menipis & kadaluarsa, chip nominal cepat,
-                          chip Qty + tombol Cari (F4 = qty item berikutnya
-                          sekali pakai, F3 = layar cari produk), input catatan
-                          per baris (produk `use_note`, ikut ke struk via
-                          `items[].note`), dan pintasan level document di
-                          `bindPintasan()` (F2 bayar, F3/F4, Enter bayar, Esc ke
-                          scan). Setelah penjualan sukses **`pilihCetakSelesai()`**
-                          membuka dialog **[Thermal] [A4] [Tidak]**
+apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync)
+                         + **kv `'holds'` transaksi tertahan POS** (`getHolds()`/
+                         `saveHolds()` — per device, P5).
+apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
+                          referensi KulaPOS (kula-02-transaksi-pos.png):
+                          info bar → scan bar (+ Mode) → label keranjang →
+                          tabel ‖ sidebar kanan (panel bayar).** Shell POS (`renderPosShell()` di
+                          `ui/shell.ts`) **TANPA `<header>` sama sekali**
+                          (permintaan pemilik 2026-10-04 "full hapus" — tidak
+                          ada judul "Kasir (POS)"). Tombol kembali ke
+                          dashboard = `tombolKembaliHtml()` (pos.ts): kiri
+                          info bar (mode jual) + kiri baris Mode
+                          (topup/tarik, info bar tak dirender) supaya kasir
+                          tidak terkunci di `#/pos`). Scan bar = input `#pos-q` + dropdown
+                          cari, **info bar** (mode Penjualan: kolom kiri =
+                          tombol ⬅ + tumpukan dua baris **Waktu** (atas) /
+                          **Kasir + Shift** (bawah) — jam live
+                          `jamPos()`/`mulaiJam()` — jam lokal konsisten
+                          `waktuStruk()`, dihentikan di `unmountPosPage`;
+                          select `#pos-customer` pelanggan,
+                          default "Pelanggan Umum", dimuat dari
+                          `GET /api/customers`;
+                          kolom kanan = label TOTAL BELANJA + `#pos-owncount`
+                          "n item (n Qty)" di KIRI kolom + `#pos-grand` angka
+                          besar di KANAN — **`text-[48px]` kustom (2x lipat
+                          `text-2xl` lama), permintaan pemilik 2026-10-04**;
+                          **3 kolom dipisah garis vertikal**
+                          `border-l` ≥lg — border-t saat kolom menumpuk),
+                          lalu scan bar, strip stok menipis
+                          & kadaluarsa, **label baris di ATAS tabel**
+                          (`#pos-count` "n item"/"Keranjang kosong" kiri +
+                          `#pos-clear` Bersihkan F5 kanan — dipindah dari
+                          bawah tabel 2026-10-04, id tetap), **tabel keranjang
+                          8 kolom**
+                          (No / Kode / Nama barang / Harga / Qty / Diskon /
+                          Subtotal / Aksi — SKU di kolom Kode mono, baris
+                          catatan & empty `colspan="8"`), chip nominal cepat,
+                          chip Qty + tombol
+                          Cari (F4 = qty item berikutnya sekali pakai, F3 =
+                          layar cari produk), input catatan per baris (produk
+                          `use_note`, ikut ke struk via `items[].note`).
+                           **Panel bayar = SIDEBAR KANAN 320px** (grid
+                           `lg:grid-cols-[1fr_320px]` — putaran 4 2026-10-04:
+                           footer horizontal DITOLAK pemilik, "tetap jadi
+                           sidebar kanan tadi"): ringkasan
+                           Subtotal/Diskon item → **Aksi cepat** → diskon
+                           transaksi F6 → metode + `#pos-cash` uang diterima +
+                           chip nominal + KEMBALIAN → tombol (mt-auto di
+                           dasar). **Baris "Grand total" DIHAPUS** (duplikat
+                           TOTAL BELANJA di info bar — permintaan pemilik
+                           2026-10-04); `#pos-grand` = satu-satunya angka
+                           total besar. **Aksi cepat** (grid 2 kolom):
+                           **Tahan** (`tahanKeranjang()`) + **Pending (n)**
+                           (`bukaTertahan()`, badge `#pos-hold-count`) =
+                           fitur **P5 transaksi tertahan** — snapshot keranjang
+                           (`Hold` type: items/discount/pelanggan) disimpan di
+                           **IndexedDB per device** lewat `getHolds()`/
+                           `saveHolds()` (kv key `'holds'` di `store.ts`,
+                           tanpa endpoint API); modal daftar beraksi
+                           **Lanjutkan** (`muatHold()` — konfirmasi swal bila
+                           keranjang tak kosong, validasi `customerId` ke
+                           master, dorong `manualSeq`) & **Hapus**
+                           (`hapusHold()` + `confirmDialog` danger);
+                           **Item manual** & **Diskon F6** memanggil aksi
+                           lama; **Voucher** & **Cetak ulang** = placeholder
+                           `[data-soon]` (toast "menyusul" — permintaan
+                           pemilik "placeholder dulu, fitur nanti").
+                           **SEMUA id lama dipertahankan**
+                           (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`)
+                           supaya F2/Enter/barrier + suite test tetap jalan.
+                          **`#pos-pay-pas` ("Bayar pas")** = `bayarPas()`
+                          (tunai saja): `cashIn = total()` lalu `pay()` —
+                          tanpa mengubah arti `#pos-pay` (bayar langsung).
+                          `pay()` kirim `customer_id` + struk meta
+                          `Pelanggan: <customer_name>` + reset pilihan ke
+                          Pelanggan Umum. Pintasan level document di
+                          `bindPintasan()` (F2 bayar, F3 cari, F4 qty,
+                          F5 bersihkan, F6 diskon transaksi, Enter bayar, Esc
+                          ke scan — jangan dicuri untuk pelanggan). Setelah
+                          penjualan sukses **`pilihCetakSelesai()`** membuka
+                          dialog **[Thermal] [A4] [Selesai]**
                           (`choiceDialog`, HANYA bila saklar auto-print ON —
-                          guard `if (autoPrint)` wajib, tanpa itu backdrop swal
-                          memblokir seluruh UI): Thermal = struk ESC/POS via
-                          print-agent, A4 = invoice browser (`cetakInvoice`),
-                          pilihan terakhir menyetel pref layout topup berikutnya.
+                          guard `if (autoPrint)` wajib, tanpa itu backdrop
+                          swal memblokir seluruh UI): judul **`Kembalian
+                          RpX`** (bila `kembalian > 0`) / "Pembayaran
+                          berhasil", Thermal = struk ESC/POS via print-agent,
+                          A4 = invoice browser (`cetakInvoice`), pilihan
+                          terakhir menyetel pref layout topup berikutnya.
+                          Slot swal TIDAK berubah (`.swal2-confirm`=Thermal,
+                          `.swal2-deny`=A4, `.swal2-cancel`=Selesai) —
+                          `tests/e2e-struk.mjs` `pilihCetak()` bergantung
+                          padanya. Ikon label info bar dipegang CSS
+                          `.info-bar svg { size-4 }` di `styles.css` (pola
+                          `.chip svg` — `icon()` tidak menulis width/height).
 apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS
@@ -68,7 +146,10 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          GET /api/sales & /api/topups (filter hari sama dengan
                           /api/reports/daily), isi nota dibuka lewat GET /api/sales/:id,
                           plus tombol **Cetak ulang struk** (bangun ulang Struk
-                          dari isi nota + `base_unit`, lalu dialog pilihan
+                          dari isi nota + `base_unit` + `note` per baris +
+                          baris meta `Pelanggan:` dari `sale.customer_name`
+                          (fallback "Pelanggan Umum") — sama dengan struk
+                          asli POS, lalu dialog pilihan
                           **[Thermal] [A4] [Batal]** — A4 = `cetakInvoice()`,
                           Thermal = `kirimPrint(strukUntuk(...,'thermal'))`
                           eksplisit seperti POS).
@@ -93,10 +174,31 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
                           + select layout thermal/A4, tanpa swal & tanpa API —
                           printer tiap PC kasir beda, jangan dipindah ke
                           server), PLUS kartu
-                          **Backup data** (tombol "Backup sekarang" ->
-                          POST /api/backup + daftar file + Unduh per baris dari
-                          GET /api/backup; tanpa swal — non-destruktif; daftar
-                          gagal-muat tidak mematahkan halaman).
+                           **Backup data** (tombol "Backup sekarang" ->
+                           POST /api/backup + daftar file + Unduh per baris dari
+                           GET /api/backup; tanpa swal — non-destruktif; daftar
+                           gagal-muat tidak mematahkan halaman).
+apps/web/src/pages/customers.ts  Halaman #/customers (menu Pelanggan, baru
+                           2026-10-04): master kontak pembeli — tabel nama/
+                           HP/catatan, cari multi-kata, CRUD via openModal +
+                           confirmDialog (pola satuan.ts). Hapus DITOLAK 400
+                           bila pelanggan masih punya catatan hutang (pesan
+                           server menunjuk halaman Hutang). Read-only terhadap
+                           products.version.
+apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
+                           kartu "Total piutang berjalan" (dari total GET
+                           /api/customer-debts), tabel per-pelanggan (sisa
+                           DESC, toggle open|semua), dialog rincian ledger
+                           (baris charge/payment + sisa berjalan, hapus baris
+                           salah ketik), dan form "Catat hutang"/"Catat bayar"
+                           (POST /api/customer-debts — pembayaran > sisa
+                           ditolak server, toast error). Sejak 2026-10-04:
+                           tombol **Bayar** per baris tabel (prefill sisa +
+                           pratinjau "Sisa setelah bayar") dan tombol
+                           **Cetak A4** di dialog rincian (`htmlHutangA4`/
+                           `cetakHutangA4` — pola popup `invoice.ts`, tanpa
+                           print-agent, gagal = toast). Hutang DICATAT
+                           MANUAL di sini — POS tidak punya mode piutang.
 apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print-agent.
                           Layout struk: `thermal` 32 kolom (COLS) ekor FEED+CUT —
                           bawaan toko; `a4` 64 kolom (COLS_A4) ekor FEED+Form
@@ -120,7 +222,8 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           `htmlInvoice(sale, items, toko)` menyusun HTML + CSS
                           `@page A4 margin 16mm 14mm` (kop INVOICE + nama/
                           alamat/Phone/Email dari `store_*` + logo lingkaran "R",
-                          Bill to = "Pelanggan Umum", Invoice No. = `sales.invoice_no`,
+                          Bill to = `sale.customer_name` snapshot ("Pelanggan
+                          Umum" bila kosong), Invoice No. = `sales.invoice_no`,
                           Payment status Lunas, tabel item + baris `* note`,
                           ringkasan Discount/Total, footer "Dicetak dari Ravaa
                           POS"), dan `cetakInvoice(saleId)` = fetch
@@ -192,6 +295,74 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   `name` dari `GET /api/units`.
 * `DELETE /api/units/:slug` (404 tak ada, 400 bila masih dipakai produk — FK
   `products.unit` -> `units.slug`)
+* **Pelanggan & hutang (piutang) — baru 2026-10-04** (halaman `#/customers` +
+  `#/debts`; tabel `customers` + ledger `customer_debts` di `db/schema.sql`).
+  Read-only terhadap `products.version` (tidak menyentuh kolom itu sama sekali).
+  - **Prinsip ledger: saldo TIDAK PERNAH disimpan sebagai angka.** `sisa` =
+    `SUM(charge) - SUM(payment)` selalu dihitung ulang saat dibaca — angka
+    tersimpan akan selisih begitu salah satu baris mutasi diedit/dihapus.
+    `charge` = pelanggan berhutang (beli belum bayar), `payment` = pembayaran.
+  - `GET /api/customers?q=` -> `{data:[{id,code,supplier_no,name,phone,address,note,created_at,updated_at}], total}`
+    - `q` opsional, multi-kata (SEMUA kata harus cocok di `name`/`phone`/`note`,
+      pola search produk — tidak harus di field atau urutan yang sama).
+    - Urutan `name COLLATE NOCASE, id`; `total` = jumlah baris TANPA filter
+      (dipakai footer halaman).
+    - **`code` / `supplier_no` / `address` (revisi pemilik 2026-10-04)**:
+      `code` = no customer auto (`CUS-000001`), `supplier_no` = no supplier
+      auto (`SUP-000001` — master supplier belum ada, nomor disimpan di kontak
+      dulu), `address` = alamat pelanggan. Baris lama bernomor `''` tampil
+      sebagai `—` dan diisi server saat pertama disimpan ulang.
+  - `POST /api/customers` `{id?,name,phone?,address?,note?}` -> 201 baru / 200 update
+    - `id` dikirim = update (404 bila tak ada), tanpa id = insert baru.
+      **Sengaja TIDAK upsert by phone** — dua orang bisa berbagi nomor
+      (keluarga/karyawan toko), nomor bukan kunci identitas.
+    - `name` wajib non-kosong (trim) -> 400 `"nama pelanggan wajib diisi"`.
+    - `phone`/`address`/`note` teks bebas (default `''`); `updated_at` di-set
+      ulang saat update. `id` harus integer bila dikirim -> selain itu 400.
+    - **Nomor urut OTOMATIS di server** (`nomorUrutPelanggan`): `code` ->
+      `CUS-<6 digit>`, `supplier_no` -> `SUP-<6 digit>`, di-assign saat INSERT;
+      saat UPDATE hanya baris yang masih `''` yang diisi — **nomor TIDAK
+      pernah berubah** setelah terbit. Urutan = baris terbesar lewat
+      `CAST(substr(code,5))` + pola `LIKE 'CUS-%'` (BUKAN COUNT: celah nomor
+      tidak dipakai ulang). Prefiks WAJIB ikut dash (`'CUS-'`), kalau tidak
+      `CAST('-000001')` = -1 untuk semua baris dan nomor dobel (bug nyata yang
+      pernah terjadi, sudah diuji manual lewat curl).
+  - `DELETE /api/customers/:id` -> `{data:{id,deleted:true}}`
+    - Guard **400 bila masih punya catatan hutang**: `"pelanggan ini masih
+      punya N catatan hutang — hapus catatannya dulu di halaman Hutang"`
+      (riwayat harus utuh, pola sama dengan hapus produk yang pernah terjual).
+      TIDAK ada cascade hapus — baris `customer_debts` dirujuk `sale_items` masa
+      depan dan wajib utuh selama masih ada.
+    - 404 tak ada / sudah dihapus; 400 bila `:id` bukan integer.
+  - `GET /api/customer-debts?status=open|semua` -> `{data:[{customer_id,name,phone,charge,bayar,sisa,terakhir}], total}`
+    - **Ringkasan saldo per pelanggan** (tabel utama halaman `#/debts`).
+      Read-only.
+    - `status` default `open` = hanya `sisa > 0`; `semua` = semua yang punya
+      riwayat (termasuk lunas, `sisa` 0). Nilai lain -> 400
+      `"status harus open|semua"`.
+    - Urutan `sisa DESC, terakhir DESC, customer_id`; `total` = jumlah `sisa`
+      (dipakai kartu "Total piutang berjalan").
+  - `GET /api/customer-debts/:customerId` ->
+    `{data:{customer:{id,name,phone,note,...}, rows:[{id,customer_id,type,amount,note,created_at,sisa}], charge, bayar, sisa}}`
+    - Rincian ledger satu pelanggan; `rows` urut **terbaru di atas** (DESC),
+      tiap baris membawa `sisa` **berjalan setelah baris itu** (dihitung dari
+      terlama dulu lalu dibalik — jadi "sisa setelah mutasi ini" masuk akal).
+    - 404 bila pelanggan tak ada; `:customerId` harus integer -> 400.
+  - `POST /api/customer-debts` `{customer_id,type:charge|payment,amount>0,note?}` -> 201 `{data:<baris>}`
+    - Validasi (semua 400): `type` harus persis `charge`|`payment`; `amount`
+      angka bulat `> 0` (rupiah bulat — desimal ditolak); `note` maks 200
+      karakter; pelanggan tidak ada -> **404**.
+    - **`payment` > sisa -> 400** `"pembayaran melebihi sisa hutang (sisa RpX)"`
+      (uang lebih dari utang memang tidak ada; keputusan jadi saldo kredit/
+      awal = wewenang pemilik, ditunda). Check + insert dijalankan dalam
+      `db.transaction` (skala 1-2 kasir: atomik cukup).
+    - Tidak menyentuh `POST /api/sales` / `pay_method` — hutang dicatat
+      **manual** di halaman Hutang; integrasi POS (piutang saat bayar) belum
+      ada dan jangan ditambah sepihak.
+  - `DELETE /api/customer-debts/:id` -> `{data:{id,deleted:true}}`
+    - Hapus 1 baris mutasi (salah ketik). Sengaja TANPA cek sisa: hapus
+      `payment` memperbesar sisa, hapus `charge` memperkecil — dua-duanya
+      diinginkan saat membetulkan input. 404 tak ada; 400 `:id` bukan integer.
 * `GET /api/products?since=&category=<slug>&q=&status=aktif|nonaktif|semua` -> `{data, maxVersion}`
   - `status` default `aktif`. `nonaktif` untuk layar Manage (aktifkan kembali), `semua` gabungan.
     Status tak dikenal -> 400.
@@ -316,12 +487,18 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     satu kali lalu menyimpannya di IndexedDB dan menampilkannya dari cache —
     jadi setelah sekali terlihat, foto tetap tampil walau server mati.
 * `GET /api/stock-moves?product_id=&reason=&limit=&offset=` ->
-  `{data:[{id,created_at,product_id,sku,name,qty,reason,ref_id,unit_cost,cashier}], total}`
+  `{data:[{id,created_at,product_id,sku,name,qty,reason,ref_id,ref_invoice,unit_cost,cashier}], total}`
   - **Riwayat mutasi stok / product history.** Read-only: TIDAK mengubah
     `products.version` dan tidak perlu.
   - `product_id` **wajib** (riwayat selalu milik satu produk) -> 400 tanpa itu.
   - `reason` opsional (`sale|restock|opname|rusak`); `limit` default 50, maks
     200; `offset` default 0. `total` = jumlah baris tanpa limit (untuk paginasi).
+  - **`ref_invoice` (sejak 2026-10-04)**: nomor invoice penjualan
+    (`sales.invoice_no`) lewat subquery `(SELECT invoice_no FROM sales WHERE
+    id = sm.ref_id)` — dikirim **hanya supaya tampilan Riwayat Stok memakai
+    nomor nota yang sama** dengan Riwayat transaksi/struk (dulu `Nota
+    <8 digit uuid>`). NULL bila `reason != sale` / `ref_id` bukan penjualan /
+    nota lama. Additive — field lama tidak berubah.
   - Urutan `created_at DESC, id DESC` (yang terbaru di atas).
   - Data sudah ada sejak awal (`stock_moves` diisi oleh sale/restock/opname) —
     endpoint ini hanya MEMBUKANYA, bukan memodifikasi riwayat.
@@ -454,15 +631,30 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shifts.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
-* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?}`
-  - **`invoice_no` (baru 2026-10-03, fitur Invoice A4)**: di-assign **SERVER**,
-    tidak pernah dari client. Format **`YYMM-NNNNNN`** (UTC — tahun 2 digit +
-    bulan 2 digit + `-` + 6 digit urut): `2610-000001`. Urutan dihitung
-    `ORDER BY CAST(substr(invoice_no,6) AS INTEGER) DESC` — **BUKAN COUNT dan
-    BUKAN teks** (`000010 < 000009` secara leksikal) — dan dicek duplikat
-    idempotent dulu (POST ulang `id` yang sama tidak menggandakan nomor).
-    Disimpan di kolom `sales.invoice_no`; muncul di `GET /api/sales`,
+* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?,customer_id?}`
+  - **`invoice_no` (baru 2026-10-03, direvisi 2026-10-04, fitur Invoice A4)**:
+    di-assign **SERVER**, tidak pernah dari client. Format **`YYMMDD-NNNNNN`**
+    (UTC — tahun 2 digit + bulan 2 digit + **tanggal** 2 digit + `-` + 6 digit
+    urut **harian**): `261004-000001` (revisi pemilik: kombinasi tahun/bulan/
+    tanggal + urut, bukan per bulan seperti `YYMM-NNNNNN` lama). Urutan dihitung
+    `ORDER BY CAST(substr(invoice_no,8) AS INTEGER) DESC` dengan pola
+    `LIKE '<YYMMDD>-%'` — **BUKAN COUNT dan BUKAN teks** (`000010 < 000009`
+    secara leksikal) — dan dicek duplikat idempotent dulu (POST ulang `id` yang
+    sama tidak menggandakan nomor). Baris lama berformat `YYMM-…` tidak cocok
+    dengan pola hari baru sehingga tidak mengganggu urutan; nomornya dibiarkan
+    apa adanya. Disimpan di kolom `sales.invoice_no`; muncul di `GET /api/sales`,
     `GET /api/sales/:id`, dan tercetak di kop invoice A4.
+  - **`customer_id?` + snapshot `customer_name` (revisi pemilik 2026-10-04)**:
+    client mengirim **id** pelanggan terpilih di header POS (bawaan =
+    "Pelanggan Umum", `CUS-000001`); kolom `sales.customer_id` + **snapshot**
+    `sales.customer_name` diisi saat INSERT — riwayat, cetak ulang struk, dan
+    invoice A4 tetap menampilkan pelanggan walau kontak kelak diedit/dihapus
+    (pola sama dengan `sale_items.name`/`cost`). **`customer_id` OPSIONAL**:
+    absen/null = transaksi tanpa kontak (201, kolom kosong; client lama & outbox
+    tidak rusak). Bila DIKIRIM: bukan integer atau tak ada di `customers` ->
+    **400** `"pelanggan tidak dikenal: <id>"` (payload korup, seperti produk/
+    satuan tak dikenal). `GET /api/sales` & `GET /api/sales/:id` ikut
+    mengembalikan kedua kolom (SELECT `s.*`).
   - **Diskon PER BARIS `discount?`** (baru 2026-09-29): nilai rupiah mutlak.
     Diisi client (prefill dari `products.discount` tipe `rp`/`pct`, boleh
     diubah kasir per baris) lalu **DI-SNAPSHOT** ke `sale_items.discount` —
@@ -522,8 +714,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     / outbox lama tidak boleh ditolak karena alasan kosmetik); `''`/absen =
     tanpa catatan.
 * `GET /api/sales/:id` -> `{data:{sale,items}}` (isi lengkap satu nota)
-  - `sale` memuat **`invoice_no`** (`YYMM-NNNNNN`) sejak 2026-10-03 —
-    diambil client oleh `cetakInvoice()` untuk dicetak di kop invoice A4.
+  - `sale` memuat **`invoice_no`** (`YYMMDD-NNNNNN`, urut harian) sejak
+    2026-10-03 — diambil client oleh `cetakInvoice()` untuk dicetak di kop
+    invoice A4.
+  - `sale` juga memuat **`customer_id`** + **`customer_name`** (snapshot, sejak
+    2026-10-04) — sumber baris `Pelanggan:` di struk ulang dan "Bill to"
+    invoice A4. Baris lama bernama `''` = tampilkan "Pelanggan Umum".
   - Tiap baris `items` memuat **`base_unit`** (satuan dasar produk lewat
     `LEFT JOIN products`, `NULL` untuk item manual) sejak 2026-10-01 — dipakai
     tombol **Cetak ulang struk** di halaman Riwayat: struk hanya mencetak
@@ -607,7 +803,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   * **Restore = manual dokumentasi** (tanpa endpoint, disengaja): matikan API,
     ganti `data.db` dengan file backup, hidupkan lagi. Jangan menambah endpoint
     restore tanpa diskusi — menulis DB dari body request = risiko keamanan baru.
-* Endpoints backup diuji `tests/backup-test.mjs` (21 asersi, terdaftar di
+* Endpoints backup diuji `tests/backup-test.mjs` (27 asersi, terdaftar di
   `tests/run.mjs`): daftar/POST/unduh+integrity/guard 3×404/retensi 16
   dummy/UI kartu. Test MEMINDAHKAN file asli ke snapshot lalu mengembalikan
   file asli di `finally` — jangan menghapus file `backups/` milik pemilik di
@@ -666,7 +862,37 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-03 (Invoice A4 — nomor invoice + kop toko):**
+  **Migrasi terakhir 2026-10-04 (Pelanggan toko — nomor urut + alamat +
+  pelanggan pada penjualan):** 3 kolom `customers` (`code`, `supplier_no`,
+  `address`) + 2 kolom `sales` (`customer_id`, `customer_name`).
+  **Dijalankan sebagai ALTER in-place di dev (bukan re-create)** — keputusan
+  sadar: data pelanggan + riwayat penjualan sudah berisi, re-create akan
+  membuangnya (re-create hanya untuk perubahan murni skema di awal dev).
+  Urutan yang dipakai (backup DENGAN checkpoint WAL dulu):
+  ```bash
+  sqlite3 apps/api/data/data.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+  cp apps/api/data/data.db apps/api/data/data.db.bak.customer-sales
+  sqlite3 apps/api/data/data.db <<'SQL'
+  ALTER TABLE customers ADD COLUMN code TEXT NOT NULL DEFAULT '';
+  ALTER TABLE customers ADD COLUMN supplier_no TEXT NOT NULL DEFAULT '';
+  ALTER TABLE customers ADD COLUMN address TEXT NOT NULL DEFAULT '';
+  ALTER TABLE sales ADD COLUMN customer_id INTEGER REFERENCES customers(id);
+  ALTER TABLE sales ADD COLUMN customer_name TEXT NOT NULL DEFAULT '';
+  SQL
+  npm run seed   # tanam "Pelanggan Umum" (WHERE NOT EXISTS by code)
+  ```
+  `db/schema.sql` tetap ditulis penuh dengan kolom baru (sumber kebenaran) —
+  `migrate()` memakai `CREATE IF NOT EXISTS`, jadi install lama tidak otomatis
+  dapat kolomnya; SQL di atas juga dipakai untuk install yang tidak boleh
+  di-recreate. Seed menanam kontak default **`Pelanggan Umum` (`CUS-000001` /
+  `SUP-000001`)** — pilihan otomatis header POS & "Bill to" invoice A4.
+  Migrasi sebelumnya 2026-10-04 (Pelanggan & hutang): dua tabel baru
+  **`customers`** + **`customer_debts`** (re-create penuh, backup
+  `data.db.bak.customers` — dibuat DENGAN checkpoint WAL dulu, sesuai aturan di
+  bawah). Tabel baru = baris baru di `db/schema.sql` + `npm run seed`; tidak ada
+  kolom lama yang berubah, jadi data API lain ikut hilang bersama re-create
+  (buka shift lagi setelahnya).
+  Migrasi sebelumnya 2026-10-03 (Invoice A4 — nomor invoice + kop toko):
   kolom **`sales.invoice_no`** + 4 baris `settings store_name/store_address/
   store_phone/store_email` (re-create penuh, backup `data.db.bak.invoice-no`;
   seed menanam kop contoh pemilik lewat `INSERT OR IGNORE`, jadi seed ulang
@@ -736,13 +962,37 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `invoice_no` diisi sendiri oleh `POST /api/sales` berikutnya (lama tetap
   NULL, tampil `—` di invoice); `store_*` sengaja default kosong, pemilik
   mengisinya lewat kartu **Pengaturan toko** di `#/settings`:
+   ```sql
+   ALTER TABLE sales ADD COLUMN invoice_no TEXT;
+   INSERT OR IGNORE INTO settings (key, value) VALUES ('store_name', '');
+   INSERT OR IGNORE INTO settings (key, value) VALUES ('store_address', '');
+   INSERT OR IGNORE INTO settings (key, value) VALUES ('store_phone', '');
+   INSERT OR IGNORE INTO settings (key, value) VALUES ('store_email', '');
+   ```
+  Migrasi 2026-10-04 (Pelanggan & hutang) di install yang TIDAK boleh
+  di-recreate — dua tabel BARU (tanpa data lama, jadi tidak ada risiko
+  kehilangan kolom; jalankan saat API mati):
   ```sql
-  ALTER TABLE sales ADD COLUMN invoice_no TEXT;
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_name', '');
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_address', '');
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_phone', '');
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('store_email', '');
+  CREATE TABLE IF NOT EXISTS customers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    phone       TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS customer_debts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id),
+    type        TEXT NOT NULL CHECK (type IN ('charge', 'payment')),
+    amount      INTEGER NOT NULL CHECK (amount > 0),
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_customer_debts_customer
+    ON customer_debts(customer_id, created_at, id);
   ```
+
 
 ## 6. Troubleshooting yang sudah diketahui (fakta, bukan tebakan)
 

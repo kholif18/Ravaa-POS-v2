@@ -89,7 +89,7 @@ const tungguTercetak = async (n, ms = 15000) => {
   while (tercetak.length < n && Date.now() - t0 < ms) await page.waitForTimeout(100);
 };
 
-// Dialog pilihan [Thermal] [A4] [Tidak] muncul SETELAH bayar bila "Cetak struk
+// Dialog pilihan [Thermal] [A4] [Selesai] muncul SETELAH bayar bila "Cetak struk
 // otomatis" nyala (pilihan pemilik 2026-10-03). Tanpa klik dialog ini struk
 // tidak pernah terkirim — semua titik bayar suite ini melewatinya.
 const pilihCetak = async (pilihan) => {
@@ -148,7 +148,12 @@ try {
   const t1 = teksDari(s1);
   const b1 = barisStruk(s1);
   ok('membawa nama toko (default aplikasi)', t1.includes('RAVA POS'), b1.slice(0, 2));
-  ok('membawa no transaksi + kasir + shift', /No\. \w{8}/.test(t1) && /Kasir:/.test(t1) && /Shift:/.test(t1), b1[1]);
+  // Revisi nomor 2026-10-04: `No.` = invoice YYMMDD-NNNNNN (tanggal hari ini
+  // UTC + urut harian), bukan lagi 8 digit uuid — dan dipisah baris dari
+  // waktu supaya tidak kena potong 32 kolom.
+  const ymdStruk = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+  ok(`membawa no transaksi ${ymdStruk}-NNNNNN + kasir + shift`,
+    new RegExp(`No\\. ${ymdStruk}-\\d{6}`).test(t1) && /Kasir:/.test(t1) && /Shift:/.test(t1), b1.slice(1, 5));
   ok('membawa item terjual', /1 x Aqua 600ml/.test(t1), b1.filter((x) => x.includes('Aqua')));
   ok('membawa subtotal', t1.includes('Subtotal') && t1.includes('Rp4.000'));
   ok('membawa TOTAL', t1.includes('TOTAL') && t1.includes('Rp4.000'));
@@ -271,8 +276,8 @@ try {
   ok('E: popup invoice terbuka (judul INVOICE + kop nama toko)',
     /INVOICE/.test(teksE) && tokoE !== '' && teksE.includes(tokoE),
     JSON.stringify({ toko: tokoE, awal: teksE.slice(0, 80) }));
-  ok('E: memuat nomor invoice pola YYMM-NNNNNN', /\b\d{4}-\d{6}\b/.test(teksE),
-    (teksE.match(/\b\d{4}-\d{6}\b/) || [])[0]);
+  ok('E: memuat nomor invoice pola YYMMDD-NNNNNN', /\b\d{6}-\d{6}\b/.test(teksE),
+    (teksE.match(/\b\d{6}-\d{6}\b/) || [])[0]);
   ok('E: memuat Bill to + Payment status Lunas',
     teksE.includes('Bill to') && teksE.includes('Pelanggan Umum') && teksE.includes('Lunas'));
   ok('E: memuat item terjual + Total ringkasan + Paid amount',
@@ -299,10 +304,19 @@ try {
   await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
   ok('chip nominal cepat tampil (Uang pas + 3 pecahan)', await page.locator('[data-cash]').count() === 4,
     await page.locator('[data-cash]').count());
+  // P1 (backlog riset 2026-10-04): uang diterima AUTO-ISA = total selama kasir
+  // belum menyentuh kolomnya (pola KulaPOS/Aronium) — item masuk, kolom langsung
+  // terisi Rp4.000 tanpa diketik.
+  ok('uang diterima auto-isi = total (P1)', (await page.inputValue('#pos-cash')) === '4000',
+    await page.inputValue('#pos-cash'));
 
-  // BARRIER tunai (keluhan pemilik 2026-10-03): uang diterima masih KOSONG —
+  // BARRIER tunai (keluhan pemilik 2026-10-03): uang diterima KOSONG —
   // dulu `cashIn=0` lolos cek dan transaksi selesai tanpa menerima uang.
+  // Sejak auto-isi (P1) kolom terisi otomatis, jadi test MENGOSONGKAN dulu
+  // (mengimitasi kasir menghapus isian; input kosong = "disentuh", auto-isi
+  // tidak boleh menolong lagi) — barrier wajib tetap menolak.
   const nSebelumBarrier = tercetak.length;   // snapshot: section lama sudah cetak
+  await page.fill('#pos-cash', '');
   await page.click('#pos-pay');
   let tolakKosong = false;
   try {
@@ -481,9 +495,11 @@ try {
   ok('server menyimpan note (trimmed)', nAqua?.note === 'ukuran 1 x 3 meter', JSON.stringify(nAqua?.note));
   const nChit = notaH.data?.items?.find((i) => i.product_id === 14);
   ok('baris tanpa catatan disimpan sebagai ""', nChit?.note === '', JSON.stringify(nChit?.note));
-  // Nota membawa nomor invoice bulanan (fitur 2026-10-03): YYMM-NNNNNN.
-  ok('nota membawa invoice_no pola YYMM-NNNNNN',
-    /^\d{4}-\d{6}$/.test(notaH.data?.sale?.invoice_no ?? ''), notaH.data?.sale?.invoice_no);
+  // Nota membawa nomor invoice = tanggal + urut harian (revisi 2026-10-04):
+  // YYMMDD-NNNNNN dengan tanggal hari ini UTC.
+  const ymdH = hari.slice(2).replace(/-/g, ''); // 2026-10-04 -> 261004
+  ok(`nota membawa invoice_no pola ${ymdH}-NNNNNN (tanggal + urut harian)`,
+    new RegExp(`^${ymdH}-\\d{6}$`).test(notaH.data?.sale?.invoice_no ?? ''), notaH.data?.sale?.invoice_no);
 
   console.log('=== I. Pengaturan toko (kop invoice A4) & guard API settings ===');
   const set0 = (await (await fetch(`${API}/api/settings`)).json()).data || {};

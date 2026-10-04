@@ -29,9 +29,12 @@ type SaleRow = {
   id: string; shift_id: number | null; created_at: string; pay_method: string;
   subtotal: number; discount: number; total: number; cash_in: number; change: number;
   cashier: string; n_items: number;
-  /** Nomor invoice `YYMM-NNNNNN` (server, di-assign saat INSERT). Bisa null
+  /** Nomor invoice `YYMMDD-NNNNNN` (server, di-assign saat INSERT). Bisa null
    *  untuk baris sangat lama; tampil sebagai '—'. */
   invoice_no: string | null;
+  /** Pelanggan pada transaksi (SNAPSHOT server, sejak 2026-10-04). '' / absen
+   *  = baris lama tanpa kontak -> tampil "Pelanggan Umum". */
+  customer_name?: string | null;
 };
 
 type TopupRow = {
@@ -122,7 +125,7 @@ function kepala(): string {
   const hariIniKah = state.date === hariIni();
   return `
   <div class="card">
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" data-h="prev" class="row-btn" title="Hari sebelumnya" aria-label="Hari sebelumnya">${icon('chevL')}</button>
         <input id="h-date" type="date" class="input input-sm !w-44" value="${esc(state.date)}" aria-label="Pilih tanggal riwayat" />
@@ -172,7 +175,7 @@ function detailJual(s: SaleRow): string {
     .map((it) => {
       const bersih = it.amount - it.discount;
       return `
-      <div class="flex items-start justify-between gap-3 border-b border-gray-100 py-2 last:border-0 dark:border-gray-800">
+      <div class="flex items-start justify-between gap-2 border-b border-gray-100 py-2 last:border-0 dark:border-gray-800">
         <div class="min-w-0">
           <div class="text-sm font-medium text-gray-900 dark:text-white">${esc(it.name)}</div>
           <div class="cell-sub">${it.qty}${it.unit ? ` ${esc(it.unit)}` : ''} × ${rp(it.price)}${
@@ -187,12 +190,12 @@ function detailJual(s: SaleRow): string {
     })
     .join('');
   const ket = (l: string, v: string, kuat = false) => `
-    <div class="flex items-baseline justify-between gap-3 py-1">
+    <div class="flex items-baseline justify-between gap-2 py-1">
       <span class="text-xs text-gray-500 dark:text-gray-400">${l}</span>
       <span class="text-sm tabular-nums ${kuat ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}">${v}</span>
     </div>`;
   return `
-  <div class="grid gap-3 lg:grid-cols-[1fr_280px]">
+  <div class="grid gap-2 lg:grid-cols-[1fr_280px]">
     <div class="card">
       <h3 class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">Item nota</h3>
       ${items.length ? rows : `<div class="empty">Tidak ada baris item pada nota ini.</div>`}
@@ -207,9 +210,10 @@ function detailJual(s: SaleRow): string {
       ${ket('Metode', metode(s.pay_method))}
       ${s.pay_method === 'tunai' ? ket('Uang diterima', rp(s.cash_in)) + ket('Kembali', rp(s.change)) : ''}
       ${ket('Kasir', esc(s.cashier))}
+      ${ket('Pelanggan', esc((s.customer_name ?? '').trim() || 'Pelanggan Umum'))}
       ${ket('Shift', s.shift_id ? `#${s.shift_id}` : '—')}
       <div class="mt-2 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500">
-        Nota ${esc(s.id)}<br />${esc(waktu(s.created_at))}
+        Nota ${esc(s.invoice_no ?? s.id.slice(0, 8))}<br />${esc(waktu(s.created_at))}
       </div>
       <button type="button" data-reprint="${esc(s.id)}" class="btn btn-primary mt-3 w-full justify-center">
         ${icon('print')}<span>Cetak ulang struk</span>
@@ -220,7 +224,7 @@ function detailJual(s: SaleRow): string {
 
 function detailTopup(t: TopupRow): string {
   const ket = (l: string, v: string, kuat = false) => `
-    <div class="flex items-baseline justify-between gap-3 py-1">
+    <div class="flex items-baseline justify-between gap-2 py-1">
       <span class="text-xs text-gray-500 dark:text-gray-400">${l}</span>
       <span class="text-sm tabular-nums ${kuat ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}">${v}</span>
     </div>`;
@@ -273,7 +277,9 @@ function renderTabel(): string {
       const terbuka = state.buka === b.key;
       const waktuCell = b.s ? jam(b.s.created_at) : jam(b.t!.created_at);
       const keterangan = b.s
-        ? `<div class="cell-strong">${b.s.n_items} item · Nota ${esc(b.s.id.slice(0, 8))}</div>
+        // Nota memakai nomor invoice (YYMMDD-NNNNNN) — id uuid hanya fallback
+        // untuk baris lama tanpa nomor (revisi pemilik 2026-10-04).
+        ? `<div class="cell-strong">${b.s.n_items} item · Nota ${esc(b.s.invoice_no ?? b.s.id.slice(0, 8))}</div>
            <div class="cell-sub">Kasir ${esc(b.s.cashier)}${b.s.discount ? ` · diskon ${rp(b.s.discount)}` : ''}</div>`
         : `<div class="cell-strong">${esc(layanan(b.t!.provider))} · ${esc(b.t!.nomor)}</div>
            <div class="cell-sub">Kasir ${esc(b.t!.cashier)}${
@@ -282,7 +288,7 @@ function renderTabel(): string {
       const total = b.s ? b.s.total : b.t!.total;
       const metodeCell = b.s ? metode(b.s.pay_method) : metode(b.t!.pay_method);
       const isi = terbuka
-        ? `<tr class="det-row"><td colspan="6" class="td !py-3">${
+        ? `<tr class="det-row"><td colspan="6" class="td !py-2">${
             b.s ? detailJual(b.s) : detailTopup(b.t!)
           }</td></tr>`
         : '';
@@ -309,19 +315,21 @@ function renderTabel(): string {
 
   return `
   <div class="card-flush">
-    <table class="table">
-      <thead>
-        <tr>
-          <th class="th">Waktu</th>
-          <th class="th">Jenis</th>
-          <th class="th">Keterangan</th>
-          <th class="th">Metode</th>
-          <th class="th text-right">Total</th>
-          <th class="th text-right"><span class="sr-only">Rincian</span></th>
-        </tr>
-      </thead>
-      <tbody>${html}</tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="th">Waktu</th>
+            <th class="th">Jenis</th>
+            <th class="th">Keterangan</th>
+            <th class="th">Metode</th>
+            <th class="th text-right">Total</th>
+            <th class="th text-right"><span class="sr-only">Rincian</span></th>
+          </tr>
+        </thead>
+        <tbody>${html}</tbody>
+      </table>
+    </div>
   </div>
   ${kelebihan}
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -451,9 +459,15 @@ async function cetakUlang(s: SaleRow): Promise<void> {
     const strukUlang: Struk = {
       judul: getToko(),
       meta: [
-        `${waktuStrukRiwayat(s.created_at)} · No. ${s.id.slice(0, 8)}`,
+        // Waktu & No. dipisah baris — digabung melebihi 32 kolom thermal dan
+        // kena potong (lihat catatan serupa di struk POS).
+        waktuStrukRiwayat(s.created_at),
+        `No. ${s.invoice_no ?? s.id.slice(0, 8)}`,
         `Kasir: ${s.cashier}`,
         `Shift: ${s.shift_id ?? '—'}`,
+        // Snapshot pelanggan dari server (sumber sama dengan struk POS) — baris
+        // lama tanpa kontak tampil "Pelanggan Umum" persis seperti nota aslinya.
+        `Pelanggan: ${(s.customer_name ?? '').trim() || 'Pelanggan Umum'}`,
       ],
       items: items.map((i) => ({
         name: i.name, qty: i.qty, price: i.price,
@@ -480,7 +494,7 @@ async function cetakUlang(s: SaleRow): Promise<void> {
     // Eksplisit 'thermal' — pilihan Thermal di dialog tidak boleh tergantung
     // pref layout per-device (pref 'a4' kini berarti invoice A4, bukan struk).
     await kirimPrint(strukUntuk(strukUlang, 'thermal'));
-    toast(`Struk ${s.id.slice(0, 8)} dicetak ulang`, 'success');
+    toast(`Struk ${s.invoice_no ?? s.id.slice(0, 8)} dicetak ulang`, 'success');
   } catch (e) {
     toast(`Struk tidak tercetak: ${errMsg(e)}`, 'warning', 9000);
   }
@@ -518,7 +532,7 @@ export async function mountHistoryPage(el: HTMLElement): Promise<void> {
   // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
   // halaman Stok & Produk.
   el.innerHTML = `
-    <div class="space-y-4">
+    <div class="space-y-3">
       <div id="h-body"></div>
     </div>`;
   paint();

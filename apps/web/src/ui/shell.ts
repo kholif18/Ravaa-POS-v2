@@ -1,7 +1,7 @@
 import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'history' | 'reports' | 'shifts' | 'settings';
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'history' | 'customers' | 'debts' | 'reports' | 'shifts' | 'settings';
 export type Route = 'pos' | AdminRoute;
 
 interface NavItem {
@@ -23,6 +23,9 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
       { route: 'stock', label: 'Stok', icon: 'stock' },
       // Linimasa penjualan + topup/tarik per hari (baru 2026-09-30).
       { route: 'history', label: 'Riwayat transaksi', icon: 'receipt' },
+      // Pelanggan & piutang (baru 2026-10-04): master kontak + ledger hutang.
+      { route: 'customers', label: 'Pelanggan', icon: 'users' },
+      { route: 'debts', label: 'Hutang', icon: 'wallet' },
       { route: 'reports', label: 'Laporan', icon: 'reports' },
       { route: 'shifts', label: 'Shift Kasir', icon: 'shifts' },
     ],
@@ -43,6 +46,8 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   satuan: 'Satuan',
   stock: 'Stok',
   history: 'Riwayat transaksi',
+  customers: 'Pelanggan',
+  debts: 'Hutang',
   reports: 'Laporan',
   shifts: 'Shift Kasir',
   settings: 'Pengaturan',
@@ -56,6 +61,8 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   satuan: ['Menu', 'Satuan'],
   stock: ['Menu', 'Stok'],
   history: ['Menu', 'Riwayat transaksi'],
+  customers: ['Menu', 'Pelanggan'],
+  debts: ['Menu', 'Hutang'],
   reports: ['Menu', 'Laporan'],
   shifts: ['Menu', 'Shift Kasir'],
   settings: ['Sistem', 'Pengaturan'],
@@ -69,6 +76,8 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   satuan: 'Master satuan untuk struk; form produk memilih dari daftar ini.',
   stock: 'Pantau stok menipis dan riwayat restock.',
   history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
+  customers: 'Kontak pembeli — dipakai untuk mencatat hutang di halaman Hutang.',
+  debts: 'Buku piutang: catat siapa berhutang dan pembayarannya.',
   reports: 'Omzet, laba, HPP, rekap metode bayar, produk terlaris, dan stok menipis.',
   shifts: 'Riwayat shift + buka/tutup shift dengan modal awal & modal akhir.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
@@ -220,7 +229,7 @@ export function renderShell(active: AdminRoute, cashier: string): string {
     <aside class="sidebar" id="sidebar" aria-label="Navigasi utama">
       <div class="brand">
         <img class="brand-logo" src="/logo.png" alt="Logo Ravaa" />
-        <span class="brand-name truncate text-base font-semibold text-white">Ravaa POS</span>
+        <span class="brand-name truncate text-sm font-semibold text-white">Ravaa POS</span>
       </div>
       <div class="nav-scroll">
         ${navHtml(active)}
@@ -250,15 +259,13 @@ export function renderShell(active: AdminRoute, cashier: string): string {
 }
 
 export function renderPosShell(): string {
+  // Tanpa header sama sekali (permintaan pemilik 2026-10-04, dua putaran:
+  // "hilangkan header" lalu "full hapus untuk POS") — layar kasir dibuka
+  // penuh dari baris pertama, seperti referensi KulaPOS. Catatan: dengan ini
+  // TIDAK ada tombol di-app kembali ke dashboard (shell POS tanpa sidebar);
+  // keluar = tombol back browser / ganti hash manual.
   return `
   <div class="flex h-full flex-col bg-canvas dark:bg-gray-900">
-    <header class="app-header">
-      <a href="#/dashboard" class="icon-btn" aria-label="Kembali ke dashboard" title="Kembali ke dashboard">${icon('chevL')}</a>
-      <div class="min-w-0">
-        <h1 class="page-title">Kasir (POS)</h1>
-        <p class="page-sub">Keranjang kasir — scan atau ketik produk</p>
-      </div>
-    </header>
     <main class="page" id="page" tabindex="-1"></main>
   </div>`;
 }

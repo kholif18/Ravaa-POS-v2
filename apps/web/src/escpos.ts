@@ -183,7 +183,9 @@ export interface Struk {
   /** Nama toko (baris paling atas, tebal, rata tengah). */
   judul: string;
   subjudul?: string;
-  /** Baris info transaksi (tanggal, no, kasir, shift) — rata tengah, satu per baris. */
+  /** Baris info transaksi (tanggal, no, kasir, shift, pelanggan — pelanggan
+   *  diisi POS & Cetak ulang dari `sale.customer_name`, fallback "Pelanggan
+   *  Umum") — rata tengah, satu per baris. */
   meta: string[];
   items: StrukItem[];
   /** Subtotal / Diskon / TOTAL / Tunai / Kembalian — sudah berpasangan. */

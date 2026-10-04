@@ -81,7 +81,7 @@ function tanggalPekan(): string[] {
 
 function kepala(): string {
   return `
-  <div class="card flex flex-wrap items-center justify-between gap-3">
+  <div class="card flex flex-wrap items-center justify-between gap-2">
     <div class="flex flex-wrap items-center gap-2">
       <span class="chip">${icon('calendar')}<span>${esc(tglPanjang(state.hari))}</span></span>
       <span class="chip">${icon('users')}<span>${esc(getCashier())}</span></span>
@@ -115,13 +115,13 @@ function ringkasan(): string {
       tone: state.outbox ? 'danger' : '',
     },
   ];
-  return `<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+  return `<div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
     ${kartu
       .map((k) => {
         const warna = k.tone === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white';
         return `<div class="card">
           <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${k.label}</p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums ${warna}">${esc(k.nilai)}</p>
+          <p class="mt-1 text-sm font-semibold tabular-nums ${warna}">${esc(k.nilai)}</p>
           <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${esc(k.sub)}</p>
         </div>`;
       })
@@ -165,7 +165,7 @@ function grafik(): string {
       <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Penjualan 7 hari</h2>
       <span class="chip">${icon('reports')}<span>${esc(rp(totalOmzet))} · ${totalN} transaksi</span></span>
     </div>
-    <div class="mt-3 flex items-end gap-1.5 sm:gap-3" role="img"
+    <div class="mt-3 flex items-end gap-1.5 sm:gap-2" role="img"
          aria-label="Grafik penjualan 7 hari terakhir, total ${esc(rp(totalOmzet))} dari ${totalN} transaksi">
       ${batang}
     </div>
@@ -182,15 +182,15 @@ function kartuShift(): string {
     ? `<div class="empty">${icon('alert')}<span>${esc(state.shiftErr)}</span></div>`
     : state.shift
       ? `<ul class="mt-2 space-y-2 text-sm">
-          <li class="flex items-center justify-between gap-3">
+          <li class="flex items-center justify-between gap-2">
             <span class="text-gray-500 dark:text-gray-400">Kasir</span>
             <span class="font-medium text-gray-900 dark:text-white">${esc(state.shift.cashier)}</span>
           </li>
-          <li class="flex items-center justify-between gap-3">
+          <li class="flex items-center justify-between gap-2">
             <span class="text-gray-500 dark:text-gray-400">Dibuka</span>
             <span class="font-medium tabular-nums text-gray-900 dark:text-white">${esc(waktu(state.shift.opened_at))}</span>
           </li>
-          <li class="flex items-center justify-between gap-3">
+          <li class="flex items-center justify-between gap-2">
             <span class="text-gray-500 dark:text-gray-400">Modal awal</span>
             <span class="font-medium tabular-nums text-gray-900 dark:text-white">${esc(rp(state.shift.modal_awal))}</span>
           </li>
@@ -249,7 +249,7 @@ function stokMenipis(): string {
           ${low
             .slice(0, 8)
             .map(
-              (p) => `<li class="flex items-center justify-between gap-3 py-2">
+              (p) => `<li class="flex items-center justify-between gap-2 py-2">
                 <span class="min-w-0">
                   <span class="block truncate text-sm font-medium text-gray-900 dark:text-white">${esc(p.name)}</span>
                   <span class="cell-sub">${esc(p.sku)}</span>
@@ -269,7 +269,7 @@ function stokMenipis(): string {
 function isi(): string {
   if (state.loading) {
     return `<div class="space-y-3">
-      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
         ${'<div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>'.repeat(4)}
       </div>
       <div class="card"><div class="skel h-40 w-full"></div></div>
@@ -280,7 +280,7 @@ function isi(): string {
   }
   return `
     ${ringkasan()}
-    <div class="grid gap-3 lg:grid-cols-2">
+    <div class="grid gap-2 lg:grid-cols-2">
       ${grafik()}
       ${kartuShift()}
       ${kartuOutbox()}

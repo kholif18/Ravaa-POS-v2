@@ -54,7 +54,7 @@ const SUITE = [
   ['e2e-import.mjs', 43],
   ['e2e-opname.mjs', 38],
   ['e2e-label.mjs', 21],
-  ['e2e-struk.mjs', 82],
+  ['e2e-struk.mjs', 83],
   ['e2e-hpp.mjs', 28],
   ['satuan-test.mjs', 44],
   ['e2e-multisatuan.mjs', 30],
@@ -68,6 +68,7 @@ const SUITE = [
   ['foto-tambah-test.mjs', 10],
   ['kadaluarsa-jual-test.mjs', 17],
   ['backup-test.mjs', 27],
+  ['customer-debt-test.mjs', 33],
 ];
 
 let total = 0;

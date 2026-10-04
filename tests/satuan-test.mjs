@@ -44,7 +44,10 @@ const th = await p.evaluate(() => [...document.querySelectorAll('#unit-body th')
 })));
 chk('header tabel ada 3 kolom', th.length === 3, JSON.stringify(th.map((x) => x.t)));
 chk('setiap header pakai kelas .th', th.every((x) => x.cls.includes('th')), JSON.stringify(th.map((x) => x.cls)));
-chk('header ter-style (12px + border bawah)', th.every((x) => x.fs === '12px' && x.bb === '1px'), JSON.stringify(th.map((x) => `${x.fs}/${x.bb}`)));
+  // 11px = skala super-compact (2026-10-04, --text-xs di styles.css) — pemilik
+  // meminta seluruh teks turun mengikuti KulaPOS/RPOS, jadi guard ini ikut
+  // diturunkan SADAR dari 12px. Ubah hanya bila kebijakan skala teks berubah.
+  chk('header ter-style (11px + border bawah)', th.every((x) => x.fs === '11px' && x.bb === '1px'), JSON.stringify(th.map((x) => `${x.fs}/${x.bb}`)));
 chk('tidak ada kolom "Urutan"', !th.some((x) => /urutan/i.test(x.t)), JSON.stringify(th.map((x) => x.t)));
 
 console.log('=== 2. Tambah satuan (slug otomatis dari nama) ===');

@@ -381,7 +381,7 @@ function tableCard(): string {
         <tbody id="rows">${productRows()}</tbody>
       </table>
     </div>
-    <div class="flex items-center justify-between gap-3 border-t border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+    <div class="flex items-center justify-between gap-2 border-t border-gray-200 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
       <span id="count" aria-live="polite">${countText()}</span>
       <span id="sync-info">${state.syncedAt ? `sinkron ${state.syncedAt} · ${state.syncedNote}` : 'memuat data…'}</span>
     </div>
@@ -402,20 +402,24 @@ export function renderProductsPage(): string {
   // Di mobile: halaman scroll normal, toolbar tetap lengket (sticky).
   //
   // Jarak toolbar -> app-header memakai PADDING YANG SAMA dengan .page
-  // (`p-4 sm:p-6` = 16px / 24px), bukan angka lain. Wrapper jadi mencerminkan
-  // padding .page persis: `-mx-4 -mt-4 px-4 pt-4` (mobile) dan
-  // `sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6` (>= sm). Negative margin +
+  // (`p-2.5 sm:p-3` = 10px / 12px — super-compact 2026-10-04), bukan angka
+  // lain. Wrapper jadi mencerminkan padding .page persis:
+  // `-mx-2.5 -mt-2.5 px-2.5 pt-2.5` (mobile) dan
+  // `sm:-mx-3 sm:-mt-3 sm:px-3 sm:pt-3` (>= sm). Negative margin +
   // padding sepadan = background wrapper terangkat INTO padding .page, jadi
-  // kartu toolbar tetap duduk di offset 16/24px dari header (= padding .page)
+  // kartu toolbar tetap duduk di offset 10/12px dari header (= padding .page)
   // tanpa menyisakan celah yang bisa dilewati sel tabel.
+  // INI WAJIB IKUT DIUBAH tiap padding .page berubah — selisihnya tidak
+  // terlihat di layar (wrapper dan halaman sama-sama bg-canvas) tapi membuat
+  // toolbar menjorok ke luar padding halaman.
   //
   // Di mobile/tablet wrapper `sticky`, dan ini yang tricky: `position: sticky`
   // di .page (overflow-y:auto) mem-pin BORDER box di CONTENT box .page + offset
   // `top` - bukan padding box, bukan margin box (hasil ukur
   // getBoundingClientRect, bukan asumsi). Karena itu `top` harus negatif
-  // (`-top-4 sm:-top-6`) dan sama besar dengan margin negatifnya: begitu
+  // (`-top-2.5 sm:-top-3`) dan sama besar dengan margin negatifnya: begitu
   // posisi diam = posisi lengket (tidak ada lompatan saat mulai scroll) dan
-  // background menutup penuh dari 64px ke bawah. Dengan `top:0` toolbar
+  // background menutup penuh dari 44px (tinggi .app-header) ke bawah. Dengan `top:0` toolbar
   // terdorong ke content box dan sel tabel bocor melewati padding .page -
   // dulu ditutup pseudo-element `before`, sekarang tidak perlu.
   //
@@ -426,7 +430,7 @@ export function renderProductsPage(): string {
   // ikut scroll.
   return `
     <div class="lg:flex lg:h-full lg:min-h-0 lg:flex-col">
-      <div class="sticky -top-4 sm:-top-6 z-20 -mx-4 -mt-4 shrink-0 bg-canvas px-4 pt-4 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6 dark:bg-gray-900 lg:static">
+      <div class="sticky -top-2.5 sm:-top-3 z-20 -mx-2.5 -mt-2.5 shrink-0 bg-canvas px-2.5 pt-2.5 sm:-mx-3 sm:-mt-3 sm:px-3 sm:pt-3 dark:bg-gray-900 lg:static">
         <div class="card !p-3">
           <div class="toolbar">
             <button type="button" id="nav-toggle" class="side-collapse-btn lg:hidden" title="Buka navigasi" aria-label="Buka navigasi">${icon('dashboard')}</button>
@@ -444,7 +448,7 @@ export function renderProductsPage(): string {
           </div>
         </div>
       </div>
-      <div class="mt-6 flex flex-col items-stretch gap-4 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch">
+      <div class="mt-6 flex flex-col items-stretch gap-3 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch">
         <div class="prod-side-wrap shrink-0" data-open="${state.side}">
           <aside class="card w-64 max-w-full !p-3 lg:overflow-y-auto">${categorySidebar()}</aside>
         </div>

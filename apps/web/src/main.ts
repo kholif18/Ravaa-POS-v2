@@ -5,6 +5,8 @@ import { mountReportsPage } from './pages/reports';
 import { mountPosPage, unmountPosPage } from './pages/pos';
 import { mountProductsPage } from './pages/products';
 import { mountSatuanPage } from './pages/satuan';
+import { mountCustomersPage } from './pages/customers';
+import { mountDebtsPage } from './pages/debts';
 import { mountShiftsPage } from './pages/shifts';
 import { mountSettingsPage } from './pages/settings';
 import { mountStockPage, unmountStockPage } from './pages/stock';
@@ -55,6 +57,12 @@ function render(): void {
     void mountDashboardPage(page);
   } else if (route === 'satuan') {
     void mountSatuanPage(page);
+  } else if (route === 'customers') {
+    // Pelanggan: master kontak, state sendiri (cari multi-kata + CRUD).
+    void mountCustomersPage(page);
+  } else if (route === 'debts') {
+    // Hutang: ledger piutang, state sendiri (ringkasan + rincian + catat).
+    void mountDebtsPage(page);
   } else if (route === 'stock') {
     // Halaman Stok: ringkasan + restock/opname, state sendiri -> di-mount.
     void mountStockPage(page);
@@ -78,7 +86,7 @@ function render(): void {
     void mountSettingsPage(page);
   }
   // Tidak ada cabang else: parseRoute hanya menghasilkan 'pos' atau salah satu
-  // dari 9 AdminRoute, dan semuanya sudah di-mount di atas.
+  // dari 11 AdminRoute, dan semuanya sudah di-mount di atas.
 }
 
 function boot(): void {
