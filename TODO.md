@@ -59,9 +59,16 @@ user (saat akhir session):
   `openCariPelanggan()` (pola identik `openCariProduk()`): input multi-kata
   filter nama/HP/nomor urut/catatan, ↑↓ sorot, Enter/**Pilih**/klik = pilih
   + set `#pos-customer` value + kembali fokus scan. Cust type extend phone/note.
+- ✅ **Shortcut F1/F8 (fokus scan)** — **F1** = referensi KulaPOS
+  *"Jumlah Beli * Kode [F1/Cmd+K]"*, **F8** = alias jalan pendek satu tekan;
+  placeholder Kolom Scan + title tooltip F1/F8/Esc diupdate.
+- ✅ **Shortcut F9 (cari pelanggan)** — tombol `#pos-cust-cari` + title
+  "Cari pelanggan (F9)" + hint `<kbd>F9</kbd>` di input modal cari pelanggan.
+- ✅ **`<kbd>` hint di modal cari produk** — tambah `<kbd>F3</kbd>` di
+  modal `openCariProduk()` (samping input search).
 - ✅ Docs: AGENTS §2 (info bar + sidebar ringkasan + scan bar), README
-  (info bar + sidebar + Aksi cepat + Layar cari pelanggan bullet), SKILL,
-  pos.ts komentar, TODO catatan ini.
+  (info bar + sidebar + Aksi cepat + Layar cari pelanggan bullet + shortcut
+  F1/F8/F9), SKILL, pos.ts komentar, TODO catatan ini.
 - ✅ Tests: `e2e-struk.mjs` section K (6 asersi baru: Subtotal/Manual/Cari
   modal/filter/Enter select/no-match message) → 99 + 6 = **105**, run.mjs
   ekspek diupdate; **npm test total 883 assertion SEMUA HIJAU**.

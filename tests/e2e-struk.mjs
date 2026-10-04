@@ -684,10 +684,21 @@ try {
   const nilaiLain = await page.$eval('#pos-customer', (s, keep) =>
     [...s.options].find((o) => o.value !== keep)?.value ?? '', String(cidJ));
   if (nilaiLain) await page.selectOption('#pos-customer', nilaiLain);
-  await page.click('#pos-cust-cari');
+
+  // Test F1 & F8 (fokus scan) sebelum membuka modal
+  await page.click('body'); // buang fokus
+  await page.keyboard.press('F1');
+  const fokusF1 = await page.evaluate(() => document.activeElement?.id);
+  await page.click('body');
+  await page.keyboard.press('F8');
+  const fokusF8 = await page.evaluate(() => document.activeElement?.id);
+  ok('F1 & F8 memindahkan fokus ke kolom scan (ala KulaPOS)',
+    fokusF1 === 'pos-q' && fokusF8 === 'pos-q', `F1=${fokusF1}, F8=${fokusF8}`);
+
+  await page.keyboard.press('F9');
   await page.waitForSelector('#pcust-q', { timeout: 5000 });
   const fokusCari = await page.evaluate(() => document.activeElement?.id);
-  ok('tombol Cari membuka layar cari pelanggan (ala F3) + fokus di kolom cari',
+  ok('F9 (Cari pelanggan) membuka layar cari pelanggan + fokus di kolom cari',
     (await page.locator('#pcust-list').count()) === 1 && fokusCari === 'pcust-q',
     JSON.stringify({ list: await page.locator('#pcust-list').count(), fokus: fokusCari }));
 

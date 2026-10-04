@@ -232,9 +232,11 @@ npm run dev:api
       karena F2/F3 sudah dipakai Bayar/Layar cari, jadi Tahan tidak bisa
       memakai F3 seperti KulaPOS. Tombolnya ikut berlabel `F7`.
       Teruji `tests/pos-qtykode-test.mjs` (24 asersi).
-    * **F8 / F10 / F12** — pintasan putaran 5–6 (2026-10-04): **F8** fokus
-      balik ke kolom scan (jalan pendek dari Esc, dua langkah saat dropdown
-      terbuka), **F10** buka form bayar (referensi Aronium *"Payment (F10)
+    * **F1 / F8 / F9 / F10 / F12** — pintasan putaran 5–7 (2026-10-04): **F1**
+      & **F8** fokus balik ke kolom scan (**F1** = referensi KulaPOS
+      *"Jumlah Beli * Kode [F1/Cmd+K]"*; **F8** = alias jalan pendek satu tekan
+      pengganti Esc), **F9** buka layar **Cari pelanggan** (ala F3 produk),
+      **F10** buka form bayar (referensi Aronium *"Payment (F10)
       opens payment form"*), **F12** bayar pas (*"Default payment … F12"* —
       tanpa form, tombol hijau di sidebar). Guard: **swal konfirmasi/pilihan
       cetak yang terbuka menahan seluruh pintasan**, dan form bayar yang
@@ -355,12 +357,13 @@ npm run dev:api
     browser tidak membuka find bar) walau modal sedang terbuka — aksinya
     sendiri dilewati oleh guard modal yang sama dengan F2.
   - **Layar cari pelanggan** (putaran 7 2026-10-04, *"tambahkan cari seperti
-    cari produk F3"*): tombol **🔍 Cari** (`#pos-cust-cari`) di info bar di
-    sebelah select Pelanggan — modal lebar `openCariPelanggan()` dengan pola
-    identik layar cari produk F3 (filter bebas nama/no.HP/nomor urut/catatan,
-    ↑↓ pilih, Enter/klik/**Pilih** = set `customerId` + nilai select, Esc =
-    tutup), lalu fokus otomatis balik ke kolom scan. Sangat membantu bila
-    kontak pembeli di master sudah panjang (teruji section **K** `tests/e2e-struk.mjs`).
+    cari produk F3"*): tombol **🔍 Cari** (`#pos-cust-cari` / pintasan **F9**)
+    di info bar di sebelah select Pelanggan — modal lebar `openCariPelanggan()`
+    dengan pola identik layar cari produk F3 (filter bebas nama/no.HP/nomor
+    urut/catatan, ↑↓ pilih, Enter/klik/**Pilih** = set `customerId` + nilai
+    select, Esc = tutup), lalu fokus otomatis balik ke kolom scan. Sangat
+    membantu bila kontak pembeli di master sudah panjang (teruji section **K**
+    `tests/e2e-struk.mjs`).
   - **Catatan per baris** (sejak 2026-10-03, kolom `products.use_note`):
     produk yang sakelarnya **"Catatan di POS"** menyala (di-set pemilik lewat
     form produk Tambah/Ubah) menampilkan **input catatan di bawah barisnya**

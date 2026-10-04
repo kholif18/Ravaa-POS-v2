@@ -165,17 +165,20 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            `pay()` kirim `customer_id` + struk meta
                            `Pelanggan: <customer_name>` + reset pilihan ke
                             Pelanggan Umum. Pintasan level document di
-                            `bindPintasan()` (F2 bayar, F3 cari, F4 qty,
+                            `bindPintasan()` (**F1/F8 fokus kolom scan** —
+                            F1 referensi KulaPOS `[F1/Cmd+K]`, F8 alias
+                            jalan pendek; F2 bayar, F3 cari, F4 qty,
                             F5 bersihkan, F6 diskon transaksi, **F7 tahan**
                             — alokasi F7 sebab F2/F3 sudah terpakai, label
                             `<kbd>F7>` ikut tertulis di tombol Tahan,
-                            **F8 fokus kolom scan**, **F10 buka form bayar**,
-                            **F12 bayar pas**, Enter bayar, Esc ke scan —
-                            jangan dicuri untuk pelanggan; **guard swal**:
-                            ada `.swal2-popup` non-toast (konfirmasi hutang /
-                            pilihan cetak) = SELURUH pintasan dilepas dulu,
-                            sebab `.modal-overlay` bisa menemukan form bayar
-                            yang ada di bawah swal)
+                            **F9 cari pelanggan** (`openCariPelanggan()`),
+                            **F10 buka form bayar**, **F12 bayar pas**,
+                            Enter bayar, Esc ke scan — jangan dicuri untuk
+                            pelanggan; **guard swal**: ada `.swal2-popup`
+                            non-toast (konfirmasi hutang / pilihan cetak) =
+                            SELURUH pintasan dilepas dulu, sebab
+                            `.modal-overlay` bisa menemukan form bayar yang
+                            ada di bawah swal)
                            plus **↑↓ navigasi baris keranjang**
                            (`pindahBarisKeranjang()`: hanya saat fokus di
                            dalam `#pos-rows`, baris catatan dilewati, input

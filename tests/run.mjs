@@ -54,7 +54,7 @@ const SUITE = [
   ['e2e-import.mjs', 43],
   ['e2e-opname.mjs', 38],
   ['e2e-label.mjs', 21],
-  ['e2e-struk.mjs', 105],
+  ['e2e-struk.mjs', 106],
   ['e2e-hpp.mjs', 28],
   ['satuan-test.mjs', 44],
   ['e2e-multisatuan.mjs', 30],

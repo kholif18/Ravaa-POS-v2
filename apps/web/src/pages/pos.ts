@@ -672,7 +672,7 @@ function infoBarHtml(): string {
             <label class="label" for="pos-customer">Pelanggan</label>
             <div class="flex items-stretch gap-1.5">
               <select id="pos-customer" class="input input-sm min-w-0 flex-1">${pilih}</select>
-              <button type="button" id="pos-cust-cari" class="icon-btn self-center" title="Cari pelanggan (ala layar cari produk F3)" aria-label="Cari pelanggan">${icon('search')}</button>
+              <button type="button" id="pos-cust-cari" class="icon-btn self-center" title="Cari pelanggan (F9, ala layar cari produk F3)" aria-label="Cari pelanggan (F9)">${icon('search')}</button>
             </div>
           </div>
         </div>
@@ -705,7 +705,7 @@ function cartHtml(): string {
               <input id="pos-q" class="input input-sm" type="search" autocomplete="off" role="combobox"
                      aria-expanded="false" aria-controls="pos-results" aria-autocomplete="list"
                      placeholder="Scan barcode / ketik nama atau SKU — Qty*Kode, mis. 3*PRD00001"
-                     title="Scan barcode, ketik nama/SKU, atau Qty*Kode (mis. 3*aqua). Fokus balik ke sini: F8 atau Esc" />
+                     title="Scan barcode, ketik nama/SKU, atau Qty*Kode (mis. 3*aqua). Fokus balik ke sini: F1, F8, atau Esc" />
             </div>
             <div id="pos-results" class="suggest hidden" role="listbox" aria-label="Hasil pencarian produk"></div>
           </div>
@@ -1770,6 +1770,7 @@ function openCariProduk(): void {
           <input id="pc-q" class="input" type="search" autocomplete="off"
                  placeholder="Nama / SKU / barcode — ↑↓ pilih, Enter tambah" />
         </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Shortcut: ${kbd('F3')}</p>
         <p id="pc-info" class="text-xs text-gray-500 dark:text-gray-400"></p>
         <div id="pc-list" class="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 py-1 dark:border-gray-700"></div>
       </div>`,
@@ -1872,6 +1873,7 @@ function openCariPelanggan(): void {
           <input id="pcust-q" class="input" type="search" autocomplete="off"
                  placeholder="Nama / nomor HP / nomor urut / catatan — ↑↓ pilih, Enter pilih" />
         </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Shortcut: ${kbd('F9')}</p>
         <p id="pcust-info" class="text-xs text-gray-500 dark:text-gray-400"></p>
         <div id="pcust-list" class="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 py-1 dark:border-gray-700"></div>
       </div>`,
@@ -2459,14 +2461,16 @@ function bindPintasan(): void {
   document.addEventListener(
     'keydown',
     (e) => {
-      // F3–F8, F10, F12 = fitur POS (layar cari / qty berikutnya / bersihkan
-      // keranjang / diskon / tahan / fokus scan / form bayar / bayar pas).
+      // F1–F9, F10, F12 = fitur POS (fokus scan / layar cari / qty / bersihkan
+      // keranjang / diskon / tahan / fokus scan / cari pelanggan / form bayar /
+      // bayar pas). F1 = KulaPOS ("Jumlah Beli * Kode [F1/Cmd+K]") = fokus
+      // scan; F9 = cari pelanggan (slot kosong, KulaPOS belum mendefinisinya).
       // preventDefault DULU sebelum guard modal: walau modal sedang terbuka
       // tombolnya jangan jatuh ke browser (Chrome membuka find bar, F5
       // me-reload halaman), tapi aksinya tetap dilewati di baris guard di
       // bawah.
-      if (e.key === 'F3' || e.key === 'F4' || e.key === 'F5' || e.key === 'F6' ||
-          e.key === 'F7' || e.key === 'F8' || e.key === 'F10' || e.key === 'F12') e.preventDefault();
+      if (e.key === 'F1' || e.key === 'F3' || e.key === 'F4' || e.key === 'F5' || e.key === 'F6' ||
+          e.key === 'F7' || e.key === 'F8' || e.key === 'F9' || e.key === 'F10' || e.key === 'F12') e.preventDefault();
       // Swal terbuka (konfirmasi HUTANG, pilihan cetak, hapus, …) = ambil
       // alih keyboard UTUH. Penting untuk kasus ganda form-bayar + swal:
       // selector `.modal-overlay` menemukan form bayar yang ada di bawah
@@ -2538,16 +2542,24 @@ function bindPintasan(): void {
         return;
       }
 
-      if (e.key === 'F8') {
-        // Fokus balik ke kolom scan (permintaan pemilik 2026-10-04: "tambahkan
-        // shortcut untuk mengarah ke form ini"). Esc juga melakukan hal yang
-        // sama — persis Aronium ("If search box is not focused, simply hit
-        // ESC ... Aronium will focus the search box automatically") — tapi Esc
-        // dua langkah saat dropdown masih terbuka (Esc pertama menutup
-        // dropdown), jadi F8 = jalan pendek satu tekan.
+      if (e.key === 'F1' || e.key === 'F8') {
+        // F1 = KulaPOS ("Jumlah Beli * Kode [F1/Cmd+K]" + fokus search);
+        // F8 = jalan pendek pemilik 2026-10-04 ("tambahkan shortcut untuk
+        // mengarah ke form ini"). Esc juga fokus scan tapi 2 langkah saat
+        // dropdown terbuka (Esc pertama tutup dropdown). F1/F8 = 1 tekan.
         e.preventDefault();
         if (mode !== 'jual' || !shift) return;
         focusScan();
+        return;
+      }
+
+      if (e.key === 'F9') {
+        // Cari pelanggan (putaran 7 2026-10-04 + riset KulaPOS: F9 belum
+        // standar, dipakai karena F1-F8 sudah terpakai). Mirip F3 layar cari
+        // produk tapi untuk pelanggan — buka openCariPelanggan().
+        e.preventDefault();
+        if (mode !== 'jual' || !shift) return;
+        openCariPelanggan();
         return;
       }
 
