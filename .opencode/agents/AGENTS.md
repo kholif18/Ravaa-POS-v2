@@ -61,7 +61,11 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           "n item (n Qty)" di KIRI kolom + `#pos-grand` angka
                           besar di KANAN — **`text-[48px]` kustom (2x lipat
                           `text-2xl` lama), permintaan pemilik 2026-10-04**;
-                          **3 kolom dipisah garis vertikal**
+                          **ketiga kolom SAMA RATA `lg:grid-cols-3`**
+                          (putaran 9 — "jangan lebar di tengah"; menggantikan
+                          `[auto_1fr_auto]` yang memberi sisa lebar ke kolom
+                          tengah; `lg:min-w-[340px]` kolom kanan ikut
+                          dibuang) **dipisah garis vertikal**
                           `border-l` ≥lg — border-t saat kolom menumpuk),
                           lalu scan bar, strip stok menipis
                           & kadaluarsa, **label baris di ATAS tabel**

@@ -43,6 +43,15 @@ payment modal terpusat.
 
 ## Selesai (ringkas)
 
+- [x] 2026-10-04 **Info bar: 3 kolom SAMA RATA** (permintaan pemilik "buat
+      kolomnya sama rata, jangan lebar di tengah, belum sama rata ukuran
+      kolomnya"): grid `lg:grid-cols-[auto_1fr_auto]` → **`lg:grid-cols-3`**
+      (track select pelanggan `1fr` dulu menyerap seluruh sisa lebar) +
+      `lg:min-w-[340px]` kolom kanan ikut dibuang (track sudah 1/3; min-width
+      itu meluap di layar 1024px). Uji ukur: **1440px → 453/453/453px,
+      1024px → 314/314/314px**, `#pos-grand` tetap 48px menempel kanan, tanpa
+      scroll horizontal, `npm test` **837 hijau**.
+
 - [x] 2026-10-04 **Nomor nota konsisten — uuid penuh dibuang dari layar**
       (laporan pemilik: "Nota d35b5731-… kok tidak sama dengan
       261004-000013"): dialog **detail nota Riwayat** (`history.ts` — baris
@@ -183,8 +192,3 @@ payment modal terpusat.
       butuh diskusi kontrak `POST /api/sales`) dan **Cetak ulang** (ulang
       struk nota terakhir?) saat ini `data-soon` → toast "menyusul"
       (permintaan pemilik "placeholder/hardcode dulu tidak apa-apa").
-- [ ] **Info bar: ketiga kolom SAMA RATA — jangan lebar di tengah**
-      (permintaan pemilik 2026-10-04, paling akhir): grid kini
-      `lg:grid-cols-[auto_1fr_auto]` — kolom select pelanggan (`1fr`) yang
-      menyerap seluruh sisa lebar. Ubah ke kolom sama rata / proporsi
-      seimbang tanpa mengorbankan `#pos-grand` 48px yang menempel kanan.

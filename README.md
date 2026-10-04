@@ -195,7 +195,10 @@ npm run dev:api
     **kiri** kolom, angka besar `#pos-grand` di **kanan** — ukuran **kustom
     `text-[48px]` = 2x lipat `text-2xl` lama (24px)**, permintaan pemilik
     2026-10-04 "custom ukuran font, besarkan lagi 2x lipat". **Ketiga kolom
-    info bar dipisah garis vertikal** (`border-l`
+    info bar SAMA RATA `lg:grid-cols-3`** (putaran 9 — "jangan lebar di
+    tengah"; menggantikan `[auto_1fr_auto]` di mana kolom select yang
+    menyerap seluruh sisa lebar; `lg:min-w-[340px]` lama ikut dibuang)
+    **dipisah garis vertikal** (`border-l`
     hanya ≥lg; layar sempit kolom menumpuk jadi garis horizontal).
   - **Keranjang = tabel 8 kolom**: No / **Kode** (SKU, mono) / Nama barang /
     Harga / Qty / **Diskon** / Subtotal / **Aksi** (hapus) — deskripsi

@@ -616,10 +616,16 @@ function infoBarHtml(): string {
     : `<option value="">Pelanggan Umum</option>`;
   return `
     <div class="card info-bar !p-3">
-      <!-- Tiga kolom dipisah garis vertikal (permintaan pemilik 2026-10-04):
-           border-l hanya >=lg (layar sempit kolom menumpuk, garis jadi noise).
-           Kolom kanan = label+qty di KIRI, angka TOTAL di KANAN. -->
-      <div class="grid items-center gap-2 lg:grid-cols-[auto_1fr_auto] lg:gap-4">
+      <!-- Tiga kolom SAMA RATA (permintaan pemilik 2026-10-04 putaran 9:
+           "buat kolomnya sama rata, jangan lebar di tengah, belum sama
+           rata ukuran kolomnya") — lg:grid-cols-3 menggantikan
+           [auto_1fr_auto] yang membuat kolom select pelanggan menyerap
+           seluruh sisa lebar. lg:min-w-[340px] lama ikut DIBUANG: track
+           sudah 1/3, dan min-width itu akan meluap di layar tepat 1024px.
+           Kolom dipisah garis vertikal — border-l hanya >=lg (layar sempit
+           kolom menumpuk, garis jadi noise). Kolom kanan = label+qty di
+           KIRI, angka TOTAL di KANAN. -->
+      <div class="grid items-center gap-2 lg:grid-cols-3 lg:gap-4">
         <div class="flex items-center gap-2 whitespace-nowrap text-xs text-gray-600 dark:text-gray-300">
           ${tombolKembaliHtml()}
           <div class="flex flex-col gap-y-0.5">
@@ -635,10 +641,11 @@ function infoBarHtml(): string {
             <select id="pos-customer" class="input input-sm">${pilih}</select>
           </div>
         </div>
-        <!-- Kolom total: min-w supaya justify-between punya ruang — label+n item
-             nempel KIRI kolom, angka #pos-grand nempel KANAN (tanpa min-w,
-             track auto selebar konten & keduanya menempel berdempetan). -->
-        <div class="flex items-center justify-between gap-3 border-t border-gray-200 pt-2 dark:border-gray-700 lg:min-w-[340px] lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        <!-- Kolom total = track 1/3 (sama rata, lihat komentar grid di atas).
+             justify-between tetap menempelkan label+n item ke KIRI kolom dan
+             angka #pos-grand ke KANAN — tanpa min-w yang dulu dipakai untuk
+             memberi ruang pada track auto. -->
+        <div class="flex items-center justify-between gap-3 border-t border-gray-200 pt-2 dark:border-gray-700 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
           <div class="min-w-0 text-left">
             <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total belanja</div>
             <div id="pos-owncount" class="text-xs text-gray-500 dark:text-gray-400">${cart.length ? `${cart.length} item (${count()} Qty)` : '0 item'}</div>
