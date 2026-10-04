@@ -669,11 +669,18 @@ function infoBarHtml(): string {
                kata, ↑↓ sorot, Enter pilih), buat pelanggan yang daftarnya
                sudah panjang (master kontak + hutang). -->
           <div class="w-full">
-            <label class="label" for="pos-customer">Pelanggan</label>
-            <div class="flex items-stretch gap-1.5">
-              <select id="pos-customer" class="input input-sm min-w-0 flex-1">${pilih}</select>
-              <button type="button" id="pos-cust-cari" class="icon-btn self-center" title="Cari pelanggan (F9, ala layar cari produk F3)" aria-label="Cari pelanggan (F9)">${icon('search')}</button>
+            <div class="flex items-center justify-between gap-2">
+              <label class="label" for="pos-customer">Pelanggan</label>
+              <!-- Tombol cari PINDAH ke baris label (permintaan pemilik
+                   putaran 8 2026-10-04: "tombol cari pelanggan hapus aja cukup
+                   pakai text label yang F9 dan ganti logo kuncinya dengan
+                   search karena jika text label hanya f9 maka space yang
+                   digunakan select option jadi lebih besar") -->
+              <button type="button" id="pos-cust-cari" class="flex items-center gap-1 text-xs font-semibold text-primary hover:underline" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">
+                ${icon('search')} ${kbd('F9')}
+              </button>
             </div>
+            <select id="pos-customer" class="input input-sm w-full">${pilih}</select>
           </div>
         </div>
         <!-- Kolom total = track 1/3 (sama rata, lihat komentar grid di atas).
@@ -702,11 +709,12 @@ function cartHtml(): string {
           <div class="relative min-w-[220px] flex-1">
             <div class="search-wrap">
               ${icon('search')}
-              <input id="pos-q" class="input input-sm" type="search" autocomplete="off" role="combobox"
+              <input id="pos-q" class="input input-sm pr-14" type="search" autocomplete="off" role="combobox"
                      aria-expanded="false" aria-controls="pos-results" aria-autocomplete="list"
                      placeholder="Scan barcode / ketik nama atau SKU — Qty*Kode, mis. 3*PRD00001"
                      title="Scan barcode, ketik nama/SKU, atau Qty*Kode (mis. 3*aqua). Fokus balik ke sini: F1, F8, atau Esc" />
             </div>
+            <span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2">${kbd('F1')}</span>
             <div id="pos-results" class="suggest hidden" role="listbox" aria-label="Hasil pencarian produk"></div>
           </div>
           ${mode === 'jual' ? `
@@ -765,7 +773,7 @@ function cartGridHtml(): string {
              ... Bersihkan [F5]" kanan-atas). -->
         <div class="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
           <span id="pos-count">${cart.length ? `${count()} item` : 'Keranjang kosong'}</span>
-          <button type="button" id="pos-clear" class="btn btn-ghost !min-h-[30px] !px-2.5 !py-1 text-xs" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${cart.length ? '' : ' disabled'}>${icon('trash')}<span class="hidden sm:inline">Bersihkan</span>${kbd('F5')}</button>
+          <button type="button" id="pos-clear" class="btn btn-ghost text-red-600 !min-h-[30px] !px-2.5 !py-1 text-xs" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${cart.length ? '' : ' disabled'}>${icon('trash')}<span class="hidden sm:inline">Bersihkan</span>${kbd('F5')}</button>
         </div>
         <div class="table-wrap table-scroll flex-1">
           <!-- "table-compact" = pola yang sama dengan halaman Produk & Stok
@@ -778,14 +786,14 @@ function cartGridHtml(): string {
           <table id="pos-cart" class="table table-compact">
             <thead>
               <tr>
-                <th class="th th-sticky text-center">No</th>
-                <th class="th th-sticky">Kode</th>
-                <th class="th th-sticky">Nama barang</th>
-                <th class="th th-sticky text-right">Harga</th>
-                <th class="th th-sticky text-center">Qty</th>
-                <th class="th th-sticky text-right">Diskon</th>
-                <th class="th th-sticky text-right">Subtotal</th>
-                <th class="th th-sticky text-right">Aksi</th>
+                <th class="th th-sticky text-center w-10">No</th>
+                <th class="th th-sticky w-24">Kode</th>
+                <th class="th th-sticky w-auto">Nama barang</th>
+                <th class="th th-sticky text-right w-24">Harga</th>
+                <th class="th th-sticky text-center w-32">Qty</th>
+                <th class="th th-sticky text-right w-24">Diskon</th>
+                <th class="th th-sticky text-right w-24">Subtotal</th>
+                <th class="th th-sticky text-right w-14">Aksi</th>
               </tr>
             </thead>
             <tbody id="pos-rows">${cartRows()}</tbody>
@@ -850,7 +858,7 @@ function cartGridHtml(): string {
              selain "Pelanggan Umum"), dan metode pembayaran lain. -->
         <div class="mt-auto flex flex-col gap-1.5">
           <button type="button" id="pos-bayar" class="btn btn-primary w-full !py-3.5 text-sm"${cart.length ? '' : ' disabled'}>${icon('check')}<span>Bayar</span>${kbd('F10')}</button>
-          <button type="button" id="pos-pay-pas" class="btn w-full !py-4 text-base font-semibold bg-emerald-600 text-white hover:bg-emerald-700"${cart.length ? '' : ' disabled'} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
+          <button type="button" id="pos-pay-pas" class="btn btn-outline w-full !py-4 text-base font-semibold !text-emerald-600 !border-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/20"${cart.length ? '' : ' disabled'} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
           <p class="text-center text-xs text-gray-500 dark:text-gray-400">${kbd('F10')} form bayar · ${kbd('F12')} bayar pas · ${kbd('F2')} bayar cepat</p>
         </div>
       </div>
@@ -1198,7 +1206,7 @@ function cartRows(): string {
             aria-label="Catatan ${esc(l.name)}" />
         </td>
       </tr>` : '';
-      return `<tr data-key="${l.key}">
+      return `<tr data-key="${l.key}" class="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
       <td class="td td-num text-center text-gray-500">${i + 1}</td>
       <td class="td font-mono text-xs">${l.sku ? esc(l.sku) : '<span class="text-gray-400">—</span>'}</td>
       <td class="td">
@@ -1209,7 +1217,7 @@ function cartRows(): string {
       <td class="td">
         <div class="flex items-center justify-center gap-1">
           <button type="button" class="row-btn" data-act="dec" data-key="${l.key}" title="Kurangi" aria-label="Kurangi qty">${icon('minus')}</button>
-          <input class="input input-sm !w-16 text-center" data-act="qty" data-key="${l.key}" type="number" inputmode="numeric" min="0" value="${l.qty}" aria-label="Qty ${l.name}" />
+          <input class="input input-sm !w-20 text-center font-semibold" data-act="qty" data-key="${l.key}" type="number" inputmode="numeric" min="0" value="${l.qty}" aria-label="Qty ${l.name}" />
           <button type="button" class="row-btn" data-act="inc" data-key="${l.key}" title="Tambah" aria-label="Tambah qty">${icon('plus')}</button>
         </div>
       </td>
