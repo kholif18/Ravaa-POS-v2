@@ -110,14 +110,45 @@ panel topup/laporan, modal struk, atau styling apa pun.
    shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700`,
    `!py-4`, F12 — hover SENADA warna tombol, permintaan 8c "hover tombol F12
    juga ubah ke hijau jangan biru, karena tombolnya warna hijau"; bayar tunai
-   persis total SEKALI ketuk tanpa modal); **modal form bayar** =
-   `formBayarHtml()` (total tagihan, metode `data-pay`, `#pos-cash`, chip
-   `data-cash`, kembalian, petunjuk hutang; OK footer = `#pos-pay`) untuk kasus
+    persis total SEKALI ketuk tanpa modal); **modal form bayar** =
+   `formBayarHtml()` — **putaran 10 (2026-10-05): layout 2 panel ala
+   Ravaa POS v1** (referensi `payment-modal.blade.php`, flex 5/7 → grid
+   `sm:grid-cols-[5fr_7fr]`, modal `wide` 768px): kolom KIRI = kartu Total
+   tagihan border-2 primer `#bayar-total` + kotak pelanggan `#bayar-cust`
+   (ikon users) + **kartu metode `data-pay`** gaya `.btn-method-card`
+   (ikon wallet/qr/sync, aktif = `!border-primary bg-primary-soft
+   !text-primary dark:bg-primary/15`; jangan ubah daftar kelas ini di satu
+   tempat saja — `paintFormBayar()` harus toggle persis sama) + petunjuk
+   pintasan; kolom KANAN `bg-gray-50` = input besar `#pos-cash` (`text-2xl`
+   prefix Rp + tombol × `#bayar-clear`), chip `data-cash` grid 2 kolom,
+   kotak KEMBALIAN putus-putus (`#pos-change` kelas dari `kelasPosChange()`,
+   satu sumber dengan `paintCart()`) + `#pos-change-ctx`, petunjuk hutang;
+   OK footer = `#pos-pay`; metode non-tunai = `#bayar-non-tunai` (toggle
+   `hidden`, jangan render ulang HTML). **Putaran 10b (2026-10-05): semua
+   tombol + kolom uang dalam modal ~2x** (permintaan pemilik) — kartu
+   metode 78px/24px **layout kolom ikon-atas-label-bawah** (horizontal
+   @24px tidak muat di kolom 137px), chip 51px/22px, `#pos-cash` 91px/font
+   40px + prefix Rp 24px + `!pr-[76px]` (angka tak tertimpa × 56px), footer
+   via `classList` di `bukaBayar` (modal lain normal). **Putaran 10c
+   (2026-10-05)**: chip "Uang pas" DIHAPUS dari modal (F12 `#pos-pay-pas`
+   sudah mengurusi uang persis total → `QUICK_CASH` = 20k/50k/100k/200k),
+   chip uang KEMBALI ukuran normal 1x, `#pos-change` font **40px =
+   seukuran `#pos-cash`** (kelasPosChange), `#bayar-total` **36px** (+50%).
+   **Putaran 10d (2026-10-05)**: chip pecahan **44px/17px** (diperbesar dari
+   25/11 — "tombol nominalnya terlalu kecil") + **auto-isi uang pas DIHAPUS**
+   — `bukaBayar()` reset `cashIn=0`, kolom uang **default kosong** (tujuan:
+   isi uang kurang/lebih), fokus `#pos-cash` tetap.
+   **Jebakan**: kelas arbitrary yang MENEMPEL `${` tanpa spasi TIDAK
+   di-generate scanner
+   Tailwind v4 — selalu spasi sebelum interpolasi template literal.
+   **Kecepatan wajib dipertahankan**: fokus `#pos-cash` saat buka (default kosong), klik chip → fokus balik ke
+   kolom uang (kasir tinggal Enter), Enter-on-input/F2/F10/F12. untuk kasus
    **uang lebih / uang kurang / metode lain**. Uang kurang boleh jadi HUTANG
    hanya dengan pelanggan terpilih selain "Pelanggan Umum" — konfirmasi swal
    dulu, baru `pay({hutang:true})`; penolakannya = toast barrier lama + fokus
-   kolom uang. Id lama (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`)
-   tetap dipertahankan supaya pintasan & suite test tidak patah.
+   kolom uang. Id lama (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`,
+   `#bayar-tunai`, `#bayar-non-tunai`) tetap dipertahankan supaya pintasan &
+   suite test tidak patah.
 
 ## Larangan UI
 

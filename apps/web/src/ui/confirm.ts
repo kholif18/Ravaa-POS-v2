@@ -75,20 +75,35 @@ export function alertDialog(o: {
  *  ([Thermal] [A4] [Tidak]). SweetAlert2 punya tepat tiga slot tombol
  *  (confirm / deny / cancel), jadi `choices` maksimal tiga: slot pertama
  *  = konfirmasi (primer), kedua = deny, ketiga = cancel (ghost).
- *  Resolusi: key tombol yang diklik, atau `null` bila Esc / klik luar. */
+ *  Resolusi: key tombol yang diklik, atau `null` bila Esc / klik luar.
+ *  `html` (mutual eksklusif dengan `message`): isi ber-format — dipakai
+ *  modal resume pasca-bayar POS (putaran 11, 2026-10-05) untuk baris-baris
+ *  ringkasan; `message` tetap untuk teks polos caller lama. */
 export function choiceDialog(o: {
   title: string;
   message?: string;
+  html?: string;
   icon?: 'question' | 'info' | 'success' | 'warning';
   choices: { key: string; label: string }[];
   cancelLabel?: string;
+  /** `true` = sweetalert2 menempelkan listener keydown ke **window (capture)**
+   *  — Esc didengar dari mana pun fokus. Default bawaan menempel di popup,
+   *  jadi Esc MATI bila fokus sempat pindah keluar (kasus modal resume POS:
+   *  `pay()` memfokus kolom scan sesaat setelah dialog dibuka). */
+  keydownListenerCapture?: boolean;
+  /** `false` = sweetalert2 tidak mengembalikan fokus ke elemen saat
+   *  `fire()` (returnFocus-nya bisa menimpa `focusScan()` penutup yang
+   *  menyiapkan kolom scan untuk transaksi berikutnya). */
+  returnFocus?: boolean;
 }): Promise<string | null> {
   const [a, b] = o.choices;
   return base
     .fire({
       title: o.title,
-      text: o.message,
+      ...(o.html != null ? { html: o.html } : { text: o.message }),
       icon: o.icon ?? 'question',
+      ...(o.keydownListenerCapture === true ? { keydownListenerCapture: true } : {}),
+      ...(o.returnFocus === false ? { returnFocus: false } : {}),
       showDenyButton: b !== undefined,
       showCancelButton: true,
       confirmButtonText: a?.label ?? 'Ya',

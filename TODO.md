@@ -14,6 +14,8 @@ terhapus, bukti utama sudah diekstrak ke laporan chat 2026-10-04).
       metode berubah; input manual dihormati, barrier `pay()` tetap pengaman.
       Test: kolom auto-isi Rp4.000 + barrier dijalankan setelah kolom
       dikosongkan (`e2e-struk.mjs` 83 asersi).
+      **⚠ DICABUT putaran 10d (2026-10-05)**: pemilik memutuskan kolom harus
+      default 0 — lihat Catatan 2026-10-05 putaran 10d di bawah.
 - [x] 2026-10-04 **P2 — Teks konteks Kembalian** — `teksKembalian()` di
       `pos.ts`: "Kurang Rp…" (merah) / "Uang pas. Tidak ada kembalian."
       (hijau) di baris `#pos-change-ctx` bawah angka KEMBALIAN.
@@ -151,8 +153,237 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
   penuh dengan modal baru) + tsc/build lolos; screenshot verifikasi
   `/tmp/opencode/putaran9b-*.png` — computed: kolom 301/703px (30/70),
   preview 540px = 0.60 × 900, `overflowY: auto`, kartu aktif
-  `rgb(0,135,255)` + `rgb(255,255,255)`, aksi `[data-hold-act]` HANYA di
-  detail.
+   `rgb(0,135,255)` + `rgb(255,255,255)`, aksi `[data-hold-act]` HANYA di
+   detail.
+
+**Catatan 2026-10-05 (putaran 10 — modal bayar ala v1)**:
+- ✅ **Modal bayar dirombak 2 panel ala Ravaa POS v1** — permintaan pemilik:
+  *"modal bayar silakan dengan referensi ravaapos v1 di directory tadi,
+  pendekatan yang sama, tanpa mengurangi kecepatan dalam transaksi, mungkin
+  layout bisa di benahi pada v2 ini"*. Referensi
+  `src/RPOS/.../partials/payment-modal.blade.php` + `.payment-layout-wrapper`
+  (flex `5fr 7fr`) di `pos-system.css`. Yang diterapkan: `formBayarHtml()`
+  → grid **`sm:grid-cols-[5fr_7fr]`** (proporsi terukur **312/436px**) +
+  `bukaBayar()` pakai opsi **`wide`** (768px — `max-w-lg` lama terlalu
+  sempit untuk dua panel). KIRI: kartu **Total tagihan** border-2 primer
+  (`#bayar-total` angka 3xl extra-bold) → kotak **Pelanggan `#bayar-cust`**
+  (ikon users, "Pelanggan Umum · CUS-000001" — penanda alur hutang) →
+  **kartu metode `data-pay` grid 2 kolom** gaya `.btn-method-card` (ikon
+  wallet/qr/sync; **ikon `qr` BARU di `icons.ts`** — set v2 tak punya ikon
+  QR; aktif = `!border-primary bg-primary-soft !text-primary
+  dark:bg-primary/15`) → hint pintasan. KANAN `bg-gray-50`: **Uang
+  diterima** input `#pos-cash` `text-2xl`/700 prefix Rp + **tombol ×
+  `#bayar-clear`** (ala `btn-clear-huge` v1: kosongkan + `cashTouched` +
+  fokus balik) → chip `data-cash` grid 2 kolom (Uang pas/50k/100k/200k) →
+  **kotak KEMBALIAN putus-putus** ala `.payment-section-result` (label
+  statis + `#pos-change` lewat helper baru **`kelasPosChange()`** =
+  `text-2xl font-extrabold tabular-nums` + `kelasKembalian()` — satu sumber
+  untuk render awal & `paintCart()`, ukuran/warna tidak terpecah) →
+  petunjuk hutang; `#bayar-non-tunai` untuk QRIS/Transfer. Blok
+  tunai/non-tunai dirender SEKALIGUS + ditoggle `hidden`
+  (`paintFormBayar()` — toggle 4 kelas kartu WAJIB sama persis dengan
+  render awal), jadi `bindFormBayar()` tetap satu kali pasang.
+- ✅ **Kecepatan transaksi TIDAK dikurangi** (syarat pemilik): auto-isi P1
+  (`isiUangOtomatis()` sebelum HTML) *(fitur ini kemudian DICABUT di putaran
+  10d 2026-10-05 — lihat Catatan 10d)*, fokus `#pos-cash` saat buka,
+  Enter-on-input → `ok.click()` → `pay()`, F2/F10/F12, plus perilaku BARU:
+  **klik chip → fokus balik ke kolom uang** (kasir tinggal Enter — sebelumnya
+  fokus tertinggal di chip) dan **tombol ×** untuk salah ketik. Semua id
+  lama TANPA perubahan (`#pos-cash`, `#pos-pay` OK footer, `data-pay`,
+  `data-cash`, `#pos-change`, `#pos-change-ctx`, `#bayar-tunai`,
+  `#bayar-non-tunai`) — `#pos-pay-pas` sengaja tetap di side panel.
+- ✅ Tests: `e2e-struk.mjs` **106 → 108 asersi** (section form bayar + cek
+  layout 2-panel `layoutBayar{kolom===2,totalDiKiri===0,uangDiKanan===1,
+  kartuMetode===3,pelanggan}` + fokus `pos-cash` setelah klik chip),
+  `run.mjs` ekspek menyesuaikan → **`npm test` 888 assertion SEMUA HIJAU**
+  (run pertama hijau dengan modal bayar baru); tsc + build lolos.
+  Screenshot verifikasi `/tmp/opencode/putaran10-*.png` (bayar awal, chip
+  100k → kembalian Rp86.000, QRIS → blok bertukar, closeup 768px).
+  **Catatan alat**: Read tool sesi ini sempat menyajikan media basi/salah
+  (membaca `putaran10-bayar.png` memperlihatkan konten modal Pending;
+  closeup 768px ditampilkan sebagai halaman penuh) — diverifikasi ulang via
+  md5 + `file` (dimensi) + sampel piksel PIL (Tunai aktif `(166,213,255)`,
+  bg kanan gray-50 `(249,250,251)`); bukan bug aplikasi.
+
+**Catatan 2026-10-05 (putaran 10b — tombol + uang diterima ~2x)**:
+- ✅ *"kurang besar untuk tombol-tombol dan uang diterima pada modal, silakan
+  atur untuk lebih besar sekitar 2x lipat"* — semua kontrol dalam modal
+  bayar diperbesar ~2x (baseline diukur Playwright, **ingat `@theme` repo:
+  `--text-2xl`=20px, `--text-sm`=13px** — angka Tailwind default tidak
+  berlaku):
+
+  | kontrol | sebelum | sesudah | rasio |
+  |---|---|---|---|
+  | kartu metode `data-pay` | 34px / 13px | **78px / 24px** | 2.3x / 1.85x |
+  | chip `data-cash` | 25px / 11px | **51px / 22px** | 2.0x / 2.0x |
+  | `#pos-cash` | 41px / 20px | **91px / 40px** | 2.2x / 2.0x |
+  | tombol × `#bayar-clear` | 28px | **56px** | 2.0x |
+  | footer Batal/Bayar | 34px / 13px | **68px / 24px** | 2.0x / 1.85x |
+
+- ✅ Keputusan: **kartu metode pindah ke layout KOLOM** (ikon atas, label
+  bawah, center) persis gaya `.btn-method-card` v1 — label horizontal
+  `Transfer` @24px = ±98px + ikon + padding meluber dari kolom 137px
+  (lebar panel kiri 5/7); `border-2` ala v1. Prefix `Rp` ikut 24px/800 ala
+  `.payment-input-huge` v1; `!pr-[76px]` menjaga angka (text-right) berhenti
+  12px sebelum tombol ×. Footer diperbesar lewat `classList` di
+  `bukaBayar()` `onMount` — modal lain (pending/cari/konfirmasi) TIDAK ikut
+  membesar. `#pos-pay-pas` (side panel) di luar permintaan, tidak diubah.
+- ✅ **Jebakan Tailwind tercatat**: `!text-[22px]` yang menempel `${`
+  tanpa spasi TIDAK di-generate oleh scanner Tailwind v4 (kekurangan
+  pembatas → token dibuang) — chip awalnya naik tingginya tapi font tetap
+  11px; diperbaiki dengan spasi eksplisit sebelum interpolasi. Pola ini
+  berlaku untuk SEMUA class arbitrary di template literal.
+- ✅ Verifikasi: label semua muat (`Transfer` 98≤135), chip `scrollWidth ==
+  clientWidth`, tidak ada kotak tumpang tindih, angka tak tertimpa tombol ×,
+  modal 546px < 90vh (tanpa scroll), glyph angka 29px PIL = cap-height font
+  40px. `npm test` **888 assertion SEMUA HIJAU** (tanpa asersi berubah —
+  suite hanya mem-check struktur/interaksi, bukan piksel), tsc + build lolos.
+  Screenshot: `/tmp/opencode/putaran10b-*.png` (Read tool sesi ini
+  menyajikan media basi — verifikasi ukuran via Playwright evaluate + PIL).
+
+**Catatan 2026-10-05 (putaran 10c — revisi ukuran modal bayar)**:
+- ✅ Instruksi pemilik: *"Jangan ada uang pas, karena sudah ada tombol F12
+  untuk uang pas, ganti 20.000, tapi tombol uang itu kecilkan 1xnya,
+  kembalian kurang besar seukuran uang diterima, total tagihan di besarkan
+  setengahnya"* — 5 perubahan:
+  1. **Chip "Uang pas" DIHAPUS** dari modal bayar; `QUICK_CASH` kini
+     `[20000, 50000, 100000, 200000]` — `#pos-pay-pas` (F12, side panel)
+     TIDAK tersentuh, justru jadi alasannya. Semua cabang `raw === 'pas'`
+     dibersihkan (`bindFormBayar`, `paintCart`, template).
+  2. **Chip uang kembali ukuran normal 1x** (pembesaran 10b dibatalkan
+     khusus chip): 51px/22px → **25px/11px** (baseline awal).
+  3. **Kembalian `#pos-change` font 20px → 40px** = persis seukuran
+     `#pos-cash` (*"seukuran uang diterima"*) — lewat `kelasPosChange()`
+     (satu sumber render awal + `paintCart`).
+  4. **Total tagihan `#bayar-total` 24px → 36px** (*"di besarkan
+     setengahnya"* = +50%).
+  5. Toast barrier "tekan 'Uang pas'" → "tekan Bayar pas (F12)" (ujian
+     test tetap `includes('Uang diterima belum diisi')`).
+- ✅ Test `e2e-struk.mjs`: skenario chip pas diganti **chip 20.000 +
+  ketik manual 4000 → kembalian Rp0**; label ok "(Uang pas + 3 pecahan)"
+  → "(4 pecahan: 20rb-200rb)". **Jumlah asersi TIDAK berubah (108)** →
+  run.mjs tidak disentuh; **`npm test` 888 assertion SEMUA HIJAU** + tsc +
+  build lolos. Verifikasi terukur: chips `["Rp20.000","Rp50.000",
+  "Rp100.000","Rp200.000"]`, `adaPas:false`, `#pos-change` 40px (sama
+  dgn `#pos-cash`), `#bayar-total` 36px, kartu metode 78px & footer 68px
+  (10b) tetap; chip100k → kembalian Rp86.000 + tersorot.
+
+**Catatan 2026-10-05 (putaran 10d — chip lebih besar + auto-isi dicabut)**:
+- ✅ Instruksi pemilik: *"tombol nominalnya terlalu kecil kalau sekarang,
+  form uang di terima jangan langsung di isi uang pas, karena tujuannya
+  adalah untuk memasukkan nilai uang kurang atau uang lebih jadi default 0
+  dan auto focus sudah OK"* — 2 perubahan:
+  1. **Chip pecahan diperbesar** 25px/11px (1x putaran 10c) → **44px/17px**
+     (`!min-h-[44px] !px-4 !py-2 !text-[17px]` — di antara 1x dan 2x 10b,
+     biar tidak bolak-balik ke ekstrem). Kartu metode/footer/input tidak
+     tersentuh.
+  2. **Auto-isi "uang pas" (P1) DIHAPUS** — **fitur P1 (2026-10-04) resmi
+     dicabut** setelah 1 hari: `isiUangOtomatis()` + 3 pemanggilnya
+     (`bukaBayar`, `paint`, `paintCart`) dibuang; `bukaBayar()` kini
+     `cashIn=0; cashTouched=false` sehingga kolom **selalu terbuka kosong**
+     (placeholder tetap total ala Aronium). Alasan pemilik: kolom itu untuk
+     memasukkan uang KURANG/LEBIH sesungguhnya — prefill "pas" menyembunyikan
+     niat kasir. **Fokus `#pos-cash` saat buka TIDAK berubah** ("auto focus
+     sudah OK"); "uang pas" = F12 `#pos-pay-pas` / klik chip. `cashTouched`
+     dipertahankan sebagai penanda sentuhan (guard sinkronisasi paintCart +
+     reset ganti metode); `bayarPas()` tetap set `cashIn=total()`.
+- ✅ Test `e2e-struk.mjs`: asersi "uang diterima auto-isi = total (P1)" →
+  **"uang diterima default KOSONG (tanpa auto-isi — putaran 10d)"**;
+  komentar barrier disesuaikan (fill('') = langkah eksplisit). Semua `jual()`
+  memang mengisi uang sendiri → **jumlah asersi TIDAK berubah (108)**;
+  **`npm test` 888 assertion SEMUA HIJAU** + tsc + build lolos. Verifikasi
+  terukur (Playwright): buka form → `value=""`, `fokus=pos-cash`,
+  chip `202x44px font=17px`; isi 10.000 dari total 14.000 → ctx
+  **"Kurang Rp4.000"** (alur uang kurang jalan); kartu metode 78px,
+  `#pos-cash` 91px/40px, `#pos-change` 40px, `#bayar-total` 36px,
+  footer 68px (10b/10c) tetap; `#pos-pay-pas` side panel 294×55 tak
+  tersentuh.
+
+**Catatan 2026-10-05 (putaran 11 — modal resume pasca-bayar)**:
+- ✅ Instruksi pemilik: *"Setelah bayar tambahkan modal resume, dan pilihan
+  print thermal atau A4, begitu juga pada bayar PAS F12"* — dengan klarifikasi
+  **1A** (muncul setelah SETIAP bayar, semua jalur, tanpa peduli saklar
+  auto-print; saklar hanya menentukan apakah tombol Thermal/A4 benar-benar
+  mengirim ke printer) dan poin 2 (isi resume): pemilik biasanya cuma butuh
+  **uang kembali**, tapi minta lihat saran dulu — *"jika tidak cocok nanti
+  kita ubah"*. Saran yang diterapkan (judul hero TETAP `Kembalian RpX`
+  ala revisi 2026-10-04):
+  1. **Badan resume** (`htmlResumePenjualan()` di `pos.ts`, lewat opsi baru
+     `html` di `choiceDialog`): **No. `invoice_no`** (huruf besar via CSS
+     `uppercase`) → daftar item `qty × nama` + net per baris (**maks 5 baris**
+     + "… +N item lainnya") → **Total** (bold) → baris `Tunai` (uang
+     diterima) / label metode QRIS/Transfer (total) — pola baris rincian
+     struk. Tombol **[Thermal] [A4] [Selesai]** + slot swal TIDAK berubah
+     (`.swal2-confirm/.swal2-deny/.swal2-cancel`, `focusCancel` → fokus awal
+     = **Selesai**, Enter = selesai tanpa cetak). Modal ±384×273px.
+  2. **Guard dihapus**: `if (autoPrint) void pilihCetakSelesai(...)` →
+     **dipanggil tanpa syarat** di `pay()` — F12 `bayarPas()` memang lewat
+     `pay()` yang sama, jadi ikut serta tanpa cabang khusus. Snapshot resume
+     (invoice/items/metode/uang) di-argumen-kan **SEBELUM** reset
+     `cart`/`cashIn`.
+  3. **Saklar = izin kirim printer**: Thermal/A4 saat saklar mati →
+     `setStrukLayout` tetap jalan (pref tersimpan) + **toast "Cetak sedang
+     mati…"** (diam-diam no-op dahulu). **A4 kena guard BARU** — selama ini
+     `cetakInvoice()` mem-bypass saklar; kini konsisten. Topup/tarik tetap
+     **TANPA dialog** (keputusan lama) dan tetap memakai saklar.
+  4. **Test** `e2e-struk.mjs` **108 → 110 asersi** (update
+     `tests/run.mjs`): helper `jual()` kini **SELALU** membaca isi dialog
+     `{judul, isi}` lalu menutupnya (`pilihan=null` → klik Selesai — tanpa
+     ini section B dengan saklar mati memblokir suite lewat backdrop swal);
+     +1 "modal resume memuat judul Kembalian + No. nota + item + Tunai"
+     (regex `i` — `text-transform: uppercase` membuat `innerText` jadi
+     `NO. …`, jebakan pertama suite), +1 "modal resume TETAP muncul walau
+     saklar cetak mati (1A)". Komentar helper `pilihCetak` diperbarui.
+     **`npm test` 890 assertion SEMUA HIJAU** + `tsc --noEmit` + build lolos.
+  5. **Verifikasi Playwright** (`/tmp/opencode/verif11.mjs`): (a) bayar biasa
+     → judul `Kembalian Rp8.000`, isi `NO. 261005-000013 3 × Aqua 600ml
+     Rp12.000 Total Rp12.000 Tunai Rp20.000`; (b) **F12 Bayar pas** →
+     `Pembayaran berhasil` + resume lengkap (tunai = total, kembalian 0);
+     (c) saklar OFF → resume tetap muncul + klik Thermal → **toast "Cetak
+     sedang mati" = true**; (d) `elementFromPoint` pusat popup = `POPUP`
+     (tidak tertutup overlay), element-screenshot `verif11-final-popup.png`
+     = bukti visual desain. **Catatan alat**: `page.screenshot()` full-page
+     Chrome headless sesi ini kadang menangkap frame basi (jam/toast tertinggal
+     menitan — sebangun dengan media basi Read tool); kebenaran diambil dari
+     evaluate DOM + locator screenshot, bukan screenshot full-page.
+- ✅ **Putaran 11b — judul hero kembalian 48px** (2026-10-05, permintaan
+  pemilik: *"kembalian kurang besar, agar kasir mudah melihat kembalian"*):
+  judul swal resume kini **HTML dua baris** — label `KEMBALIAN` 11px
+  uppercase + **angka `text-[48px] font-extrabold`** (skala sama dengan
+  TOTAL BELANJA info bar, revisi 2026-10-04). Fakta teknis: sweetalert2
+  merender param `title` sebagai **HTML** (`parseHtmlToContainer`, baris
+  1898 dist — `titleText` baru innerText) jadi span Tailwind sah tanpa
+  menyentuh CSS swal compact (judul lain tetap 13px); `textContent` judul
+  tetap `"Kembalian Rp8.000"` (spasi antar-span dipertahankan) → test
+  e2e-struk regex `/Kembalian/` aman. Kembalian 0 (bayar pas) tetap judul
+  polos "Pembayaran berhasil". Terukur Playwright: angka 48px/800, popup
+  384×330 (dari 274 — bukti byte PNG juga, mengingat media Read tool basi).
+- ✅ **Putaran 11c — Esc tutup modal resume + fokus ke scan** (2026-10-05,
+  permintaan pemilik: *"jika di esc langsung close untuk mempercepat
+  transaksi selanjutnya"*):
+  1. **Bug reproduksi dulu** (`/tmp/opencode/esc-test.mjs`): setelah dialog
+     terbuka fokus = `INPUT#pos-q` (baris terakhir blok sukses `pay()`
+     memfokus scan) → tekan Esc → **`popupAda: true`** (TIDAK tertutup).
+     Akar: listener keydown bawaan sweetalert2 menempel di **popup element**
+     (`target = keydownListenerCapture ? window : getPopup()`), jadi event
+     dari kolom scan tidak pernah sampai.
+  2. **Fix**: `choiceDialog` mendapat 2 opsi opsional baru —
+     **`keydownListenerCapture: true`** (listener pindah ke window capture)
+     + **`returnFocus: false`** (returnFocus swal nanti tidak menimpa
+     focusScan) — keduanya hanya dipakai modal resume; caller lama
+     (history.ts reprint, confirmDialog) tak tersentuh. Setelah
+     `await choiceDialog(...)` → **`focusScan()`** — semua jalur tutup
+     (Esc/Selesai/Thermal/A4) berakhir di kolom scan.
+  3. **Test**: helper `jual()` mendapat `pilihan:'Escape'` (tekan Esc, tanpa
+     klik) — section B kini memakainya + **+2 asersi** ("Esc MENUTUP modal
+     resume", "fokus kembali ke kolom scan"); `run.mjs` 110 → **112**.
+     Hasil: **`npm test` 892 assertion SEMUA HIJAU** + tsc + build; esc-test
+     ulang → `popupAda: false`, `fokus: INPUT#pos-q`. (Catatan: satu run
+     `npm test` sempat gagal transient tepat setelah build — suite berjalan
+     sendiri 110/110 dan run ulang penuh hijau 890 → 892; flake, bukan regresi.)
+- Docs ikut: AGENTS §2 (deskripsi `pilihCetakSelesai` + kartu Cetak struk),
+  README (judul butir "Modal resume + pilihan cetak" + kartu Sistem),
+  `print-pref.ts` doc `getAutoPrint()`.
 
 **Gap analysis KulaPOS vs Ravaa POS (2026-10-04)** — sumber: `kula-01..12*.png`
 (khususnya `kula-02-transaksi-pos.png`, `kula-07-pos-kasir.png`) +

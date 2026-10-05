@@ -13,7 +13,8 @@
 //   2. Keranjang: tambah item, ubah qty, hapus; ↑↓ pindah antar baris
 //      (pindahBarisKeranjang — baris catatan dilewati).
 //   3. Bayar: POST /api/sales (idempotent per uuid). Isian bayar ada di
-//      FORM BAYAR (modal, bukaBayar) — side panel hanya tombol Bayar F10 dan
+//      FORM BAYAR (modal, bukaBayar — putaran 10: layout 2 panel ala Ravaa
+//      POS v1, lihat formBayarHtml()) — side panel hanya tombol Bayar F10 dan
 //      Bayar pas F12 (tepat di bawahnya). Uang kurang boleh berujung HUTANG
 //      asal pelanggan terpilih bukan bawaan "Pelanggan Umum" (lihat pay()).
 //
@@ -37,7 +38,7 @@ import { cetakInvoice } from '../invoice';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
 import { toast } from '../ui/toast';
 import { openModal, type ModalHandle } from '../ui/modal';
-import { icon } from '../ui/icons';
+import { icon, type IconName } from '../ui/icons';
 import { AMBAT_EXPIRY, statusExpiry, tglExpiry } from '../ui/expiry';
 
 /* ---------- tipe ---------- */
@@ -91,10 +92,12 @@ type Mode = 'jual' | 'topup' | 'tarik';
  *  Kode jenis ini yang mengisi kolom `provider` di /api/topups. */
 type TopupJenis = 'e-wallet' | 'pulsa' | 'pln-token' | 'pln-bill' | 'tarik-ewallet' | 'tarik-bank';
 
-const PAY_METHODS: { key: PayMethod; label: string }[] = [
-  { key: 'tunai', label: 'Tunai' },
-  { key: 'qris', label: 'QRIS' },
-  { key: 'transfer', label: 'Transfer' },
+/** Metode bayar + ikonnya. `icon` dipakai kartu metode di form bayar ala
+ *  Ravaa POS v1 (putaran 10); form topup/tarik memakai `label` saja. */
+const PAY_METHODS: { key: PayMethod; label: string; icon: IconName }[] = [
+  { key: 'tunai', label: 'Tunai', icon: 'wallet' },
+  { key: 'qris', label: 'QRIS', icon: 'qr' },
+  { key: 'transfer', label: 'Transfer', icon: 'sync' },
 ];
 
 /* ---------- topup / tarik (AGENTS.md §1) ----------
@@ -111,12 +114,14 @@ let manualSeq = 0;
 let discount = 0;
 let payMethod: PayMethod = 'tunai';
 let cashIn = 0;
-/** P1 (backlog riset 2026-10-04) — "uang diterima auto-isi = Total":
- *  selama kasir BELUM menyentuh kolom uang, nilainya ikut total tiap kali
- *  keranjang / diskon / metode berubah (pola KulaPOS & Aronium). Disentuh =
- *  mengetik di kolom atau mengklik chip nominal — setelah itu isi manual
- *  dihormati sampai transaksi selesai. Barrier `pay()` tetap pengaman
- *  terakhir: uang kosong / kurang tetap ditolak server-side klien. */
+/** Penanda "kasir sudah mengelola kolom uang sendiri" — mengetik di kolom,
+ *  mengklik chip nominal, tombol ×, atau Bayar pas (F12). Selama `false`,
+ *  sinkronisasi `paintCart()` boleh menulis ulang isian dari `cashIn`
+ *  (mis. setelah ganti metode me-reset `cashIn=0`). Sejak putaran 10d
+ *  (2026-10-05) TIDAK ADA lagi auto-isi "uang pas" — `bukaBayar()` selalu
+ *  me-reset `cashIn=0` + `cashTouched=false` (default kolom = kosong;
+ *  tujuannya memasukkan uang kurang/lebih sesungguhnya). Barrier `pay()`
+ *  tetap pengaman terakhir: uang kosong / kurang tetap ditolak. */
 let cashTouched = false;
 let busy = false;
 // host di-render ulang berkali-kali (ganti metode bayar, dsb). Tanpa abort,
@@ -233,31 +238,121 @@ async function cetak(bytes: number[]): Promise<void> {
   }
 }
 
-/** Modal SELESAI penjualan — judulnya KEMBALIAN (revisi pemilik 2026-10-04,
- *  ala KulaPOS: angka kembalian ditampilkan besar setelah bayar):
- *  [Thermal] = struk ESC/POS via print-agent (perilaku lama),
- *  [A4]      = invoice gaya Aronium via window.print() browser (CUPS),
- *  [Selesai] = tanpa cetak. Tampil hanya bila "Cetak struk otomatis" ON —
- *  device tanpa printer tidak pernah diganggu dialog (kembalian tetap masuk
- *  toast sukses). Pilihan terakhir juga disimpan sebagai pref layout
- *  (untuk struk topup/tarik berikutnya). Posisi tombol swal TIDAK BERUBAH
- *  (confirm/deny/cancel) — tests/e2e-struk.mjs memakai selector itu. */
-async function pilihCetakSelesai(saleId: string, struk: Struk, tot: number, kembalian: number): Promise<void> {
+/** Isi badan "modal resume" pasca-bayar (putaran 11, 2026-10-05 — permintaan
+ *  pemilik "setelah bayar tambahkan modal resume"): ringkasan compact di
+ *  bawah judul hero KEMBALIAN — No. nota → daftar item (maks 5 baris +
+ *  "… +N item lainnya") → Total (bold) → Tunai/ujian metode (pola baris
+ *  rincian struk: tunai tampilkan uang diterima, non-tunai tampilkan
+ *  label metode + total). Nama item di-esc (pola esc() wajib untuk teks
+ *  user). Kelas Tailwind tertulis sebagai literal supaya di-scan build. */
+function htmlResumePenjualan(o: {
+  invoiceNo?: string | null;
+  items: { qty: number; nama: string; net: number }[];
+  metode: PayMethod;
+  uang: number;
+  tot: number;
+}): string {
+  const batas = 5;
+  const baris = o.items
+    .slice(0, batas)
+    .map(
+      (it) =>
+        `<div class="flex items-baseline justify-between gap-4"><span class="min-w-0 truncate">${it.qty} × ${esc(it.nama)}</span><span class="tabular-nums shrink-0">${rp(it.net)}</span></div>`,
+    );
+  const sisa = o.items.length - batas;
+  if (sisa > 0) {
+    baris.push(
+      `<div class="text-gray-500 dark:text-gray-400">… +${sisa} item lainnya</div>`,
+    );
+  }
+  return `<div class="mx-auto w-full max-w-xs space-y-1.5 text-left text-sm text-gray-700 dark:text-gray-200">
+      <div class="text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">No. ${esc(o.invoiceNo ?? '-')}</div>
+      <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
+      ${baris.join('\n      ')}
+      <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
+      <div class="flex items-baseline justify-between gap-4 font-bold text-gray-900 dark:text-white"><span>Total</span><span class="tabular-nums shrink-0">${rp(o.tot)}</span></div>
+      <div class="flex items-baseline justify-between gap-4"><span>${o.metode === 'tunai' ? 'Tunai' : labelMetode(o.metode)}</span><span class="tabular-nums shrink-0">${o.metode === 'tunai' ? rp(o.uang) : rp(o.tot)}</span></div>
+    </div>`;
+}
+
+/** Modal SELESAI penjualan (putaran 11, 2026-10-05 — revisi pemilik 1A:
+ *  "setelah bayar tambahkan modal resume, dan pilihan print thermal atau
+ *  A4, begitu juga pada bayar PAS F12"):
+ *  - **SELALU tampil setelah SETIAP penjualan sukses** — semua jalur (tombol
+ *    Bayar / F2 / Enter / F12 Bayar pas) lewat `pay()` dan memanggil fungsi
+ *    ini TANPA guard `if (autoPrint)` lagi. "Cetak struk otomatis" kini hanya
+ *    menentukan apakah tombol Thermal/A4 BENAR-BENAR mengirim ke printer
+ *    (guard di cabang bawah + `cetak()`).
+ *  - **Judul hero = KEMBALIAN** (revisi pemilik 2026-10-04 ala KulaPOS,
+ *    tetap; **putaran 11b** mengangkat angkanya jadi 48px — lihat komentar
+ *    di pemanggilan `choiceDialog` bawah) + **badan resume** lewat
+ *    `htmlResumePenjualan()` (No. nota, item, Total, metode).
+ *  - [Thermal] = struk ESC/POS via print-agent,
+ *    [A4]      = invoice gaya Aronium via window.print() browser (CUPS),
+ *    [Selesai] = tanpa cetak (fokus awal swal = tombol ini, Enter = selesai).
+ *    Pilihan terakhir disimpan sebagai pref layout (struk topup/tarik).
+ *    Posisi tombol swal TIDAK BERUBAH (confirm/deny/cancel) —
+ *    tests/e2e-struk.mjs memakai selector itu. */
+async function pilihCetakSelesai(
+  saleId: string,
+  struk: Struk,
+  tot: number,
+  kembalian: number,
+  resume: { invoiceNo?: string | null; items: { qty: number; nama: string; net: number }[]; metode: PayMethod; uang: number },
+): Promise<void> {
   const pilihan = await choiceDialog({
-    title: kembalian > 0 ? `Kembalian ${rp(kembalian)}` : 'Pembayaran berhasil',
-    message: `Total ${rp(tot)}${kembalian > 0 ? ` · uang diterima ${rp(cashIn)}` : ''}. Cetak struk?`,
+    // Judul hero KEMBALIAN — putaran 11b (2026-10-05, permintaan pemilik
+    // "kembalian kurang besar, agar kasir mudah melihat kembalian"):
+    // label "Kembalian" kecil (uppercase) + ANGKA 48px (skala sama dengan
+    // TOTAL BELANJA di info bar, revisi pemilik 2026-10-04) menggantikan
+    // judul swal compact 13px. SweetAlert2 merender `title` sebagai HTML
+    // (`parseHtmlToContainer`, beda dengan `titleText` yang innerText) jadi
+    // span Tailwind di sini sah — `textContent` judul tetap "Kembalian RpX"
+    // (spasi di antara span dipertahankan untuk test e2e-struk).
+    // Kembalian 0 (bayar pas) tetap judul polos "Pembayaran berhasil".
+    title:
+      kembalian > 0
+        ? `<span class="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Kembalian</span> <span class="block text-[48px] font-extrabold leading-tight text-gray-900 dark:text-white tabular-nums">${rp(kembalian)}</span>`
+        : 'Pembayaran berhasil',
+    html: htmlResumePenjualan({ ...resume, tot }),
     icon: kembalian > 0 ? 'success' : 'question',
     choices: [
       { key: 'thermal', label: 'Thermal' },
       { key: 'a4', label: 'A4' },
     ],
     cancelLabel: 'Selesai',
+    // Esc = TUTUP LANGSUNG (putaran 11c, 2026-10-05 — permintaan pemilik
+    // "jika di esc langsung close untuk mempercepat transaksi selanjutnya").
+    // Fakta bug: `pay()` memfokus `#pos-q` tepat setelah dialog dibuka, tapi
+    // listener keydown bawaan sweetalert2 menempel di POPUP (bukan document)
+    // — Esc dari kolom scan tidak pernah sampai ke popup (terbukti empiris:
+    // popup tetap terbuka). `keydownListenerCapture` memindahkan listener ke
+    // window (capture) jadi Esc didengar dari mana pun fokus. `returnFocus:
+    // false` supaya pengembalian fokus swal nanti tidak menimpa focusScan()
+    // penutup di bawah.
+    keydownListenerCapture: true,
+    returnFocus: false,
   });
+  // Tutup dengan cara apa pun (Esc / Selesai / Thermal / A4) -> FOKUS KEMBALI
+  // ke kolom scan: kasir langsung bisa scan transaksi berikutnya tanpa klik.
+  focusScan();
+  // Saklar auto-print = IZIN kirim ke printer (bukan syarat tampil modal).
+  // Klik eksplisit saat saklar mati -> beri tahu, jangan diam-diam no-op.
+  const mati =
+    'Cetak sedang mati — nyalakan saklar "Cetak struk otomatis" di baris Mode bila ingin mengirim ke printer.';
   if (pilihan === 'thermal') {
     setStrukLayout('thermal');
+    if (!autoPrint) {
+      toast(mati, 'info');
+      return;
+    }
     void cetak(strukUntuk(struk, 'thermal'));
   } else if (pilihan === 'a4') {
     setStrukLayout('a4');
+    if (!autoPrint) {
+      toast(mati, 'info');
+      return;
+    }
     try {
       await cetakInvoice(saleId);
     } catch (e) {
@@ -305,10 +400,11 @@ const total = () => Math.max(0, subtotal() - diskonBaris() - discount);
 const count = () => cart.reduce((s, l) => s + l.qty, 0);
 const change = () => Math.max(0, cashIn - total());
 
-/** Kelas warna angka KEMBALIAN (panel kanan ala Aronium: angka besar).
- *  SATU sumber untuk render awal (cartGridHtml) dan update live (paintCart) —
- *  dua tempat ini pernah punya kelas terpisah dan bisa berbeda saat dirawat.
- *  Merah = uang diterima kurang; hijau = cukup/lebih; abu = belum diisi. */
+/** Kelas warna angka KEMBALIAN (hasil besar di form bayar: hijau = cukup/
+ *  lebih, merah = kurang, abu = belum diisi). Dipakai lewat kelasPosChange()
+ *  — SATU sumber untuk render awal (formBayarHtml) dan update live
+ *  (paintCart) — dua tempat ini pernah punya kelas terpisah dan bisa berbeda
+ *  saat dirawat. */
 function kelasKembalian(): string {
   if (!(cashIn > 0)) return 'text-gray-900 dark:text-white';
   return cashIn < total()
@@ -316,13 +412,13 @@ function kelasKembalian(): string {
     : 'text-emerald-600 dark:text-emerald-400';
 }
 
-/** Isi otomatis "Uang diterima" = total (P1). HANYA bila kasir belum pernah
- *  menyentuh kolomnya (`cashTouched=false`) dan masih mode jual tunai.
- *  Dipanggil dari `paint()` (render ulang penuh) dan `paintCart()` (keranjang
- *  berubah) supaya angka tidak pernah tertinggal dari total. */
-function isiUangOtomatis(): void {
-  if (mode !== 'jual' || payMethod !== 'tunai' || cashTouched) return;
-  cashIn = cart.length ? total() : 0;
+/** Kelas LENGKAP angka KEMBALIAN di form bayar (putaran 10: hasil besar ala
+ *  `.result-value` Ravaa POS v1; putaran 10c pemilik: *"kembalian kurang
+ *  besar, seukuran uang diterima"* -> 40px = sama dengan font `#pos-cash`).
+ *  SATU sumber untuk render awal `formBayarHtml()` DAN update live
+ *  `paintCart()` — ukuran + warna tidak boleh terpecah (pola kelasKembalian). */
+function kelasPosChange(): string {
+  return `text-[40px] font-extrabold tabular-nums ${kelasKembalian()}`;
 }
 
 /** Teks konteks KEMBALIAN (P2): angka "Rp0" saat uang masih kurang
@@ -619,7 +715,10 @@ function expBarisKeranjang(product_id: number | null): string {
 
 /** Chip nominal cepat di panel bayar tunai — gaya Kasir Pintar: satu klik
  *  mengisi "Uang diterima", hindari salah ketik nol. `pas` = persis total. */
-const QUICK_CASH: (number | 'pas')[] = ['pas', 50000, 100000, 200000];
+// Putaran 10c (2026-10-05): chip "Uang pas" DIHAPUS dari modal bayar —
+// permintaan pemilik "Jangan ada uang pas, karena sudah ada tombol F12 untuk
+// uang pas, ganti 20.000". F12 = #pos-pay-pas di side panel tetap utuh.
+const QUICK_CASH: number[] = [20000, 50000, 100000, 200000];
 
 /** Info bar ala KulaPOS (revisi pemilik 2026-10-04): jam berjalan + kasir
  *  (kiri), pemilih PELANGGAN (tengah), TOTAL BELANJA besar (kanan). Hanya
@@ -906,60 +1005,144 @@ function cekHutangDiperbolehkan(): string {
   return '';
 }
 
-/** Isi FORM BAYAR — dipindahkan dari sidebar kanan ke modal (permintaan
- *  pemilik 2026-10-04: "pindahkan ke modal ketika klik bayar — buat modal
- *  untuk menampung bayar dan metode bayarnya", ala payment screen Aronium
- *  yang terbuka lewat F10). Urut: tagihan -> metode -> uang diterima ->
- *  chip nominal cepat -> kembalian -> petunjuk hutang. **Bayar pas
- *  (#pos-pay-pas) sengaja TIDAK ada di form** — ada di side panel, tepat di
- *  bawah tombol Bayar (permintaan pemilik putaran kedua 2026-10-04).
+/** Isi FORM BAYAR — modal (permintaan pemilik 2026-10-04: "pindahkan ke
+ *  modal ketika klik bayar", ala payment screen Aronium F10).
  *
- *  Blok tunai & non-tunai dirender SEKALIGUS lalu ditoggle `hidden` (bukan
- *  dirender ulang saat ganti metode), supaya listener yang terpasang di
- *  bindFormBayar() tidak perlu dipasang ulang. SEMUA id lama pindah ke sini
- *  tanpa diubah: #pos-cash, #pos-pay (tombol OK modal — di-set di
- *  bukaBayar), data-pay, data-cash, #pos-change,
- *  #pos-change-ctx. */
+ *  **Putaran 10 (2026-10-05): layout dua panel ala Ravaa POS v1** —
+ *  permintaan pemilik: "modal bayar silakan dengan referensi ravaapos v1 di
+ *  directory tadi, pendekatan yang sama, tanpa mengurangi kecepatan dalam
+ *  transaksi, mungkin layout bisa di benahi pada v2 ini". Referensi:
+ *  `payment-modal.blade.php` + `.payment-layout-wrapper` (flex 5/7) di
+ *  `pos-system.css`. Yang diterapkan —
+ *  KIRI (flex-5, border kanan): kartu **Total tagihan** (border-2 primer,
+ *  angka 36px extra-bold — putaran 10c "+setengah" dari 24px) → kotak
+ *  **Pelanggan** (ikon + nama, penanda alur HUTANG) → **kartu metode**
+ *  grid 2 kolom (ikon+label, aktif = primer, gaya `.btn-method-card`) →
+ *  petunjuk pintasan;
+ *  KANAN (flex-7, bg abu ala `#f8fafc`): **Uang diterima** input besar ala
+ *  `.payment-input-huge` (prefix Rp + tombol × `#bayar-clear`) → **chip
+ *  nominal 4 pecahan 20/50/100/200rb** (chip "Uang pas" DIHAPUS putaran
+ *  10c — sudah ada F12 Bayar pas; chip kembali ukuran normal 1x) →
+ *  **kotak hasil KEMBALIAN** putus-putus ala `.payment-section-result`
+ *  (label + angka **40px** seukuran `#pos-cash` + teks konteks) →
+ *  petunjuk hutang. Blok tunai/non-tunai tetap dirender SEKALIGUS lalu
+ *  ditoggle `hidden`, supaya listener bindFormBayar() tidak dipasang ulang.
+ *  **Kecepatan transaksi dijaga**: fokus `#pos-cash`
+ *  saat buka, Enter-on-input -> ok.click() -> pay(), F2/F10/F12, chip satu
+ *  klik + fokus balik ke kolom (siap Enter), semua id lama TANPA perubahan —
+ *  #pos-cash, #pos-pay (tombol OK modal — di-set di bukaBayar), data-pay,
+ *  data-cash, #pos-change, #pos-change-ctx, #bayar-tunai, #bayar-non-tunai.
+ *  **Bayar pas (#pos-pay-pas) sengaja TIDAK ada di form** — tetap di side
+ *  panel bawah Bayar (permintaan putaran kedua 2026-10-04).
+ *
+ *  **Putaran 10b (2026-10-05): tombol + uang diterima ~2x** — *"kurang besar
+ *  untuk tombol-tombol dan uang diterima pada modal, silakan atur untuk lebih
+ *  besar sekitar 2x lipat"*. Baseline terukur (Playwright, skala @theme repo
+ *  yang memang lebih kecil: --text-2xl=20px, --text-sm=13px): kartu metode
+ *  34px/13px, chip 25px/11px, #pos-cash 41px/20px, footer 34px/13px. Kini:
+ *  kartu metode jadi layout KOLOM ala `.btn-method-card` v1 (ikon atas +
+ *  label bawah, border-2) ±73px + font 24px — kolom wajib karena label
+ *  horizontal @24px meluber dari kolom 137px; chip ±50px + font 22px;
+ *  #pos-cash ±82px + font 40px (2x tepat) dengan prefix Rp 24px ala
+ *  `.payment-input-huge` v1; tombol × 28 -> 56px; footer Batal/Bayar
+ *  ±68px + font 24px (kelas dipasang di bukaBayar — modal lain normal).
+ *
+ *  **Putaran 10c (2026-10-05)** — permintaan pemilik: *"Jangan ada uang pas,
+ *  karena sudah ada tombol F12 untuk uang pas, ganti 20.000, tapi tombol uang
+ *  itu kecilkan 1xnya, kembalian kurang besar seukuran uang diterima, total
+ *  tagihan di besarkan setengahnya"*:
+ *  - chip **"Uang pas" DIHAPUS** dari modal, QUICK_CASH = [20k, 50k, 100k,
+ *    200k] — `#pos-pay-pas` (F12 side panel) TIDAK tersentuh;
+ *  - **chip uang kembali ukuran normal 1x** (kelas pembesaran 10b dibuang);
+ *  - `#pos-change` font **40px** = seukuran `#pos-cash` (kelasPosChange);
+ *  - `#bayar-total` font **36px** (+50% dari 24px).
+ *
+ *  **Putaran 10d (2026-10-05)** — permintaan pemilik: *"tombol nominalnya
+ *  terlalu kecil kalau sekarang, form uang diterima jangan langsung di isi
+ *  uang pas, karena tujuannya adalah untuk memasukkan nilai uang kurang atau
+ *  uang lebih jadi default 0 dan auto focus sudah OK"*:
+ *  - **chip pecahan diperbesar** dari 25px/11px (1x 10c) → ±**44px/17px**
+ *    (`!min-h-[44px] !px-4 !py-2 !text-[17px]` — di antara 1x dan 2x);
+ *  - **auto-isi "uang pas" (P1) DIHAPUS**: `isiUangOtomatis()` + semua
+ *    pemanggilnya dibuang; `bukaBayar()` me-reset `cashIn=0`, jadi kolom
+ *    SELALU default kosong — kasir mengisi sendiri uang kurang/lebihnya.
+ *    Fokus `#pos-cash` saat buka TIDAK berubah; "uang pas" tetap hanya
+ *    F12 `#pos-pay-pas` / chip pecahan. */
 function formBayarHtml(): string {
   const tot = total();
   const tunai = payMethod === 'tunai';
+  const sel = document.querySelector<HTMLSelectElement>('#pos-customer');
+  const namaCust = sel?.selectedOptions[0]?.text.trim() || 'Pelanggan Umum';
   return `
-    <div class="space-y-3">
-      <div class="flex items-baseline justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/60">
-        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total tagihan</span>
-        <span id="bayar-total" class="text-2xl font-bold tabular-nums text-primary">${rp(tot)}</span>
+    <div class="grid grid-cols-1 sm:grid-cols-[5fr_7fr]">
+      <div class="border-b border-gray-200 p-3 sm:border-b-0 sm:border-r dark:border-gray-700">
+        <!-- Putaran 10c (2026-10-05): "total tagihan di besarkan setengahnya"
+             -> text-3xl (24px) menjadi text-[36px] (+50%). -->
+        <div class="mb-3 rounded-lg border-2 border-primary bg-white p-3 dark:bg-gray-800">
+          <div class="text-xs text-gray-500 dark:text-gray-400">Total tagihan</div>
+          <div id="bayar-total" class="text-[36px] font-extrabold tabular-nums text-primary">${rp(tot)}</div>
+        </div>
+        <div class="mb-3 flex items-center gap-2.5">
+          <span class="shrink-0 text-primary [&>svg]:size-7">${icon('users')}</span>
+          <div class="min-w-0">
+            <div class="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pelanggan</div>
+            <div id="bayar-cust" class="truncate text-sm font-bold text-gray-900 dark:text-white">${esc(namaCust)}</div>
+          </div>
+        </div>
+        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Metode pembayaran</div>
+        <div class="grid grid-cols-2 gap-2">
+          ${PAY_METHODS.map((m) => {
+            const aktif = payMethod === m.key;
+            // Putaran 10b (2026-10-05, "kurang besar … sekitar 2x lipat"):
+            // kartu metode jadi ~2x — layout KOLOM ala .btn-method-card v1
+            // (ikon atas, label bawah, center) supaya label besar muat di
+            // kolom sempit (horizontal @24px meluber 137px), border-2 ala v1,
+            // tinggi ±73px (baseline 34px), font 13px -> 24px.
+            return `<button type="button" data-pay="${m.key}" class="btn w-full flex-col items-center justify-center gap-1 !min-h-[68px] !px-2 !py-1.5 !text-[24px] [&>svg]:size-6 border-2 border-gray-200 bg-white text-gray-700 hover:border-primary dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200${aktif ? ' !border-primary bg-primary-soft !text-primary dark:bg-primary/15' : ''}">${icon(m.icon)}<span>${m.label}</span></button>`;
+          }).join('')}
+        </div>
+        <p class="mt-4 text-center text-xs text-gray-500 dark:text-gray-400">Tekan ${kbd('Enter')} atau ${kbd('F2')} untuk bayar · ${kbd('Esc')} untuk batal</p>
       </div>
-      <div>
-        <span class="label">Metode bayar</span>
-        <div class="flex flex-wrap gap-2">
-          ${PAY_METHODS.map((m) => `<button type="button" data-pay="${m.key}" class="chip${payMethod === m.key ? ' !border-primary !text-primary' : ''}">${m.label}</button>`).join('')}
+      <div class="bg-gray-50 p-3 dark:bg-gray-800/40">
+        <div id="bayar-tunai" class="space-y-3"${tunai ? '' : ' hidden'}>
+          <div>
+            <label class="label" for="pos-cash">Uang diterima</label>
+            <!-- Putaran 10b (2026-10-05, "uang diterima … sekitar 2x lipat"):
+                 baseline terukur 41px/20px -> ±82px/40px (2x). py-4 + text-[40px]
+                 (angka 40px = 2x --text-2xl repo yang = 20px), prefix Rp ikut
+                 24px ala .payment-input-huge v1 (1.5rem/800), tombol × 28 -> 56px
+                 (2x) dengan ikon dibatasi size-7 supaya tidak raksasa. -->
+            <div class="relative mt-1">
+              <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[24px] font-extrabold text-gray-500 dark:text-gray-400">Rp</span>
+              <input id="pos-cash" class="input !pr-[76px] pl-12 !text-right !text-[40px] !py-4 font-bold tabular-nums" type="number" inputmode="numeric" min="0" step="1000" value="${cashIn || ''}" placeholder="${tot}" />
+              <button type="button" id="bayar-clear" aria-label="Kosongkan uang diterima" class="absolute right-2 top-1/2 flex size-14 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-700 [&>svg]:size-7">${icon('close')}</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <!-- Putaran 10d (2026-10-05, "tombol nominalnya terlalu kecil"):
+                 chip 25px/11px (1x) -> ±44px/17px (di antara 1x dan 2x).
+                 Spasi sebelum tanda kurung kurawal interpolasi WAJIB — kelas
+                 arbitrary yang menempelnya tidak di-generate scanner
+                 Tailwind v4. -->
+            ${QUICK_CASH.map((c) => `<button type="button" data-cash="${c}" class="chip justify-center !min-h-[44px] !px-4 !py-2 !text-[17px] ${cashIn > 0 && cashIn === c ? ' !border-primary !text-primary' : ''}">${rp(c)}</button>`).join('')}
+          </div>
+          <div class="rounded-lg border border-dashed border-gray-300 bg-white p-3 text-center dark:border-gray-600 dark:bg-gray-800">
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</div>
+            <div id="pos-change" class="${kelasPosChange()}">${rp(change())}</div>
+            <p id="pos-change-ctx" class="text-xs font-medium ${teksKembalian() ? '' : 'hidden'} ${
+              cashIn > 0 && cashIn < total() ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+            }">${teksKembalian()}</p>
+          </div>
+          <!-- Uang kurang BOLEH asal jadi HUTANG (permintaan pemilik
+               2026-10-04: "kurang = jadi Hutang, dengan catatan harus ada
+               customer yang terpilih dan tidak boleh customer default/umum").
+               Tombol Bayar di form yang menawarkan jalan ini — lihat handler
+               di bukaBayar() yang memvalidasi pelanggan + konfirmasi swal,
+               lalu pay({hutang:true}). -->
+          <p class="text-xs text-gray-500 dark:text-gray-400">Uang kurang bisa dicatat jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>
         </div>
+        <p id="bayar-non-tunai" class="text-xs text-gray-500 dark:text-gray-400"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
       </div>
-      <div id="bayar-tunai" class="space-y-2"${tunai ? '' : ' hidden'}>
-        <div>
-          <label class="label" for="pos-cash">Uang diterima (Rp)</label>
-          <input id="pos-cash" class="input text-right text-sm font-semibold tabular-nums" type="number" inputmode="numeric" min="0" step="1000" value="${cashIn || ''}" placeholder="${tot}" />
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          ${QUICK_CASH.map((c) => `<button type="button" data-cash="${c}" class="chip${cashIn > 0 && cashIn === (c === 'pas' ? tot : c) ? ' !border-primary !text-primary' : ''}">${c === 'pas' ? 'Uang pas' : rp(c)}</button>`).join('')}
-        </div>
-        <div class="flex items-baseline justify-between">
-          <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</span>
-          <span id="pos-change" class="text-lg font-bold tabular-nums ${kelasKembalian()}">${rp(change())}</span>
-        </div>
-        <p id="pos-change-ctx" class="text-xs font-medium ${teksKembalian() ? '' : 'hidden'} ${
-          cashIn > 0 && cashIn < total() ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
-        }">${teksKembalian()}</p>
-        <!-- Uang kurang BOLEH asal jadi HUTANG (permintaan pemilik
-             2026-10-04: "kurang = jadi Hutang, dengan catatan harus ada
-             customer yang terpilih dan tidak boleh customer default/umum").
-             Tombol Bayar di form yang menawarkan jalan ini — lihat handler
-             di bukaBayar() yang memvalidasi pelanggan + konfirmasi swal,
-             lalu pay({hutang:true}). -->
-        <p class="text-xs text-gray-500 dark:text-gray-400">Uang kurang bisa dicatat jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>
-      </div>
-      <p id="bayar-non-tunai" class="text-xs text-gray-500 dark:text-gray-400"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
-      <p class="text-center text-xs text-gray-500 dark:text-gray-400">Tekan ${kbd('Enter')} atau ${kbd('F2')} untuk bayar · ${kbd('Esc')} untuk batal</p>
     </div>`;
 }
 
@@ -973,12 +1156,17 @@ function bukaBayar(): void {
     return;
   }
   if (!cart.length) return;
-  // Auto-isi (P1) dijalankan SEBELUM HTML dibangun — input dirender dari
-  // `cashIn`, sama seperti catatan di paint().
-  isiUangOtomatis();
+  // Putaran 10d (2026-10-05, "form uang diterima jangan langsung di isi uang
+  // pas … jadi default 0"): auto-isi (P1) DIHAPUS — kolom SELALU dibuka
+  // kosong, karena tujuannya memasukkan uang KURANG / LEBIH sesungguhnya.
+  // Fokus `#pos-cash` saat buka TIDAK berubah (pemilik: "auto focus sudah
+  // OK"); "uang pas" hanya lewat F12 `#pos-pay-pas`.
+  cashIn = 0;
+  cashTouched = false;
   bayarApi = openModal({
     title: `Bayar — ${rp(total())}`,
     body: formBayarHtml(),
+    wide: true, // putaran 10: panel 5/7 ala v1 butuh max-w-3xl (max-w-lg terlalu sempit)
     okLabel: 'Bayar',
     cancelLabel: 'Batal',
     onMount: (api) => {
@@ -986,6 +1174,13 @@ function bukaBayar(): void {
       // pemanggil lama — id-nya disematkan di sini supaya `#pos-pay`,
       // Enter-on-input (modal.ts -> ok.click()), dan F2 tetap satu aksi.
       api.ok.id = 'pos-pay';
+      // Putaran 10b (2026-10-05, "tombol-tombol … sekitar 2x lipat"): footer
+      // Batal + Bayar ikut diperbesar KHUSUS modal bayar (34px/13px ->
+      // ±68px/24px). Modal lain (pending, cari produk, konfirmasi) tetap
+      // ukuran normal — kelasnya dipasang di sini, bukan di modal.ts.
+      for (const b of [api.ok, api.el.querySelector<HTMLElement>('.modal-footer [data-x]')]) {
+        b?.classList.add('!min-h-[68px]', '!px-8', '!text-[24px]');
+      }
       // Satu aksi sama dengan Enter-on-input (modal.ts -> ok.click()) dan F2:
       // semua masuk lewat pay() — validasi uang kurang (tawaran HUTANG) ada
       // di dalam barrier pay(), jadi satu sumber kebenaran.
@@ -1015,7 +1210,13 @@ function paintFormBayar(): void {
   if (bNon) bNon.hidden = tunai;
   el.querySelectorAll<HTMLElement>('[data-pay]').forEach((b) => {
     const aktif = b.dataset.pay === payMethod;
+    // Kartu metode gaya .btn-method-card v1 (putaran 10): aktif = border +
+    // isi primer muda + teks primer. Daftar kelas WAJIB sama persis dengan
+    // render awal di formBayarHtml() supaya ganti metode tidak meninggalkan
+    // sisa kelas dari keadaan sebelumnya.
     b.classList.toggle('!border-primary', aktif);
+    b.classList.toggle('bg-primary-soft', aktif);
+    b.classList.toggle('dark:bg-primary/15', aktif);
     b.classList.toggle('!text-primary', aktif);
   });
 }
@@ -1026,9 +1227,9 @@ function bindFormBayar(overlay: HTMLElement): void {
   overlay.querySelectorAll<HTMLElement>('[data-pay]').forEach((b) =>
     b.addEventListener('click', () => {
       payMethod = (b.dataset.pay as PayMethod) || 'tunai';
-      // Ganti metode = mulai lagi dari awal: kolom uang kosong + auto-isi
-      // (P1) boleh mengurusnya lagi sampai kasir menyentuh kolom. Sama persis
-      // dengan aturan lama di sidebar.
+      // Ganti metode = mulai lagi dari awal: kolom uang kosong (cashIn=0,
+      // cashTouched=false) — paintCart menulis ulang isian lewat guard
+      // `!cashTouched`. Sama persis dengan aturan lama di sidebar.
       cashIn = 0;
       cashTouched = false;
       paintCart();
@@ -1038,27 +1239,45 @@ function bindFormBayar(overlay: HTMLElement): void {
   );
 
   overlay.querySelector('#pos-cash')?.addEventListener('input', (e) => {
-    // Kasir menyentuh kolom -> auto-isi (P1) berhenti mengurusnya.
+    // Kasir menyentuh kolom -> tandai `cashTouched` (sinkronisasi paintCart
+    // berhenti menulis ulang isian).
     cashTouched = true;
     cashIn = Number((e.target as HTMLInputElement).value || 0);
     paintCart();
   });
 
-  // Nominal cepat (chip "Uang pas" + pecahan): satu klik mengisi kolom uang
+  // Nominal cepat (4 pecahan; putaran 10c: tanpa chip "Uang pas" — sudah ada
+  // F12 Bayar pas di side panel): satu klik mengisi kolom uang
   // diterima + kembalian, menghindari salah ketik nol saat kas menerima
   // pecahan besar. paintCart tidak merender ulang form, jadi input & state
-  // aktif chip dijaga manual di sana.
+  // aktif chip dijaga manual di sana. Fokus DIPERBALIKAN ke kolom uang
+  // setelah klik chip (putaran 10, "tanpa mengurangi kecepatan"): kasir
+  // tinggal Enter untuk bayar — sebelumnya fokus tertinggal di chip dan
+  // Enter menekan chip yang sama lagi.
   overlay.querySelectorAll<HTMLElement>('[data-cash]').forEach((b) =>
     b.addEventListener('click', () => {
-      // Pilih pecahan = keputusan eksplisit -> hentikan auto-isi juga.
+      // Pilih pecahan = keputusan eksplisit -> tandai cashTouched.
       cashTouched = true;
-      const raw = b.dataset.cash ?? '';
-      cashIn = raw === 'pas' ? total() : Number(raw);
+      cashIn = Number(b.dataset.cash || 0);
       const inp = overlay.querySelector<HTMLInputElement>('#pos-cash');
       if (inp) inp.value = cashIn ? String(cashIn) : '';
       paintCart();
+      inp?.focus();
     }),
   );
+
+  // Tombol × di samping kolom uang (ala btn-clear-huge Ravaa POS v1):
+  // salah ketik nominal dibersihkan satu klik lalu fokus balik — tanpa
+  // harus select-all manual. Kolom yang sengaja dikosongkan ditandai
+  // cashTouched supaya sinkronisasi paintCart tidak mengisi ulang.
+  overlay.querySelector('#bayar-clear')?.addEventListener('click', () => {
+    cashTouched = true;
+    cashIn = 0;
+    const inp = overlay.querySelector<HTMLInputElement>('#pos-cash');
+    if (inp) inp.value = '';
+    paintCart();
+    inp?.focus();
+  });
 }
 
 /* ---------- form topup / tarik ---------- */
@@ -1278,9 +1497,6 @@ function paint(): void {
   // masih jalan lalu kasir pindah halaman. Tanpa guard ini, POS menimpa halaman
   // lain yang baru dirender router.
   if (!host || !host.isConnected) return;
-  // P1: isi "Uang diterima" ikut total SEBELUM HTML dibangun — input dirender
-  // dari nilai `cashIn`, jadi auto-isi harus terjadi sebelum `innerHTML`.
-  isiUangOtomatis();
   host.innerHTML = shift ? cartHtml() : shiftGateHtml();
   // Saklar "Cetak struk otomatis" ikut diganti tiap paint() (host.innerHTML),
   // jadi listenernya WAJIB dipasang di sini — bukan di bindCart(). bindCart()
@@ -1304,9 +1520,6 @@ function paint(): void {
 function paintCart(): void {
   if (!host || !shift || mode !== 'jual') return;
   // Cuma tbody + panel kanan, supaya fokus input scan tidak hilang.
-  // P1: keranjang/diskon baru berubah -> uang diterima ikut total (kalau belum
-  // disentuh kasir). Dipanggil SEBELUM membaca `cashIn` di bawah.
-  isiUangOtomatis();
   const rows = host.querySelector('#pos-rows');
   if (rows) rows.innerHTML = cartRows();
   // Pencarian pakai `document`, BUKAN `host`: isian pembayaran kini berada
@@ -1333,9 +1546,10 @@ function paintCart(): void {
   const cashEl = document.querySelector<HTMLInputElement>('#pos-cash');
   if (cashEl) {
     cashEl.placeholder = String(total());
-    // P1: form bayar tidak dirender ulang di paintCart, jadi bila auto-isi
-    // mengubah `cashIn` tulis juga ke inputnya. `.value =` TIDAK memicu event
-    // `input`, jadi `cashTouched` tetap false dan auto-isi tetap hidup.
+    // `cashIn` = sumber kebenaran; tulis ke input hanya kalau kasir belum
+    // menyentuh kolom (mis. ganti metode me-reset `cashIn=0` lewat handler
+    // data-pay). `.value =` TIDAK memicu event `input`, jadi `cashTouched`
+    // tidak ikut berubah.
     if (!cashTouched) cashEl.value = cashIn ? String(cashIn) : '';
   }
   // Angka "Total tagihan" di kepala form bayar ikut total terkini.
@@ -1361,9 +1575,9 @@ function paintCart(): void {
   if (dbRow) dbRow.hidden = db === 0;
   const changeEl = document.querySelector('#pos-change');
   if (changeEl) {
-    // Kelas diambil dari SATU sumber (kelasKembalian) — jangan ditulis ulang di
-    // sini, render awal di formBayarHtml memakai fungsi yang sama.
-    changeEl.className = `text-lg font-bold tabular-nums ${kelasKembalian()}`;
+    // Kelas diambil dari SATU sumber (kelasPosChange) — jangan ditulis ulang
+    // di sini, render awal di formBayarHtml memakai fungsi yang sama.
+    changeEl.className = kelasPosChange();
   }
   const pay = document.querySelector<HTMLButtonElement>('#pos-pay');
   if (pay) pay.disabled = cart.length === 0 || busy;
@@ -1385,10 +1599,10 @@ function paintCart(): void {
   const holdOpen = host!.querySelector<HTMLButtonElement>('#pos-hold-open');
   if (holdOpen) holdOpen.disabled = holds.length === 0;
   set('#pos-hold-count', String(holds.length));
-  // Chip nominal cepat: sorot yang cocok dengan cashIn ("Uang pas" = total).
+  // Chip nominal cepat: sorot yang cocok dengan cashIn (putaran 10c: tanpa
+  // cabang "Uang pas" — chip itu sudah dihapus, tersisa 4 pecahan angka).
   document.querySelectorAll<HTMLElement>('[data-cash]').forEach((b) => {
-    const raw = b.dataset.cash ?? '';
-    const nilai = raw === 'pas' ? total() : Number(raw);
+    const nilai = Number(b.dataset.cash ?? 0);
     const aktif = cashIn > 0 && cashIn === nilai;
     b.classList.toggle('!border-primary', aktif);
     b.classList.toggle('!text-primary', aktif);
@@ -2187,8 +2401,9 @@ function openManualItem(): void {
 /** Bayar pas (tombol footer, revisi pemilik 2026-10-04): uang diterima =
  *  persis total, lalu bayar — satu klik untuk transaksi tunai tanpa kelebihan.
  *  Menjalankan JALUR YANG SAMA dengan Bayar/F2 (pay()), bukan jalur terpisah:
- *  cashTouched disetel dulu supaya auto-isi (P1) tidak menimpa, dan paintCart
- *  meng_sinkron_kan input/chip sebelum pay() membaca `cashIn`. */
+ *  `cashIn` disetel + `cashTouched` ditandai (pilihan "pas" = keputusan
+ *  eksplisit; sejak putaran 10d tidak ada auto-isi yang bisa menimpa), lalu
+ *  paintCart menyinkronkan chip/kembalian sebelum pay() membaca `cashIn`. */
 function bayarPas(): void {
   if (!cart.length || busy) return;
   if (payMethod === 'tunai') {
@@ -2215,7 +2430,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
   // barrier dilewati; F2/Enter/pintasan tidak pernah membawa opsi itu.
   if (payMethod === 'tunai' && !opts?.hutang && cashIn < total()) {
     if (cekHutangDiperbolehkan()) {
-      if (!(cashIn > 0)) toast('Uang diterima belum diisi — ketik nominal atau tekan "Uang pas"', 'error');
+      if (!(cashIn > 0)) toast('Uang diterima belum diisi — ketik nominal atau tekan Bayar pas (F12)', 'error');
       else toast(`Uang diterima kurang dari total ${rp(total())}`, 'error');
       // Form bayar dibuka kalau belum (F2 dari layar utama = bayar cepat):
       // tanpa ini kasir hanya melihat toast tanpa kolom untuk membetulkannya.
@@ -2347,17 +2562,25 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       ],
       kaki: ['Terima kasih sudah berbelanja'],
     };
-    // Form bayar DITUTUP lebih dulu: pilihan cetak (swal) dan fokus kembali ke
+    // Form bayar DITUTUP lebih dulu: modal resume (swal) dan fokus kembali ke
     // kolom scan jangan berdiri di atas modal yang isinya sudah tidak berlaku.
     tutupBayar();
-    // Pilihan cetak SELESAI transaksi — HANYA bila "Cetak struk otomatis" ON.
-    // Device tanpa printer (saklar mati) tidak boleh diganggu dialog; tanpa
-    // guard ini backdrop swal juga memblokir seluruh UI POS (terbukti di test).
-    if (autoPrint) void pilihCetakSelesai(res.data.sale.id, strukJual, tot, kembalian);
+    // Modal resume SELESAI transaksi (putaran 11, 2026-10-05 / permintaan 1A):
+    // tampil SETELAH SETIAP penjualan sukses — semua jalur (tombol Bayar,
+    // F2, Enter, F12 Bayar pas) lewat pay() ini — TANPA syarat saklar
+    // auto-print. Saklar hanya menentukan apakah tombol Thermal/A4 benar-benar
+    // mengirim ke printer. Snapshot data resume WAJIB diambil SEBELUM
+    // cart/cashIn di-reset beberapa baris di bawah.
+    void pilihCetakSelesai(res.data.sale.id, strukJual, tot, kembalian, {
+      invoiceNo: res.data.sale.invoice_no,
+      items: cart.map((l) => ({ qty: l.qty, nama: l.name, net: jumlahBaris(l) - l.discount })),
+      metode: payMethod,
+      uang: cashIn,
+    });
     cart = [];
     discount = 0;
     cashIn = 0;
-    cashTouched = false; // penjualan baru -> auto-isi (P1) hidup lagi
+    cashTouched = false; // penjualan baru -> form berikutnya buka kolom kosong (10d)
     // Pelanggan kembali ke bawaan (Pelanggan Umum) — pilihan pelanggan berlaku
     // PER NOTA, jangan menempel ke transaksi kasir berikutnya diam-diam.
     customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;

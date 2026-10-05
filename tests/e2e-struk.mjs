@@ -89,9 +89,13 @@ const tungguTercetak = async (n, ms = 15000) => {
   while (tercetak.length < n && Date.now() - t0 < ms) await page.waitForTimeout(100);
 };
 
-// Dialog pilihan [Thermal] [A4] [Selesai] muncul SETELAH bayar bila "Cetak struk
-// otomatis" nyala (pilihan pemilik 2026-10-03). Tanpa klik dialog ini struk
-// tidak pernah terkirim — semua titik bayar suite ini melewatinya.
+// Modal resume [Thermal] [A4] [Selesai] muncul SETELAH SETIAP bayar sejak
+// putaran 11 (2026-10-05, permintaan pemilik 1A) — TANPA syarat saklar
+// "Cetak struk otomatis" (saklar mati hanya menahan pengiriman ke printer).
+// pilihan=null = klik Selesai (tanpa cetak); pilihan='Escape' = tutup lewat
+// Esc (putaran 11c — listener window-capture; tanpa itu Esc mati karena
+// fokus sempat di kolom scan, bukan di popup). Semua titik bayar suite ini
+// melewatinya.
 const pilihCetak = async (pilihan) => {
   await page.waitForSelector('.swal2-popup', { timeout: 8000 });
   const sel = pilihan === 'A4' ? '.swal2-deny' : pilihan === 'Tidak' ? '.swal2-cancel' : '.swal2-confirm';
@@ -116,12 +120,24 @@ const jual = async (paket, pilihan = 'Thermal') => {
     () => document.querySelector('#toast-root')?.textContent?.includes('Terjual'),
     { timeout: 15000 },
   );
-  if (pilihan) {
-    await pilihCetak(pilihan);
-    // Struk Thermal baru terkirim sesudah tombol dialog diklik — tunggu betulan
-    // supaya asersi `tercetak.length` tidak balapan dengan fetch print-agent.
-    if (pilihan === 'Thermal') await tungguTercetak(n0 + 1);
+  // Baca isi modal resume {judul, isi} SEBELUM tombol/Esc — dikembalikan
+  // ke caller untuk asersi konten (1A: modal selalu muncul setiap bayar).
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  const resume = await page.evaluate(() => ({
+    judul: document.querySelector('.swal2-title')?.textContent?.trim() ?? '',
+    isi: (document.querySelector('.swal2-popup')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+  }));
+  if (pilihan === 'Escape') {
+    // Tutup lewat Esc (putaran 11c) — tidak ada klik tombol sama sekali.
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.swal2-popup', { state: 'detached', timeout: 8000 });
+  } else {
+    await pilihCetak(pilihan ?? 'Tidak');
   }
+  // Struk Thermal baru terkirim sesudah tombol dialog diklik — tunggu betulan
+  // supaya asersi `tercetak.length` tidak balapan dengan fetch print-agent.
+  if (pilihan === 'Thermal') await tungguTercetak(n0 + 1);
+  return resume;
 };
 
 try {
@@ -145,7 +161,7 @@ try {
   // menambah produk ber-"aqua" kedua, .suggest-item pertama berubah menjadi
   // produk yang salah dan struknya ikut salah isi. Query persis = exact SKU
   // -> tepat 1 hasil (lihat pos.ts pencarian).
-  await jual({ q: 'PRD00013', tunai: 20000 });
+  const r1 = await jual({ q: 'PRD00013', tunai: 20000 });
   ok('struk dikirim sekali', tercetak.length === 1, tercetak.length);
   const s1 = Buffer.from(tercetak[0], 'base64');
   ok('diawali INIT', s1[0] === 0x1b && s1[1] === 0x40);
@@ -165,6 +181,13 @@ try {
   ok('membawa tunai & kembalian', t1.includes('Tunai') && t1.includes('Rp20.000') && t1.includes('Rp16.000'),
     b1.filter((x) => /Tunai|Kembalian/.test(x)));
   ok('membawa kaki struk', t1.includes('Terima kasih sudah berbelanja'));
+  // Modal resume pasca-bayar (putaran 11, 2026-10-05): judul hero KEMBALIAN
+  // + badan ringkasan No. nota / item / Total / Tunai. Regex `i` karena
+  // kelas `uppercase` di baris No. nota membuat innerText jadi "NO. …".
+  ok('modal resume memuat judul Kembalian + No. nota + item + Tunai',
+    /Kembalian/.test(r1.judul) && new RegExp(`No\\. ${ymdStruk}-\\d{6}`, 'i').test(r1.isi)
+      && r1.isi.includes('1 × Aqua 600ml') && r1.isi.includes('Total') && r1.isi.includes('Tunai'),
+    JSON.stringify(r1).slice(0, 400));
   const lewat1 = b1.filter((x) => x.length > COLS);
   ok(`semua baris <= 32 kolom (maks ${Math.max(...b1.map((x) => x.length))})`, lewat1.length === 0, lewat1);
   ok('3 garis pemisah (item + rincian)', jmlGaris(s1) === 3, jmlGaris(s1));
@@ -181,8 +204,15 @@ try {
   await page.click('label[for="pos-autoprint"]');
   ok('posisi saklar terbaca mati', !(await page.isChecked('#pos-autoprint')));
   // Chitato, bukan Pulpen Hitam: pulpen adalah fixture baseline E2E opname.
-  // pilihan=null: auto-print mati = TIDAK ada dialog pilihan cetak.
-  await jual({ q: 'PRD00014', tunai: 20000 }, null);
+  // Tutup dialog dengan ESC (putaran 11c): sejak putaran 11 (1A) modal resume
+  // TETAP muncul walau saklar mati — yang ditahan hanya pengiriman ke printer.
+  const rB = await jual({ q: 'PRD00014', tunai: 20000 }, 'Escape');
+  ok('modal resume TETAP muncul walau saklar cetak mati (1A)',
+    /Kembalian|Pembayaran berhasil/.test(rB.judul), JSON.stringify(rB).slice(0, 200));
+  ok('Esc MENUTUP modal resume langsung (11c)', !(await page.isVisible('.swal2-popup')));
+  const fokusEsc = await page.evaluate(() => document.activeElement?.id ?? '');
+  ok('fokus kembali ke kolom scan setelah resume ditutup (11c)',
+    fokusEsc === 'pos-q', fokusEsc);
   ok('penjualan jalan walau cetak mati', await page.isVisible('#pos-rows'));
   ok('TIDAK ada permintaan cetak tambahan', tercetak.length === 1, tercetak.length);
 
@@ -314,19 +344,39 @@ try {
   ok('klik Bayar membuka form bayar (modal) berisi metode + uang diterima + chip',
     (await page.locator('[data-cash]').count()) === 4 && await page.isVisible('#pos-cash'),
     await page.locator('[data-cash]').count());
-  ok('chip nominal cepat tampil (Uang pas + 3 pecahan)', await page.locator('[data-cash]').count() === 4,
+  ok('chip nominal cepat tampil (4 pecahan: 20rb-200rb)', await page.locator('[data-cash]').count() === 4,
     await page.locator('[data-cash]').count());
-  // P1 (backlog riset 2026-10-04): uang diterima AUTO-ISA = total selama kasir
-  // belum menyentuh kolomnya (pola KulaPOS/Aronium) — item masuk, kolom langsung
-  // terisi Rp4.000 tanpa diketik.
-  ok('uang diterima auto-isi = total (P1)', (await page.inputValue('#pos-cash')) === '4000',
+  // Putaran 10 (2026-10-05): layout modal bayar dua panel ala Ravaa POS v1 —
+  // kiri = Total tagihan + Pelanggan + kartu metode, kanan = uang diterima.
+  const layoutBayar = await page.evaluate(() => {
+    const wrap = document.querySelector('.modal-body > div');
+    const kolom = wrap ? [...wrap.children] : [];
+    const idx = (sel) => kolom.findIndex((c) => c.querySelector(sel));
+    return {
+      kolom: kolom.length,
+      totalDiKiri: idx('#bayar-total'),
+      uangDiKanan: idx('#pos-cash'),
+      kartuMetode: document.querySelectorAll('[data-pay]').length,
+      pelanggan: !!document.querySelector('#bayar-cust'),
+    };
+  });
+  ok('modal bayar 2 panel ala v1 (total+metode kiri, uang diterima kanan)',
+    layoutBayar.kolom === 2 && layoutBayar.totalDiKiri === 0 && layoutBayar.uangDiKanan === 1
+      && layoutBayar.kartuMetode === 3 && layoutBayar.pelanggan,
+    JSON.stringify(layoutBayar));
+  // Putaran 10d (2026-10-05, pemilik): form uang diterima JANGAN langsung
+  // terisi "uang pas" — tujuannya memasukkan uang KURANG / LEBIH, jadi
+  // default 0 (kosong). Auto-isi P1 dihapus; auto-focus tetap (dicek di
+  // section barrier di bawah). Uang pas kini hanya F12 #pos-pay-pas.
+  ok('uang diterima default KOSONG (tanpa auto-isi — putaran 10d)',
+    (await page.inputValue('#pos-cash')) === '',
     await page.inputValue('#pos-cash'));
 
   // BARRIER tunai (keluhan pemilik 2026-10-03): uang diterima KOSONG —
   // dulu `cashIn=0` lolos cek dan transaksi selesai tanpa menerima uang.
-  // Sejak auto-isi (P1) kolom terisi otomatis, jadi test MENGOSONGKAN dulu
-  // (mengimitasi kasir menghapus isian; input kosong = "disentuh", auto-isi
-  // tidak boleh menolong lagi) — barrier wajib tetap menolak.
+  // Kolom memang sudah kosong sejak dibuka (putaran 10d); fill('') tetap
+  // dijalankan sebagai langkah eksplisit kasir mengosongkan kolom —
+  // barrier wajib tetap menolak.
   const nSebelumBarrier = tercetak.length;   // snapshot: section lama sudah cetak
   await page.fill('#pos-cash', '');
   await page.click('#pos-pay');
@@ -367,16 +417,24 @@ try {
   await page.click('[data-cash="100000"]');
   ok('klik pecahan mengisi uang diterima', (await page.inputValue('#pos-cash')) === '100000',
     await page.inputValue('#pos-cash'));
+  // Putaran 10: chip membalikkan fokus ke kolom uang supaya Enter = bayar
+  // (kecepatan transaksi — sebelumnya fokus tertinggal di chip).
+  ok('klik chip langsung memfokus kolom uang (siap Enter bayar)',
+    (await page.evaluate(() => document.activeElement?.id)) === 'pos-cash',
+    await page.evaluate(() => document.activeElement?.id));
   ok('kembalian ikut terhitung', norm(await page.innerText('#pos-change')) === 'Rp96.000',
     await page.innerText('#pos-change'));
-  // Lalu "Uang pas" = persis total -> kembalian 0, chip tersorot.
-  await page.click('[data-cash="pas"]');
-  ok('"Uang pas" mengisi persis total', (await page.inputValue('#pos-cash')) === '4000',
+  // Putaran 10c (2026-10-05): chip "Uang pas" DIHAPUS dari modal (sudah ada
+  // F12 #pos-pay-pas) — ganti pecahan baru 20.000; uang persis total kini
+  // lewat ketik manual.
+  await page.click('[data-cash="20000"]');
+  ok('chip 20.000 mengisi persis uang diterima', (await page.inputValue('#pos-cash')) === '20000',
     await page.inputValue('#pos-cash'));
-  ok('kembalian jadi Rp0', norm(await page.innerText('#pos-change')) === 'Rp0',
+  ok('chip 20.000 tersorot sebagai pilihan aktif',
+    (await page.locator('[data-cash="20000"]').getAttribute('class') || '').includes('!border-primary'));
+  await page.fill('#pos-cash', '4000');
+  ok('kembalian jadi Rp0 saat uang = total', norm(await page.innerText('#pos-change')) === 'Rp0',
     await page.innerText('#pos-change'));
-  ok('chip "Uang pas" tersorot sebagai pilihan aktif',
-    (await page.locator('[data-cash="pas"]').getAttribute('class') || '').includes('!border-primary'));
 
   // Pintasan global: blur ke <body> lalu F2 — dulu host tidak pernah menerima
   // keydown ini, kasir harus mengklik kolom dulu supaya F2 hidup.

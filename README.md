@@ -285,7 +285,49 @@ npm run dev:api
     pemilik "pindahkan ke modal ketika klik bayar", ala payment screen
     Aronium F10): **Total tagihan → metode bayar → uang diterima + chip
     nominal cepat → kembalian → petunjuk hutang**, OK modal = `#pos-pay`
-    (Enter/F2/F10 tetap satu aksi). Karena itu sidebar tidak lagi penuh
+    (Enter/F2/F10 tetap satu aksi). **Putaran 10 (2026-10-05): modal
+    dirombak 2 panel ala Ravaa POS v1** — *"modal bayar silakan dengan
+    referensi ravaapos v1 … pendekatan yang sama, tanpa mengurangi
+    kecepatan dalam transaksi"* (referensi `payment-modal.blade.php` +
+    `.payment-layout-wrapper` flex 5/7): grid **`sm:grid-cols-[5fr_7fr]`**
+    (312/436px terukur) + modal **`wide` 768px**; **kiri** = kartu Total
+    tagihan border-2 primer `#bayar-total` (angka 3xl) + kotak **Pelanggan
+    `#bayar-cust`** (ikon users · `CUS-xxxxxx`, penanda alur hutang) +
+    **kartu metode `data-pay` grid 2 kolom** gaya `.btn-method-card` (ikon
+    wallet/qr/sync — ikon `qr` baru di `icons.ts`, aktif = primer muda) +
+    petunjuk pintasan; **kanan** `bg-gray-50` = **Uang diterima** input
+    besar `text-2xl` prefix Rp + **tombol × `#bayar-clear`** (ala
+    `btn-clear-huge` v1, bersihkan + fokus balik) → chip nominal grid 2
+    kolom → **kotak KEMBALIAN putus-putus** (label statis + angka
+    `text-2xl` dari helper `kelasPosChange()` — satu sumber render awal &
+    `paintCart`) → petunjuk hutang; metode non-tunai menukar blok ini
+    dengan teks "Tanpa uang diterima". **Kecepatan transaksi dijaga**:
+    fokus `#pos-cash` saat buka (kolom default KOSONG sejak putaran 10d),
+    **klik chip →
+    fokus balik ke kolom uang** (kasir tinggal Enter), Enter-on-input/F2/
+    F10/F12 tanpa perubahan; semua id lama (`#pos-cash`, `#pos-pay`,
+    `data-pay`, `data-cash`, `#pos-change`, `#pos-change-ctx`,
+    `#bayar-tunai`, `#bayar-non-tunai`) TIDAK berubah.
+    **Putaran 10b (2026-10-05): tombol + uang diterima ~2x lipat** (permintaan
+    pemilik *"kurang besar untuk tombol-tombol dan uang diterima … sekitar 2x
+    lipat"*): kartu metode 34→**78px** (font 13→24px, layout kolom ala v1 —
+    ikon atas label bawah, karena label horizontal @24px tidak muat di kolom
+    137px), chip nominal 25→**51px** (font 11→22px), `#pos-cash` 41→**91px**
+    (font 20→**40px**, prefix Rp 24px ala `.payment-input-huge` v1, angka
+    berhenti sebelum tombol × lewat `!pr-[76px]`), tombol × 28→**56px**, dan
+    footer Batal/Bayar 34→**68px** (font 24px, kelas dipasang di `bukaBayar`
+    — modal lain tetap ukuran normal). **Putaran 10c (2026-10-05)** lanjutan:
+    chip "Uang pas" dihapus + pecahan baru **20.000**, chip kembali ukuran
+    normal 1x, **kembalian `#pos-change` font 40px = seukuran uang diterima**
+    (*"kembalian kurang besar, seukuran uang diterima"*), dan **total
+    tagihan `#bayar-total` 36px** (*"total tagihan di besarkan setengahnya"*
+    — +50% dari 24px). **Putaran 10d (2026-10-05)**: chip pecahan
+    diperbesar lagi 25→**44px** (font 11→17px, "tombol nominalnya terlalu
+    kecil") dan **auto-isi "uang pas" DIHAPUS** — kolom uang diterima
+    **default kosong** (*"form uang diterima jangan langsung di isi uang
+    pas, karena tujuannya adalah untuk memasukkan nilai uang kurang atau
+    uang lebih jadi default 0"*); auto-focus `#pos-cash` tetap, "uang pas"
+    kini hanya F12 Bayar pas / pilih chip. Karena itu sidebar tidak lagi penuh
     isian; hierarki Aronium tetap utuh di dalam modal. **Baris "Grand
     total" DIHAPUS** dari sidebar (permintaan
     pemilik 2026-10-04 — duplikat TOTAL BELANJA di info bar atas) dan
@@ -358,19 +400,28 @@ npm run dev:api
     (`statusExpiry`, `tglExpiry`, `AMBAT_EXPIRY = 30`).
     Strip ini **murni visual** — blokir keras (400 dari server) adalah pilihan
     terpisah: **Pengaturan → Tolak jual kadaluarsa**, lihat bagian Pengaturan.
-  - **Nominal cepat di panel bayar tunai** (gaya Kasir Pintar): chip **Uang
-    pas** + pecahan Rp50.000 / Rp100.000 / Rp200.000 — satu klik mengisi kolom
+  - **Nominal cepat di panel bayar tunai** (gaya Kasir Pintar): **4 pecahan
+    Rp20.000 / Rp50.000 / Rp100.000 / Rp200.000** — satu klik mengisi kolom
     **Uang diterima**, kembalian ikut terhitung, chip yang cocok tersorot.
-    Chip hanya ada di mode tunai (QRIS/transfer tidak butuh nominal).
+    **Putaran 10c (2026-10-05)**: chip **"Uang pas" DIHAPUS dari modal**
+    (permintaan pemilik *"Jangan ada uang pas, karena sudah ada tombol F12"*
+    — `#pos-pay-pas` Bayar pas tetap di side panel) dan diganti pecahan
+    20.000; chip kembali **ukuran normal 1x** (*"tombol uang itu kecilkan
+    1xnya"* — pembesaran 10b dibatalkan khusus chip; lalu **putaran 10d**
+    menaikkannya lagi ke **44px/17px** — *"tombol nominalnya terlalu kecil"*).
+    Chip hanya ada di mode
+    tunai (QRIS/transfer tidak butuh nominal).
   - **Panel bayar disusun seperti payment screen Aronium** (referensi
     help.aronium.com *Payment*): hierarki **Total** angka besar biru ->
     **Uang diterima** input besar (placeholder = amount due, meniru "Paid"
     Aronium yang menampilkan total tagihan) -> **Kembalian** angka besar
-    otomatis (hijau saat cukup, merah saat kurang). Layout/masih memakai
-    token & komponen repo (`.chip`, `.btn`, `.input`).
+    otomatis (hijau saat cukup, merah saat kurang). Sejak putaran 10
+    hierarki itu hidup di **kolom kanan panel 5/7 ala Ravaa POS v1**
+    (kolom kiri = total + pelanggan + kartu metode, lihat atas), tetap
+    dengan token & komponen repo (`.chip`, `.btn`, `.input`).
   - **Barrier uang diterima (tunai)**: tombol **Bayar**/pintasan F2/Enter
     DITOLAK dengan toast bila uang diterima **kosong** ("Uang diterima belum
-    diisi — ketik nominal atau tekan 'Uang pas'") atau **kurang dari total**
+    diisi — ketik nominal atau tekan Bayar pas (F12)") atau **kurang dari total**
     ("Uang diterima kurang dari total RpX"); fokus dikembalikan ke kolom
     uang. Dulu `cashIn=0` lolos cek dan transaksi bisa selesai tanpa menerima
     uang. Barrier serupa berlaku untuk **topup tunai** (`#tp-tunai`);
@@ -507,15 +558,27 @@ npm run dev:api
     (satu pintu, bisa dipilih produknya, bukan cuma "yang sedang tampil").
   - Tanpa printer, print-agent menyimpan ke `apps/print-agent/out/*.bin`
     (bisa dicek/CUPS-kan manual), jadi alur ini bisa diuji tanpa hardware.
-* **Cetak struk otomatis** (saklar **Cetak struk otomatis** pada baris **Mode**,
-  tampil di semua mode; bisa juga dimatikan per device lewat **Sistem →
-  Cetak struk**): setiap **penjualan** selesai, dialog menawarkan pilihan
-  **[Thermal] [A4] [Selesai]** sebelum keranjang/state direset — judulnya
-  **`Kembalian RpX`** (atau "Pembayaran berhasil") supaya kasir menutup
-  transaksi sambil melihat nominal uang kembali (sejak 2026-10-04). Gagal cetak
-  **tidak pernah** membatalkan transaksi (cukup toast peringatan sekali per
-  sesi). **Topup/tarik tanpa dialog** — struk langsung dikirim sesuai layout
-  per-device. Device dengan saklar mati tidak diganggu dialog sama sekali.
+* **Modal resume + pilihan cetak setiap penjualan** (revisi pemilik
+  2026-10-05, putaran 11 — sebelumnya "Cetak struk otomatis"): setiap
+  **penjualan selesai** — semua jalur, termasuk **F12 Bayar pas** — membuka
+  modal **[Thermal] [A4] [Selesai]** sebelum keranjang/state direset,
+  **tanpa syarat saklar** (1A): judul hero **KEMBALIAN** — label kecil +
+  **angka kembalian 48px** (putaran 11b, "kembalian kurang besar, agar
+  kasir mudah melihat kembalian"; "Pembayaran berhasil" bila kembalian 0)
+  + **badan resume** ringkas: **No. nota**,
+  daftar item (maks 5 baris + "… +N item lainnya"), **Total**, baris
+  `Tunai`/metode — supaya kasir verifikasi nota & uang kembali dalam satu
+  layar. **Esc = tutup langsung** (putaran 11c — listener Esc dipindah ke
+  window-capture karena fokus sempat di kolom scan, bukan di popup) dan
+  penutup apa pun (Esc/Selesai/Thermal/A4) **mengembalikan fokus ke kolom
+  scan** supaya transaksi berikutnya langsung jalan. Saklar **Cetak struk
+  otomatis** (baris **Mode**, juga per-device
+  lewat **Sistem → Cetak struk**) kini hanya **mengizinkan tombol
+  Thermal/A4 mengirim ke printer** — klik saat saklar mati = toast
+  "Cetak sedang mati…", modal tetap muncul. Gagal cetak **tidak pernah**
+  membatalkan transaksi (cukup toast peringatan sekali per sesi).
+  **Topup/tarik tanpa dialog** — struk langsung dikirim sesuai layout
+  per-device.
   - **Pilihan A4 = INVOICE A4 gaya Aronium** (baru 2026-10-03): membuka tab
     baru berisi nota invoice A4 (kop **INVOICE** + nama/alamat/Phone/Email
     toko + logo "R", Bill to pelanggan terpilih — *Pelanggan Umum* bila
@@ -754,7 +817,9 @@ npm run dev:api
     disimpan di browser device ini (localStorage `ravaa.cetak` dan
     `ravaa.struklayout`, lihat `apps/web/src/ui/print-pref.ts`) — karena dua PC
     bisa menempel pada printer yang berbeda, dan HP fallback mungkin tanpa
-    printer sama sekali.
+    printer sama sekali. Sejak putaran 11 (2026-10-05) saklar **hanya
+    mengizinkan pengiriman ke printer** — modal resume + pilihan cetak
+    tetap muncul setiap penjualan (lihat "Modal resume" di atas).
 * **HPP & laba (modal rata-rata)** — menutup celah "HPP rata-rata" di bawah.
   - Restock kini menerima **`harga_beli`** (opsional, isian "Harga beli / nota"
     di dialog stok, mode **Masuk barang**). Tidak diisi = rata-rata modal tidak

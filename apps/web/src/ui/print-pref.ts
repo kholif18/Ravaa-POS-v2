@@ -20,9 +20,13 @@ export type LayoutStruk = 'thermal' | 'a4';
 export const KEY_CETAK = 'ravaa.cetak';
 export const KEY_LAYOUT = 'ravaa.struklayout';
 
-/** Cetak struk otomatis setelah tiap penjualan/topup. Default NYALA — toko
- *  punya printer dan pelanggan mengharapkan struk; matikan lewat panel Sistem
- *  atau saklar di scan bar kalau device ini memang tidak punya printer. */
+/** Izin mengirim struk ke printer setelah tiap penjualan/topup (sejak
+ *  putaran 11 2026-10-05: modal resume + pilihan Thermal/A4 muncul SETELAH
+ *  SETIAP penjualan tanpa syarat — saklar ini hanya menentukan apakah tombol
+ *  Thermal/A4 benar-benar mengirim ke printer; klik saat mati = toast).
+ *  Default NYALA — toko punya printer dan pelanggan mengharapkan struk;
+ *  matikan lewat panel Sistem atau saklar di scan bar kalau device ini
+ *  memang tidak punya printer. */
 export function getAutoPrint(): boolean {
   try {
     return localStorage.getItem(KEY_CETAK) !== '0';
