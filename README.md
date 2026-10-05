@@ -169,6 +169,8 @@ npm run dev:api
 * Layar kasir (`#/pos`) **tidak memakai grid produk**. Satu input scan/ketik
   (barcode persis → SKU persis → nama mengandung) dengan dropdown hasil: ArrowUp /
   ArrowDown menyorot, Enter atau klik memasukkan ke keranjang, Escape menutup.
+  Ujung kanan input memuat badge **`F1`** — penanda shortcut fokus scan
+  (F1/F8; Esc juga kembali ke sini).
    Mode: **Penjualan / Topup / Tarik** (bar yang sama). Topup-tarik memakai
    `POST /api/topups`; admin terisi otomatis dari tier toko yang sama dengan
    `GET /api/topups/suggest-admin`, dan bisa diedit kasir.
@@ -191,8 +193,11 @@ npm run dev:api
     sebelum bayar, ikut ke `POST /api/sales` sebagai `customer_id` +
     snapshot `customer_name`, di-simpan ke struk/invoice/riwayat, dan
     **kembali ke Pelanggan Umum** setelah tiap penjualan), **ditemani tombol
-    🔍 Cari** (`#pos-cust-cari`, putaran 7 2026-10-04 *"tambahkan cari
-    seperti cari produk F3"*) yang membuka **layar cari pelanggan**
+    kompak `🔍 F9`** (`#pos-cust-cari` — putaran 7 2026-10-04 *"tambahkan
+    cari seperti cari produk F3"*; putaran 8b tombol tetap **inline** di
+    sebelah select — *"tombol dan dropdown customer tidak inline"* — hanya
+    teks "Cari" dibuang, tinggal ikon search + label **F9** polos supaya
+    select tetap lega) yang membuka **layar cari pelanggan**
     `openCariPelanggan()` — pola identik layar cari produk (input multi-kata
     nama/HP/nomor urut/catatan, ↑↓ sorot, Enter/klik/**Pilih** = pilih,
     Esc = tutup), lalu fokus balik ke kolom scan, serta **kolom
@@ -209,6 +214,17 @@ npm run dev:api
     Harga / Qty / **Diskon** / Subtotal / **Aksi** (hapus) — deskripsi
     pendukung (unit, `item manual`, badge kadaluarsa) pindah ke bawah nama.
     Baris catatan (`use_note`) & baris kosong memakai `colspan="8"`.
+    **Lebar kolom eksplisit** (putaran 8 2026-10-04, mengikuti lebar kolom di
+    referensi `kula-02-transaksi-pos.png`): No `w-10`, Kode `w-24`,
+    **Nama barang `w-auto`** menyerap seluruh sisa lebar (kolom nama jadi
+    panjang), Harga/Diskon/Subtotal `w-24`, Qty `w-32`, Aksi `w-14`.
+    **Hover per baris KEBIRUAN** `hover:bg-primary-soft` (+ `dark:hover:bg-primary/15`)
+    dengan `transition-colors` — baris disorot biru muda saat mouse lewat
+    (token `--color-primary-soft #e6f3ff`, sama dengan state aktif tombol;
+    riwayat gray-50 → gray-100 → primary-soft sesuai permintaan *"hover di
+    tabel keranjang ubah jadi kebiru-biruan"*). **Input Qty
+    diperbesar** `!w-16` → `!w-20` + `font-semibold` (permintaan pemilik
+    "pada baris perbesar Qty input").
     **Label baris di atas tabel**: `#pos-count` ("n item" / "Keranjang
     kosong") di kiri + tombol **Bersihkan [F5]** (`#pos-clear`) di kanan —
     dipindah dari bawah tabel mengikuti baris "Keranjang … Bersihkan [F5]"
@@ -237,8 +253,8 @@ npm run dev:api
       *"Jumlah Beli * Kode [F1/Cmd+K]"*; **F8** = alias jalan pendek satu tekan
       pengganti Esc), **F9** buka layar **Cari pelanggan** (ala F3 produk),
       **F10** buka form bayar (referensi Aronium *"Payment (F10)
-      opens payment form"*), **F12** bayar pas (*"Default payment … F12"* —
-      tanpa form, tombol hijau di sidebar). Guard: **swal konfirmasi/pilihan
+      opens payment form"*),       **F12** bayar pas (*"Default payment … F12"* —
+      tanpa form, tombol gradasi hijau di sidebar). Guard: **swal konfirmasi/pilihan
       cetak yang terbuka menahan seluruh pintasan**, dan form bayar yang
       terbuka hanya mengizinkan F2/F10/F12.
   - **Panel bayar = sidebar kanan 320px** (grid `lg:grid-cols-[1fr_320px]` —
@@ -250,9 +266,21 @@ npm run dev:api
     di sebelah label inputnya dihapus, permintaan pemilik putaran 7 2026-10-04
     "ghapus saja, di atasnya sudah ada label F6 ternyata di tombol diskon").
     Tombol utama **Bayar F10** (`#pos-bayar`, pembuka **form bayar**) dan **tepat di
-    bawahnya** tombol hijau **Bayar pas F12** (`#pos-pay-pas`: tunai persis
+    bawahnya** tombol **Bayar pas F12** (`#pos-pay-pas`: tunai persis
     total, langsung proses **tanpa form** — permintaan pemilik putaran 6
-    2026-10-04 "bayar uang pas letakkan di sidepanel bawahnya Bayar F10").
+    2026-10-04 "bayar uang pas letakkan di sidepanel bawahnya Bayar F10";
+    **putaran 8b/8c**: gaya akhir = **gradasi hijau + shadow + hover hijau
+    lebih gelap** (`bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md
+    shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700`) —
+    permintaan
+    awal *"pakai outline saja"* menghasilkan tombol tanpa warna karena class
+    `btn-outline` ternyata tidak ada di `styles.css` (*"style hilang yang
+    tombol warna hijaunya"*), lalu pemilik meminta *"warna buat modern,
+    gradasi dan ada shadownya"*; hover sempat dibuat kebiruan lalu dibatalkan
+    (8c: *"hover tombol F12 juga ubah ke hijau jangan biru, karena tombolnya
+    warna hijau"*). Petunjuk
+    `F2 bayar cepat` di baris bawah ikut dihapus — kini hanya `F10 form bayar
+    · F12 bayar pas`).
     **Isian bayar pindah ke FORM BAYAR (modal)** (putaran 5, permintaan
     pemilik "pindahkan ke modal ketika klik bayar", ala payment screen
     Aronium F10): **Total tagihan → metode bayar → uang diterima + chip
@@ -269,10 +297,26 @@ npm run dev:api
     **transaksi tertahan (P5)** — `tahanKeranjang()` membekukan isi
     keranjang (items/diskon/pelanggan) ke **IndexedDB per device**
     (`getHolds()`/`saveHolds()`, kv `'holds'`, tanpa endpoint API) lalu
-    mengosongkan keranjang; tombol **Pending (n)** membuka modal daftar
-    dengan aksi **Lanjutkan** (muat balik ke keranjang — konfirmasi swal
-    bila keranjang sedang terisi) dan **Hapus** (konfirmasi danger);
-    daftar bertahan setelah reload. **Item manual** & **Diskon** memanggil
+    mengosongkan keranjang; tombol **Pending (n)** membuka **MODAL SPLIT ala
+    Ravaa POS v1** (putaran 9/9b, 2026-10-05 — *"ke modal pending, buat 2
+    kolom, kiri daftar antrian, kanannya preview"* lalu *"sebagai referensi
+    lihat layout di ravaa POS versi 1 … coba di terapkan pada modal pending"*
+    — referensi `hold-modal.blade.php` + `.modal-split` +
+    `showHoldDetail()`): grid **30/70** (`grid-cols-[3fr_7fr]`, `wider` ≈
+    modal-lg 900px v1), tiap kolom **tinggi fix 60% layar (`h-[60vh]`) +
+    scroll** (*"tinggi fix misal 60% dari screen atau 80%, dan buat
+    scrollable jika barang ada banyak"*). KIRI = split-header **"DAFTAR
+    ANTRIAN (n)"** + kartu antrian gaya `.split-item` v1 (hover biru, kartu
+    terpilih **solid primer + teks putih + shadow**; klik kartu = pilih;
+    berisi nama pelanggan · total · baris/Qty · waktu). KANAN =
+    `#hold-preview` persis struktur v1: header-info **Pelanggan | Waktu
+    simpan** (garis dashed) → **Daftar Produk (N item)** kartu abu-abu
+    (`SKU · qty × harga`, netto primer di kanan) → kotak ringkasan
+    **Subtotal/Diskon/Total** → dua tombol **[Hapus outline] [Lanjutkan
+    primer]** di bawah detail (bukan per kartu; **Lanjutkan** = muat balik
+    ke keranjang + konfirmasi swal bila keranjang terisi, **Hapus** =
+    konfirmasi danger, kedua kolom dirender ulang, modal ditutup sendiri
+    bila antrian habis); daftar bertahan setelah reload. **Item manual** & **Diskon** memanggil
     aksi yang sudah ada (putaran 7: tombol ganda `#pos-manual` di scan bar
     DIHAPUS — yang tetap hanya `#pos-qa-manual` di panel kanan, *"karena di
     bawah sudah ada pada deretan tombol panel kanan"*); **Voucher** & **Cetak ulang** = tombol placeholder
@@ -357,8 +401,10 @@ npm run dev:api
     browser tidak membuka find bar) walau modal sedang terbuka — aksinya
     sendiri dilewati oleh guard modal yang sama dengan F2.
   - **Layar cari pelanggan** (putaran 7 2026-10-04, *"tambahkan cari seperti
-    cari produk F3"*): tombol **🔍 Cari** (`#pos-cust-cari` / pintasan **F9**)
-    di info bar di sebelah select Pelanggan — modal lebar `openCariPelanggan()`
+    cari produk F3"*): pemicu **`#pos-cust-cari`** (ikon 🔍 + `<kbd>F9</kbd>`,
+    pintasan **F9**) **inline di sebelah select Pelanggan** (putaran 8b — teks
+    "Cari" dibuang, tinggal ikon search + **F9**) — modal
+    lebar `openCariPelanggan()`
     dengan pola identik layar cari produk F3 (filter bebas nama/no.HP/nomor
     urut/catatan, ↑↓ pilih, Enter/klik/**Pilih** = set `customerId` + nilai
     select, Esc = tutup), lalu fokus otomatis balik ke kolom scan. Sangat

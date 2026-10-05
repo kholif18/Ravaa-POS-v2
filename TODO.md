@@ -76,6 +76,84 @@ user (saat akhir session):
   async callback tanpa await (race: note-click paralel dengan fill search
   dropdown); fixed async + await, test kembali hijau 24/24.
 
+**Catatan 2026-10-04 (putaran 8)**: revisi layout tabel + info bar permintaan
+pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
+- ✅ **Lebar kolom tabel keranjang** — "kolom Nama barang kurang panjang, No,
+  Kode, Harga, qty, diskon, subtotal dan aksi kurang kecil": lebar `<th>`
+  eksplisit (No `w-10`, Kode `w-24`, **Nama barang `w-auto`** menyerap sisa,
+  Harga/Diskon/Subtotal `w-24`, Qty `w-32`, Aksi `w-14`).
+- ✅ **Badge `<kbd>F1</kbd>` di kolom scan** — penanda shortcut fokus scan di
+  ujung kanan input `#pos-q` (`pr-14` + span absolut; referensi KulaPOS
+  `[F1/Cmd+K]`), ikut di commit `0d2406d`.
+- ✅ **Hover per baris tabel KEBIRUAN** — `hover:bg-primary-soft
+  dark:hover:bg-primary/15 transition-colors` di tiap `<tr data-key>`
+  (putaran 8c *"hover di tabel keranjang ubah jadi kebiru-biruan"* — token
+  `--color-primary-soft #e6f3ff` konsisten dengan state aktif tombol; riwayat
+  `gray-50` (terlalu tipis) → `gray-100` → `primary-soft`).
+- ✅ **Input Qty diperbesar** — `!w-16` → `!w-20` + `font-semibold`
+  ("pada baris 1 perbesar Qty input").
+- ✅ **Tombol cari pelanggan INLINE kompak** — `#pos-cust-cari` tetap
+  sebaris dengan select (revisi 8b: "tombol dan dropdown customer tidak
+  inline" — sempat salah paham dipindah ke baris label), tapi teks "Cari"
+  dibuang: tinggal ikon search + label *F9* polos ("cukup pakai text label
+  yang F9 dan ganti logo kuncinya dengan search … space select jadi lebih
+  besar"); select `min-w-0 flex-1`.
+- ✅ **Bayar pas F12 = gradasi + shadow + hover hijau gelap** (gaya akhir 8c) —
+  permintaan awal "pakai outline saja" menghasilkan tombol TANPA warna
+  karena class **`btn-outline` tidak ada di `styles.css` (no-op)** —
+  pemilik: "style hilang yang tombol warna hijaunya"; ganti jadi
+  `bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md
+  shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700` —
+  *"warna buat modern, gradasi dan ada shadownya"* (hover sempat dibuat
+  kebiruan 8b, lalu 8c dibatalkan: *"hover tombol F12 juga ubah ke hijau
+  jangan biru, karena tombolnya warna hijau"*).
+- ✅ **Petunjuk `F2 bayar cepat` dihapus** dari baris `<p>` bawah dua tombol
+  bayar (kini hanya `F10 form bayar · F12 bayar pas`).
+- ✅ **Bug bonus: `.btn-outline` + `.btn-sm` akhirnya DIDEFINISIKAN** di
+  `styles.css` — dua class ini dipakai halaman Sistem (kartu Backup:
+  `#set-backup` + tombol Unduh) tapi tidak pernah ada, jadi selama ini tampil
+  polos tanpa border (jebakan sama dengan pay-pas). Daftar komponen SKILL
+  frontend-pos dikoreksi (`.btn-danger`/`.btn-lg`/`.btn-outline-secondary`
+  ternyata juga tidak ada — dihapus dari daftar, diganti catatan "jangan
+  pakai class tak terdefinisi = no-op tanpa error").
+- ✅ Tests: **npm test 884 assertion SEMUA HIJAU** (tidak ada asersi berubah);
+  tsc + build lolos; screenshot verifikasi `/tmp/opencode/putaran8b-*.png`
+  (inline F9, gradasi hijau, hover baris, lebar kolom — Nama barang 438px).
+
+**Catatan 2026-10-05 (putaran 9/9b — modal Pending)**:
+- ✅ **Putaran 9: modal Pending jadi 2 kolom** — *"ke modal pending, buat 2
+  kolom, kiri daftar antrian, kanannya preview barang apa saja yang di
+  pending"*: `bukaTertahan()` dirombak jadi grid dua kolom (`wide`),
+  KIRI `#hold-list` (klik kartu = pilih) ‖ KANAN `#hold-preview`, plus
+  **tinggi fix 60% layar + scroll** (*"previewnya memiliki tinggi fix, misal
+  60% dari screen atau 80%, dan buat scrollable jika barang ada banyak"* —
+  60vh dipilih supaya header+footer modal `max-h-[90vh]` tetap muat). Test
+  `pos-qtykode-test.mjs` +2 asersi (preview + tinggi → 26), run.mjs ekspek
+  total 886.
+- ✅ **Putaran 9b: layout dirapikan ala Ravaa POS v1** — *"sebagai referensi
+  lihat layout di ravaa POS versi 1 ini … coba di terapkan pada modal
+  pending di ravaaPOS v2"*. Referensi: `src/RPOS/.../partials/hold-modal.blade.php`
+  + `.modal-split`/`.split-header`/`.split-item` di `pos-system.css` +
+  `showHoldDetail()` di `assets/js/pos/index.js`. Yang diterapkan: proporsi
+  **30/70** (`grid-cols-[3fr_7fr]` — modal `wider` ≈ modal-lg 900px v1),
+  split-header bar **"DAFTAR ANTRIAN (n)"**, kartu antrian gaya
+  `.split-item` (hover `blue-50`, **aktif = bg primer SOLID + teks putih +
+  shadow**, menggantikan bg-soft), panel kanan persis struktur `detailHtml`
+  v1: header-info **Pelanggan | Waktu simpan** (garis dashed) → **Daftar
+  Produk (N item)** kartu abu-abu (SKU · qty × harga, netto primer) → kotak
+  ringkasan **Subtotal/Diskon/Total** (dashed, Total primer `text-xl`) →
+  **dua tombol [Hapus outline] [Lanjutkan primer] di bawah detail** (bukan
+  per kartu — listener pindah dari `#hold-list` ke `api.el`). Urutan kolom
+  TETAP kiri-antrian / kanan-detail (v1 menaruh daftar di kanan 30% — kita
+  mirror sisanya, sesuai instruksi putaran 9). Test §C3: cek label lama
+  "Preview barang" diganti split-header "Daftar antrian" (jumlah asersi
+  tetap 26). **npm test 886 assertion SEMUA HIJAU** (run pertama hijau
+  penuh dengan modal baru) + tsc/build lolos; screenshot verifikasi
+  `/tmp/opencode/putaran9b-*.png` — computed: kolom 301/703px (30/70),
+  preview 540px = 0.60 × 900, `overflowY: auto`, kartu aktif
+  `rgb(0,135,255)` + `rgb(255,255,255)`, aksi `[data-hold-act]` HANYA di
+  detail.
+
 **Gap analysis KulaPOS vs Ravaa POS (2026-10-04)** — sumber: `kula-01..12*.png`
 (khususnya `kula-02-transaksi-pos.png`, `kula-07-pos-kasir.png`) +
 `kulapos-transcript.txt` segmen 35:00–41:00:

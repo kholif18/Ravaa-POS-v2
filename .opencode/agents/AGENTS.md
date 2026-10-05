@@ -49,7 +49,11 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           info bar (mode jual) + kiri baris Mode
                           (topup/tarik, info bar tak dirender) supaya kasir
                            tidak terkunci di `#/pos`). Scan bar = input `#pos-q` + dropdown
-                           cari (**sintaks `Qty*Kode`**: `3*PRD00001` = 3 pcs —
+                           cari — input memuat **badge `<kbd>F1</kbd>` di ujung
+                           kanan** (`pr-14` + span absolut; putaran 8 2026-10-04,
+                           penanda shortcut fokus scan ala KulaPOS
+                           `[F1/Cmd+K]`) —
+                           (**sintaks `Qty*Kode`**: `3*PRD00001` = 3 pcs —
                            `bacaQtyKode()`, qty eksplisit menang atas chip
                            Qty/F4 dan sengaja TIDAK mengosongkan preset itu;
                            aturan sama untuk Enter & klik hasil; tanpa `*`
@@ -59,10 +63,16 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           `jamPos()`/`mulaiJam()` — jam lokal konsisten
                           `waktuStruk()`, dihentikan di `unmountPosPage`;
                           select `#pos-customer` pelanggan + tombol
-                          `#pos-cust-cari` (Cari pelanggan ala F3 lewat
-                          `openCariPelanggan()`, putaran 7 2026-10-04),
-                          default "Pelanggan Umum", dimuat dari
-                          `GET /api/customers`;
+                          `#pos-cust-cari` **INLINE sebelah select** (flex
+                          row; putaran 8b 2026-10-04 "tombol dan dropdown
+                          customer tidak inline" — versi awal yang memindahnya
+                          ke baris label DITOLAK). Bentuk KOMPAK: ikon search
+                          + teks "F9" polos TANPA teks "Cari" ("cukup pakai
+                          text label yang F9 dan ganti logo kuncinya dengan
+                          search … space select jadi lebih besar"); select
+                          `min-w-0 flex-1`. Pembuka `openCariPelanggan()` ala
+                          F3, putaran 7 2026-10-04, default "Pelanggan Umum",
+                          dimuat dari `GET /api/customers`;
                           kolom kanan = label TOTAL BELANJA + `#pos-owncount`
                           "n item (n Qty)" di KIRI kolom + `#pos-grand` angka
                           besar di KANAN — **`text-[48px]` kustom (2x lipat
@@ -81,7 +91,20 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           8 kolom**
                           (No / Kode / Nama barang / Harga / Qty / Diskon /
                           Subtotal / Aksi — SKU di kolom Kode mono, baris
-                          catatan & empty `colspan="8"`), chip nominal cepat,
+                          catatan & empty `colspan="8"`; **lebar kolom
+                          eksplisit** putaran 8 2026-10-04: No `w-10`, Kode
+                          `w-24`, **Nama barang `w-auto`** = menyerap seluruh
+                          sisa lebar (referensi KulaPOS), Harga/Diskon/
+                          Subtotal `w-24`, Qty `w-32`, Aksi `w-14`;
+                          **hover per baris KEBIRUAN**
+                          `hover:bg-primary-soft dark:hover:bg-primary/15
+                          transition-colors` (putaran 8c 2026-10-04 "hover di
+                          tabel keranjang ubah jadi kebiru-biruan" — pakai
+                          token `--color-primary-soft #e6f3ff`, sama dengan
+                          state aktif tombol; riwayat: gray-50 → gray-100 →
+                          primary-soft) pada
+                          tiap `<tr data-key>`; **input Qty `!w-20` +
+                          font-semibold** — dulu `!w-16`), chip nominal cepat,
                           chip Qty + tombol
                           Cari (F4 = qty item berikutnya sekali pakai, F3 =
                           layar cari produk; tombol ganda `#pos-manual` di
@@ -113,12 +136,49 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                             fitur **P5 transaksi tertahan** — snapshot keranjang
                             (`Hold` type: items/discount/pelanggan) disimpan di
                             **IndexedDB per device** lewat `getHolds()`/
-                            `saveHolds()` (kv key `'holds'` di `store.ts`,
-                            tanpa endpoint API); modal daftar beraksi
-                            **Lanjutkan** (`muatHold()` — konfirmasi swal bila
-                            keranjang tak kosong, validasi `customerId` ke
-                            master, dorong `manualSeq`) & **Hapus**
-                            (`hapusHold()` + `confirmDialog` danger);
+                             `saveHolds()` (kv key `'holds'` di `store.ts`,
+                             tanpa endpoint API); **MODAL SPLIT ala Ravaa
+                             POS v1** (putaran 9 2026-10-05: *"ke modal
+                             pending, buat 2 kolom, kiri daftar antrian,
+                             kanannya preview barang"*; putaran 9b: *"sebagai
+                             referensi lihat layout di ravaa POS versi 1 …
+                             coba di terapkan pada modal pending"* —
+                             referensi `hold-modal.blade.php` +
+                             `.modal-split` + `showHoldDetail()`; `wider`
+                             ≈ modal-lg 900px v1):
+                             grid **30/70** (`sm:grid-cols-[3fr_7fr]`,
+                             pemisah = border kanan kolom kiri), tiap kolom
+                             **tinggi FIX `h-[60vh]` + gulir sendiri**
+                             (permintaan *"tinggi fix misal 60%/80% dari
+                             screen, scrollable jika barang banyak"* — 60vh
+                             supaya header+footer modal `max-h-[90vh]` tetap
+                             muat). KIRI = split-header bar **"DAFTAR
+                             ANTRIAN (n)"** (`#hold-antrian-count`) + kartu
+                             `#hold-list` gaya `.split-item` v1 (hover
+                             `blue-50`, **aktif = bg primer SOLID + teks
+                             putih + shadow**; klik kartu = pilih); KANAN =
+                             `#hold-preview` persis struktur `detailHtml`
+                             v1: header-info **Pelanggan | Waktu simpan**
+                             (garis dashed, kasir di bawah pelanggan) →
+                             label **"Daftar Produk (N item)"** → kartu
+                             abu-abu per barang (nomor. nama, `SKU · qty ×
+                             harga` [+ diskon + catatan], netto primer di
+                             kanan) → kotak ringkasan **Subtotal/Diskon
+                             (bila >0)/Total** (garis dashed, angka Total
+                             `text-xl` primer) → dua tombol **[Hapus outline
+                             merah] [Lanjutkan primer] di BAWAH detail**
+                             (bukan per kartu — v1 menaruh aksi di detail;
+                             **Lanjutkan** = `muatHold()` — konfirmasi swal
+                             bila keranjang tak kosong, validasi `customerId`
+                             ke master, dorong `manualSeq`; **Hapus** =
+                             `hapusHold()` + `confirmDialog` danger — kedua
+                             kolom di-render ulang lewat `tampil()`,
+                             pemilihan jatuh ke antrian berikutnya, modal
+                             ditutup sendiri bila antrian habis); listener
+                             SATU di `api.el`; **selector
+                             `#hold-list li[data-hold-row]` / `[data-hold-act]`
+                             DIPERTAHANKAN** (dipakai
+                             `tests/pos-qtykode-test.mjs` §C3);
                             **Item manual** & **Diskon F6** memanggil aksi
                             lama; **Voucher** & **Cetak ulang** = placeholder
                             `[data-soon]` (toast "menyusul" — permintaan
@@ -135,7 +195,21 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                             OK footer modal = `#pos-pay`** (disetel di
                             `bukaBayar` — Enter-on-input modal.ts ->
                             `ok.click()`). **`#pos-pay-pas` ("Bayar pas"
-                            `bayarPas()`; hijau `bg-emerald-600`, `!py-4`,
+                            `bayarPas()`; **gradasi hijau + shadow + hover
+                            hijau LEBIH GELAP** `bg-linear-to-r
+                            from-emerald-500 to-emerald-600 shadow-md
+                            shadow-emerald-600/40 hover:from-emerald-600
+                            hover:to-emerald-700` — gaya
+                            akhir putaran 8c 2026-10-04: hover SENADA warna
+                            tombol (*"hover tombol F12 juga ubah ke hijau
+                            jangan biru, karena tombolnya warna hijau"* —
+                            hover biru sempat dipakai 8b lalu dibatalkan).
+                            Riwayat: permintaan awal "pakai outline saja"
+                            menghasilkan tombol tanpa
+                            warna karena class `btn-outline` TIDAK ADA di
+                            styles.css = no-op → "style hilang yang tombol
+                            warna hijaunya"; lalu "warna buat modern, gradasi
+                            dan ada shadownya"; `!py-4`,
                             kbd F12) = PENGECUALIAN: tetap di SIDE PANEL tepat
                             DI BAWAH `#pos-bayar`** (permintaan pemilik
                             putaran kedua 2026-10-04 "bayar uang pas

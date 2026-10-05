@@ -30,8 +30,12 @@ panel topup/laporan, modal struk, atau styling apa pun.
   dikembalikan). Angka penting (total, kembalian, angka stok) tetap
   `text-sm` (13px) + `font-bold tabular-nums`; label/badge boleh 11px;
   jangan <11px.
-* Komponen (vanilla, tanpa framework): `.btn(.btn-primary/.btn-danger/.btn-outline/
-  .btn-outline-secondary/.btn-sm/.btn-lg)` **34px** (min-h) / teks 13 semibold,
+* Komponen (vanilla, tanpa framework): `.btn` + varian `.btn-primary` /
+  `.btn-ghost` / `.btn-outline` / `.btn-sm` / `.btn.is-on` **34px** (min-h) /
+  teks 13 semibold — **daftar ini = styles.css apa adanya; jangan memakai
+  varian `.btn` yang tidak terdefinisi (mis. `.btn-danger`/`.btn-lg`) —
+  class hantu = no-op tanpa error** (bukti putaran 8b 2026-10-04:
+  `#pos-pay-pas` jadi tanpa warna karena `btn-outline` belum ada),
   `.input` **±33px** (`py-1.5`; deviasi 16px anti-zoom iOS), `.input-sm` **±31px**,
   `.card` radius 10 + shadow-sm + `p-3`,
   `.table` (th **11px** uppercase muted — ikut skala; guard
@@ -86,8 +90,10 @@ panel topup/laporan, modal struk, atau styling apa pun.
    menampilkan produknya; qty eksplisit menang atas chip Qty/F4 untuk baris itu
    **tanpa** mengosongkan preset F4. Aturan yang sama untuk **Enter maupun klik
    baris hasil**; tanpa `*` perilaku lama dipertahankan.
-8. Pintasan level document POS: F2 bayar, F3 cari, F4 qty berikutnya, F5 bersihkan,
-   F6 diskon transaksi, **F7 tahan (Pending)**, **F8 fokus kolom scan**, **F10 buka
+8. Pintasan level document POS: **F1 / F8 fokus kolom scan** (F1 = referensi
+   KulaPOS `[F1/Cmd+K]`), F2 bayar, F3 cari, F4 qty berikutnya, F5 bersihkan,
+   F6 diskon transaksi, **F7 tahan (Pending)**, **F9 cari pelanggan**
+   (`openCariPelanggan()`), **F10 buka
    form bayar**, **F12 bayar pas**, Enter bayar, Esc ke scan, dan **↑↓**
    pindah antar baris keranjang (`pindahBarisKeranjang()` — baris catatan dilewati,
    input catatan dikecualikan karena panah = kursor). Guard: hanya mode `jual` +
@@ -99,7 +105,11 @@ panel topup/laporan, modal struk, atau styling apa pun.
    dialog konfirmasi).
 9. Bayar terbagi dua permukaan (permintaan pemilik 2026-10-04, putaran 5-6):
    **side panel** = `#pos-bayar` (buka form, F10) dan **`#pos-pay-pas` "Bayar
-   pas" tepat DI BAWAHNYA** (hijau `bg-emerald-600`, `!py-4`, F12 — bayar tunai
+   pas" tepat DI BAWAHNYA** (gaya akhir **gradasi hijau + shadow + hover hijau
+   lebih gelap** `bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md
+   shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700`,
+   `!py-4`, F12 — hover SENADA warna tombol, permintaan 8c "hover tombol F12
+   juga ubah ke hijau jangan biru, karena tombolnya warna hijau"; bayar tunai
    persis total SEKALI ketuk tanpa modal); **modal form bayar** =
    `formBayarHtml()` (total tagihan, metode `data-pay`, `#pos-cash`, chip
    `data-cash`, kembalian, petunjuk hutang; OK footer = `#pos-pay`) untuk kasus

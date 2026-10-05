@@ -143,6 +143,26 @@ try {
   await p.waitForSelector('#hold-list li[data-hold-row]', { timeout: 8000 });
   const isiHold = await p.locator('#hold-list li').first().innerText();
   chk('hold berisi 3 baris (7 Qty)', /3 baris \(7 Qty\)/.test(isiHold), isiHold.replace(/\n/g, ' | ').slice(0, 120));
+
+  // ——— Modal split ala Ravaa POS v1 (putaran 9b, 2026-10-05): kiri antrian
+  // (split-header "DAFTAR ANTRIAN"), kanan detail struktur showHoldDetail() ——
+  const isiPreview = await p.locator('#hold-preview').innerText();
+  const isiBody = await p.locator('.modal-body').innerText();
+  chk('preview kanan memuat barang hold + split-header antrian (v1)',
+    /PRD00013/.test(isiPreview) && /daftar antrian/i.test(isiBody),
+    isiPreview.replace(/\n/g, ' | ').slice(0, 140));
+  // offsetHeight (bukan getBoundingClientRect) — rect ikut skala animasi
+  // modal-in (back-out scale ≠ 1 saat pertama kali diukur).
+  const cekTinggi = await p.evaluate(() => {
+    const el = document.querySelector('#hold-preview');
+    if (!el) return { selisih: 999, ov: '' };
+    return {
+      selisih: Math.abs(el.offsetHeight - 0.6 * window.innerHeight),
+      ov: getComputedStyle(el).overflowY,
+    };
+  });
+  chk('preview tinggi fix 60% layar + scrollable',
+    cekTinggi.selisih < 2 && cekTinggi.ov === 'auto', JSON.stringify(cekTinggi));
   await p.click('[data-hold-act="lanjut"]');
   await p.waitForFunction(() => document.querySelectorAll('#pos-rows tr[data-key]:not(.note-row)').length === 3, { timeout: 8000 });
   chk('Lanjutkan memulihkan qty 2/4/1 persis', JSON.stringify(await qtyInputs()) === '["2","4","1"]',

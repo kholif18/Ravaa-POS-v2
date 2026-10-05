@@ -669,18 +669,19 @@ function infoBarHtml(): string {
                kata, ↑↓ sorot, Enter pilih), buat pelanggan yang daftarnya
                sudah panjang (master kontak + hutang). -->
           <div class="w-full">
-            <div class="flex items-center justify-between gap-2">
-              <label class="label" for="pos-customer">Pelanggan</label>
-              <!-- Tombol cari PINDAH ke baris label (permintaan pemilik
-                   putaran 8 2026-10-04: "tombol cari pelanggan hapus aja cukup
-                   pakai text label yang F9 dan ganti logo kuncinya dengan
-                   search karena jika text label hanya f9 maka space yang
-                   digunakan select option jadi lebih besar") -->
-              <button type="button" id="pos-cust-cari" class="flex items-center gap-1 text-xs font-semibold text-primary hover:underline" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">
-                ${icon('search')} ${kbd('F9')}
-              </button>
+            <label class="label" for="pos-customer">Pelanggan</label>
+            <!-- Revisi putaran 8b (2026-10-04): "tombol dan dropdown customer
+                 tidak inline" — tombol KEMBALI sebaris dengan select (dulu
+                 sempat dipindah ke baris label di atas). Bentuknya kini
+                 KOMPAK: ikon search + teks "F9" polos TANPA teks "Cari"
+                 (permintaan: "cukup pakai text label yang F9 dan ganti logo
+                 kuncinya dengan search … space select jadi lebih besar") —
+                 select tetap min-w-0 flex-1 menyerap sisa lebar. Layar cari
+                 = openCariPelanggan() ala F3 produk (putaran 7). -->
+            <div class="flex items-stretch gap-1.5">
+              <select id="pos-customer" class="input input-sm min-w-0 flex-1">${pilih}</select>
+              <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-xs font-semibold tracking-wide">F9</span></button>
             </div>
-            <select id="pos-customer" class="input input-sm w-full">${pilih}</select>
           </div>
         </div>
         <!-- Kolom total = track 1/3 (sama rata, lihat komentar grid di atas).
@@ -858,8 +859,15 @@ function cartGridHtml(): string {
              selain "Pelanggan Umum"), dan metode pembayaran lain. -->
         <div class="mt-auto flex flex-col gap-1.5">
           <button type="button" id="pos-bayar" class="btn btn-primary w-full !py-3.5 text-sm"${cart.length ? '' : ' disabled'}>${icon('check')}<span>Bayar</span>${kbd('F10')}</button>
-          <button type="button" id="pos-pay-pas" class="btn btn-outline w-full !py-4 text-base font-semibold !text-emerald-600 !border-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/20"${cart.length ? '' : ' disabled'} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
-          <p class="text-center text-xs text-gray-500 dark:text-gray-400">${kbd('F10')} form bayar · ${kbd('F12')} bayar pas · ${kbd('F2')} bayar cepat</p>
+          <!-- Revisi putaran 8b/8c (2026-10-04): outline sempat dipakai lalu
+               diminta pemilik "style hilang yang tombol warna hijaunya" —
+               class btn-outline MEMANG tidak ada di styles.css (no-op, jadi
+               warnanya hilang). Gaya final: GRADASI hijau + shadow; hover
+               hijau LEBIH GELAP (8c: "hover tombol F12 juga ubah ke hijau
+               jangan biru, karena tombolnya warna hijau" — versi hover biru
+               sempat dipakai 8b lalu dibatalkan). -->
+          <button type="button" id="pos-pay-pas" class="btn w-full !py-4 text-base font-semibold text-white bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-700/50 transition-all"${cart.length ? '' : ' disabled'} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
+          <p class="text-center text-xs text-gray-500 dark:text-gray-400">${kbd('F10')} form bayar · ${kbd('F12')} bayar pas</p>
         </div>
       </div>
     </div>`;
@@ -1206,7 +1214,7 @@ function cartRows(): string {
             aria-label="Catatan ${esc(l.name)}" />
         </td>
       </tr>` : '';
-      return `<tr data-key="${l.key}" class="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
+      return `<tr data-key="${l.key}" class="hover:bg-primary-soft dark:hover:bg-primary/15 transition-colors">
       <td class="td td-num text-center text-gray-500">${i + 1}</td>
       <td class="td font-mono text-xs">${l.sku ? esc(l.sku) : '<span class="text-gray-400">—</span>'}</td>
       <td class="td">
@@ -1492,9 +1500,10 @@ async function muatHold(h: Hold): Promise<void> {
 }
 
 /** Hapus satu hold dari daftar (dipanggil dari modal Pending). Konfirmasi
- *  swal dulu; barisnya dibuang dari DOM modal in-place supaya daftar lain
- *  tidak berkedip, dan modal ditutup sendiri bila tinggal terakhir. */
-async function hapusHold(h: Hold, api: ModalHandle): Promise<void> {
+ *  swal dulu; `tampil()` me-render ulang daftar antrian + panel preview
+ *  (bila yang terhapus sedang dibuka, pemindahan otomatis ke antrian
+ *  berikutnya), dan modal ditutup sendiri bila tinggal terakhir. */
+async function hapusHold(h: Hold, api: ModalHandle, tampil: () => void): Promise<void> {
   const ok = await confirmDialog({
     title: 'Hapus transaksi tertahan?',
     message: `${h.items.length} baris senilai ${rp(hitungHold(h))} akan dihapus permanen.`,
@@ -1505,58 +1514,195 @@ async function hapusHold(h: Hold, api: ModalHandle): Promise<void> {
   if (!ok) return;
   holds = holds.filter((x) => x.id !== h.id);
   await simpanTertahan();
-  api.el.querySelector(`[data-hold-row="${h.id}"]`)?.remove();
-  const judul = api.el.querySelector('.modal-header h3');
-  if (judul) judul.textContent = `Transaksi tertahan (${holds.length})`;
   paintCart();
-  if (!holds.length) api.close();
+  if (!holds.length) {
+    api.close();
+    return;
+  }
+  tampil();
 }
 
-/** Daftar transaksi tertahan (tombol "Pending (n)"). Tiap baris punya
- *  aksi Lanjutkan (muat ke keranjang) dan Hapus. Modal memakai openModal
- *  repo dengan OK disembunyikan — cukup satu tombol "Tutup" (cancel). */
+/** Daftar transaksi tertahan (tombol "Pending (n)") — **MODAL SPLIT ala
+ *  Ravaa POS v1** (permintaan pemilik 2026-10-05: "sebagai referensi lihat
+ *  layout di ravaa POS versi 1 … coba di terapkan pada modal pending di
+ *  ravaaPOS v2"): referensi `hold-modal.blade.php` + `.modal-split` di
+ *  `src/RPOS/public/assets/css/pos-system.css` (flex 3/7, split-header,
+ *  `.split-item.active` solid primer) dan `showHoldDetail()` di
+ *  `src/RPOS/public/assets/js/pos/index.js` (struktur detail `detailHtml`).
+ *  Yang diterapkan: proporsi 30% / 70% (`grid-cols-[3fr_7fr]`), header bar
+ *  "DAFTAR ANTRIAN" ala `.split-header`, kartu antrian hover biru + aktif
+ *  SOLID primer/teks putih/shadow, dan panel kanan persis struktur v1:
+ *  header-info Pelanggan|Waktu simpan (garis dashed) → "Daftar Produk
+ *  (N item)" kartu abu-abu → kotak ringkasan Subtotal/Diskon/Total → dua
+ *  tombol aksi [Hapus outline] [Lanjutkan primer] di BAWAH detail (bukan
+ *  per kartu, seperti v1). Urutan kolom TETAP kiri=antrian / kanan=detail
+ *  sesuai instruksi pemilik sebelumnya (v1 menaruh daftar di kanan — kita
+ *  mirror sisanya). Tinggi fix 60vh per kolom + gulir sendiri (permintaan
+ *  "tinggi fix misal 60% … buat scrollable"). Selector test
+ *  pos-qtykode-test.mjs §C3 dipertahankan: `#hold-list li[data-hold-row]`
+ *  (kartu memuat teks `3 baris (7 Qty)`), `[data-hold-act="lanjut"]` (kini
+ *  SATU kecocokan di panel detail), `#hold-preview` (60vh + overflow auto).
+ *  Modal memakai openModal `wider` (max-w-5xl ≈ 900px modal-lg v1) dengan
+ *  OK disembunyikan — cukup satu tombol "Tutup". */
 function bukaTertahan(): void {
   if (!holds.length) {
     toast('Belum ada transaksi tertahan', 'info');
     return;
   }
-  const baris = (h: Hold): string => {
-    const waktu = new Date(h.waktu).toLocaleString('id-ID', {
+  let terpilih = holds[0].id; // antrian terbaru (unshift) = yang dibuka pertama
+
+  const stempel = (h: Hold): string =>
+    new Date(h.waktu).toLocaleString('id-ID', {
       day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
     });
+
+  /** Kartu antrian (kiri) — gaya `.split-item` v1: margin + border + radius,
+   *  hover `#eff6ff` (≈ blue-50) + border primer, dan aktif = **bg primer
+   *  SOLID + teks putih + shadow** (v1 `.split-item.active`, menggantikan
+   *  bg-soft sebelumnya). Isi ringkas ala v1: nama pelanggan + total,
+   *  baris/Qty (dipertahankan untuk test §C3), stempel waktu. */
+  const baris = (h: Hold, aktif: boolean): string => {
     const qty = h.items.reduce((s, l) => s + l.qty, 0);
-    const nama =
-      h.items.slice(0, 3).map((l) => esc(l.name)).join(', ') +
-      (h.items.length > 3 ? ` +${h.items.length - 3} lagi` : '');
-    return `<li class="flex items-center gap-2 rounded-lg border border-gray-200 p-2 dark:border-gray-700" data-hold-row="${h.id}">
-      <div class="min-w-0 flex-1">
-        <div class="text-sm font-semibold text-gray-900 dark:text-white">${waktu} · ${h.items.length} baris (${qty} Qty) · <span class="tabular-nums">${rp(hitungHold(h))}</span></div>
-        <div class="truncate text-xs text-gray-500 dark:text-gray-400">${esc(h.customerName)} · ${nama}</div>
+    return `<li class="m-2 cursor-pointer rounded-lg border px-3 py-2.5 transition-all${aktif
+        ? ' border-primary bg-primary text-white shadow-md'
+        : ' border-gray-200 bg-white hover:border-primary hover:bg-blue-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-primary/10'}"
+      data-hold-row="${h.id}"${aktif ? ' aria-current="true"' : ''}>
+      <div class="flex items-center justify-between gap-2">
+        <span class="truncate text-sm font-bold">${esc(h.customerName)}</span>
+        <span class="shrink-0 text-xs font-bold tabular-nums${aktif ? ' text-white' : ' text-primary'}">${rp(hitungHold(h))}</span>
       </div>
-      <button type="button" class="btn btn-primary !min-h-[32px] !px-2.5 !py-1 text-xs" data-hold-act="lanjut" data-hold-id="${h.id}">Lanjutkan</button>
-      <button type="button" class="btn btn-ghost !min-h-[32px] !px-2.5 !py-1 text-xs" data-hold-act="hapus" data-hold-id="${h.id}">Hapus</button>
+      <div class="mt-0.5 text-xs${aktif ? ' text-white/90' : ' text-gray-500 dark:text-gray-400'}">${h.items.length} baris (${qty} Qty)</div>
+      <div class="text-[10px]${aktif ? ' text-white/75' : ' text-gray-400 dark:text-gray-500'}">${stempel(h)}</div>
     </li>`;
   };
+
+  /** Panel kanan: detail terpilih persis struktur `detailHtml` v1 —
+   *  header-info 2 kolom (Pelanggan | Waktu simpan, garis dashed), label
+   *  "Daftar Produk (N item)", kartu produk abu-abu (nama + qty × harga di
+   *  kiri, netto primer tebal di kanan), kotak ringkasan Subtotal/Diskon/
+   *  Total (garis dashed, angka Total primer text-xl), lalu dua tombol aksi
+   *  [Hapus outline merah] [Lanjutkan primer]. SKU tetap ditampilkan di
+   *  baris info (tambahan kecil di luar v1, dipakai test §C3). */
+  const preview = (h: Hold | null): string => {
+    if (!h) {
+      return `<div class="flex h-full flex-col items-center justify-center p-8 text-center text-gray-500 dark:text-gray-400">
+        <span class="mb-3 opacity-30 [&>svg]:size-12">${icon('info')}</span>
+        <p class="text-sm">Pilih salah satu antrian di kiri untuk melihat detail.</p>
+      </div>`;
+    }
+    const produk = h.items.map((l, i) => {
+      const gross = Math.round(l.price * l.qty);
+      const net = gross - (l.discount || 0);
+      const per =
+        l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` / ${esc(l.unit)}` : '';
+      const sub = `${l.sku ? `${esc(l.sku)} · ` : ''}${l.qty} × ${rp(l.price)}${per}` +
+        (l.discount ? ` · <span class="text-red-600 dark:text-red-400">diskon -${rp(l.discount)}</span>` : '') +
+        (l.note ? `<br>${esc(l.note)}` : '');
+      return `<li class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-700/40">
+        <div class="min-w-0">
+          <div class="truncate text-sm font-bold text-gray-900 dark:text-white">${i + 1}. ${esc(l.name)}</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">${sub}</div>
+        </div>
+        <div class="shrink-0 text-sm font-bold tabular-nums text-primary">${rp(net)}</div>
+      </li>`;
+    }).join('');
+    const subtotal = h.items.reduce(
+      (s, l) => s + Math.round(l.price * l.qty) - (l.discount || 0), 0);
+    return `
+      <div class="p-4">
+        <div class="mb-4 grid grid-cols-2 gap-4 border-b border-dashed border-gray-200 pb-4 dark:border-gray-700">
+          <div>
+            <div class="mb-1 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Pelanggan</div>
+            <div class="text-sm font-bold text-gray-900 dark:text-white">${esc(h.customerName)}</div>
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">Kasir ${esc(h.kasir)}</div>
+          </div>
+          <div>
+            <div class="mb-1 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Waktu simpan</div>
+            <div class="text-sm font-bold text-gray-900 dark:text-white">${stempel(h)}</div>
+          </div>
+        </div>
+        <div class="mb-3 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Daftar produk (${h.items.length} item)</div>
+        <ul class="flex flex-col gap-2">${produk}</ul>
+        <div class="mt-4 rounded-lg bg-gray-100 p-4 dark:bg-gray-700/50">
+          <div class="mb-2 flex justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Subtotal</span>
+            <span class="font-bold tabular-nums">${rp(subtotal)}</span>
+          </div>
+          ${h.discount ? `<div class="mb-2 flex justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Diskon</span>
+            <span class="font-bold tabular-nums text-red-600 dark:text-red-400">-${rp(h.discount)}</span>
+          </div>` : ''}
+          <div class="flex items-center justify-between border-t border-dashed border-gray-300 pt-2 dark:border-gray-500">
+            <span class="font-bold">Total</span>
+            <span class="text-xl font-bold tabular-nums text-primary">${rp(hitungHold(h))}</span>
+          </div>
+        </div>
+        <div class="mt-6 flex gap-3">
+          <button type="button" class="btn flex-1 border border-red-500 bg-white text-red-600 hover:bg-red-50 dark:bg-transparent dark:hover:bg-red-900/20" data-hold-act="hapus" data-hold-id="${h.id}">${icon('trash')}<span>Hapus</span></button>
+          <button type="button" class="btn btn-primary flex-1" data-hold-act="lanjut" data-hold-id="${h.id}">${icon('sync')}<span>Lanjutkan</span></button>
+        </div>
+      </div>`;
+  };
+
+  /** Render ulang KEDUA kolom + judul. Pemindahan pemilihan dilakukan di
+   *  sini: id yang sudah tidak ada (habis dihapus) jatuh ke antrian pertama. */
+  const tampil = (api: ModalHandle): void => {
+    if (!holds.some((x) => x.id === terpilih)) terpilih = holds[0]?.id ?? '';
+    const ul = api.el.querySelector<HTMLElement>('#hold-list');
+    if (ul) ul.innerHTML = holds.map((h) => baris(h, h.id === terpilih)).join('');
+    const pv = api.el.querySelector<HTMLElement>('#hold-preview');
+    if (pv) pv.innerHTML = preview(holds.find((x) => x.id === terpilih) ?? null);
+    const antrian = api.el.querySelector('#hold-antrian-count');
+    if (antrian) antrian.textContent = String(holds.length);
+    const judul = api.el.querySelector('.modal-header h3');
+    if (judul) judul.textContent = `Transaksi tertahan (${holds.length})`;
+  };
+
   openModal({
     title: `Transaksi tertahan (${holds.length})`,
-    body: `<ul id="hold-list" class="space-y-2">${holds.map(baris).join('')}</ul>`,
+    wider: true, // max-w-5xl — mendekati modal-lg 900px v1; 30/70 butuh ruang detail
+    body: `
+      <!-- .modal-split v1 (proporsi flex 3/7) → grid 3fr/7fr; pemisah =
+           border KANAN kolom kiri (v1: border-LEFT kolom daftar). Tiap kolom
+           tinggi FIX 60vh (permintaan pemilik 2026-10-05: "tinggi fix, misal
+           60% dari screen … buat scrollable") dan menggulir sendiri. -->
+      <div class="grid grid-cols-1 sm:grid-cols-[3fr_7fr]">
+        <div class="flex h-[60vh] min-h-0 flex-col border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-700">
+          <!-- split-header ala v1: bar label uppercase kecil di atas daftar -->
+          <div class="shrink-0 border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-700/40 dark:text-gray-400">Daftar antrian (<span id="hold-antrian-count">${holds.length}</span>)</div>
+          <ul id="hold-list" class="min-h-0 flex-1 overflow-y-auto pb-1">${holds.map((h) => baris(h, h.id === terpilih)).join('')}</ul>
+        </div>
+        <div class="h-[60vh] min-h-0">
+          <div id="hold-preview" class="h-full overflow-y-auto">${preview(holds[0] ?? null)}</div>
+        </div>
+      </div>`,
     cancelLabel: 'Tutup',
     onMount: (api) => {
       api.ok.style.display = 'none'; // daftar tidak butuh tombol OK
-      api.el.querySelector('#hold-list')?.addEventListener('click', (e) => {
+      // SATU listener di root modal: tombol aksi [data-hold-act] kini berada
+      // di panel detail KANAN (alaa v1, bukan per kartu), sedangkan klik baris
+      // antrian KIRI = pindah pemilihan — keduanya ditangkap dari `api.el`.
+      api.el.addEventListener('click', (e) => {
         const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hold-act]');
-        if (!b) return;
-        const h = holds.find((x) => x.id === b.dataset.holdId);
-        if (!h) return;
-        if (b.dataset.holdAct === 'lanjut') {
-          // Tutup daftar dulu — confirmDialog("Ganti keranjang?") di muatHold
-          // jadi satu-satunya dialog di layar (swal di atas modal-overlay
-          // membuat ESC menutup keduanya sekaligus).
-          api.close();
-          void muatHold(h);
-        } else {
-          void hapusHold(h, api); // daftar tetap terbuka, baris dibuang in-place
+        if (b) {
+          const h = holds.find((x) => x.id === b.dataset.holdId);
+          if (!h) return;
+          if (b.dataset.holdAct === 'lanjut') {
+            // Tutup modal dulu — confirmDialog("Ganti keranjang?") di muatHold
+            // jadi satu-satunya dialog di layar (swal di atas modal-overlay
+            // membuat ESC menutup keduanya sekaligus).
+            api.close();
+            void muatHold(h);
+          } else {
+            void hapusHold(h, api, () => tampil(api)); // modal tetap terbuka, render ulang
+          }
+          return;
         }
+        // Klik kartu antrian (bukan tombol) = pindah fokus detail ke hold itu
+        const li = (e.target as HTMLElement).closest<HTMLElement>('#hold-list [data-hold-row]');
+        if (!li?.dataset.holdRow || li.dataset.holdRow === terpilih) return;
+        terpilih = li.dataset.holdRow;
+        tampil(api);
       });
     },
   });

@@ -229,6 +229,19 @@
   .btn-ghost {
     @apply border border-gray-200 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700;
   }
+  /* .btn-outline & .btn-sm (definisi BARU 2026-10-05, putaran 8b): dua class
+     ini sudah lama DIPAKAI di halaman Sistem (kartu Backup: "#set-backup" +
+     tombol Unduh per baris) tetapi TIDAK PERNAH didefinisikan di styles.css —
+     alias class hantu/no-op sehingga tombol-tombol itu tampil polos tanpa
+     border. Jebakan yang sama sempat menimpa #pos-pay-pas (gaya hijau "hilang"
+     karena btn-outline tak ada). Daftar komponen di SKILL frontend-pos ikut
+     dikoreksi — daftar komponen WAJIB mencerminkan styles.css apa adanya. */
+  .btn-outline {
+    @apply border border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-600 dark:bg-transparent dark:text-gray-200 dark:hover:bg-gray-800/60;
+  }
+  .btn-sm {
+    @apply !min-h-[30px] !px-2 !py-1 text-xs;
+  }
   /* Status aktif untuk .btn yang dipakai sebagai filter (halaman Stok).
      Sengaja TETAP membawa border seperti btn-ghost: tombol aktif tanpa border
      berarti 2px lebih pendek, dan baris toolbar akan melompat tiap kali
