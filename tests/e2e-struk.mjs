@@ -188,6 +188,14 @@ try {
     /Kembalian/.test(r1.judul) && new RegExp(`No\\. ${ymdStruk}-\\d{6}`, 'i').test(r1.isi)
       && r1.isi.includes('1 × Aqua 600ml') && r1.isi.includes('Total') && r1.isi.includes('Tunai'),
     JSON.stringify(r1).slice(0, 400));
+  // Riset KulaPOS (2026-10-06, butir 1): subtitle layan-berikutnya + jam di
+  // baris no nota. Regex jam `i` tidak relevan (angka) — tapi pastikan jam
+  // benar-benar HH:MM, bukan kebetulan angka lain yang mengandung ":".
+  ok('resume memuat subtitle "Siap melayani pelanggan berikutnya"',
+    r1.isi.includes('Siap melayani pelanggan berikutnya'), JSON.stringify(r1).slice(0, 300));
+  ok('resume memuat jam cetak HH:MM di baris no nota',
+    new RegExp(`No\\. ${ymdStruk}-\\d{6} · \\d{2}:\\d{2}`, 'i').test(r1.isi),
+    JSON.stringify(r1).slice(0, 300));
   const lewat1 = b1.filter((x) => x.length > COLS);
   ok(`semua baris <= 32 kolom (maks ${Math.max(...b1.map((x) => x.length))})`, lewat1.length === 0, lewat1);
   ok('3 garis pemisah (item + rincian)', jmlGaris(s1) === 3, jmlGaris(s1));

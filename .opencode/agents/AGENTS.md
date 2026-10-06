@@ -382,8 +382,11 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           merender `title` sebagai HTML — `textContent`
                           tetap "Kembalian RpX" untuk test) + **badan
                           resume** `htmlResumePenjualan()` (lewat opsi baru
-                          `html` di `choiceDialog`): **No.
-                          `invoice_no`** (CSS uppercase -> "NO. …") → daftar
+                          `html` di `choiceDialog`): **subjudul** "Transaksi
+                          tersimpan. Siap melayani pelanggan berikutnya."
+                          (riset KulaPOS, 2026-10-06 butir 1) → **No.
+                          `invoice_no` · jam lokal HH:MM** (tanggal sudah
+                          terkandung di nomor; CSS uppercase -> "NO. …") → daftar
                           item `qty × nama` + net per baris (maks 5 baris +
                           "… +N item lainnya") → **Total** bold → baris
                           `Tunai` (uang diterima) / label metode (QRIS/

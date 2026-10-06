@@ -565,8 +565,9 @@ npm run dev:api
   **tanpa syarat saklar** (1A): judul hero **KEMBALIAN** — label kecil +
   **angka kembalian 48px** (putaran 11b, "kembalian kurang besar, agar
   kasir mudah melihat kembalian"; "Pembayaran berhasil" bila kembalian 0)
-  + **badan resume** ringkas: **No. nota**,
-  daftar item (maks 5 baris + "… +N item lainnya"), **Total**, baris
+  + **badan resume** ringkas: **subjudul** *"Siap melayani pelanggan
+  berikutnya."* + **No. nota · jam**, daftar item (maks 5 baris + "… +N item
+  lainnya"), **Total**, baris
   `Tunai`/metode — supaya kasir verifikasi nota & uang kembali dalam satu
   layar. **Esc = tutup langsung** (putaran 11c — listener Esc dipindah ke
   window-capture karena fokus sempat di kolom scan, bukan di popup) dan

@@ -265,8 +265,17 @@ function htmlResumePenjualan(o: {
       `<div class="text-gray-500 dark:text-gray-400">… +${sisa} item lainnya</div>`,
     );
   }
+  // Jam cetak lokal HH:MM + subtitle layan-berikutnya — riset KulaPOS
+  // (2026-10-06, permintaan pemilik "ok 1 dulu"): sukses modal mereka memuat
+  // subjudul "Transaksi tersimpan. Siap melayani pelanggan berikutnya." dan
+  // no nota + jam berdampingan. Tanggal TIDAK ikut ditulis di sini karena
+  // sudah terkandung di `invoice_no` (YYMMDD-NNNNNN).
+  const d = new Date();
+  const pj = (n: number) => String(n).padStart(2, '0');
+  const jamCetak = `${pj(d.getHours())}:${pj(d.getMinutes())}`;
   return `<div class="mx-auto w-full max-w-xs space-y-1.5 text-left text-sm text-gray-700 dark:text-gray-200">
-      <div class="text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">No. ${esc(o.invoiceNo ?? '-')}</div>
+      <div class="text-center text-[11px] leading-snug text-gray-500 dark:text-gray-400">Transaksi tersimpan. Siap melayani pelanggan berikutnya.</div>
+      <div class="text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">No. ${esc(o.invoiceNo ?? '-')} · ${jamCetak}</div>
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
       ${baris.join('\n      ')}
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>

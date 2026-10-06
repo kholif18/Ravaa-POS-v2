@@ -381,6 +381,27 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
      ulang → `popupAda: false`, `fokus: INPUT#pos-q`. (Catatan: satu run
      `npm test` sempat gagal transient tepat setelah build — suite berjalan
      sendiri 110/110 dan run ulang penuh hijau 890 → 892; flake, bukan regresi.)
+- ✅ **Riset KulaPOS (2026-10-06) — butir 1: subtitle + jam di resume**
+  (pemilik: "ok 1 dulu"): `htmlResumePenjualan()` kini diawali **subjudul**
+  "Transaksi tersimpan. Siap melayani pelanggan berikutnya." + baris no nota
+  jadi **`No. <invoice> · HH:MM`** (jam lokal; tanggal sudah terkandung di
+  `invoice_no` YYMMDD). Sumber riset: `~/tmp opencode/kulapos.mp4` + transcript
+  segmen 37:47–42:00 + **95 frame ffmpeg** di `~/tmp opencode/kp/` (popup
+  bayar: tab Tunai/Digital/Piutang, chip Uang Pas, Kembalian + konteks;
+  sukses modal: subtitle + no nota/jam + Metode/Diterima/Kembalian + Cetak/
+  WhatsApp/Buka Laci + "Transaksi Baru [Space/Enter]"). Detail pembanding
+  ada di ringkasan sesi — kandidat berikutnya: Buka Laci Kasir (ESC/POS drawer
+  kick via print-agent), `Lihat Struk ›` pratinjau (tunda). Test: +2 asersi
+  (subtitle, jam) → `e2e-struk` 114, **`npm test` 894 SEMUA HIJAU**.
+- 📌 **Putaran berikutnya (instruksi pemilik 2026-10-06, BELUM dikerjakan) —
+  piutang otomatis**: bila **uang kurang ATAU uang 0** → penjualan **otomatis
+  masuk ke hutang** (charge ledger `customer_debts`, pola `pay({hutang:true})`
+  yang ada) dengan **SYARAT wajib customer terpilih** (bukan bawaan
+  "Pelanggan Umum"). Beda dengan perilaku sekarang (uang kurang = konfirmasi
+  swal dulu; uang 0 = ditolak barrier "Uang diterima belum diisi") —
+  nanti: otomatis tanpa konfirmasi, tapi tolak bila customer belum dipilih.
+  Diskusikan detail: apakah uang 0 berlaku hanya tunai / semua metode, dan
+  bagaimana pesan error bila customer belum terpilih.
 - Docs ikut: AGENTS §2 (deskripsi `pilihCetakSelesai` + kartu Cetak struk),
   README (judul butir "Modal resume + pilihan cetak" + kartu Sistem),
   `print-pref.ts` doc `getAutoPrint()`.
