@@ -7,6 +7,8 @@ dist/
 .env
 .DS_Store
 *.log
+# Cache build inkremental TypeScript (dibuat `tsc -b`)
+*.tsbuildinfo
 
 # Output print-agent (fallback struk bila printer tak ketemu)
 apps/print-agent/out/

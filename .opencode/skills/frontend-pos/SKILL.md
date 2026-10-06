@@ -79,8 +79,12 @@ panel topup/laporan, modal struk, atau styling apa pun.
 1. Search selalu autofocus; Enter = tambah hasil pertama (kompatibel scanner barcode
    yang bertindak sebagai keyboard).
 2. Tab kategori horizontal scroll; tab aktif = primer solid (#0087FF).
-3. Harga dinamis (`price_dynamic=1`) via `prompt()` — sementara, penggantinya harus
-   inline stepper/modal, bukan halaman baru.
+3. Harga dinamis (`price_dynamic=1`): **TANPA dialog** — scan langsung masuk
+   dengan harga DEFAULT master, lalu kasir mengubahnya lewat **kolom Harga
+   baris keranjang yang berupa input** (`setHarga()`, event `change`, re-key +
+   gabung; harga berbeda = baris baru). `askPrice` dihapus 2026-10-06 (*"karena
+   harga bisa di ubah inline, modal dynamic harga tidak usah"*). Jangan
+   kembalikan `prompt()`/halaman baru/panel harga.
 4. Uang selalu format `Rp` id-ID; total hijau besar; kembalian `max(0, tunai-total)`.
 5. Setelah bayar/topup: coba `sendToPrinter()` dulu; gagal -> modal struk
    (`showReceiptModal`) + tombol Cetak browser. JANGAN diam saat print gagal.

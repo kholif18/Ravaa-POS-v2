@@ -215,20 +215,36 @@ npm run dev:api
   - **Keranjang = tabel 8 kolom**: No / **Kode** (SKU, mono) / Nama barang /
     Harga / Qty / **Diskon** / Subtotal / **Aksi** (hapus) — deskripsi
     pendukung (unit, `item manual`, badge kadaluarsa) pindah ke bawah nama.
-    Baris catatan (`use_note`) & baris kosong memakai `colspan="8"`.
+    Baris kosong memakai `colspan="8"` (penuh); baris catatan (`use_note`)
+    memakai `colspan="3"` — hanya selebar kolom No..Nama barang
+    (2026-10-06).
+    **Kolom Harga jadi input untuk produk harga khusus**
+    (`products.price_dynamic` — switch "Boleh ubah harga saat jual" di form
+    produk): kasir bisa mengubahnya per baris ala Aronium; produk biasa
+    tetap teks terkunci. **Aturan baris**: produk sama + harga berbeda =
+    baris **baru**, harga sama = qty tambah (key dinamis
+    `<id>:<unit>:<harga>`; edit di baris di-re-key, menabrak baris
+    berharga sama = kuantitas digabung). **Scan tanpa dialog harga** —
+    harga default master langsung masuk, kasir mengubahnya lewat kolom Harga
+    (modal `askPrice` dihapus 2026-10-06: *"karena harga bisa di ubah inline,
+    modal dynamic harga tidak usah"*).
     **Lebar kolom eksplisit** (putaran 8 2026-10-04, mengikuti lebar kolom di
     referensi `kula-02-transaksi-pos.png`; **di-compact 2026-10-06** — semua
     kolom non-nama kini `max(hint, konten)`: No `w-8`, Kode `w-20`,
     **Nama barang `w-auto`** menyerap seluruh sisa lebar (438 → ±540px
     terukur), Harga/Diskon/Subtotal `w-16`, Qty `w-36` (konten stepper 152px),
-    Aksi `w-10`; input Qty & diskon `!w-16`).
+    Aksi `w-10`; **input Harga/Diskon `!w-24 !px-2`, Qty `!w-20 !px-2`**
+    (lebar kolom mengikuti konten input — ukuran `!w-16` lama terbukti
+    memotong digit, mis. "2000" tampil "200"; diuji asersi anti-clip di
+    `tests/harga-dinamis-test.mjs`; total lebar tabel tetap 1086px karena
+    kolom Nama menyerap seluruh selisihnya).
     **Hover per baris KEBIRUAN** `hover:bg-primary-soft` (+ `dark:hover:bg-primary/15`)
     dengan `transition-colors` — baris disorot biru muda saat mouse lewat
     (token `--color-primary-soft #e6f3ff`, sama dengan state aktif tombol;
     riwayat gray-50 → gray-100 → primary-soft sesuai permintaan *"hover di
-    tabel keranjang ubah jadi kebiru-biruan"*). **Input Qty
-    diperbesar** `!w-16` → `!w-20` + `font-semibold` (permintaan pemilik
-    "pada baris perbesar Qty input").
+    tabel keranjang ubah jadi kebiru-biruan"*). **Input Qty & diskon** sempat
+    dikompakkan ke `!w-16` (2026-10-06), lalu disetel `!w-20`/`!w-24`
+    `!px-2` — angka besar (harga jual/diskon) harus terbaca utuh.
     **Label baris di atas tabel**: `#pos-count` ("n item" / "Keranjang
     kosong") di kiri + tombol **Bersihkan [F5]** (`#pos-clear`) di kanan —
     dipindah dari bawah tabel mengikuti baris "Keranjang … Bersihkan [F5]"

@@ -764,13 +764,13 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
 
 ## Menyusul — permintaan pemilik berikutnya (belum dikerjakan)
 
-- [ ] **Keranjang POS: kolom angka compact** — Harga / Qty / Diskon /
-      Subtotal / Aksi diperkecil sesuai isi kontennya (width auto/shrink),
-      hanya kolom **Nama barang** yang melebar menyerap sisa lebar tabel
-      (permintaan pemilik 2026-10-04: "selanjutnya nanti pada tabel
-      keranjang kolom Harga, QTY, Diskon, sub total, aksi di perkecil,
-      compact saja sesuai ukuran konten, buat kolom nama barang saja yang
-      lebar").
+- [x] **Keranjang POS: kolom angka compact — SELESAI 2026-10-06** (batch 1a,
+      push `629192f`): Harga / Qty / Diskon / Subtotal / Aksi diperkecil
+      sesuai isi kontennya (`max(hint, konten)`), hanya kolom **Nama barang**
+      yang melebar menyerap sisa lebar tabel (permintaan pemilik 2026-10-04:
+      "selanjutnya nanti pada tabel keranjang kolom Harga, QTY, Diskon, sub
+      total, aksi di perkecil, compact saja sesuai ukuran konten, buat kolom
+      nama barang saja yang lebar") — terukur Nama 438 → ±540px.
 - [x] **Rapikan layout sidebar POS — SELESAI diimplementasikan 2026-10-06**
       (mockup direview pemilik lalu dikode): urutan baru per permintaan
       *"diskon item pindah ke bawah menu cepat di atas diskon"* =
@@ -781,6 +781,34 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       kini ber-pintasan **`<kbd>F8</kbd>`** (dialihkan dari alias lama F8 =
       fokus scan — F1 tetap ke scan; uji `e2e-struk` F8 disesuaikan);
       bukti: DOM order + navigasi + toast F8 terverifikasi, **915 hijau**.
+- [x] **Harga khusus di POS: kolom Harga jadi INPUT — SELESAI 2026-10-06**
+      (permintaan pemilik, referensi Aronium; fitur lama `price_dynamic`
+      dipertahankan + diperluas): (1) **kolom Harga baris keranjang = input
+      bila `products.price_dynamic=1`**, teks terkunci untuk produk lain
+      (`setHarga()`, event `change` seperti Diskon); (2) **aturan baris**:
+      produk sama + harga **berbeda = baris BARU**, harga **sama = qty
+      tambah** — key baris dinamis kini `<id>:<unit>:<harga>`, edit harga
+      di-re-key & bila menabrak baris berharga sama kuantitas **digabung**;
+      (3) **dialog harga saat scan DIHAPUS permanen** — permintaan lanjutan
+      pemilik 2026-10-06: *"karena harga bisa di ubah inline, modal dynamic
+      harga tidak usah"*; scan kini lewat jalur `addProduct()` yang sama
+      (harga default `hargaTampil` langsung terisi). Keputusan "batal =
+      harga default" pagi harinya **gugur bersama hilangnya dialog**;
+      (4) **bugfix**: tombol **Simpan**
+      `askNumber` dahulu hanya `resolve` tanpa `close()` — modal Qty (F4)
+      nyangkut terbuka setelah baris masuk (Enter sudah menutup; `askPrice`
+      sendiri sudah dihapus bersama dialognya).
+      Aturan baris juga ditegakkan saat pulihkan keranjang/hold (re-key +
+      gabung). Uji baru `tests/harga-dinamis-test.mjs` **18 asersi** (scan
+      tanpa dialog, harga default, grouping, edit re-key/tabrak-gabung,
+      non-dinamis terkunci, anti-clip, F12 + snapshot server);
+      **933 hijau**, tsc + build lolos.
+- [x] **Input catatan per baris dipendek — SELESAI 2026-10-06** (permintaan
+      pemilik: *"input untuk catatan ini misal di kurangi panjangnya selebar
+      No - Nama Barang saja"*): `trCatatan` `colspan="8"` → **`colspan="3"`
+      (No..Nama = 609px terukur, dulu 1086px penuh)** — baris kosong tetap
+      `colspan="8"`. Selector test (`data-act=note`, `tr.note-row`) tak
+      berubah; 933 hijau.
 - [ ] **Layout mobile + tombol pindah mode** (pengganti P4 grid, keputusan
       pemilik 2026-10-06: *"untuk mobile nanti buat layout sendiri …
       tambahkan layout untuk berpindah ke mode mobile saja"*) — pindah ke

@@ -54,13 +54,20 @@ type Shift = {
 
 /** Baris keranjang. `product_id` null = item manual (jasa/cetak). */
 type CartLine = {
-  key: string;              // `<id produk>:<unit>`, atau 'manual:<n>' untuk item manual.
+  key: string;              // `<id produk>:<unit>`, atau — untuk produk harga
+                            // khusus (price_dynamic) — `<id>:<unit>:<harga>`
+                            // (harga ikut di key: beda harga = baris terpisah),
+                            // atau 'manual:<n>' untuk item manual.
                             // TANPA unit di key, "Aqua btl" dan "Aqua dus" akan
                             // menumpuk jadi satu baris (fitur #3).
   product_id: number | null;
   name: string;
   sku: string;
   price: number;            // harga satuan yang sudah final (dinamis sudah ditanya)
+  /** Snapshot `products.price_dynamic` saat masuk keranjang: 1 = kolom Harga
+   *  baris ini dirender sebagai INPUT yang boleh diubah kasir (khusus produk
+   *  "boleh ubah harga saat jual"); 0 = teks terkunci. */
+  dyn: boolean;
   qty: number;
   track_stock: number;      // 1 = stok dicek server, 0 = jasa
   /** Satuan yang dijual (item manual = ''). */
@@ -522,7 +529,10 @@ function bacaQtyKode(v: string): { qty: number; q: string } | null {
 
 function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1): void {
   // Key menyertakan satuan: 2 pcs dan 2 pack adalah baris BERBEDA, bukan penambahan.
-  const key = `${p.id}:${unit}`;
+  // Produk harga khusus (price_dynamic) key-nya ikut memuat HARGA beli baris
+  // ini — scan ulang dengan harga berbeda = baris BARU; harga sama = qty
+  // bertambah (keputusan pemilik 2026-10-06).
+  const key = p.price_dynamic ? `${p.id}:${unit}:${price}` : `${p.id}:${unit}`;
   // Prefill diskon permanen produk: '%'-nya dihitung ke rupiah per baris, jadi
   // kasir melihat angka jadi (bukan tebak-tebakan) dan tetap bisa mengubahnya.
   const prefill = p.discount > 0
@@ -531,7 +541,7 @@ function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1):
   const found = cart.find((l) => l.key === key);
   if (found) {
     found.qty += qty;
-    found.price = price; // harga terbaru untuk produk harga dinamis
+    found.price = price; // harga terbaru — untuk dinamis key sudah memastikan ini harga yang SAMA
     // Diskon mengikuti qty ASALKAN belum diedit tangan — kalau kasir sudah
     // menyetel angka sendiri, menimpanya akan mengubah harga yang sudah
     // disepakati pelanggan di tengah transaksi.
@@ -541,6 +551,7 @@ function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1):
       key, product_id: p.id, name: p.name, sku: p.sku,
       price, qty, track_stock: p.track_stock,
       unit, baseUnit: p.unit, factor,
+      dyn: !!p.price_dynamic,
       discount: 0, prefill, discManual: false,
       useNote: !!p.use_note, note: '',
     };
@@ -573,6 +584,35 @@ function setDisc(key: string, nilai: number): void {
   // Semua ketikan dianggap edit manual — termasuk mengosongkan ke 0 (kasir
   // sengaja membatalkan prefill, jadi jangan dikembalikan saat qty berubah).
   line.discManual = true;
+  clampDiskonTransaksi();
+  simpanKeranjang();
+  paintCart();
+}
+
+/** Setel harga satu baris dari input kolom Harga — HANYA untuk produk
+ *  price_dynamic (`line.dyn`); kolom non-dinamis dirender teks terkunci.
+ *  Baris di-RE-KEY ke `<id>:<unit>:<harga>` baru: bila baris lain sudah
+ *  memakai harga itu, kuantitas DIGABUNG (aturan scan yang sama — "harga sama
+ *  = qty tambah, beda = baris baru", keputusan pemilik 2026-10-06). */
+function setHarga(key: string, nilai: number): void {
+  const line = cart.find((l) => l.key === key);
+  if (!line || !line.dyn || line.product_id === null) return;
+  const bersih = Number.isFinite(nilai) ? Math.max(0, Math.round(nilai)) : 0;
+  line.price = bersih;
+  // Diskon prefill (%/Rp) dihitung ulang terhadap harga BARU selama kasir
+  // belum mengeditnya sendiri, lalu dijepit ke jumlah baris yang baru.
+  if (!line.discManual) line.discount = hitungPrefill(line);
+  line.discount = Math.min(line.discount, jumlahBaris(line));
+  const keyBaru = `${line.product_id}:${line.unit}:${bersih}`;
+  if (keyBaru !== key) {
+    const tabrakan = cart.find((l) => l.key === keyBaru);
+    if (tabrakan) {
+      tabrakan.qty += line.qty;
+      if (!tabrakan.discManual) tabrakan.discount = hitungPrefill(tabrakan);
+      tabrakan.discount = Math.min(tabrakan.discount, jumlahBaris(tabrakan));
+      cart = cart.filter((l) => l.key !== key);
+    } else line.key = keyBaru;
+  }
   clampDiskonTransaksi();
   simpanKeranjang();
   paintCart();
@@ -1462,15 +1502,18 @@ function cartRows(): string {
       const gross = jumlahBaris(l);
       const net = gross - l.discount;
       // Baris catatan (produk use_note=1): input satu baris DI BAWAH baris
-      // produk, mis. Cetak Banner -> "ukuran 1 x 3 meter". colspan=8 = seluruh
-      // lebar tabel (No..Aksi). td TANPA class `.td` — padding kiri/kanan
+      // produk, mis. Cetak Banner -> "ukuran 1 x 3 meter". colspan=3 = hanya
+      // selebar kolom **No..Nama barang** (permintaan pemilik 2026-10-06:
+      // "input untuk catatan ini misal di kurangi panjangnya selebar No -
+      // Nama Barang saja" — dulu colspan=8 membentang penuh No..Aksi).
+      // td TANPA class `.td` — padding kiri/kanan
       // (12px) datang dari `.table-compact td` (table-compact di cartGridHtml);
       // tanpa itu preflight membuatnya 0px dan input menempel tepi.
       // Disimpan live lewat event `input` (tanpa paintCart, supaya fokus tidak
       // pindah saat kasir mengetik).
       const trCatatan = l.useNote ? `
       <tr data-key="${l.key}" class="note-row">
-        <td colspan="8">
+        <td colspan="3">
           <input class="input input-sm w-full" type="text" maxlength="200"
             data-act="note" data-key="${l.key}" value="${esc(l.note)}"
             placeholder="Catatan (mis. ukuran 1 x 3 meter)"
@@ -1484,16 +1527,20 @@ function cartRows(): string {
         <div class="cell-strong">${esc(l.name)}</div>
         <div class="cell-sub">${l.product_id === null ? 'item manual' : l.track_stock ? '' : 'jasa'}${l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` · jual per ${l.unit}` : ''}${expBarisKeranjang(l.product_id)}</div>
       </td>
-      <td class="td td-num">${rp(l.price)}</td>
+      <td class="td td-num">${l.dyn
+        ? `<input class="input input-sm !w-24 !px-2 text-right" data-act="price" data-key="${l.key}" type="number"
+             inputmode="numeric" min="0" step="500" value="${l.price}"
+             aria-label="Harga ${esc(l.name)}" title="Harga jual (Rp) — boleh diubah (produk harga khusus)" />`
+        : rp(l.price)}</td>
       <td class="td">
         <div class="flex items-center justify-center gap-1">
           <button type="button" class="row-btn" data-act="dec" data-key="${l.key}" title="Kurangi" aria-label="Kurangi qty">${icon('minus')}</button>
-          <input class="input input-sm !w-16 text-center font-semibold" data-act="qty" data-key="${l.key}" type="number" inputmode="numeric" min="0" value="${l.qty}" aria-label="Qty ${l.name}" />
+          <input class="input input-sm !w-20 !px-2 text-center font-semibold" data-act="qty" data-key="${l.key}" type="number" inputmode="numeric" min="0" value="${l.qty}" aria-label="Qty ${l.name}" />
           <button type="button" class="row-btn" data-act="inc" data-key="${l.key}" title="Tambah" aria-label="Tambah qty">${icon('plus')}</button>
         </div>
       </td>
       <td class="td td-num">
-        <input class="input input-sm !w-16 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
+        <input class="input input-sm !w-24 !px-2 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
           min="0" step="100" value="${l.discount || ''}" placeholder="0"
           aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}" />
       </td>
@@ -1733,8 +1780,23 @@ function muatKeranjang(): boolean {
         dibuang++;
         continue;
       }
-      if (!p.price_dynamic) l.price = p.price;
-    }
+      l.dyn = !!p.price_dynamic;
+      if (p.price_dynamic) {
+        // Re-key baris lama (format pre-2026-10-06 tanpa harga di key) ke
+        // `<id>:<unit>:<harga>` — idempoten untuk format baru. Kalau ternyata
+        // baris key itu sudah ada (keranjang tersimpan oleh versi berbeda),
+        // kuantitas digabung supaya tidak ada dua <tr data-key> kembar.
+        const k = `${p.id}:${l.unit}:${l.price}`;
+        const dobel = k === l.key ? undefined : items.find((x) => x.key === k);
+        if (dobel) {
+          dobel.qty += l.qty;
+          if (!dobel.discManual) dobel.discount = hitungPrefill(dobel);
+          dobel.discount = Math.min(dobel.discount, jumlahBaris(dobel));
+          continue;
+        }
+        l.key = k;
+      } else l.price = p.price;
+    } else l.dyn = false;
     l.note = (l.note ?? '').slice(0, 200);
     l.discount = Math.min(Math.max(0, Math.round(l.discount || 0)), jumlahBaris(l));
     items.push(l);
@@ -1811,6 +1873,15 @@ async function muatHold(h: Hold): Promise<void> {
     if (!ok) return;
   }
   cart = h.items.map((l) => ({ ...l }));
+  // Normalisasi baris hold seperti muatKeranjang: flag `dyn` + re-key format
+  // key lama — hold bisa dibuat sebelum kolom Harga menjadi input (2026-10-06).
+  const byIdHold = new Map(products.map((p) => [p.id, p]));
+  for (const l of cart) {
+    if (l.product_id === null) { l.dyn = false; continue; }
+    const p = byIdHold.get(l.product_id);
+    l.dyn = !!p?.price_dynamic;
+    if (l.dyn) l.key = `${l.product_id}:${l.unit}:${l.price}`;
+  }
   discount = h.discount;
   // Pelanggan hold divalidasi terhadap master terkini — id lama yang sudah
   // tidak ada jatuh ke Pelanggan Umum, bukan ke select kosong.
@@ -2060,7 +2131,10 @@ function askNumber(title: string, label: string, value: number, step = 500): Pro
         inp?.focus();
         inp?.select();
         const done = () => resolve(Number(inp?.value || 0));
-        api.ok.addEventListener('click', done);
+        // Klik Simpan harus MENUTUP seperti jalur Enter — sebelumnya hanya
+        // resolve sehingga modal harga/QTY nyangkut terbuka setelah baris
+        // sudah masuk (ditemukan saat uji E2E harga khusus 2026-10-06).
+        api.ok.addEventListener('click', () => { done(); api.close(); });
         inp?.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
@@ -2070,7 +2144,9 @@ function askNumber(title: string, label: string, value: number, step = 500): Pro
         });
       },
     });
-    // Batal / tutup -> null (tidak menambahkan apa pun).
+    // Batal / tutup -> null (pemanggil: preset dibiarkan); OK/Enter -> angka
+    // dari kolom. Satu-satunya pemanggil kini = dialog Qty (F4) via setQtyNext
+    // — dialog harga produk dinamis sudah DIHAPUS (lihat addProduct).
     m.el.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t.closest('[data-x]') || t.closest('.modal-overlay') === t) {
@@ -2081,15 +2157,13 @@ function askNumber(title: string, label: string, value: number, step = 500): Pro
   });
 }
 
-/** Harga dinamis wajib per transaksi (AGENTS.md §1) — jadi selalu ditanyakan.
- *  `unit` diisi bila satuan terpilih bukan satuan dasar, supaya kasir tahu
- *  harga yang diketik itu untuk pack/dus, bukan untuk 1 pcs. */
-function askPrice(p: Product, unit?: string): Promise<number | null> {
-  return askNumber(`Harga: ${p.name}${unit ? ` (per ${unit})` : ''}`, 'Harga jual (Rp)', 0);
-}
-
-/** Masukkan satu produk ke keranjang. Harga dinamis selalu ditanyakan
- *  (AGENTS.md §1: price_dynamic=1 wajib harga per transaksi).
+/** Masukkan satu produk ke keranjang. SEMUA produk masuk LEWAT SATU JALUR
+ *  yang sama — termasuk harga khusus (`price_dynamic`): harga default dari
+ *  master langsung menjadi isi baris, kasir mengubahnya lewat kolom Harga di
+ *  keranjang (keputusan pemilik 2026-10-06: *"karena harga bisa di ubah
+ *  inline, modal dynamic harga tidak usah"* — dialog `askPrice` DIHAPUS).
+ *  `items[].price` tetap ikut setiap penjualan, jadi kontrak server
+ *  (AGENTS §1) tidak berubah.
  *
  *  `unitSlug` dipilih lewat chip satuan di dropdown (fitur #3). Angka harga di
  *  sini hanya untuk TAMPILAN awal baris — harga final tetap ditentukan server
@@ -2112,17 +2186,6 @@ function addProduct(p: Product, unitSlug?: string, qtyOverride?: number): void {
   // price di baris satuan = harga grosir eksplisit; NULL = ikut rumus.
   const hargaTampil = ru ? (ru.price ?? Math.round(p.price * factor)) : p.price;
 
-  if (p.price_dynamic) {
-    void askPrice(p, ru ? unit : undefined).then((price) => {
-      if (!price || price <= 0) return;
-      // qtyNext baru dipakai kalau benar-benar masuk keranjang — batal dialog
-      // harga = preset tidak hilang.
-      addLine(p, price, qtyPakai(), unit, factor);
-      paintCart();
-      focusScan();
-    });
-    return;
-  }
   addLine(p, hargaTampil, qtyPakai(), unit, factor);
   paintCart();
   focusScan();
@@ -2502,7 +2565,9 @@ function openManualItem(): void {
           key: `manual:${manualSeq}`, product_id: null, name: n, sku: 'MANUAL',
           price: pr, qty: q, track_stock: 0, unit: '', baseUnit: '', factor: 1,
           // Item manual tidak punya diskon permanen (bukan produk katalog),
-          // tapi kolom Diskon tetap terisi 0 dan bisa diketik kasir.
+          // tapi kolom Diskon tetap terisi 0 dan bisa diketik kasir. Harga
+          // manual juga tidak lewat kolom input harga (bukan produk dinamis).
+          dyn: false,
           discount: 0, prefill: null, discManual: false,
           // Tanpa input catatan: tidak ada produk use_note-nya (pemilik memang
           // menandai produk katalog, mis. Cetak Banner — bukan jasa dadakan).
@@ -3284,6 +3349,13 @@ function bindCart(): void {
 
   host!.querySelector('#pos-rows')?.addEventListener('change', (e) => {
     const el = e.target as HTMLElement;
+    // Kolom Harga (produk price_dynamic): di-commit via `change` seperti Diskon
+    // — Enter/blur. Bisa memicu re-key + penggabungan baris (lihat setHarga).
+    const hargaInp = el.closest<HTMLInputElement>('[data-act="price"]');
+    if (hargaInp) {
+      setHarga(hargaInp.dataset.key!, Number(hargaInp.value || 0));
+      return;
+    }
     // Kolom Diskon: ketikan kasir (boleh menghapus prefill = isi 0). Angka
     // dijepit ke jumlah baris di setDisc supaya server tidak menolak 400.
     const discInp = el.closest<HTMLInputElement>('[data-act="disc"]');

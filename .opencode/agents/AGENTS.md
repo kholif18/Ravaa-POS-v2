@@ -23,7 +23,10 @@
 * Topup/tarik: `nominal` bebas + `admin` editable per transaksi.
   `nominal` = mutasi modal, `admin` = pendapatan jasa, `total = nominal + admin`.
 * Harga produk non-dinamis DIKUNCI server (client tidak boleh override).
-  Produk `price_dynamic=1` wajib kirim harga per transaksi.
+  Produk `price_dynamic=1` wajib kirim harga per transaksi — **scan TANPA
+  dialog** (2026-10-06): harga default master langsung masuk keranjang, kasir
+  mengubahnya lewat kolom Harga baris; modal `askPrice` DIHAPUS permanen
+  (*"karena harga bisa di ubah inline, modal dynamic harga tidak usah"*).
 
 ## 2. Arsitektur (peta file)
 
@@ -99,7 +102,9 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           8 kolom**
                           (No / Kode / Nama barang / Harga / Qty / Diskon /
                           Subtotal / Aksi — SKU di kolom Kode mono, baris
-                          catatan & empty `colspan="8"`; **lebar kolom
+                          catatan `colspan="3"` (hanya selebar No..Nama
+                          barang, pemendekan permintaan pemilik 2026-10-06)
+                          & empty `colspan="8"`; **lebar kolom
                           eksplisit** putaran 8 2026-10-04 lalu **DI-COMPACT
                           2026-10-06** ("Harga, QTY, Diskon, sub total, aksi
                           diperkecil compact sesuai ukuran konten, buat kolom
@@ -117,11 +122,50 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           token `--color-primary-soft #e6f3ff`, sama dengan
                           state aktif tombol; riwayat: gray-50 → gray-100 →
                           primary-soft) pada
-                          tiap `<tr data-key>`; **input Qty `!w-16` +
-                          font-semibold** (kembali `!w-16` 2026-10-06 dari
-                          `!w-20` putaran 8 — permintaan compact; input
-                          diskon baris ikut `!w-16`), chip nominal cepat,
-                          chip Qty + tombol
+                           tiap `<tr data-key>`; **input Qty `!w-20 !px-2` +
+                           font-semibold** (riwayat: `!w-20` putaran 8 →
+                           compact `!w-16` 2026-10-06 → `!w-20 !px-2` kembali
+                           setelah diukur **4 digit "1000" ter-capture di
+                           w-16**; `!px-2` = sisihkan ruang spinner), input
+                           diskon & harga `!w-24 !px-2` (terukur muat 7 digit
+                           `1500000` = Rp1.500.000; w-16 lama memotong
+                           "2000" jadi "200" — anti-regresi diuji asersi
+                           A5/A6 `harga-dinamis-test`),
+                           **kolom Harga = INPUT untuk produk harga khusus**
+                           (permintaan pemilik 2026-10-06: *"jika produk
+                           memiliki harga price 2000 namun switch On, di POS
+                           barang tersebut kolom Harga baris keranjang →
+                           input … dan bisa di ubah"* — switch = tombol
+                           **"Boleh ubah harga saat jual"**
+                           `products.price_dynamic` di form produk; produk
+                           lain tetap teks `rp(price)` terkunci, event
+                           `change` → `setHarga()` seperti Diskon).
+                           **Aturan baris (2026-10-06)**: produk sama dengan
+                           harga **BERBEDA = baris BARU**, harga **SAMA =
+                           qty bertambah** — untuk itu key baris dinamis =
+                           `<id>:<unit>:<harga>` (`addLine()`; non-dinamis
+                           tetap `<id>:<unit>`), dan `setHarga()` me-re-key
+                           baris yang diedit; menabrak baris lain berharga
+                           sama → **kuantitas digabung**. Aturan yang sama
+                            ditegakkan saat `muatKeranjang()`/`muatHold()`
+                            memulihkan baris lama (re-key idempoten + gabung
+                            bila key kembar). **Scan TANPA dialog harga —
+                            `askPrice` DIHAPUS permanen** (permintaan pemilik
+                            2026-10-06: *"karena harga bisa di ubah inline,
+                            modal dynamic harga tidak usah"*): produk dinamis
+                            masuk lewat jalur `addProduct()` yang SAMA dengan
+                            biasa, harga default master (`hargaTampil`)
+                            langsung menjadi isi baris lalu kasir mengedit
+                            kolom Harga — kontrak `items[].price` tidak
+                            berubah. Aturan "batal = harga default" (yang
+                            sempat ditambahkan pagi itu) gugur bersama
+                            hilangnya dialog; `askNumber` kini hanya melayani
+                            dialog **Qty F4**, dengan bugfix yang tetap
+                            berlaku: tombol Simpan dahulu hanya `resolve`
+                            tanpa `close()` sehingga modal F4 nyangkut
+                            terbuka (2026-10-06);
+                           chip nominal cepat,
+                           chip Qty + tombol
                           Cari (F4 = qty item berikutnya sekali pakai, F3 =
                           layar cari produk; tombol ganda `#pos-manual` di
                           scan bar DIHAPUS putaran 7 karena sudah ada di
