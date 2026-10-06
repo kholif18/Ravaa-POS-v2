@@ -100,10 +100,16 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           (No / Kode / Nama barang / Harga / Qty / Diskon /
                           Subtotal / Aksi — SKU di kolom Kode mono, baris
                           catatan & empty `colspan="8"`; **lebar kolom
-                          eksplisit** putaran 8 2026-10-04: No `w-10`, Kode
-                          `w-24`, **Nama barang `w-auto`** = menyerap seluruh
-                          sisa lebar (referensi KulaPOS), Harga/Diskon/
-                          Subtotal `w-24`, Qty `w-32`, Aksi `w-14`;
+                          eksplisit** putaran 8 2026-10-04 lalu **DI-COMPACT
+                          2026-10-06** ("Harga, QTY, Diskon, sub total, aksi
+                          diperkecil compact sesuai ukuran konten, buat kolom
+                          nama barang saja yang lebar" — semua hint ukurannya
+                          `max(hint, konten)`, jadi angka besar tetap tumbuh
+                          tanpa clip): No `w-8`, Kode `w-20`, **Nama barang
+                          `w-auto`** = menyerap SELURUH sisa lebar (438 →
+                          ±540px terukur, referensi KulaPOS), Harga/Diskon/
+                          Subtotal `w-16`, Qty `w-36` (konten stepper 152px
+                          yang menang), Aksi `w-10`;
                           **hover per baris KEBIRUAN**
                           `hover:bg-primary-soft dark:hover:bg-primary/15
                           transition-colors` (putaran 8c 2026-10-04 "hover di
@@ -111,8 +117,10 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           token `--color-primary-soft #e6f3ff`, sama dengan
                           state aktif tombol; riwayat: gray-50 → gray-100 →
                           primary-soft) pada
-                          tiap `<tr data-key>`; **input Qty `!w-20` +
-                          font-semibold** — dulu `!w-16`), chip nominal cepat,
+                          tiap `<tr data-key>`; **input Qty `!w-16` +
+                          font-semibold** (kembali `!w-16` 2026-10-06 dari
+                          `!w-20` putaran 8 — permintaan compact; input
+                          diskon baris ikut `!w-16`), chip nominal cepat,
                           chip Qty + tombol
                           Cari (F4 = qty item berikutnya sekali pakai, F3 =
                           layar cari produk; tombol ganda `#pos-manual` di
@@ -123,11 +131,17 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                             **Panel bayar = SIDEBAR KANAN 320px** (grid
                             `lg:grid-cols-[1fr_320px]` — putaran 4 2026-10-04:
                             footer horizontal DITOLAK pemilik, "tetap jadi
-                            sidebar kanan tadi"): ringkasan
+                            sidebar kanan tadi"): **URUTAN 2026-10-06**
+                            (permintaan pemilik "diskon item pindah ke bawah
+                            menu cepat di atas diskon"): **Aksi cepat** →
+                            garis tipis → **Menu cepat** (tombol **Produk** |
+                            **Stok** → hash `#/products`/`#/stock`,
+                            permintaan "tambahkan tombol cepat ke produk dan
+                            stok juga") → garis tipis → ringkasan
                             **Diskon item** saja (baris Subtotal ikut DIHAPUS
                             putaran 7 2026-10-04, "ini juga hapus saja" —
-                            subtotal terbaca dari TOTAL BELANJA di info bar) →
-                            **Aksi cepat** → input
+                            subtotal terbaca dari TOTAL BELANJA di info bar)
+                            → input
                             diskon transaksi (label polos — chip `<kbd>F6</kbd>`
                             DIHAPUS, putaran 7 2026-10-04 "ghapus saja,
                             di atasnya sudah ada label F6 ternyata di tombol
@@ -140,7 +154,8 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                             2026-10-04); `#pos-grand` = satu-satunya angka
                             total besar. **Aksi cepat** (grid 2 kolom):
                             **Tahan** (`tahanKeranjang()`) + **Pending (n)**
-                            (`bukaTertahan()`, badge `#pos-hold-count`) =
+                            (`bukaTertahan()`, badge `#pos-hold-count`,
+                            pintasan `<kbd>F8</kbd>` sejak 2026-10-06) =
                             fitur **P5 transaksi tertahan** — snapshot keranjang
                             (`Hold` type: items/discount/pelanggan) disimpan di
                             **IndexedDB per device** lewat `getHolds()`/
@@ -188,7 +203,10 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                              DIPERTAHANKAN** (dipakai
                              `tests/pos-qtykode-test.mjs` §C3);
                             **Item manual** & **Diskon F6** memanggil aksi
-                            lama; **Voucher** & **Cetak ulang** = placeholder
+                            lama; **Riwayat** (anchor `#/history`,
+                            MENGGANTIKAN slot **Voucher** — keputusan pemilik
+                            2026-10-06, voucher & PPN ditutup permanen);
+                            **Cetak ulang** = masih placeholder
                             `[data-soon]` (toast "menyusul" — permintaan
                             pemilik "placeholder dulu, fitur nanti").
                             **Isian bayar = FORM BAYAR (modal)** (putaran 5
@@ -353,9 +371,12 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            `pay()` kirim `customer_id` + struk meta
                            `Pelanggan: <customer_name>` + reset pilihan ke
                             Pelanggan Umum. Pintasan level document di
-                            `bindPintasan()` (**F1/F8 fokus kolom scan** —
-                            F1 referensi KulaPOS `[F1/Cmd+K]`, F8 alias
-                            jalan pendek; F2 bayar, F3 cari, F4 qty,
+                            `bindPintasan()` (**F1 fokus kolom scan** —
+                            referensi KulaPOS `[F1/Cmd+K]`; **F8 = modal
+                            Pending** sejak 2026-10-06, dialihkan dari alias
+                            scan lama — pemilik: "F8 … bisa digunakan untuk
+                            membuka modal pending", holds kosong → toast;
+                            F2 bayar, F3 cari, F4 qty,
                             F5 bersihkan, F6 diskon transaksi, **F7 tahan**
                             — alokasi F7 sebab F2/F3 sudah terpakai, label
                             `<kbd>F7>` ikut tertulis di tombol Tahan,

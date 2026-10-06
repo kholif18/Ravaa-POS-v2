@@ -90,8 +90,9 @@ panel topup/laporan, modal struk, atau styling apa pun.
    menampilkan produknya; qty eksplisit menang atas chip Qty/F4 untuk baris itu
    **tanpa** mengosongkan preset F4. Aturan yang sama untuk **Enter maupun klik
    baris hasil**; tanpa `*` perilaku lama dipertahankan.
-8. Pintasan level document POS: **F1 / F8 fokus kolom scan** (F1 = referensi
-   KulaPOS `[F1/Cmd+K]`), F2 bayar, F3 cari, F4 qty berikutnya, F5 bersihkan,
+8. Pintasan level document POS: **F1 fokus kolom scan** (KulaPOS `[F1/Cmd+K]`),
+   **F8 modal Pending** (dialihkan dari alias scan lama, 2026-10-06), F2 bayar,
+   F3 cari, F4 qty berikutnya, F5 bersihkan,
    F6 diskon transaksi, **F7 tahan (Pending)**, **F9 cari pelanggan**
    (`openCariPelanggan()`), **F10 buka
    form bayar**, **F12 bayar pas**, Enter bayar, Esc ke scan, dan **↑↓**

@@ -172,7 +172,7 @@ npm run dev:api
   (barcode persis → SKU persis → nama mengandung) dengan dropdown hasil: ArrowUp /
   ArrowDown menyorot, Enter atau klik memasukkan ke keranjang, Escape menutup.
   Ujung kanan input memuat badge **`F1`** — penanda shortcut fokus scan
-  (F1/F8; Esc juga kembali ke sini).
+  (F1; Esc juga kembali ke sini).
    Mode: **Penjualan / Topup / Tarik** (bar yang sama). Topup-tarik memakai
    `POST /api/topups`; admin terisi otomatis dari tier toko yang sama dengan
    `GET /api/topups/suggest-admin`, dan bisa diedit kasir.
@@ -217,9 +217,11 @@ npm run dev:api
     pendukung (unit, `item manual`, badge kadaluarsa) pindah ke bawah nama.
     Baris catatan (`use_note`) & baris kosong memakai `colspan="8"`.
     **Lebar kolom eksplisit** (putaran 8 2026-10-04, mengikuti lebar kolom di
-    referensi `kula-02-transaksi-pos.png`): No `w-10`, Kode `w-24`,
-    **Nama barang `w-auto`** menyerap seluruh sisa lebar (kolom nama jadi
-    panjang), Harga/Diskon/Subtotal `w-24`, Qty `w-32`, Aksi `w-14`.
+    referensi `kula-02-transaksi-pos.png`; **di-compact 2026-10-06** — semua
+    kolom non-nama kini `max(hint, konten)`: No `w-8`, Kode `w-20`,
+    **Nama barang `w-auto`** menyerap seluruh sisa lebar (438 → ±540px
+    terukur), Harga/Diskon/Subtotal `w-16`, Qty `w-36` (konten stepper 152px),
+    Aksi `w-10`; input Qty & diskon `!w-16`).
     **Hover per baris KEBIRUAN** `hover:bg-primary-soft` (+ `dark:hover:bg-primary/15`)
     dengan `transition-colors` — baris disorot biru muda saat mouse lewat
     (token `--color-primary-soft #e6f3ff`, sama dengan state aktif tombol;
@@ -266,10 +268,12 @@ npm run dev:api
       **Bersihkan** menulis ulang jadi kosong. Uang diterima & mode bayar
       tidak ikut (milik per pembayaran). Teruji `tests/e2e-struk.mjs`
       section M.
-    * **F1 / F8 / F9 / F10 / F12** — pintasan putaran 5–7 (2026-10-04): **F1**
-      & **F8** fokus balik ke kolom scan (**F1** = referensi KulaPOS
-      *"Jumlah Beli * Kode [F1/Cmd+K]"*; **F8** = alias jalan pendek satu tekan
-      pengganti Esc), **F9** buka layar **Cari pelanggan** (ala F3 produk),
+    * **F1 / F8 / F9 / F10 / F12** — pintasan putaran 5–7 (2026-10-04,
+      direvisi 2026-10-06): **F1** fokus balik ke kolom scan (referensi KulaPOS
+      *"Jumlah Beli * Kode [F1/Cmd+K]"*); **F8** kini membuka **modal Pending**
+      (dialihkan dari alias scan lama — pemilik: *"F8 sepertinya belum dipakai
+      dan bisa digunakan untuk membuka modal pending"*; F1 tetap 1 tekan ke
+      scan; holds kosong → toast *"Belum ada transaksi tertahan"*), **F9** buka layar **Cari pelanggan** (ala F3 produk),
       **F10** buka form bayar (referensi Aronium *"Payment (F10)
       opens payment form"*),       **F12** bayar pas (*"Default payment … F12"* —
       tanpa form, tombol gradasi hijau di sidebar). Guard: **swal konfirmasi/pilihan
@@ -278,8 +282,10 @@ npm run dev:api
   - **Panel bayar = sidebar kanan 320px** (grid `lg:grid-cols-[1fr_320px]` —
     revisi pemilik 2026-10-04 putaran 4: footer horizontal ala KulaPOS
     **ditolak**, "tidak usah, tetap jadi sidebar kanan tadi"). Isi panel
-    berurutan vertikal: **Diskon item → Aksi cepat → Diskon
-    transaksi (Rp) → dua tombol bayar menempel dasar panel** — pintasan F6
+    berurutan vertikal (**urutan 2026-10-06**: "diskon item pindah ke
+    bawah menu cepat di atas diskon"): **Aksi cepat → Menu cepat (Produk |
+    Stok) → Diskon item → Diskon transaksi (Rp) → dua tombol bayar menempel
+    dasar panel** — pintasan F6
     disebut **hanya di tombol "Diskon F6" grid Aksi cepat** (chip `<kbd>F6</kbd>`
     di sebelah label inputnya dihapus, permintaan pemilik putaran 7 2026-10-04
     "ghapus saja, di atasnya sudah ada label F6 ternyata di tombol diskon").
@@ -379,7 +385,9 @@ npm run dev:api
     bila antrian habis); daftar bertahan setelah reload. **Item manual** & **Diskon** memanggil
     aksi yang sudah ada (putaran 7: tombol ganda `#pos-manual` di scan bar
     DIHAPUS — yang tetap hanya `#pos-qa-manual` di panel kanan, *"karena di
-    bawah sudah ada pada deretan tombol panel kanan"*); **Voucher** & **Cetak ulang** = tombol placeholder
+    bawah sudah ada pada deretan tombol panel kanan"*); **Riwayat** (anchor `#/history`,
+    menggantikan slot **Voucher** — keputusan 2026-10-06: *"tombol bisa di ubah ke
+    history transaksi"*; voucher & PPN ditutup permanen) + **Cetak ulang** = tombol placeholder
     (`data-soon` → toast "menyusul") — tombol sudah dulu, fiturnya
     menyusul sesuai permintaan pemilik. Semua id/selector lama
     (`#pos-cash`, `#pos-pay`,

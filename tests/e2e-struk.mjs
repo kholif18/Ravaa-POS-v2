@@ -808,15 +808,21 @@ try {
     [...s.options].find((o) => o.value !== keep)?.value ?? '', String(cidJ));
   if (nilaiLain) await page.selectOption('#pos-customer', nilaiLain);
 
-  // Test F1 & F8 (fokus scan) sebelum membuka modal
+  // Test F1 (fokus scan) & F8 (modal Pending) sebelum membuka modal.
+  // F8 DIALIHKAN 2026-10-06 dari alias fokus scan ke bukaTertahan() —
+  // keputusan pemilik "F8 ... bisa digunakan untuk membuka modal pending".
+  // Pada titik ini holds kosong, jadi F8 → toast "Belum ada transaksi
+  // tertahan" (perilaku sama dengan tombol #pos-hold-open yang disabled).
   await page.click('body'); // buang fokus
   await page.keyboard.press('F1');
   const fokusF1 = await page.evaluate(() => document.activeElement?.id);
   await page.click('body');
   await page.keyboard.press('F8');
-  const fokusF8 = await page.evaluate(() => document.activeElement?.id);
-  ok('F1 & F8 memindahkan fokus ke kolom scan (ala KulaPOS)',
-    fokusF1 === 'pos-q' && fokusF8 === 'pos-q', `F1=${fokusF1}, F8=${fokusF8}`);
+  await page.waitForSelector('.toast', { timeout: 3000 });
+  const toastF8 = (await page.locator('.toast').allInnerTexts()).join(' | ');
+  ok('F1 fokus kolom scan (ala KulaPOS) & F8 membuka alur Pending (toast holds kosong)',
+    fokusF1 === 'pos-q' && toastF8.includes('Belum ada transaksi tertahan'),
+    `F1=${fokusF1}, toast=${JSON.stringify(toastF8)}`);
 
   await page.keyboard.press('F9');
   await page.waitForSelector('#pcust-q', { timeout: 5000 });

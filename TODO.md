@@ -24,8 +24,12 @@ terhapus, bukti utama sudah diekstrak ke laporan chat 2026-10-04).
       pintasan baru **F5** (kosongkan keranjang — sekalian memperbaiki kolom
       diskon yang tidak ikut dikosongkan) dan **F6** (fokus kolom diskon) di
       `bindPintasan()`, preventDefault F5/F6 agar Chrome tidak reload/find.
-- [ ] **P4 — Grid katalog + tab kategori di POS** (mode `Daftar|Grid`, ≥860px;
-      HP tetap search) — tanpa API baru (cache produk + `/api/categories`).
+- [ ] **P4 dirombak pemilik 2026-10-06: tampilan grid TIDAK diperlukan**
+      (*"P4 tidak perlu tampilan grid"*). Yang diminta sebagai gantinya:
+      **layout mobile sendiri + tombol perpindah mode** (*"untuk mobile
+      nanti buat layout sendiri … tambahkan layout untuk berpindah ke mode
+      mobile saja"*) — task terpisah, dikerjakan setelah batch urutan yang
+      disetujui (lihat Menyusul: "Layout mobile").
 - [x] **P5 — Tahan/pending transaksi** — SELESAI 2026-10-04: snapshot keranjang
       (`Hold` = items/diskon/pelanggan/waktu/kasir) ke **IndexedDB per device**
       (`getHolds()`/`saveHolds()` di `store.ts`, kv key `'holds'` — tanpa
@@ -34,10 +38,12 @@ terhapus, bukti utama sudah diekstrak ke laporan chat 2026-10-04).
       **[Lanjutkan] [Hapus]** (konfirmasi swal; Lanjutkan validasi pelanggan
       ke master + dorong `manualSeq`), persisten setelah reload. Uji
       `uji-hold.mjs` 23/23 + `npm test` 837 hijau.
-- [ ] **P6 — Biaya tambahan / voucher** ⚠️ butuh diskusi kontrak `POST /api/sales`
-      (jangan diimplementasi sepihak; kompromi saat ini = Item manual Rp500).
-- [ ] **P7 — Customer display** (jendela kedua via `BroadcastChannel`, struk
-      live gaya KulaPOS) — client-only, tanpa API.
+- ❌ **P6 — Biaya tambahan / voucher: DITOLAK PERMANEN** (keputusan pemilik
+      2026-10-06: *"pajak dan voucher di app ini tidak pernah terpakai jadi
+      saya tidak memerlukan fitur itu"*) — jangan diusulkan lagi, kontrak
+      `POST /api/sales` TIDAK disentuh untuk ini; kompromi praktis tetap
+      Item manual Rp500. Pajak PPN/service charge (dulu "skip dulu") ikut
+      ditutup dengan alasan sama.
 
 Tidak diusulkan (alasan tercatat di laporan riset): multi-tata-letak/tema picker,
 member/poin.
@@ -541,10 +547,13 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
 * **Sudah setara / selesai**: Pending-Tahan (P5) + pintasan F7, `Qty*Kode`,
   navigasi ↑↓ baris, Bersihkan F5, diskon faktur F6, pelanggan inline, strip
   stok/kadaluarsa, cetak struk otomatis, satuan jual, catatan per baris.
-* **Menyusul (sudah tercatat)**: P4 grid katalog, P6 biaya tambahan/voucher,
-  P7 customer display, plus kandidat kecil di section Menyusul (kolom
-  keranjang compact, rapikan sidebar, placeholder Voucher/Cetak ulang,
-  tutup shift dari POS, ganti satuan baris). *Dibersihkan 2026-10-06*:
+* **Menyusul (sudah tercatat)**: kandidat kecil di section Menyusul (kolom
+  keranjang compact, rapikan sidebar, Cetak ulang nota terakhir, tutup shift
+  dari POS, ganti satuan baris) + pengganti P4 = layout mobile (keputusan
+  pemilik 2026-10-06). *Ditutup permanen 2026-10-06*: P4 grid (**tidak
+  diperlukan**), P6 biaya tambahan/voucher + pajak PPN (**tidak pernah
+  terpakai — jangan diusulkan lagi**), P7 customer display (**pemilik tidak
+  punya display; PERINTAH: jangan masuk TODO, jangan dikerjakan**). *Dibersihkan 2026-10-06*:
   tiga kandidat lama — hapus duplikat Item manual, hapus baris Subtotal,
   cari pelanggan ala F3 — ternyata sudah dikerjakan putaran 7 (lihat
   Catatan putaran 7 di atas), jadi dihapus dari daftar; arah "hapus Item
@@ -762,23 +771,44 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       keranjang kolom Harga, QTY, Diskon, sub total, aksi di perkecil,
       compact saja sesuai ukuran konten, buat kolom nama barang saja yang
       lebar").
-- [ ] **Rapikan layout sidebar POS** — permintaan pemilik "sidebar nanti
-      rapikan layoutnya" (menyusul masuknya section Aksi cepat + penghapusan
-      baris Grand total).
-- [ ] **Tombol placeholder → fitur nyata** — **Voucher** (kaitan dengan P6,
-      butuh diskusi kontrak `POST /api/sales`) dan **Cetak ulang** (ulang
-      struk nota terakhir?) saat ini `data-soon` → toast "menyusul"
-      (permintaan pemilik "placeholder/hardcode dulu tidak apa-apa").
-- [ ] **Tutup shift dari dalam POS** (sisa gap analysis) — KulaPOS punya
-      tombol merah "Tutup Sesi Kas" di header POS; shell Ravaa sengaja tanpa
-      menu, jadi kasir harus keluar ke `#/shifts` (halaman Shift Kasir sudah
-      punya dialog tutup + rumus expected-cash). Butuh keputusan bentuk:
-      tombol di info bar / sidebar, atau sekadar tautan.
+- [x] **Rapikan layout sidebar POS — SELESAI diimplementasikan 2026-10-06**
+      (mockup direview pemilik lalu dikode): urutan baru per permintaan
+      *"diskon item pindah ke bawah menu cepat di atas diskon"* =
+      **Aksi cepat → (garis tipis) → Menu cepat → (garis tipis) → Diskon
+      item → Diskon transaksi → Bayar (mt-auto)**; tombol **Riwayat**
+      (`a[href="#/history"]`) menggantikan slot Voucher; **Menu cepat**
+      = **Produk** (`#/products`) | **Stok** (`#/stock`); tombol **Pending**
+      kini ber-pintasan **`<kbd>F8</kbd>`** (dialihkan dari alias lama F8 =
+      fokus scan — F1 tetap ke scan; uji `e2e-struk` F8 disesuaikan);
+      bukti: DOM order + navigasi + toast F8 terverifikasi, **915 hijau**.
+- [ ] **Layout mobile + tombol pindah mode** (pengganti P4 grid, keputusan
+      pemilik 2026-10-06: *"untuk mobile nanti buat layout sendiri …
+      tambahkan layout untuk berpindah ke mode mobile saja"*) — pindah ke
+      akhir urutan batch yang disetujui. Buka Laci Kasir ikut **keputusan
+      2026-10-06: OTOMATIS tiap penjualan tunai** (kick ESC/POS lewat
+      `kirimPrint()`, nol perubahan API/agent).
+- [x] **Tombol Voucher → Riwayat — SUDAH (2026-10-06)**: `data-soon="Voucher"`
+      dibuang, slot kini `a[href="#/history"]` (lihat item sidebar di atas;
+      fitur voucher sendiri DITOLAK, lihat P6 di Backlog).
+- [ ] **Tombol Cetak ulang → nota TERAKHIR** (*"nota terakhir"*, keputusan
+      pemilik 2026-10-06): simpan id nota sukses terakhir → dialog
+      [Thermal][A4] jalur yang sama dengan Riwayat. Pasangan alami:
+      **Lihat Struk ›** pratinjau popup HTML (kandidat riset 2026-10-06)
+      digabung ke dialog itu bila jadi.
+- [ ] **Tutup shift dari dalam POS** — **keputusan pemilik 2026-10-06:
+      "tombol merah di pos seperti kula pos"** (bukan tautan). Letak: tombol
+      merah di POS → dialog konfirmasi tutup yang sama; rumus
+      `kasSeharusnya()`/`hitungSelisih()` diangkat dari `shifts.ts` ke
+      helper BERSAMA (satu sumber kebenaran, jangan diduplikasi — AGENTS §5).
 - [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
       KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah
-      satuan kini = hapus baris + scan ulang. Butuh keputusan UI (chip
-      satuan per baris vs dialog) — jangan disentuh tanpa itu.
+      satuan kini = hapus baris + scan ulang. **Keputusan FINAL pemilik 2026-10-06:
+      (a) dropdown/chip satuan PER BARIS di tabel keranjang; diskon baris
+      DI-RESET saat satuan diganti** (total uang berubah — diskon lama
+      tidak relevan; qty mengikuti satuan baru). Re-key `<id>:<unit>`,
+      harga diambil ulang dari `product_units` (server tetap mengunci
+      harga saat bayar).
 
 *Catatan pembersihan 2026-10-06*: tiga item lama di akhir section ini —
 hapus duplikat "Item manual", hapus baris "Subtotal" sidebar, cari pelanggan

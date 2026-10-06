@@ -20,7 +20,7 @@
 //      "Pelanggan Umum" (lihat pay() + cekHutangDiperbolehkan()).
 //
 // Pintasan level document (bindPintasan): F2 bayar, F3 cari, F4 qty
-// berikutnya, F5 bersihkan, F6 diskon transaksi, F7 tahan, F8 fokus kolom
+// berikutnya, F5 bersihkan, F6 diskon transaksi, F7 tahan, F8 modal Pending
 // scan, F10 buka form bayar, F12 bayar pas, Enter bayar, Esc fokus ke scan.
 // Swal terbuka (konfirmasi/pilihan cetak) menahan SEMUA pintasan; form bayar
 // yang terbuka hanya mengizinkan F2/F10/F12.
@@ -838,7 +838,7 @@ function cartHtml(): string {
               <input id="pos-q" class="input input-sm pr-14" type="search" autocomplete="off" role="combobox"
                      aria-expanded="false" aria-controls="pos-results" aria-autocomplete="list"
                      placeholder="Scan barcode / ketik nama atau SKU — Qty*Kode, mis. 3*PRD00001"
-                     title="Scan barcode, ketik nama/SKU, atau Qty*Kode (mis. 3*aqua). Fokus balik ke sini: F1, F8, atau Esc" />
+                     title="Scan barcode, ketik nama/SKU, atau Qty*Kode (mis. 3*aqua). Fokus balik ke sini: F1 atau Esc" />
             </div>
             <span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2">${kbd('F1')}</span>
             <div id="pos-results" class="suggest hidden" role="listbox" aria-label="Hasil pencarian produk"></div>
@@ -912,14 +912,14 @@ function cartGridHtml(): string {
           <table id="pos-cart" class="table table-compact">
             <thead>
               <tr>
-                <th class="th th-sticky text-center w-10">No</th>
-                <th class="th th-sticky w-24">Kode</th>
+                <th class="th th-sticky text-center w-8">No</th>
+                <th class="th th-sticky w-20">Kode</th>
                 <th class="th th-sticky w-auto">Nama barang</th>
-                <th class="th th-sticky text-right w-24">Harga</th>
-                <th class="th th-sticky text-center w-32">Qty</th>
-                <th class="th th-sticky text-right w-24">Diskon</th>
-                <th class="th th-sticky text-right w-24">Subtotal</th>
-                <th class="th th-sticky text-right w-14">Aksi</th>
+                <th class="th th-sticky text-right w-16">Harga</th>
+                <th class="th th-sticky text-center w-36">Qty</th>
+                <th class="th th-sticky text-right w-16">Diskon</th>
+                <th class="th th-sticky text-right w-16">Subtotal</th>
+                <th class="th th-sticky text-right w-10">Aksi</th>
               </tr>
             </thead>
             <tbody id="pos-rows">${cartRows()}</tbody>
@@ -928,11 +928,45 @@ function cartGridHtml(): string {
       </div>
 
       <div class="card flex min-h-0 flex-col gap-2.5 overflow-y-auto !p-3">
-        <!-- 1. Ringkasan = HANYA "Diskon item" (tersembunyi bila 0). Dua baris
-             sudah DIHAPUS: "Grand total" (permintaan pemilik 2026-10-04 —
-             duplikat TOTAL BELANJA di info bar) dan **"Subtotal"** (putaran 7
-             2026-10-04 "ini juga hapus saja" — subtotal sudah terbaca dari
-             TOTAL BELANJA di info bar + kolom Subtotal per baris tabel, satu
+        <!-- 1. Aksi cepat (permintaan pemilik 2026-10-04) — kini di POSISI
+             ATAS kartu (permintaan pemilik 2026-10-06: "diskon item pindah
+             ke bawah menu cepat di atas diskon"). Tahan/Pending = fitur
+             NYATA (IndexedDB per device, lihat tahanKeranjang/bukaTertahan);
+             Item manual & Diskon memanggil aksi yang sudah ada; **Riwayat**
+             = anchor hash ke #/history, MENGGANTIKAN slot Voucher (keputusan
+             pemilik 2026-10-06 "tombol bisa di ubah ke history transaksi" —
+             voucher & PPN ditutup permanen); Cetak ulang masih PLACEHOLDER
+             (nota terakhir, menyusul). Pending kini ber-pintasan **F8**
+             (keputusan 2026-10-06 — F8 dulu alias fokus scan, kini F1
+             saja yang ke scan). -->
+        <div>
+          <span class="label">Aksi cepat</span>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${cart.length ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
+            <button type="button" id="pos-hold-open" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
+            <button type="button" id="pos-qa-manual" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">${icon('pencil')}<span>Item manual</span></button>
+            <button type="button" id="pos-qa-disc" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">Diskon${kbd('F6')}</button>
+            <a href="#/history" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
+            <button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" data-soon="Cetak ulang">${icon('print')}<span>Cetak ulang</span></button>
+          </div>
+        </div>
+        <div class="border-t border-gray-100 dark:border-gray-700" role="separator"></div>
+        <!-- 2. Menu cepat (permintaan pemilik 2026-10-06: "tambahkan tombol
+             cepat ke produk dan stok juga") — anchor hash biasa, pola sama
+             dengan strip-low stok yang sudah ada (shell.ts parseRoute). -->
+        <div>
+          <span class="label">Menu cepat</span>
+          <div class="grid grid-cols-2 gap-1.5">
+            <a href="#/products" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>
+            <a href="#/stock" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>
+          </div>
+        </div>
+        <div class="border-t border-gray-100 dark:border-gray-700" role="separator"></div>
+        <!-- 3. Diskon item — DIPINDAH dari paling atas ke sini (permintaan
+             pemilik 2026-10-06, lihat catatan Aksi cepat di atas): persis
+             DI ATAS input diskon transaksi. Tetap tersembunyi bila 0. Dua
+             baris lama sudah DIHAPUS: "Grand total" (2026-10-04 — duplikat
+             TOTAL BELANJA di info bar) dan "Subtotal" (putaran 7 — satu
              angka satu tempat). -->
         <div class="space-y-1">
           <div class="flex items-baseline justify-between" id="pos-disc-item-row" ${diskonBaris() ? '' : 'hidden'}>
@@ -940,24 +974,7 @@ function cartGridHtml(): string {
             <span id="pos-disc-item" class="text-sm font-semibold text-red-600 dark:text-red-400">-${rp(diskonBaris())}</span>
           </div>
         </div>
-        <!-- 2. Aksi cepat (permintaan pemilik 2026-10-04): tombol percepat
-             transaksi. Tahan/Pending = fitur NYATA (IndexedDB per device,
-             lihat tahanKeranjang/bukaTertahan); Item manual & Diskon memanggil
-             aksi yang sudah ada; Voucher & Cetak ulang PLACEHOLDER — tombolnya
-             sudah dulu, fiturnya menyusul ("placeholder/hardcode dulu
-             tidak apa-apa", P6 & cetak ulang). -->
-        <div>
-          <span class="label">Aksi cepat</span>
-          <div class="grid grid-cols-2 gap-1.5">
-            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${cart.length ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
-            <button type="button" id="pos-hold-open" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka daftar transaksi tertahan"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span></button>
-            <button type="button" id="pos-qa-manual" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">${icon('pencil')}<span>Item manual</span></button>
-            <button type="button" id="pos-qa-disc" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">Diskon${kbd('F6')}</button>
-            <button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" data-soon="Voucher">${icon('copy')}<span>Voucher</span></button>
-            <button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" data-soon="Cetak ulang">${icon('print')}<span>Cetak ulang</span></button>
-          </div>
-        </div>
-        <!-- 3. Diskon transaksi (alokasi F6). kelas space-y-1.5 = jarak baris
+        <!-- 4. Diskon transaksi (alokasi F6). kelas space-y-1.5 = jarak baris
              label ke input di bawahnya — dulu keduanya menempel langsung
              (permintaan pemilik 2026-10-04 "F6 rapikan, karena nempel dengan
              form bawahnya"). <kbd>F6</kbd> DIHAPUS dari baris label
@@ -1471,12 +1488,12 @@ function cartRows(): string {
       <td class="td">
         <div class="flex items-center justify-center gap-1">
           <button type="button" class="row-btn" data-act="dec" data-key="${l.key}" title="Kurangi" aria-label="Kurangi qty">${icon('minus')}</button>
-          <input class="input input-sm !w-20 text-center font-semibold" data-act="qty" data-key="${l.key}" type="number" inputmode="numeric" min="0" value="${l.qty}" aria-label="Qty ${l.name}" />
+          <input class="input input-sm !w-16 text-center font-semibold" data-act="qty" data-key="${l.key}" type="number" inputmode="numeric" min="0" value="${l.qty}" aria-label="Qty ${l.name}" />
           <button type="button" class="row-btn" data-act="inc" data-key="${l.key}" title="Tambah" aria-label="Tambah qty">${icon('plus')}</button>
         </div>
       </td>
       <td class="td td-num">
-        <input class="input input-sm !w-20 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
+        <input class="input input-sm !w-16 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
           min="0" step="100" value="${l.discount || ''}" placeholder="0"
           aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}" />
       </td>
@@ -3029,14 +3046,27 @@ function bindPintasan(): void {
         return;
       }
 
-      if (e.key === 'F1' || e.key === 'F8') {
-        // F1 = KulaPOS ("Jumlah Beli * Kode [F1/Cmd+K]" + fokus search);
-        // F8 = jalan pendek pemilik 2026-10-04 ("tambahkan shortcut untuk
-        // mengarah ke form ini"). Esc juga fokus scan tapi 2 langkah saat
-        // dropdown terbuka (Esc pertama tutup dropdown). F1/F8 = 1 tekan.
+      if (e.key === 'F1') {
+        // F1 = KulaPOS ("Jumlah Beli * Kode [F1/Cmd+K]" + fokus search).
+        // Esc juga fokus scan tapi 2 langkah saat dropdown terbuka (Esc
+        // pertama tutup dropdown). F1 = 1 tekan.
         e.preventDefault();
         if (mode !== 'jual' || !shift) return;
         focusScan();
+        return;
+      }
+
+      if (e.key === 'F8') {
+        // F8 DIALIHKAN dari alias fokus scan (jalan pendek 2026-10-04) ke
+        // MODAL PENDING — keputusan pemilik 2026-10-06: "F8 sepertinya belum
+        // dipakai dan bisa digunakan untuk membuka modal pending". Faktanya
+        // F8 memang terpakai (alias F1), tapi kehilangan alias itu tidak
+        // mengurangi apa pun — F1 tetap 1 tekan ke scan. Kosong → toast dari
+        // bukaTertahan() ("Belum ada transaksi tertahan"), sama dengan
+        // tombol #pos-hold-open yang disabled.
+        e.preventDefault();
+        if (mode !== 'jual' || !shift) return;
+        bukaTertahan();
         return;
       }
 
