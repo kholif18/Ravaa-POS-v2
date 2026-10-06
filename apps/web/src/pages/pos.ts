@@ -30,7 +30,10 @@
 // nonaktif tidak mungkin masuk keranjang.
 
 import { apiGet, apiPost, uuid, HttpError } from '../api';
-import { getCachedProducts, syncMaster, getHolds, saveHolds, type Product } from '../store';
+import {
+  getCachedProducts, syncMaster, getHolds, saveHolds, getKeranjang, saveKeranjang,
+  type Product,
+} from '../store';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
 import { getAutoPrint, setAutoPrint, setStrukLayout } from '../ui/print-pref';
@@ -544,6 +547,7 @@ function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1):
     baris.discount = hitungPrefill(baris);
     cart.push(baris);
   }
+  simpanKeranjang();
 }
 
 function setQty(key: string, qty: number): void {
@@ -555,6 +559,7 @@ function setQty(key: string, qty: number): void {
     if (!line.discManual) line.discount = hitungPrefill(line);
   }
   clampDiskonTransaksi();
+  simpanKeranjang();
   paintCart();
 }
 
@@ -569,6 +574,7 @@ function setDisc(key: string, nilai: number): void {
   // sengaja membatalkan prefill, jadi jangan dikembalikan saat qty berubah).
   line.discManual = true;
   clampDiskonTransaksi();
+  simpanKeranjang();
   paintCart();
 }
 
@@ -1643,10 +1649,90 @@ function bersihkanKeranjang(): void {
   discount = 0;
   cashIn = 0;
   cashTouched = false;
+  simpanKeranjang(); // "Bersihkan" ikut menulis localStorage — reload tidak boleh memulihkan baris yang sudah dibersihkan
   paintCart();
   const disc = host?.querySelector<HTMLInputElement>('#pos-discount');
   if (disc) disc.value = '';
   host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+}
+
+/* ---------- keranjang persisten (putaran 16, 2026-10-06) ---------- */
+
+/** Snapshot keranjang untuk localStorage `ravaa.keranjang` (per device, tulis sinkron —
+ *  tanpa endpoint API). Permintaan pemilik 2026-10-06: "produk yang berada di
+ *  keranjang jika kasir pindah ke halaman dashboard atau tidak sengaja
+ *  terrefresh barang tidak hilang/keranjang tidak kosong". Yang ikut
+ *  dipersist hanya isi transaksi (baris + diskon + pelanggan); uang diterima
+ *  & mode bayar TIDAK — kepemilikan uang berlaku per pembayaran, bukan
+ *  per sesi. */
+type SimpananKeranjang = { items: CartLine[]; discount: number; customerId: number | null };
+
+/** Tulis snapshot keranjang ke localStorage `ravaa.keranjang`. SINKRON —
+ *  store.saveKeranjang memakai localStorage.setItem, jadi tidak ada antrean
+ *  yang bisa tertinggal saat kasir refresh tepat setelah mutasi (liputan
+ *  kasus "refresh tak sengaja" yang memang jadi tujuan fitur ini; tulisan
+ *  IndexedDB pernah terbukti terbuang oleh reload kilat — lihat catatan di
+ *  store.ts). Gagal menyimpan TIDAK membuang keranjang dari memori (pola
+ *  `simpanTertahan`): hanya dilaporkan SEKALI supaya localStorage yang
+ *  penuh/ditolak tidak membanjiri toast tiap ketikan. */
+let keranjangGagalLapor = false;
+function simpanKeranjang(): void {
+  try {
+    saveKeranjang({ items: cart.map((l) => ({ ...l })), discount, customerId } satisfies SimpananKeranjang);
+  } catch {
+    if (!keranjangGagalLapor) {
+      keranjangGagalLapor = true;
+      toast('Gagal menyimpan keranjang — isi bisa hilang saat refresh', 'error');
+    }
+  }
+}
+
+/** Pulihkan isi localStorage `ravaa.keranjang` ke state POS saat mount
+ *  (reload / perangkat baru). PANGGIL HANYA saat `cart` kosong — navigasi
+ *  dalam-aplikasi mempertahankan isi memori apa adanya.
+ *
+ *  Validasi mengikuti pola `muatHold()` (key `manual:<n>` didorong melampaui
+ *  seq tertinggi; diskon transaksi lewat `clampDiskonTransaksi()`). Tambahan
+ *  khusus keranjang — bisa bertahan lama, bukan hitungan menit seperti hold:
+ *  - baris produk yang sudah dihapus/ditombstone di server DIBUANG — kalau
+ *    dibiarkan, `pay()` mentok 400 "produk tidak dikenal" pada baris yang
+ *    tak bisa dijual lagi;
+ *  - harga baris non-dinamis disamakan dengan cache master — harga
+ *    non-dinamis DIKUNCI server, jadi tampilan harus sama dengan yang akan
+ *    ditagih;
+ *  - diskon baris dijepit ulang ke jumlah baris (harga mungkin berubah).
+ *  Pelanggan TIDAK divalidasi di sini — `mountPosPage` melakukannya SETELAH
+ *  master `customers` dimuat. Return true bila ada isi yang dipulihkan. */
+function muatKeranjang(): boolean {
+  const s = getKeranjang<SimpananKeranjang>();
+  if (!s?.items?.length) return false;
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const items: CartLine[] = [];
+  let dibuang = 0;
+  for (const l of s.items) {
+    if (l.product_id !== null) {
+      const p = byId.get(l.product_id);
+      if (!p) {
+        dibuang++;
+        continue;
+      }
+      if (!p.price_dynamic) l.price = p.price;
+    }
+    l.note = (l.note ?? '').slice(0, 200);
+    l.discount = Math.min(Math.max(0, Math.round(l.discount || 0)), jumlahBaris(l));
+    items.push(l);
+  }
+  cart = items;
+  discount = Math.max(0, Math.round(s.discount || 0));
+  customerId = s.customerId ?? null;
+  for (const l of cart) {
+    const m = /^manual:(\d+)$/.exec(l.key);
+    if (m) manualSeq = Math.max(manualSeq, Number(m[1]));
+  }
+  clampDiskonTransaksi(); // diskon transaksi > sisa subtotal (harga berubah) dijepit sebelum paint
+  if (dibuang) toast(`${dibuang} baris dibuang — produknya sudah dihapus dari katalog`, 'info');
+  if (cart.length) toast(`Keranjang dipulihkan — ${cart.length} baris`, 'success');
+  return cart.length > 0;
 }
 
 /* ---------- tahan / pending (fitur P5) ---------- */
@@ -1688,6 +1774,7 @@ async function tahanKeranjang(): Promise<void> {
   customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
   const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
   if (sel) sel.value = customerId === null ? '' : String(customerId);
+  simpanKeranjang(); // sinkronkan pelanggan bawaan (isi kosong sudah ditulis bersihkanKeranjang)
   paintCart();
   toast(`Transaksi ditahan — ${holds.length} tertahan`, 'info');
 }
@@ -1721,6 +1808,7 @@ async function muatHold(h: Hold): Promise<void> {
     const m = /^manual:(\d+)$/.exec(l.key);
     if (m) manualSeq = Math.max(manualSeq, Number(m[1]));
   }
+  simpanKeranjang(); // isi keranjang kini = isi hold — tulis ke localStorage (konfirmasi ganti sudah lewat)
   holds = holds.filter((x) => x.id !== h.id);
   await simpanTertahan();
   cashIn = 0;
@@ -2276,6 +2364,7 @@ function openCariPelanggan(): void {
         customerId = c.id;
         const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
         if (sel) sel.value = String(c.id);
+        simpanKeranjang(); // pilihan pelanggan tanpa repaint — tulis eksplisit
         api.close();
         focusScan(); // pola addProduct: kembali ke kolom scan utk transaksi
       };
@@ -2402,6 +2491,7 @@ function openManualItem(): void {
           // menandai produk katalog, mis. Cetak Banner — bukan jasa dadakan).
           useNote: false, note: '',
         });
+        simpanKeranjang();
         api.close();
         paintCart();
         host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
@@ -2605,6 +2695,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
     const selCust = host?.querySelector<HTMLSelectElement>('#pos-customer');
     if (selCust) selCust.value = customerId === null ? '' : String(customerId);
+    simpanKeranjang(); // penjualan sukses = keranjang kosong di localStorage (reload berikutnya tidak memulihkan nota ini)
     toast(
       `Terjual ${res.data.sale.invoice_no ?? res.data.sale.id.slice(0, 8)} · ${rp(res.data.sale.total)}` +
         (kembalian > 0 ? ` · kembalian ${rp(kembalian)}` : '') +
@@ -3182,7 +3273,10 @@ function bindCart(): void {
     const inp = (e.target as HTMLElement).closest<HTMLInputElement>('[data-act="note"]');
     if (!inp) return;
     const line = cart.find((l) => l.key === inp.dataset.key);
-    if (line) line.note = inp.value.slice(0, 200);
+    if (line) {
+      line.note = inp.value.slice(0, 200);
+      simpanKeranjang(); // tanpa repaint — tulis eksplisit supaya catatan ikut pulih
+    }
   });
 
   host!.querySelector('#pos-discount')?.addEventListener('input', (e) => {
@@ -3195,6 +3289,7 @@ function bindCart(): void {
       discount = maks;
       (e.target as HTMLInputElement).value = String(discount);
     }
+    simpanKeranjang();
     paintCart();
   });
 
@@ -3214,6 +3309,7 @@ function bindCart(): void {
   host!.querySelector('#pos-customer')?.addEventListener('change', (e) => {
     const v = (e.target as HTMLSelectElement).value;
     customerId = v ? Number(v) : null;
+    simpanKeranjang(); // ganti pelanggan tanpa repaint — tulis eksplisit
   });
 
   host!.querySelector('#pos-clear')?.addEventListener('click', () => bersihkanKeranjang());
@@ -3286,8 +3382,18 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   topAdminTouched = false;
   topTunai = 0;
   results = [];
-  cart = [];
-  discount = 0;
+  // KERPERSISTEN (putaran 16, 2026-10-06 — permintaan pemilik: "produk yang
+  // berada di keranjang jika kasir pindah ke halaman dashboard atau tidak
+  // sengaja terrefresh barang tidak hilang/keranjang tidak kosong"):
+  // keranjang TIDAK lagi direset mentah di sini. Navigasi dalam-aplikasi
+  // (hash route TANPA reload dokumen) mempertahankan isi memori apa adanya;
+  // bila kosong (reload / perangkat baru) isi dipulihkan dari localStorage lewat
+  // muatKeranjang() setelah master pelanggan siap (validasi id butuh
+  // `customers`). Uang diterima & mode bayar TIDAK ikut: form transaksi
+  // berikutnya selalu buka kolom uang kosong (putaran 10d) — kepemilikan
+  // uang berlaku per pembayaran, bukan per sesi.
+  const keranjangAda = cart.length > 0;
+  if (!keranjangAda) discount = 0;
   cashIn = 0;
   busy = false;
   await loadShift();
@@ -3301,7 +3407,14 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   } catch {
     customers = [];
   }
-  customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
+  if (!keranjangAda) muatKeranjang(); // localStorage kosong = no-op; terisi = ganti cart/discount/customerId
+  // Pelanggan terpilih wajib ada di master terkini: id lama (kontak dihapus
+  // sejak mount terakhir / kv lama) jatuh ke Pelanggan Umum — pola muatHold.
+  // null saat customers kosong dibiarkan (payload tanpa customer_id sah).
+  if (!customers.some((c) => c.id === customerId)) {
+    customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
+  }
+  if (cart.length) simpanKeranjang(); // sinkronkan localStorage dengan state tervalidasi di atas
   // Daftar transaksi tertahan (P5) dari IndexedDB per device. Gagal/IDB
   // rusak = daftar kosong — fitur hold tetap bisa dipakai dari kosong.
   try {

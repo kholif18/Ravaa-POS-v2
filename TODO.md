@@ -498,6 +498,41 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
 - Docs ikut: AGENTS §2 (deskripsi `pilihCetakSelesai` + kartu Cetak struk),
   README (judul butir "Modal resume + pilihan cetak" + kartu Sistem),
   `print-pref.ts` doc `getAutoPrint()`.
+- ✅ **Putaran 16 — keranjang PERSISTEN: selamat dari refresh & pindah
+  halaman** (instruksi pemilik 2026-10-06: *"produk yang berada di keranjang
+  jika kasir pindah ke halaman dashboard atau tidak sengaja terrefresh
+  barang tidak hilang/keranjang tidak kosong"* — dikerjakan lebih dulu
+  sebelum bahas daftar Menyusul):
+  1. **Penyimpanan: localStorage sinkron `ravaa.keranjang`** (`store.ts`
+     `getKeranjang()`/`saveKeranjang()`) — **BUKAN** kv IndexedDB seperti
+     holds. Kasus kanoniknya justru refresh kilat setelah mutasi; tulisan
+     IndexedDB (open+tx async) terbukti empiris terbuang oleh `reload()`
+     <16ms sehingga isi LAMA terbaca lagi saat mount (kebukti saat menulis
+     test section H: clear + reload langsung → qty section G ter-marshal
+     kembali → total barrier Rp38.000). Pola outbox `ravaa.outbox.v1`
+     memakai localStorage karena alasan yang sama.
+  2. **`simpanKeranjang()` (pos.ts)**: snapshot `{items, discount,
+     customerId}` pada SETIAP titik mutasi — `addLine`/`setQty`/`setDisc`,
+     input catatan, diskon transaksi, select pelanggan + pilih F9, item
+     manual, `bersihkanKeranjang`, `muatHold`, `tahanKeranjang`, reset
+     `pay()` sukses. Gagal = toast sekali-per-sesi, memori dipertahankan
+     (pola `simpanTertahan`). Uang diterima/mode bayar TIDAK ikut (per
+     pembayaran, bukan per sesi).
+  3. **`muatKeranjang()` di `mountPosPage`** — HANYA saat `cart` memori
+     kosong (navigasi hash tanpa reload mempertahankan memori; reset mentah
+     `cart = []` dibuang dari mount). Setelah master customers dimuat:
+     validasi id (pola `muatHold`), **buang baris tombstone** (pay akan 400
+     "produk tidak dikenal"), **samakan harga non-dinamis** ke cache
+     (dikunci server), clamp diskon baris + `clampDiskonTransaksi()`,
+     dorong `manualSeq`, toast "Keranjang dipulihkan — N baris".
+  4. **Test**: section M `e2e-struk.mjs` (8 asersi: baseline kosong, isi +
+     reload → pulih baris/total/diskon/toast, nav dashboard↔POS utuh,
+     Bersihkan persisten); **section H & J reload kini didahului
+     `#pos-clear`** (cart sengaja penuh di sana — tujuannya sync master,
+     bukan pemulihan; tanpa clear, restore menggandakan qty). Ekspek 125 →
+     **133**; **`npm test` 915 SEMUA HIJAU** + tsc + build lolos. Docs:
+     AGENTS §2 `store.ts` + `pos.ts`, README butir "Keranjang tahan
+     refresh".
 
 **Gap analysis KulaPOS vs Ravaa POS (2026-10-04)** — sumber: `kula-01..12*.png`
 (khususnya `kula-02-transaksi-pos.png`, `kula-07-pos-kasir.png`) +

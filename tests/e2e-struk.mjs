@@ -544,8 +544,15 @@ try {
   ok('API: use_note=1 tersimpan & version naik', setNote.s === 201 && setNote.j?.data?.use_note === 1,
     JSON.stringify({ s: setNote.s, use_note: setNote.j?.data?.use_note }));
 
-  // Reload = mount ulang POS -> delta sync menarik use_note=1 ke cache;
-  // keranjang juga dikosongkan oleh state in-memory.
+  // Reload = mount ulang POS -> delta sync menarik use_note=1 ke cache.
+  // Keranjang PERSISTEN (putaran 16, localStorage sinkron) — kosongkan dulu,
+  // supaya section H mulai dari keranjang bersih dan tidak memulihkan 2 baris
+  // sisa section G (tujuan test di sini = sync master, bukan pemulihan
+  // keranjang; perilaku pemulihan diuji di section M).
+  if (await page.locator('#pos-rows tr[data-key]:not(.note-row)').count()) {
+    await page.click('#pos-clear');
+    await page.waitForFunction(() => !document.querySelectorAll('#pos-rows tr[data-key]:not(.note-row)').length);
+  }
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 20000 });
 
@@ -686,7 +693,15 @@ try {
   const ledPre = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();
   for (const r of ledPre.data?.rows ?? []) await fetch(`${API}/api/customer-debts/${r.id}`, { method: 'DELETE' });
   // Select pelanggan diinfo bar dirender saat mount -> reload supaya pelanggan
-  // baru ikut masuk daftar (pola sama dengan section H).
+  // baru ikut masuk daftar (pola sama dengan section H). Keranjang masih
+  // memuat 1 baris PRD00013 sisa barrier langkah 3 di atas (pay ditolak =
+  // cart dipertahankan) — kosongkan dulu: putaran 16 membuatnya persisten,
+  // tanpa clear ini reload akan memulihkannya lalu langkah 4 jadi qty 2 /
+  // total Rp8.000, bukan Rp4.000 (semua asersi hutang di bawah patah).
+  if (await page.locator('#pos-rows tr[data-key]:not(.note-row)').count()) {
+    await page.click('#pos-clear');
+    await page.waitForFunction(() => !document.querySelectorAll('#pos-rows tr[data-key]:not(.note-row)').length);
+  }
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 20000 });
   await page.selectOption('#pos-customer', String(cidJ));
@@ -910,6 +925,85 @@ try {
   if (chInv.j?.data?.id) {
     await fetch(`${API}/api/customer-debts/${chInv.j.data.id}`, { method: 'DELETE' });
   }
+
+  // ——— Section M: keranjang persisten (putaran 16, 2026-10-06) ———
+  // Permintaan pemilik: "produk yang berada di keranjang jika kasir pindah ke
+  // halaman dashboard atau tidak sengaja terrefresh barang tidak hilang /
+  // keranjang tidak kosong". Sumber kebenaran = localStorage `ravaa.keranjang`
+  // (store.ts getKeranjang/saveKeranjang, TULIS SINKRON — bukan antrean
+  // IndexedDB yang bisa terbuang reload kilat) yang ditulis tiap mutasi
+  // (pos.ts simpanKeranjang) dan dipulihkan mountPosPage -> muatKeranjang()
+  // saat cart memori kosong.
+  console.log('=== M. Keranjang persisten (reload + pindah halaman) ===');
+  await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
+  await page.waitForSelector('#pos-q', { timeout: 15000 });
+  // Titik awal deterministik: buang sisa section sebelumnya (bila ada) —
+  // tombol Bersihkan ikut menulis localStorage, jadi sesudahnya benar-benar kosong.
+  if (await page.locator('#pos-rows tr[data-key]:not(.note-row)').count()) {
+    await page.click('#pos-clear');
+    await page.waitForFunction(() => !document.querySelectorAll('#pos-rows tr[data-key]:not(.note-row)').length);
+  }
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#pos-q', { timeout: 20000 });
+  const kosongM = (await page.locator('#pos-rows tr[data-key]:not(.note-row)').count()) === 0;
+  ok('M: baseline — reload saat penyimpanan kosong = keranjang kosong', kosongM);
+
+  // Isi keranjang + diskon transaksi, ukur sebelum reload.
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.fill('#pos-discount', '500');
+  const sebelumM = {
+    baris: await page.locator('#pos-rows tr[data-key]:not(.note-row)').count(),
+    grand: norm(await page.innerText('#pos-grand')),
+    disc: await page.inputValue('#pos-discount'),
+  };
+  ok('M: keranjang terisi sebelum reload (1 baris + diskon 500)',
+    sebelumM.baris >= 1 && sebelumM.disc === '500', JSON.stringify(sebelumM));
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#pos-q', { timeout: 20000 });
+  let pulihToast = false;
+  try {
+    await page.waitForFunction(
+      () => document.querySelector('#toast-root')?.textContent?.includes('Keranjang dipulihkan'),
+      { timeout: 5000 },
+    );
+    pulihToast = true;
+  } catch { /* toast lewat sebelum sempat dibaca — asersi data di bawah yang menentukan */ }
+  ok('M: reload -> toast "Keranjang dipulihkan" muncul', pulihToast);
+  const sesudahM = {
+    baris: await page.locator('#pos-rows tr[data-key]:not(.note-row)').count(),
+    grand: norm(await page.innerText('#pos-grand')),
+    disc: await page.inputValue('#pos-discount'),
+  };
+  ok('M: reload -> baris keranjang pulih (tidak kosong)',
+    sesudahM.baris === sebelumM.baris && sesudahM.baris >= 1, JSON.stringify({ sebelumM, sesudahM }));
+  ok('M: reload -> TOTAL BELANJA identik', sesudahM.grand === sebelumM.grand,
+    `${sebelumM.grand} -> ${sesudahM.grand}`);
+  ok('M: reload -> diskon transaksi ikut pulih', sesudahM.disc === '500', sesudahM.disc);
+
+  // Pindah halaman = hash route TANPA reload dokumen -> mountPosPage ulang;
+  // isi memori dipertahankan, keranjang tidak boleh hilang.
+  await page.goto('http://localhost:5656/#/dashboard', { waitUntil: 'load' });
+  await page.waitForSelector('#db-reload', { timeout: 15000 });
+  await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
+  await page.waitForSelector('#pos-q', { timeout: 15000 });
+  const navM = {
+    baris: await page.locator('#pos-rows tr[data-key]:not(.note-row)').count(),
+    grand: norm(await page.innerText('#pos-grand')),
+  };
+  ok('M: pindah ke Dashboard lalu kembali = keranjang utuh',
+    navM.baris === sebelumM.baris && navM.grand === sebelumM.grand, JSON.stringify(navM));
+
+  // "Bersihkan" menulis isi kosong -> reload sesudahnya TETAP kosong.
+  await page.click('#pos-clear');
+  await page.waitForFunction(() => !document.querySelectorAll('#pos-rows tr[data-key]:not(.note-row)').length);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#pos-q', { timeout: 20000 });
+  const tetapKosong = (await page.locator('#pos-rows tr[data-key]:not(.note-row)').count()) === 0;
+  ok('M: "Bersihkan" persisten — reload sesudahnya tetap kosong', tetapKosong);
 
   ok('tanpa error halaman', errs.length === 0, errs.slice(0, 3));
 } catch (e) {

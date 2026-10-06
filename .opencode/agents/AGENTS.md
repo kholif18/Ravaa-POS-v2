@@ -37,7 +37,15 @@ apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync)
                          + **kv `'holds'` transaksi tertahan POS** (`getHolds()`/
-                         `saveHolds()` — per device, P5).
+                         `saveHolds()` — per device, P5)
+                         + **`ravaa.keranjang` isi keranjang aktif POS**
+                         (`getKeranjang()`/`saveKeranjang()` — **localStorage
+                         TULIS SINKRON**, putaran 16 — sengaja BUKAN kv
+                         IndexedDB seperti holds: kasus kanonik = refresh kilat
+                         setelah mutasi, tulisan IndexedDB yang open+tx async
+                         bisa terbuang sebelum sampai; pola outbox
+                         `ravaa.outbox.v1` memakai localStorage karena alasan
+                         sama).
 apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           referensi KulaPOS (kula-02-transaksi-pos.png):
                           info bar → scan bar (+ Mode) → label keranjang →
@@ -420,11 +428,48 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           `tests/e2e-struk.mjs` `pilihCetak()` bergantung
                           padanya; helper `jual()` kini SELALU membaca isi
                           resume + menutup dialog (`pilihan:'Escape'` =
-                          tutup via Esc, 112 asersi). Topup/tarik
-                          tetap TANPA dialog. Ikon label info bar dipegang CSS
-                          `.info-bar svg { size-4 }` di `styles.css` (pola
-                          `.chip svg` — `icon()` tidak menulis width/height).
-apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
+                           tutup via Esc; e2e-struk 133 asersi). Topup/tarik
+                           tetap TANPA dialog. Ikon label info bar dipegang CSS
+                           `.info-bar svg { size-4 }` di `styles.css` (pola
+                           `.chip svg` — `icon()` tidak menulis width/height).
+                          **Keranjang PERSISTEN (putaran 16, 2026-10-06,
+                          permintaan pemilik: "produk yang berada di keranjang
+                          jika kasir pindah ke halaman dashboard atau tidak
+                          sengaja terrefresh barang tidak hilang/keranjang
+                          tidak kosong")**: snapshot `{items, discount,
+                          customerId}` ditulis **sinkron** ke localStorage
+                          `ravaa.keranjang` oleh `simpanKeranjang()` pada
+                          SETIAP titik mutasi — `addLine`/`setQty`/`setDisc`,
+                          input catatan & diskon transaksi & select pelanggan
+                          (ketiganya tanpa repaint → tulis eksplisit), pilih
+                          F9, item manual, `bersihkanKeranjang`, `muatHold`,
+                          `tahanKeranjang` (sinkron pelanggan bawaan), dan
+                          reset `pay()` sukses. **Gagal save** = toast
+                          sekali-per-sesi, isi memori TETAP (pola
+                          `simpanTertahan`). **Restore `muatKeranjang()` di
+                          `mountPosPage` HANYA saat `cart` memori kosong**
+                          (navigasi hash TANPA reload dokumen mempertahankan
+                          memori apa adanya — `cart = []` mentah sudah dibuang
+                          dari mount); setelah master customers dimuat:
+                          validasi id pelanggan (pola `muatHold`), **buang
+                          baris produk tombstone** (kalau dibiarkan `pay()`
+                          mentok 400 "produk tidak dikenal"), **samakan harga
+                          non-dinamis** ke cache (harga non-dinamis dikunci
+                          server), clamp diskon baris ke jumlah baris +
+                          `clampDiskonTransaksi()`, dorong `manualSeq` dari
+                          key `manual:<n>`, toast **"Keranjang dipulihkan — N
+                          baris"**. Uang diterima & mode bayar TIDAK ikut
+                          dipersist (kepemilikan uang per pembayaran, bukan
+                          per sesi); uang diterima selalu buka kolom kosong
+                          (putaran 10d). E2E `tests/e2e-struk.mjs` **section
+                          M** (8 asersi, total 133): baseline kosong → isi
+                          + reload → pulih (baris/total/diskon/toast) → nav
+                          `#/dashboard`↔`#/pos` utuh → Bersihkan persisten;
+                          **section H/J kini `#pos-clear` dulu sebelum
+                          reload** (cart sengaja penuh di sana untuk uji sync
+                          master — tanpa clear, restore menggandakan qty dan
+                          barrier menolak dengan total membengkak).
+ apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS
                           (7x GET /api/reports/daily paralel), status shift

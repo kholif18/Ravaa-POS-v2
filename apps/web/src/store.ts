@@ -166,3 +166,36 @@ export async function getHolds<T>(): Promise<T[]> {
 export async function saveHolds(holds: unknown): Promise<void> {
   await kvSet('holds', holds);
 }
+
+/* ---------- keranjang aktif (POS, putaran 16) ---------- */
+
+const KEY_KERANJANG = 'ravaa.keranjang';
+
+/** Isi keranjang POS (baris + diskon transaksi + pelanggan) — SIMPANAN PER
+ *  DEVICE, key `ravaa.keranjang` (permintaan pemilik 2026-10-06: "produk yang
+ *  berada di keranjang jika kasir pindah ke halaman dashboard atau tidak
+ *  sengaja terrefresh barang tidak hilang/keranjang tidak kosong").
+ *
+ *  Sengaja localStorage (WRITE SINKRON), BUKAN IndexedDB seperti holds:
+ *  kasus kanonik fitur ini = refresh tak sengaja tepat setelah mutasi.
+ *  Tulisan IndexedDB baru selesai beberapa saat setelah panggilan — reload
+ *  yang datang lebih cepat membuangnya dan isi LAMA terbaca lagi saat mount
+ *  (terbukti empiris saat menulis test putaran 16: clear + reload langsung =
+ *  isi lama terbaca kembali). localStorage.setItem kembali sebelum baris
+ *  kode berikutnya jadi nilai selalu sampai. Pola outbox (`ravaa.outbox.v1`
+ *  di api.ts) memakai localStorage karena alasan yang sama.
+ *
+ *  Disimpan `simpanKeranjang()` pada tiap mutasi & dipulihkan
+ *  `mountPosPage` -> `muatKeranjang()` di pages/pos.ts. Tipe barisnya
+ *  didefinisikan di sana (`SimpananKeranjang`) — store ini sengaja generik. */
+export function getKeranjang<T>(): T | undefined {
+  try {
+    const s = localStorage.getItem(KEY_KERANJANG);
+    return s ? (JSON.parse(s) as T) : undefined;
+  } catch {
+    return undefined; // rusak/kosong = mulai dari keranjang kosong
+  }
+}
+export function saveKeranjang(value: unknown): void {
+  localStorage.setItem(KEY_KERANJANG, JSON.stringify(value)); // lempar ke pemanggil bila penuh/ditolak
+}

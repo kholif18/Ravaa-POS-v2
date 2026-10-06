@@ -250,6 +250,22 @@ npm run dev:api
       karena F2/F3 sudah dipakai Bayar/Layar cari, jadi Tahan tidak bisa
       memakai F3 seperti KulaPOS. Tombolnya ikut berlabel `F7`.
       Teruji `tests/pos-qtykode-test.mjs` (24 asersi).
+    * **Keranjang tahan refresh (putaran 16, 2026-10-06)** — permintaan
+      pemilik: *"produk yang berada di keranjang jika kasir pindah ke
+      halaman dashboard atau tidak sengaja terrefresh barang tidak
+      hilang/keranjang tidak kosong"*. Setiap perubahan keranjang (baris,
+      qty, diskon baris & transaksi, catatan, pelanggan) langsung ditulis
+      **sinkron** ke localStorage `ravaa.keranjang` (`simpanKeranjang()`;
+      sinkron supaya refresh kilat tepat setelah mutasi pun sempat
+      tersimpan — tulisan IndexedDB yang lebih lambat pernah terbukti
+      terbuang oleh reload). Saat POS dibuka ulang `muatKeranjang()`
+      memulihkannya: baris produk yang sudah dihapus dari katalog dibuang,
+      harga non-dinamis disamakan dengan master, diskon dijepit ulang, lalu
+      toast **"Keranjang dipulihkan — N baris"**. Pindah halaman
+      (dashboard ↔ POS) mempertahankan isi memori tanpa perlu reload;
+      **Bersihkan** menulis ulang jadi kosong. Uang diterima & mode bayar
+      tidak ikut (milik per pembayaran). Teruji `tests/e2e-struk.mjs`
+      section M.
     * **F1 / F8 / F9 / F10 / F12** — pintasan putaran 5–7 (2026-10-04): **F1**
       & **F8** fokus balik ke kolom scan (**F1** = referensi KulaPOS
       *"Jumlah Beli * Kode [F1/Cmd+K]"*; **F8** = alias jalan pendek satu tekan
