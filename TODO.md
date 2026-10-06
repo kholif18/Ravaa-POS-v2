@@ -393,15 +393,108 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
   ada di ringkasan sesi — kandidat berikutnya: Buka Laci Kasir (ESC/POS drawer
   kick via print-agent), `Lihat Struk ›` pratinjau (tunda). Test: +2 asersi
   (subtitle, jam) → `e2e-struk` 114, **`npm test` 894 SEMUA HIJAU**.
-- 📌 **Putaran berikutnya (instruksi pemilik 2026-10-06, BELUM dikerjakan) —
-  piutang otomatis**: bila **uang kurang ATAU uang 0** → penjualan **otomatis
-  masuk ke hutang** (charge ledger `customer_debts`, pola `pay({hutang:true})`
-  yang ada) dengan **SYARAT wajib customer terpilih** (bukan bawaan
-  "Pelanggan Umum"). Beda dengan perilaku sekarang (uang kurang = konfirmasi
-  swal dulu; uang 0 = ditolak barrier "Uang diterima belum diisi") —
-  nanti: otomatis tanpa konfirmasi, tapi tolak bila customer belum dipilih.
-  Diskusikan detail: apakah uang 0 berlaku hanya tunai / semua metode, dan
-  bagaimana pesan error bila customer belum terpilih.
+- ✅ **Putaran 12 — piutang OTOMATIS: uang kurang / uang 0 → hutang**
+  (instruksi pemilik 2026-10-06: "jika uang kurang / uang 0 akan otomatis
+  masuk ke hutang dengan catatan harus terpilih customer"; menggantikan
+  backlog 📌 di bawah ini):
+  1. **`pay()` barrier** — pelanggan MEMENUHI syarat (`cekHutangDiperbolehkan()`
+     = "") → `pay({hutang:true})` **langsung, tanpa `confirmDialog`** (dialog
+     "Uang kurang — catat jadi hutang?" DIHAPUS). Pelanggan tidak memenuhi →
+     penolakan barrier persis + **alasan ikut disisipkan** ke toast
+     (`"Uang diterima belum diisi — <alasan cekHutang>"` /
+     `"…kurang dari total RpX — <alasan>"` — prefix dipertahankan, test
+     lama tetap cocok).
+  2. **Resume** — `htmlResumePenjualan()` menerima `hutang?: number` →
+     **baris `Hutang` merah** (font-semibold red-600) di bawah baris Tunai —
+     pengganti fungsi informatif konfirmasi swal yang dihapus; struk & toast
+     `· hutang RpX (nama)` sudah ada dari putaran 2026-10-04.
+  3. **Hint form bayar** diperbarui: "Uang kurang / uang 0 **otomatis** jadi
+     **hutang** — asal pelanggan terpilih bukan 'Pelanggan Umum'".
+  4. **Test section J** dirombak: dialog konfirmasi DIHAPUS dari alur →
+     (a) uang kurang+umum tetap ditolak; (b) uang kurang+valid → **langsung
+     resume** (assert TIDAK ada judul dialog lama) + baris HUTANG Rp1.000;
+     (c) **case baru uang 0** (kolom tak diisi) → resume Hutang Rp4.000 +
+     nota cash_in 0 + ledger sisa Rp5.000 (2 charge); cleanup kini fetch
+     ulang ledger (2 baris). `tungguCetak(10)` menambah 1 asersi bawaan →
+     ekspek `e2e-struk` 114 → **118**; **`npm test` 898 SEMUA HIJAU** +
+     tsc + build lolos. Docs: AGENTS §2+§3, README butir HUTANG.
+- ✅ **Putaran 13 — penanda HUTANG di Riwayat transaksi** (instruksi pemilik
+  2026-10-06: "riwayat transaksi tambahkan kalau itu hutang, beri tanda untuk
+  mudah mencari yang transaksi hutang, dan juga langsung tercatat otomatis di
+  halaman hutang"):
+  1. **Server** — `GET /api/sales` (daftar) dan `GET /api/sales/:id` (rincian)
+     menambah field computed **`sisa_hutang`**: `CASE WHEN pay_method='tunai'
+     AND total > cash_in AND customer_id IS NOT NULL AND customer_name <>
+     'Pelanggan Umum' THEN total - cash_in ELSE 0 END` — syaratnya PERSIS
+     kondisi catat-hutang otomatis POS (putaran 12), dari snapshot nota (tanpa
+     JOIN ledger — `customer_debts` tak punya FK ke `sales`). Maknanya =
+     **kejadian berhutang saat nota**, bukan saldo live; saldo aktual tetap
+     dari halaman Hutang. (`s.*` sudah ikut membawa `customer_id`/
+     `customer_name`.)
+  2. **Riwayat UI** (`history.ts`) — **chip merah `Hutang RpX`** di kolom Jenis
+     (`chipHutang()`, gaya `!border-red-500/40` sama dengan halaman Hutang;
+     title berisi pelanggan + nomor nota), **kotak merah Hutang** di kartu
+     Pembayaran rincian + baris "Otomatis tercatat di halaman Hutang — Nota …",
+     dan **chip filter `#h-hutang` "Hutang (n)"** di kepala() →
+     `state.hutangOnly` menyaring linimasa client-side (topup/tarik ikut
+     tersingkir; empty-state & caption khusus; sengaja bukan elemen `[data-h]`
+     supaya tidak tertangkap handler geser tanggal).
+  3. **Bukti poin-3 pemilik** (charge otomatis ke halaman Hutang) sudah jalan
+     sejak putaran 12 — dipertegas di test: baris rincian menunjuk halaman
+     Hutang, dan ledger-nya diuji section J (`2 charge`, sisa Rp5.000).
+  4. **Test** — section J +1 asersi (`sisa_hutang` di daftar & `/:id` =
+     Rp1.000/Rp4.000 + customer snapshot), **section L baru** (buka
+     `#/history` → penanda per baris ≥2 → filter `#h-hutang` menyisakan hanya
+     baris berhutang + caption "disaring" → rincian kotak Hutang + teks
+     "halaman Hutang"). Ekspek `e2e-struk` 118 → **122**; **`npm test` 902
+     SEMUA HIJAU** + tsc + build lolos. Docs: AGENTS §2 history.ts + §3
+     `GET /api/sales` (field + butir `sisa_hutang`) + `GET /api/sales/:id`,
+     README butir Riwayat.
+- ✅ **Putaran 14 — HUTANG di invoice A4** (instruksi pemilik 2026-10-06:
+  "pada invoice silakan sesuaikan tambahkan hutang jika pelanggan berhutang";
+  rujukan komentar halaman Hutang soal tombol Bayar per baris):
+  1. **Payment status jujur** — `Belum lunas` bila `sale.sisa_hutang > 0`
+     (snapshot nota INI, field putaran 13), selain itu `Lunas` (dulu
+     selalu "Lunas" — salah untuk nota uang kurang/0 putaran 12).
+  2. **Baris `Hutang:` merah** di rincian Payment method invoice
+     (setelah Paid amount, sebelum Change) memuat sisa nota — CSS
+     `.bayar .baris.hutang` `#b91c1c`.
+  3. **Baris kotak `Sisa hutang (semua nota)`** = ledger halaman Hutang
+     pelanggan (`cetakInvoice()` kini ikut fetch
+     `GET /api/customer-debts/:customerId` — hanya bila `customer_id` ada;
+     gagal/absen -> 0 -> baris gugur, **cetak tidak dibatalkan**). Tampil
+     bila > 0 DAN ≠ hutang nota (tanpa syarat itu nota lunas dengan piutang
+     lama + nota berhutang sendiri jadi menampilkan angka sama dua kali).
+     Mencakup kasus pelanggan berhutang dari nota lain saat mencetak ulang
+     dari Riwayat.
+  4. **Test section L** +3 asersi: charge ledger uji Rp7.000 (sengaja >
+     Rp4.000 nota uji) → reprint A4 nota uji (buka baris per nomor invoice,
+     toggle-safe) → assert `Belum lunas` + baris `Hutang:` + `Sisa hutang
+     (semua nota) Rp7,000.00` + print-agent tidak ikut; charge dihapus lagi
+     (bersih-bersih section J tetap 0). Ekspek `e2e-struk` 122 → **125**;
+     **`npm test` 905 SEMUA HIJAU** + tsc + build lolos. Docs: AGENTS §2
+     `invoice.ts`, README butir Pilihan A4.
+- ✅ **Putaran 15 — Cetak A4 rincian hutang: ringkas tabel garis-bawah +
+  striping semua tabel** (instruksi pemilik 2026-10-06: "bagian bawah Total
+  dihutang Rp50.000 / Total dibayar Rp30.000 / Sisa hutang Rp20.000 ini dibuat
+  garis tabel bawah saja jangan box seperti itu. dan setiap tabel buat
+  striped termasuk tabel yang atas" — merujuk `htmlHutangA4` di `debts.ts`):
+  1. **Ringkas bawah**: tiga `div.kotak` → **`<table class="ringkas">`**
+     (label tebal kolom kiri, nilai `rp()` rata kanan) — tiap baris hanya
+     **`border-bottom`** (baris terakhir #444 + tebal; TANPA garis
+     samping/atas, `.kotak`/`.kotak.sisa` dihapus dari CSS dokumen).
+  2. **Striped**: `tr:nth-child(even)` di **kedua** tabel —
+     `table.ledger` (tabel atas) + `table.ringkas` — dengan
+     `print-color-adjust: exact` di `body` supaya arsiran tetap tercetak
+     walau opsi "Background graphics" dialog cetak mati.
+  3. **Test** `customer-debt-test.mjs` section 11 (state §10 = pelanggan
+     lunas, charge Rp50.000/bayar Rp50.000): stub `window.print` context-wide
+     → klik **Cetak A4** (`.modal [data-ok]`, modal tidak auto-close) →
+     popup: assert tabel 3 baris TANPA `kotak` + label/angka + kedua aturan
+     striping + aturan garis bawah ada. Ekspek 33 → **35**;
+     **`npm test` 907 SEMUA HIJAU** + tsc + build lolos. Docs: AGENTS §2
+     `debts.ts`, README butir Cetak A4 (sekaligus perbaiki kalimat basi
+     "POS tidak punya metode bayar piutang" — basi sejak putaran 12).
 - Docs ikut: AGENTS §2 (deskripsi `pilihCetakSelesai` + kartu Cetak struk),
   README (judul butir "Modal resume + pilihan cetak" + kartu Sistem),
   `print-pref.ts` doc `getAutoPrint()`.
@@ -414,14 +507,26 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
   navigasi ↑↓ baris, Bersihkan F5, diskon faktur F6, pelanggan inline, strip
   stok/kadaluarsa, cetak struk otomatis, satuan jual, catatan per baris.
 * **Menyusul (sudah tercatat)**: P4 grid katalog, P6 biaya tambahan/voucher,
-  P7 customer display, plus kandidat kecil di section Menyusul
-  (tutup shift dari POS, ganti satuan baris, **hapus duplikat Item manual**,
-  **hapus baris Subtotal sidebar**, **cari pelanggan ala F3** — ketiganya
-  permintaan pemilik 2026-10-04 di akhir section itu).
+  P7 customer display, plus kandidat kecil di section Menyusul (kolom
+  keranjang compact, rapikan sidebar, placeholder Voucher/Cetak ulang,
+  tutup shift dari POS, ganti satuan baris). *Dibersihkan 2026-10-06*:
+  tiga kandidat lama — hapus duplikat Item manual, hapus baris Subtotal,
+  cari pelanggan ala F3 — ternyata sudah dikerjakan putaran 7 (lihat
+  Catatan putaran 7 di atas), jadi dihapus dari daftar; arah "hapus Item
+  manual" pun berputar: putaran 7 membuang yang di scan bar dan
+  mempertahankan yang di Aksi cepat (bukan sebaliknya).
 * **Ditunda keputusan pemilik**: **pajak PPN 10% + service charge**
   ("D pajak skip dulu", 2026-10-04) — butuh kolom/setting baru dan menyentuh
   `POST /api/sales`, laporan, struk, invoice; harga baris bisa diedit kasir
   (bertabrakan dengan "harga non-dinamis dikunci server").
+* **Belum pernah dibahas pemilik — login/akun kasir** (ditemukan 2026-10-06,
+  transcript KulaPOS): KulaPOS punya halaman login + ganti password + role
+  owner/kasir (segmen 00:08–01:03, 03:45, 11:33–12:45, 35:02+); Ravaa
+  sengaja tanpa akun — `apps/web/src/ui/user.ts` mencatat "Belum ada
+  akun/password … nama kasir hanya penanda perangkat, bukan login". Selaras
+  skala 1–2 kasir (AGENTS §1) tapi belum ada keputusan eksplisit; tanyakan
+  ke pemilik bila dianggap perlu (mis. PIN lindungi halaman Laporan dari
+  kasir).
 * **Di luar ruang lingkup toko ini** (dicatat, tidak dikerjakan): retur &
   garansi, pengeluaran (kas keluar), supplier/pembelian (PO), Kas In/Out,
   multi-cabang + transfer stok, payment gateway, notif struk WhatsApp,
@@ -639,23 +744,11 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah
       satuan kini = hapus baris + scan ulang. Butuh keputusan UI (chip
       satuan per baris vs dialog) — jangan disentuh tanpa itu.
-- [ ] **Hapus duplikat "Item manual"** (permintaan pemilik 2026-10-04) —
-      tombol itu muncul **DUA kali**: di scan bar (`#pos-manual`, tetap) dan
-      lagi di grid **Aksi cepat** sidebar (`#pos-qa-manual`, dipanggil
-      `bindCart()` pos.ts) → **yang di Aksi cepat dihapus** (redundan);
-      pasangannya di `pos.ts` (render `cartGridHtml` + listener) ikut
-      dibuang, bukan hanya tombolnya.
-- [ ] **Hapus baris "Subtotal" di sidebar** (permintaan pemilik 2026-10-04) —
-      `<span id="pos-subtotal">` + baris flex-nya di `cartGridHtml()` dihapus;
-      angka subtotal tetap hidup di ringkasan struk/laporan, jadi tidak ada
-      sumber data yang hilang. `paintCart()` yang menulis `#pos-subtotal`
-      ikut dibersihkan supaya tidak jadi query mati.
-- [ ] **Pelanggan bisa dicari seperti cari produk F3** (permintaan pemilik
-      2026-10-04) — `<select id="pos-customer">` sudah memuat master
-      (`GET /api/customers`) tapi daftarnya makin panjang (banyak kontak
-      supplier/pembeli) dan kasir harus men-scroll; ganti jadi pencarian
-      multi-kata seperti layar cari produk (**F3**) — pola `openCariProduk()`
-      di `pos.ts` (input + listbox + ↑↓ + Enter) atau dropdown hasil cari di
-      samping select. `customer_id` yang terpilih tetap dikirim `pay()`
-      seperti sekarang (server yang men-SNAPSHOT `customer_name`), jadi ini
-      **murni UI** — tidak menyentuh kontrak API.
+
+*Catatan pembersihan 2026-10-06*: tiga item lama di akhir section ini —
+hapus duplikat "Item manual", hapus baris "Subtotal" sidebar, cari pelanggan
+ala F3 — DIHAPUS karena sudah dikerjakan putaran 7 2026-10-04 (lihat Catatan
+putaran 7 di atas; bukti test `e2e-struk.mjs` section K). Arah "hapus Item
+manual" memang berputar: putaran 7 membuang yang di scan bar, mempertahankan
+yang di Aksi cepat — jadi keputusan lama "yang di Aksi cepat dihapus" tidak
+pernah dilaksanakan dan tidak perlu.

@@ -15,8 +15,9 @@
 //   3. Bayar: POST /api/sales (idempotent per uuid). Isian bayar ada di
 //      FORM BAYAR (modal, bukaBayar — putaran 10: layout 2 panel ala Ravaa
 //      POS v1, lihat formBayarHtml()) — side panel hanya tombol Bayar F10 dan
-//      Bayar pas F12 (tepat di bawahnya). Uang kurang boleh berujung HUTANG
-//      asal pelanggan terpilih bukan bawaan "Pelanggan Umum" (lihat pay()).
+//      Bayar pas F12 (tepat di bawahnya). Uang kurang / uang 0 = HUTANG
+//      OTOMATIS (putaran 12) asal pelanggan terpilih bukan bawaan
+//      "Pelanggan Umum" (lihat pay() + cekHutangDiperbolehkan()).
 //
 // Pintasan level document (bindPintasan): F2 bayar, F3 cari, F4 qty
 // berikutnya, F5 bersihkan, F6 diskon transaksi, F7 tahan, F8 fokus kolom
@@ -251,6 +252,11 @@ function htmlResumePenjualan(o: {
   metode: PayMethod;
   uang: number;
   tot: number;
+  /** Sisa yang tercatat sebagai HUTANG (putaran 12) — tampil sebagai baris
+   *  merah di bawah baris Tunai supaya kasir melihatnya tanpa buka halaman
+   *  Hutang (pengganti info konfirmasi swal yang dihapus). 0/absen = tanpa
+   *  baris. */
+  hutang?: number;
 }): string {
   const batas = 5;
   const baris = o.items
@@ -280,7 +286,11 @@ function htmlResumePenjualan(o: {
       ${baris.join('\n      ')}
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
       <div class="flex items-baseline justify-between gap-4 font-bold text-gray-900 dark:text-white"><span>Total</span><span class="tabular-nums shrink-0">${rp(o.tot)}</span></div>
-      <div class="flex items-baseline justify-between gap-4"><span>${o.metode === 'tunai' ? 'Tunai' : labelMetode(o.metode)}</span><span class="tabular-nums shrink-0">${o.metode === 'tunai' ? rp(o.uang) : rp(o.tot)}</span></div>
+      <div class="flex items-baseline justify-between gap-4"><span>${o.metode === 'tunai' ? 'Tunai' : labelMetode(o.metode)}</span><span class="tabular-nums shrink-0">${o.metode === 'tunai' ? rp(o.uang) : rp(o.tot)}</span></div>${
+        o.hutang && o.hutang > 0
+          ? `\n      <div class="flex items-baseline justify-between gap-4 font-semibold text-red-600 dark:text-red-400"><span>Hutang</span><span class="tabular-nums shrink-0">${rp(o.hutang)}</span></div>`
+          : ''
+      }
     </div>`;
 }
 
@@ -295,7 +305,8 @@ function htmlResumePenjualan(o: {
  *  - **Judul hero = KEMBALIAN** (revisi pemilik 2026-10-04 ala KulaPOS,
  *    tetap; **putaran 11b** mengangkat angkanya jadi 48px — lihat komentar
  *    di pemanggilan `choiceDialog` bawah) + **badan resume** lewat
- *    `htmlResumePenjualan()` (No. nota, item, Total, metode).
+ *    `htmlResumePenjualan()` (No. nota + jam, item, Total, metode, baris
+ *    HUTANG bila ada sisa — putaran 12).
  *  - [Thermal] = struk ESC/POS via print-agent,
  *    [A4]      = invoice gaya Aronium via window.print() browser (CUPS),
  *    [Selesai] = tanpa cetak (fokus awal swal = tombol ini, Enter = selesai).
@@ -307,7 +318,7 @@ async function pilihCetakSelesai(
   struk: Struk,
   tot: number,
   kembalian: number,
-  resume: { invoiceNo?: string | null; items: { qty: number; nama: string; net: number }[]; metode: PayMethod; uang: number },
+  resume: { invoiceNo?: string | null; items: { qty: number; nama: string; net: number }[]; metode: PayMethod; uang: number; hutang?: number },
 ): Promise<void> {
   const pilihan = await choiceDialog({
     // Judul hero KEMBALIAN — putaran 11b (2026-10-05, permintaan pemilik
@@ -998,9 +1009,11 @@ function segarJudulBayar(): void {
   if (judul) judul.textContent = `Bayar — ${rp(total())}`;
 }
 
-/** Validasi pelanggan untuk pembayaran UANG KURANG (jadi HUTANG).
- *  Permintaan pemilik 2026-10-04: "jadi Hutang dengan catatan harus ada
- *  customer yang terpilih dan tidak boleh customer default/umum".
+/** Validasi pelanggan untuk pembayaran UANG KURANG / UANG 0 (jadi HUTANG —
+ *  otomatis sejak putaran 12). Permintaan pemilik 2026-10-04: "jadi Hutang
+ *  dengan catatan harus ada customer yang terpilih dan tidak boleh customer
+ *  default/umum"; 2026-10-06: "uang kurang / uang 0 akan otomatis masuk ke
+ *  hutang dengan catatan harus terpilih customer".
  *  "" (string kosong) = boleh; selain itu = pesan penolakan untuk toast. */
 function cekHutangDiperbolehkan(): string {
   if (customerId === null) {
@@ -1142,13 +1155,12 @@ function formBayarHtml(): string {
               cashIn > 0 && cashIn < total() ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
             }">${teksKembalian()}</p>
           </div>
-          <!-- Uang kurang BOLEH asal jadi HUTANG (permintaan pemilik
-               2026-10-04: "kurang = jadi Hutang, dengan catatan harus ada
-               customer yang terpilih dan tidak boleh customer default/umum").
-               Tombol Bayar di form yang menawarkan jalan ini — lihat handler
-               di bukaBayar() yang memvalidasi pelanggan + konfirmasi swal,
-               lalu pay({hutang:true}). -->
-          <p class="text-xs text-gray-500 dark:text-gray-400">Uang kurang bisa dicatat jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>
+          <!-- Uang kurang / uang 0 = HUTANG OTOMATIS (putaran 12, instruksi
+               pemilik 2026-10-06: "uang kurang / uang 0 akan otomatis masuk
+               ke hutang dengan catatan harus terpilih customer") — tanpa
+               konfirmasi swal; pelanggan tidak memenuhi syarat = penolakan
+               barrier, lihat cekHutangDiperbolehkan() + pay(). -->
+          <p class="text-xs text-gray-500 dark:text-gray-400">Uang kurang / uang 0 <b>otomatis</b> jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>
         </div>
         <p id="bayar-non-tunai" class="text-xs text-gray-500 dark:text-gray-400"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
       </div>
@@ -2425,42 +2437,36 @@ function bayarPas(): void {
 
 async function pay(opts?: { hutang?: boolean }): Promise<void> {
   if (!shift || busy || !cart.length) return;
-  // BARRIER TUNAI (keluhan pemilik 2026-10-03): cek lama hanya menolak
-  // `0 < cashIn < total`, jadi uang diterima KOSONG (0) lolos dan transaksi
-  // selesai tanpa kasir menerima uang apa pun. Sekarang metode tunai WAJIB
-  // punya uang diterima > 0 dan tidak kurang dari total — meniru payment
-  // screen Aronium yang tak bisa konfirmasi sebelum Paid amount masuk.
+  // BARRIER TUNAI (keluhan pemilik 2026-10-03): uang diterima WAJIB diisi
+  // dan tidak kurang dari total — meniru payment screen Aronium yang tak bisa
+  // konfirmasi sebelum Paid amount masuk.
   //
-  // UANG KURANG (permintaan pemilik 2026-10-04): boleh berujung HUTANG,
-  // asal pelanggan terpilih bukan bawaan "Pelanggan Umum". Bila pelanggan
-  // tidak memenuhi syarat, penolakannya PERSIS barrier lama (pesan yang
-  // sama + buka form + fokus kolom uang) supaya uang kurang tidak pernah
-  // lolos diam-diam. `opts.hutang` = sudah lewat konfirmasi swal, jadi
-  // barrier dilewati; F2/Enter/pintasan tidak pernah membawa opsi itu.
+  // UANG KURANG / UANG 0 = HUTANG OTOMATIS (putaran 12, instruksi pemilik
+  // 2026-10-06: "jika uang kurang / uang 0 akan otomatis masuk ke hutang
+  // dengan catatan harus terpilih customer"): bila pelanggan terpilih MEMENUHI
+  // syarat (ada, bukan bawaan "Pelanggan Umum" — cekHutangDiperbolehkan()),
+  // penjualan langsung diteruskan `pay({hutang:true})` TANPA konfirmasi swal
+  // (konfirmasi lama "Uang kurang — catat jadi hutang?" DIHAPUS). Sisa
+  // dicatat ke ledger SETELAH nota tersimpan; kasir tahu dari toast
+  // `· hutang RpX` + baris HUTANG di modal resume + struk.
+  //
+  // Pelanggan TIDAK memenuhi syarat = penolakan barrier PERSIS perilaku lama
+  // (pesan + buka form + fokus kolom uang) — uang kurang tidak pernah lolos
+  // diam-diam tanpa kontak yang bisa menampung hutangnya.
+  // `opts.hutang` = sudah lewat jalur otomatis ini; F2/Enter/F12 tidak pernah
+  // membawa opsi itu.
   if (payMethod === 'tunai' && !opts?.hutang && cashIn < total()) {
-    if (cekHutangDiperbolehkan()) {
-      if (!(cashIn > 0)) toast('Uang diterima belum diisi — ketik nominal atau tekan Bayar pas (F12)', 'error');
-      else toast(`Uang diterima kurang dari total ${rp(total())}`, 'error');
+    const alasan = cekHutangDiperbolehkan();
+    if (alasan) {
+      if (!(cashIn > 0)) toast(`Uang diterima belum diisi — ${alasan}`, 'error');
+      else toast(`Uang diterima kurang dari total ${rp(total())} — ${alasan}`, 'error');
       // Form bayar dibuka kalau belum (F2 dari layar utama = bayar cepat):
       // tanpa ini kasir hanya melihat toast tanpa kolom untuk membetulkannya.
       bukaBayar();
       document.querySelector<HTMLInputElement>('#pos-cash')?.focus();
       return;
     }
-    const sisa = total() - cashIn;
-    const nama = customers.find((c) => c.id === customerId)?.name ?? '';
-    void confirmDialog({
-      title: 'Uang kurang — catat jadi hutang?',
-      message:
-        cashIn > 0
-          ? `Uang diterima ${rp(cashIn)} dari total ${rp(total())} — sisa ${rp(sisa)} tercatat sebagai HUTANG atas nama ${nama} (lihat halaman Hutang).`
-          : `Tanpa uang diterima — seluruh ${rp(total())} tercatat sebagai HUTANG atas nama ${nama} (lihat halaman Hutang).`,
-      okLabel: 'Bayar & catat hutang',
-      cancelLabel: 'Kembali',
-      icon: 'warning',
-    }).then((setuju) => {
-      if (setuju) void pay({ hutang: true });
-    });
+    void pay({ hutang: true });
     return;
   }
   busy = true;
@@ -2500,9 +2506,10 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     const discItem = diskonBaris();
     const tot = total();
     // SISA HUTANG (permintaan pemilik 2026-10-04: "uang kurang = jadi Hutang
-    // dengan catatan harus ada customer yang terpilih, bukan default/umum").
-    // Angka ini hanya bisa muncul lewat jalur `opts.hutang` — sudah lolos
-    // cek pelanggan + konfirmasi swal di bukaBayar(). Dicatat ke ledger
+    // dengan catatan harus ada customer yang terpilih, bukan default/umum";
+    // otomatis tanpa konfirmasi sejak putaran 12, 2026-10-06). Angka ini
+    // hanya bisa muncul lewat jalur `opts.hutang` — barrier di atas sudah
+    // memvalidasi pelanggan. Dicatat ke ledger
     // /api/customer-debts (type=charge) SETELAH penjualan tersimpan supaya
     // catatannya menyebut nomor nota; gagal = tetap jadi nota sukses + toast
     // penunjuk halaman Hutang (penjualan TIDAK dibatalkan, pola gagal cetak).
@@ -2585,6 +2592,9 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       items: cart.map((l) => ({ qty: l.qty, nama: l.name, net: jumlahBaris(l) - l.discount })),
       metode: payMethod,
       uang: cashIn,
+      // Baris HUTANG merah di resume (putaran 12) — sisa sudah tercatat ke
+      // ledger beberapa baris di atas; snapshot sebelum cart/cashIn di-reset.
+      hutang: sisaHutang,
     });
     cart = [];
     discount = 0;
@@ -2857,11 +2867,11 @@ function bindPintasan(): void {
       // bawah.
       if (e.key === 'F1' || e.key === 'F3' || e.key === 'F4' || e.key === 'F5' || e.key === 'F6' ||
           e.key === 'F7' || e.key === 'F8' || e.key === 'F9' || e.key === 'F10' || e.key === 'F12') e.preventDefault();
-      // Swal terbuka (konfirmasi HUTANG, pilihan cetak, hapus, …) = ambil
+      // Swal terbuka (pilihan cetak, hapus, dll.) = ambil
       // alih keyboard UTUH. Penting untuk kasus ganda form-bayar + swal:
       // selector `.modal-overlay` menemukan form bayar yang ada di bawah
       // swal, sehingga tanpa guard ini F12 masih membayar lewat belakang
-      // dialog konfirmasi dan menggagalkan rencana "uang kurang = hutang".
+      // dialog yang sedang terbuka.
       // Popup non-toast saja — container sweetalert2 dihapus dari DOM saat
       // ditutup (lihat sweetalert2: `container.remove()`), jadi keberadaannya
       // = dialog sedang tampil. Toast repo memakai #toast-root sendiri.

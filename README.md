@@ -112,12 +112,14 @@ npm run dev:api
    membuka form catat bayar sudah-prefill nama + sisa + pratinjau "Sisa
    setelah bayar" (netral `—` selama nominal kosong), dan dialog rincian
    punya tombol **Cetak A4** — dokumen ledger HTML (`@page A4`, kop
-   `store_*` + tabel kronologis + ringkasan sisa) dibuka lewat popup
+   `store_*` + tabel kronologis **striped** + ringkasan bawah berupa
+   **tabel garis-bawah-saja** (`Total dihutang` / `Total dibayar` /
+   `Sisa hutang`, **bukan box** — putaran 15, 2026-10-06)) dibuka lewat popup
    browser `window.print()`, pola sama `invoice.ts`, **tanpa print-agent**
    (gagal/popup diblokir hanya toast, tidak membatalkan). Hutang dicatat
-   **manual di halaman ini** — POS tidak punya metode bayar piutang
-   (kontrak `POST /api/sales` tidak berubah; integrasinya nanti bila
-   pemilik minta).
+   **manual di halaman ini** *dan* **otomatis dari POS** sejak putaran 12
+   (uang kurang/0 + pelanggan valid -> `charge` `Nota <invoice_no> — sisa
+   bayar POS`; lihat butir Hutang di POS).
 * **Form produk** (`#/products` -> Tambah/Edit) memakai **modal 2 kolom ala
   RPOS** (lebar `max-w-5xl`): kolom **kiri = kotak foto persegi** (seluruh kotak
   diklik untuk pilih berkas — di mode Tambah/Duplikat pilihan ditahan di memori
@@ -427,18 +429,20 @@ npm run dev:api
     uang. Barrier serupa berlaku untuk **topup tunai** (`#tp-tunai`);
     mode **Tarik dikecualikan** (uang mengalir keluar, kolom boleh kosong).
     Teruji 6 asersi regresi di `tests/e2e-struk.mjs` (section F).
-  - **Uang kurang = HUTANG (opsional, dengan syarat pelanggan)** — permintaan
-    pemilik 2026-10-04: bila uang diterima < total, form bayar menawarkan
-    jalan catat hutang **asal ada pelanggan terpilih yang bukan bawaan
-    "Pelanggan Umum"**. Syarat terpenuhi -> konfirmasi swal ("Uang kurang —
-    catat jadi hutang?", berisi sisa + nama pelanggan) -> penjualan lalu
-    `POST /api/customer-debts` `type=charge` dengan catatan
-    `Nota <invoice_no> — sisa bayar POS`; **gagal mencatat ledger TIDAK
-    membatalkan penjualan** (toast menunjuk halaman Hutang). Syarat tidak
-    terpenuhi = penolakan barrier lama **persis** (pesan + fokus kolom uang),
-    jadi uang kurang tidak pernah lolos diam-diam. Struk memuat baris
-    `Hutang` bila sisa > 0. Teruji section **J** `tests/e2e-struk.mjs`
-    (penolakan + konfirmasi + ledger + struk).
+  - **Uang kurang / uang 0 = HUTANG OTOMATIS** (putaran 12, instruksi
+    pemilik 2026-10-06; syarat pelanggan sejak 2026-10-04): bila uang
+    diterima < total (termasuk **0/kosong**) dan ada **pelanggan terpilih
+    yang bukan bawaan "Pelanggan Umum"**, penjualan **langsung diteruskan
+    tanpa konfirmasi** (dialog swal lama "Uang kurang — catat jadi hutang?"
+    dihapus) lalu `POST /api/customer-debts` `type=charge` dengan catatan
+    `Nota <invoice_no> — sisa bayar POS`. Kasir tahu dari toast
+    `· hutang RpX (nama)`, **baris `Hutang` merah di modal resume**, dan
+    baris `Hutang` di struk; **gagal mencatat ledger TIDAK membatalkan
+    penjualan** (toast menunjuk halaman Hutang). Syarat tidak terpenuhi =
+    penolakan barrier **persis** (pesan + fokus kolom uang), jadi uang
+    kurang tidak pernah lolos diam-diam. Teruji section **J**
+    `tests/e2e-struk.mjs` (penolakan + otomatis kurang + otomatis uang 0 +
+    ledger + resume).
   - **Qty item berikutnya** (gaya Aronium *Changing the quantity*): chip
     **Qty** di scan bar (mode Penjualan) atau tekan **F4** — isi angka, item
     BERIKUTNYA masuk keranjang dengan qty itu, chip lalu otomatis kembali
@@ -591,6 +595,12 @@ npm run dev:api
     (`lp -d EPSON-L3110-Series` untuk L3110). Isinya lewat
     `GET /api/sales/:id` + `GET /api/settings`; kalau nota gagal dimuat hanya
     toast peringatan, penjualan tetap tersimpan.
+    **Hutang di invoice** (2026-10-06): nota berhutang mencetak **Payment
+    status "Belum lunas"** + baris merah **`Hutang:`** (sisa nota ini, dari
+    snapshot `sisa_hutang`) di rincian pembayaran; bila pelanggan masih punya
+    piutang lain, ditambah kotak **`Sisa hutang (semua nota)`** dari ledger
+    halaman Hutang (`GET /api/customer-debts/:id` — gagal muat hanya membuat
+    baris itu gugur, cetak tidak dibatalkan).
     Kop disimpan **di server** (4 kunci `store_*`) lewat kartu **Pengaturan
     toko** di **Sistem → Pengaturan toko** — semua device mencetak kop yang
     sama; nilai awal = contoh pemilik (RAVAA STUDIO) lewat seed.
@@ -734,6 +744,17 @@ npm run dev:api
     diterima/kembali, kasir, shift) — hanya saat dibuka, jadi seratus nota
     tidak ditarik sekaligus; topup/tarik menampilkan nominal/admin/nomor dari
     baris yang sudah ada di daftar.
+  - **Penanda HUTANG + filter** (baru 2026-10-06, putaran 13): nota yang
+    berhutang (uang kurang/0 + pelanggan valid — lihat "uang kurang = hutang")
+    menampilkan **chip merah `Hutang RpX`** di kolom Jenis (judul chip memuat
+    pelanggan + nomor nota), rincian nota menampilkan **kotak merah Hutang**
+    + baris "Otomatis tercatat di halaman Hutang — Nota …", dan **chip
+    filter `Hutang (n)`** di ringkasan kanan atas menyaring linimasa jadi
+    hanya baris berhutang (client-side, tanpa reload). Penanda-nya dihitung
+    server dari snapshot nota (field `sisa_hutang` di `GET /api/sales`) —
+    menunjuk **kejadian berhutang saat nota**, sedangkan saldo piutang yang
+    masih hidup tetap dibaca dari halaman **Hutang** (charge-nya memang sudah
+    tercatat otomatis di sana sejak putaran 12).
   - **Cetak ulang struk** (baru 2026-10-01): kartu Pembayaran rincian penjualan
     punya tombol **Cetak ulang struk**. Setelah memilih isi nota, dialog
     menawarkan **[Thermal] [A4] [Batal]** — A4 membuka invoice A4 yang sama

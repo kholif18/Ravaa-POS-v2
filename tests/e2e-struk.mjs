@@ -666,7 +666,10 @@ try {
   ok('uang kurang + Pelanggan Umum ditolak (penjualan tidak terkirim)',
     tolakUmum && jmlSesudah === jmlSebelum, JSON.stringify({ tolakUmum, jmlSebelum, jmlSesudah }));
 
-  // 4) Pelanggan NYATA -> dialog konfirmasi -> penjualan + ledger charge.
+  // 4) Pelanggan NYATA -> OTOMATIS lanjut (putaran 12 2026-10-06, instruksi
+  //    pemilik: "uang kurang / uang 0 akan otomatis masuk ke hutang dengan
+  //    catatan harus terpilih customer") — TANPA dialog konfirmasi lama,
+  //    popup pertama yang muncul = RESUME, dan resume memuat baris HUTANG.
   await page.keyboard.press('Escape');
   await page.waitForSelector('.modal-overlay:not(.is-closing)', { state: 'detached', timeout: 5000 });
   // Pelanggan uji DIPAKAI ULANG tiap run — jangan dihapus: penjualan tadi
@@ -698,16 +701,12 @@ try {
   await page.fill('#pos-cash', '3000');
   await page.click('#pos-pay');
   await page.waitForSelector('.swal2-popup', { timeout: 8000 });
-  const popupHutang = await page.$('.swal2-popup');
   const isiPopup = norm(await page.innerText('.swal2-popup'));
-  ok('uang kurang + pelanggan valid -> dialog konfirmasi hutang',
-    /hutang/i.test(isiPopup) && isiPopup.includes('UjiHutang POS E2E'), isiPopup.slice(0, 160));
-  await page.click('.swal2-confirm');
-  // Tunggu POPUP ITU sendiri hilang (state 'hidden' = lepas dari DOM juga),
-  // bukan "tidak ada popup sama sekali": dialog pilihan cetak bisa muncul
-  // lebih cepat dari animasi keluar swal. ('detached' bukan state valid di
-  // Playwright — hanya visible/hidden/stable/enabled/disabled/editable.)
-  await popupHutang.waitForElementState('hidden', { timeout: 8000 });
+  ok('uang kurang + pelanggan valid -> OTOMATIS resume tanpa konfirmasi',
+    isiPopup.includes('Siap melayani pelanggan berikutnya')
+      && !isiPopup.includes('Uang kurang — catat jadi hutang'), isiPopup.slice(0, 200));
+  ok('resume memuat baris HUTANG sisa Rp1.000 (merah)',
+    isiPopup.includes('Hutang') && isiPopup.includes('Rp1.000'), isiPopup.slice(0, 200));
   await pilihCetak('Thermal');
   await tungguCetak(9);
 
@@ -727,9 +726,52 @@ try {
     typeof barisJ?.note === 'string' && barisJ.note.includes(notaJ.data?.sale?.invoice_no ?? '~~'),
     JSON.stringify(barisJ?.note));
 
-  // Bersih-bersih: baris ledger saja. Pelanggan TIDAK dihapus (FK penjualan —
-  // lihat catatan find-or-create di atas) dan tetap dipakai run berikutnya.
-  for (const r of ledJ.data?.rows ?? []) await fetch(`${API}/api/customer-debts/${r.id}`, { method: 'DELETE' });
+  // 5) UANG 0 — kolom uang sengaja TIDAK diisi (default kosong sejak putaran
+  //    10d) + pelanggan masih valid -> OTOMATIS seluruh total jadi HUTANG
+  //    (instruksi pemilik 2026-10-06: "uang kurang / uang 0"). Pelanggan
+  //    tadi sudah kembali ke bawaan setelah penjualan -> pilih ulang.
+  await page.selectOption('#pos-customer', String(cidJ));
+  await page.fill('#pos-q', 'PRD00013');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
+  await page.click('#pos-pay'); // tanpa isi #pos-cash = uang 0
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  const isi0 = norm(await page.innerText('.swal2-popup'));
+  ok('uang 0 + pelanggan valid -> OTOMATIS hutang penuh di resume',
+    isi0.includes('Hutang') && isi0.includes('Rp4.000') && isi0.includes('Tunai'),
+    isi0.slice(0, 220));
+  await pilihCetak('Thermal');
+  await tungguCetak(10);
+  const daftar0 = await (await fetch(`${API}/api/sales?date=${hari}`)).json();
+  const nota0 = await (await fetch(`${API}/api/sales/${encodeURIComponent(daftar0.data?.[0]?.id ?? '')}`)).json();
+  const led0 = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();
+  ok('nota uang-0 tersimpan (cash_in 0) + ledger sisa Rp5.000 (2 charge)',
+    nota0.data?.sale?.cash_in === 0 && (led0.data?.sisa ?? -1) === 5000
+      && (led0.data?.rows?.length ?? -1) === 2,
+    JSON.stringify({ cash_in: nota0.data?.sale?.cash_in, sisa: led0.data?.sisa, n: led0.data?.rows?.length }));
+
+  // Penanda HUTANG di Riwayat (putaran 13): field computed `sisa_hutang` di
+  // GET /api/sales (daftar) DAN GET /api/sales/:id (rincian) — nilai persis
+  // sisa dua nota uji di atas (sisaJ = total−3000 = Rp1.000, uang-0 = Rp4.000).
+  const s4 = daftar0.data?.find((x) => x.id === notaJ.data?.sale?.id);
+  ok('GET /api/sales & /:id memuat sisa_hutang (penanda hutang di Riwayat)',
+    daftar0.data?.[0]?.sisa_hutang === 4000 && s4?.sisa_hutang === sisaJ
+      && notaJ.data?.sale?.sisa_hutang === sisaJ
+      && daftar0.data?.[0]?.customer_name === 'UjiHutang POS E2E',
+    JSON.stringify({
+      s5: daftar0.data?.[0]?.sisa_hutang, s4: s4?.sisa_hutang, sisaJ,
+      diId: notaJ.data?.sale?.sisa_hutang, cust: daftar0.data?.[0]?.customer_name,
+    }));
+
+  // Bersih-bersih: SEMUA baris ledger (2 penjualan di atas) — fetch ulang,
+  // jangan pakai `ledJ` yang sudah basi. Pelanggan TIDAK dihapus (FK
+  // penjualan — lihat catatan find-or-create di atas) dan tetap dipakai
+  // run berikutnya.
+  const ledAkhir = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();
+  for (const r of ledAkhir.data?.rows ?? []) await fetch(`${API}/api/customer-debts/${r.id}`, { method: 'DELETE' });
   const ledKosong = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();
   ok('bersih-bersih: ledger pelanggan uji kembali kosong',
     (ledKosong.data?.rows?.length ?? -1) === 0, JSON.stringify(ledKosong.data?.rows ?? ledKosong));
@@ -790,6 +832,84 @@ try {
     kosong.includes('Tidak ada pelanggan yang cocok'), kosong);
   await page.keyboard.press('Escape');
   await page.waitForSelector('.modal-overlay:not(.is-closing)', { state: 'detached', timeout: 5000 });
+
+  // ——— Section L: putaran 13 pemilik 2026-10-06 ———
+  // "riwayat transaksi tambahkan kalau itu hutang, beri tanda untuk mudah
+  // mencari yang transaksi hutang, dan juga langsung tercatat otomatis di
+  // halaman hutang". Poin terakhir sudah jalan sejak putaran 12 (charge
+  // otomatis di pay()) — di sini dibuktikan dari penanda + rincian nota yang
+  // menunjuk halaman Hutang. Note: regex /i karena innerText kena
+  // text-transform pada chip.
+  console.log('=== L. Riwayat: penanda HUTANG + filter ===');
+  await page.goto('http://localhost:5656/#/history', { waitUntil: 'load' });
+  await page.waitForSelector('tr[data-trx]', { timeout: 15000 });
+  const cekBadge = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('tr[data-trx]')];
+    const h = rows.filter((r) => /hutang rp/i.test(r.innerText));
+    return { n: rows.length, hutang: h.length, angka: h.every((r) => /rp[\d.]+/i.test(r.innerText)) };
+  });
+  ok('Riwayat menampilkan penanda "Hutang RpX" per baris',
+    cekBadge.hutang >= 2 && cekBadge.angka, JSON.stringify(cekBadge));
+
+  await page.click('#h-hutang');
+  const cekFilter = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('tr[data-trx]')];
+    const text = document.querySelector('#h-body')?.innerText ?? '';
+    return {
+      n: rows.length,
+      semua: rows.length > 0 && rows.every((r) => /hutang rp/i.test(r.innerText)),
+      caption: /disaring hanya transaksi hutang/i.test(text),
+    };
+  });
+  ok('filter chip HUTANG menyisakan hanya baris berhutang (client-side)',
+    cekFilter.semua && cekFilter.caption, JSON.stringify(cekFilter));
+
+  await page.click('tr[data-trx]');
+  await page.waitForSelector('.det-row [data-reprint]', { timeout: 8000 });
+  const detHutang = await page.evaluate(() => document.querySelector('.det-row')?.innerText ?? '');
+  ok('rincian nota: kotak Hutang + catatan "tercatat di halaman Hutang"',
+    /hutang/i.test(detHutang) && /halaman Hutang/i.test(detHutang),
+    detHutang.replace(/\s+/g, ' ').slice(0, 240));
+
+  // Invoice A4 ikut membawa HUTANG (putaran 14 pemilik 2026-10-06: "pada
+  // invoice silakan sesuaikan tambahkan hutang jika pelanggan berhutang").
+  // Charge ledger uji 7000 sengaja LEBIH BESAR dari hutang nota (Rp4.000)
+  // supaya baris "Sisa hutang (semua nota)" teruji terpisah; dihapus lagi
+  // setelahnya — bersih-bersih section J menuntut ledger kembali 0.
+  const chInv = await jpost('/api/customer-debts', {
+    customer_id: cidJ, type: 'charge', amount: 7000, note: 'Uji invoice A4',
+  });
+  // Buka baris NOTA UJI sendiri (bisa bukan baris pertama — pelanggan lain
+  // boleh berhutang lebih baru); toggle bila kebetulan sudah terbuka.
+  const invUji = String(nota0.data?.sale?.invoice_no ?? '');
+  const barisUji = page.locator('tr[data-trx]', { hasText: invUji });
+  if ((await barisUji.first().getAttribute('aria-expanded')) !== 'true') {
+    await barisUji.first().click();
+  }
+  await page.waitForSelector('.det-row [data-reprint]', { timeout: 8000 });
+  const nPrintA4 = tercetak.length;
+  const [popupInv] = await Promise.all([
+    page.waitForEvent('popup'),
+    (async () => {
+      await page.click('.det-row [data-reprint]');
+      await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+      await page.click('.swal2-deny'); // A4
+      await page.waitForSelector('.swal2-popup', { state: 'detached', timeout: 8000 });
+    })(),
+  ]);
+  await popupInv.waitForLoadState('domcontentloaded');
+  const teksInv = await popupInv.innerText('body');
+  ok('L: invoice A4 nota berhutang -> "Belum lunas" + baris Hutang tercetak',
+    /Belum lunas/i.test(teksInv) && /Hutang:?\s*Rp[\d,]+\.00/i.test(teksInv),
+    teksInv.replace(/\s+/g, ' ').slice(0, 300));
+  ok('L: sisa piutang ledger (Rp7.000,00) tercetak sebagai baris terpisah',
+    /Sisa hutang \(semua nota\)/i.test(teksInv) && /Rp7,000\.00/.test(teksInv),
+    (teksInv.match(/Sisa hutang[^\n]*/) || [''])[0]);
+  ok('L: invoice A4 tidak lewat print-agent (browser/CUPS)', tercetak.length === nPrintA4,
+    `${nPrintA4} -> ${tercetak.length}`);
+  if (chInv.j?.data?.id) {
+    await fetch(`${API}/api/customer-debts/${chInv.j.data.id}`, { method: 'DELETE' });
+  }
 
   ok('tanpa error halaman', errs.length === 0, errs.slice(0, 3));
 } catch (e) {

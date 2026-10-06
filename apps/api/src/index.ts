@@ -1305,8 +1305,20 @@ app.get('/api/sales', (c) => {
   // `n_items` dihitung per baris lewat subquery: daftar riwayat hanya perlu
   // TAHU jumlah item ("3 item") — isi barisnya diambil saat dibuka lewat
   // GET /api/sales/:id, jadi satu hari ratusan nota tidak ditarik sekaligus.
+  // `sisa_hutang` (putaran 13, 2026-10-06 — penanda transaksi HUTANG di
+  // halaman Riwayat): NOTA INI berhutang, dihitung dari snapshot nota:
+  // tunai + total > uang diterima + pelanggan valid (bukan bawaan "Pelanggan
+  // Umum") — kondisi PERSIS syarat catat-hutang otomatis di POS, jadi
+  // angkanya setara dengan charge yang dikirim ke /api/customer-debts.
+  // Sisa aktual ledger BISA berubah (dibayar/dihapus di halaman Hutang) —
+  // penanda di sini sengaja menunjuk KEJADIAN saat nota, bukan saldo live.
   const data = db.prepare(
-    `SELECT s.*, (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS n_items
+    `SELECT s.*,
+            CASE WHEN s.pay_method='tunai' AND s.total > s.cash_in
+                  AND s.customer_id IS NOT NULL
+                  AND s.customer_name <> 'Pelanggan Umum'
+                 THEN s.total - s.cash_in ELSE 0 END AS sisa_hutang,
+            (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS n_items
        FROM sales s
       WHERE date(s.created_at)=date(?)
       ORDER BY s.created_at DESC, s.rowid DESC
@@ -1316,7 +1328,16 @@ app.get('/api/sales', (c) => {
 });
 
 app.get('/api/sales/:id', (c) => {
-  const sale = db.prepare('SELECT * FROM sales WHERE id=?').get(c.req.param('id'));
+  // `sisa_hutang` = penanda "nota ini berhutang" — CASE yang SAMA dengan
+  // GET /api/sales (putaran 13); lihat komentar di sana untuk rasionalnya.
+  const sale = db.prepare(
+    `SELECT *,
+            CASE WHEN pay_method='tunai' AND total > cash_in
+                  AND customer_id IS NOT NULL
+                  AND customer_name <> 'Pelanggan Umum'
+                 THEN total - cash_in ELSE 0 END AS sisa_hutang
+       FROM sales WHERE id=?`,
+  ).get(c.req.param('id'));
   if (!sale) return c.json({ error: 'tidak ditemukan' }, 404);
   // base_unit (LEFT JOIN products) ditambahkan 2026-10-01 untuk CETAK ULANG
   // struk dari halaman Riwayat: struk asli hanya mencetak `unit` bila satuan

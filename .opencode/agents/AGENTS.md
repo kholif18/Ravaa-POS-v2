@@ -316,23 +316,29 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                             letakkan di sidepanel bawahnya Bayar F10") —
                             bayar tunai persis total SEKETIKA, tanpa modal.
                             **Uang lebih** = kembalian dihitung di form.
-                            **Uang kurang = boleh berujung HUTANG**
-                            (permintaan pemilik 2026-10-04): `pay()` memanggil
-                            `cekHutangDiperbolehkan()` — wajib ada pelanggan
-                            terpilih DAN bukan bawaan "Pelanggan Umum"
-                            (`name` persis / `code = CUS-000001`); lolos ->
-                            `confirmDialog` "Uang kurang — catat jadi hutang?"
-                            -> `pay({hutang:true})` melewati barrier ->
-                            penjualan lalu `POST /api/customer-debts`
+                            **Uang kurang / uang 0 = HUTANG OTOMATIS**
+                            (instruksi pemilik 2026-10-06: "jika uang kurang /
+                            uang 0 akan otomatis masuk ke hutang dengan
+                            catatan harus terpilih customer" — putaran 12):
+                            `pay()` memanggil `cekHutangDiperbolehkan()` —
+                            wajib ada pelanggan terpilih DAN bukan bawaan
+                            "Pelanggan Umum" (`name` persis /
+                            `code = CUS-000001`); lolos -> **langsung**
+                            `pay({hutang:true})` melewati barrier
+                            **TANPA konfirmasi swal** (dialog lama "Uang
+                            kurang — catat jadi hutang?" DIHAPUS) -> penjualan
+                            lalu `POST /api/customer-debts`
                             `{type:'charge', amount:sisa,
                             note:'Nota <invoice_no> — sisa bayar POS'}` (gagal
                             ledger = penjualan TETAP sukses + toast penunjuk
-                            halaman Hutang). TIDAK lolos syarat = penolakan
-                            barrier lama **persis** (pesan "Uang diterima
-                            belum diisi/kurang dari total" + buka form + fokus
+                            halaman Hutang). Kasir tahu sisa dari **toast
+                            `· hutang RpX (nama)` + baris `Hutang` merah di
+                            modal resume + baris `Hutang` di struk**.
+                            TIDAK lolos syarat = penolakan barrier lama
+                            **persis** (pesan "Uang diterima belum diisi /
+                            kurang dari total — <alasan>" + buka form + fokus
                             kolom uang) — jadi uang kurang tidak pernah lolos
-                            diam-diam. Struk memuat baris `Hutang` bila sisa >
-                            0.
+                            diam-diam tanpa kontak penampung hutangnya.
                             **SEMUA id lama dipertahankan**
                             (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`)
                             supaya F2/Enter/barrier + suite test tetap jalan.
@@ -442,6 +448,19 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           **[Thermal] [A4] [Batal]** — A4 = `cetakInvoice()`,
                           Thermal = `kirimPrint(strukUntuk(...,'thermal'))`
                           eksplisit seperti POS).
+                         **Penanda HUTANG (putaran 13, 2026-10-06)**: baris
+                         penjualan dengan field computed `sisa_hutang > 0`
+                         (lihat GET /api/sales) menampilkan **chip merah
+                         `Hutang RpX`** di kolom Jenis (`chipHutang()` — gaya
+                         chip sama dengan halaman Hutang; title memuat
+                         pelanggan + nomor nota), rincian nota (kartu
+                         Pembayaran `detailJual()`) menampilkan **kotak
+                         merah Hutang** + baris "Otomatis tercatat di halaman
+                         Hutang — Nota …", dan **chip filter `#h-hutang`** di
+                         kepala() menyaring linimasa jadi hanya baris
+                         berhutang (client-side lewat `state.hutangOnly`,
+                         tanpa reload — sengaja BUKAN elemen `[data-h]` yang
+                         ditangkap handler geser tanggal).
 apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
                           pemilik — 4 kartu (omzet/laba/HPP/diskon), rekap metode
                           bayar, topup & tarik, produk terlaris, stok menipis,
@@ -490,6 +509,20 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            `cetakHutangA4` — pola popup `invoice.ts`, tanpa
                            print-agent, gagal = toast). Hutang DICATAT
                            MANUAL di sini — POS tidak punya mode piutang.
+                           **Layout A4 (putaran 15, 2026-10-06)**: ringkas
+                           bawah **`Total dihutang` / `Total dibayar` /
+                           `Sisa hutang` (atau `Sisa (lunas)`)** = **`<table
+                           class="ringkas">` garis-bawah-saja** (label tebal,
+                           nilai rata kanan, baris terakhir ditutup garis #444
+                           + tebal) — **`.kotak` DIYAKIN PEMILIK** ("jangan box
+                           seperti itu"); **striping `tr:nth-child(even)`**
+                           di SEMUA tabel dokumen (`table.ledger` + 
+                           `table.ringkas`) dengan `print-color-adjust: exact`
+                           di body supaya arsiran tetap keluar walau opsi
+                           "Background graphics" cetak mati. Diuji
+                           `customer-debt-test.mjs` section 11 (popup A4:
+                           tabel 3 baris tanpa `kotak` + kedua aturan
+                           striping ada).
 apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print-agent.
                           Layout struk: `thermal` 32 kolom (COLS) ekor FEED+CUT —
                           bawaan toko; `a4` 64 kolom (COLS_A4) ekor FEED+Form
@@ -510,15 +543,27 @@ apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print
                          menambah baris baru — setiap baris struk HARUS diakhiri
                           LF, kalau tidak seluruh struk menempel jadi satu baris.
 apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
-                          `htmlInvoice(sale, items, toko)` menyusun HTML + CSS
-                          `@page A4 margin 16mm 14mm` (kop INVOICE + nama/
-                          alamat/Phone/Email dari `store_*` + logo lingkaran "R",
-                          Bill to = `sale.customer_name` snapshot ("Pelanggan
+                          `htmlInvoice(sale, items, toko, piutang?)` menyusun
+                          HTML + CSS `@page A4 margin 16mm 14mm` (kop INVOICE +
+                          nama/alamat/Phone/Email dari `store_*` + logo lingkaran
+                          "R", Bill to = `sale.customer_name` snapshot ("Pelanggan
                           Umum" bila kosong), Invoice No. = `sales.invoice_no`,
-                          Payment status Lunas, tabel item + baris `* note`,
-                          ringkasan Discount/Total, footer "Dicetak dari Ravaa
-                          POS"), dan `cetakInvoice(saleId)` = fetch
-                          `GET /api/sales/:id` + `GET /api/settings` -> window.open
+                          **Payment status `Lunas`/`Belum lunas`** (putaran 14:
+                          `Belum lunas` bila `sale.sisa_hutang > 0`), tabel item
+                          + baris `* note`, ringkasan Discount/Total, footer
+                          "Dicetak dari Ravaa POS").
+                          **HUTANG di invoice (putaran 14, 2026-10-06 —
+                          "tambahkan hutang jika pelanggan berhutang")**:
+                          (a) baris **`Hutang:` merah** di rincian Payment
+                          method memuat `sale.sisa_hutang` (snapshot nota INI,
+                          antara Paid amount dan Change) bila > 0; (b) baris
+                          kotak **`Sisa hutang (semua nota)`** = param `piutang`
+                          (sisa ledger `GET /api/customer-debts/:customerId`,
+                          diambil `cetakInvoice()` bila `sale.customer_id` ada —
+                          gagal dimuat -> 0, cetak TIDAK dibatalkan) bila > 0
+                          DAN ≠ hutang nota ini (supaya tidak dobel). `cetakInvoice(saleId)`
+                          = fetch `GET /api/sales/:id` + `GET /api/settings` +
+                          ledger piutang (paralel) -> window.open
                           -> document.write -> `window.print()` otomatis saat
                           load. **Tanpa print-agent** (rendering HTML tidak bisa
                           diserahkan ke server nol-dependensi — cetak lewat
@@ -649,12 +694,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `db.transaction` (skala 1-2 kasir: atomik cukup).
     - Endpoint ini TIDAK mengubah `POST /api/sales` / `pay_method` — nota
       tetap tercatat apa adanya. **Sejak 2026-10-04 ada pelanggan KEDUA: POS.**
-      Form bayar (modal) menawarkan "uang kurang = HUTANG" bila pelanggan
-      terpilih bukan bawaan "Pelanggan Umum": setelah penjualan tersimpan,
+      Form bayar (modal) mencatat **uang kurang / uang 0 OTOMATIS = HUTANG**
+      (putaran 12, 2026-10-06 — tanpa konfirmasi) bila pelanggan terpilih
+      bukan bawaan "Pelanggan Umum": setelah penjualan tersimpan,
       client mengirim **`charge` terpisah** ke endpoint ini dengan
       `note:'Nota <invoice_no> — sisa bayar POS'` (lihat `pay()` di
       `apps/web/src/pages/pos.ts`; gagal ledger = penjualan TETAP sukses +
-      toast penunjuk halaman Hutang). Jalur **manual** di halaman Hutang
+      toast penunjuk halaman Hutang; pelanggan tidak memenuhi syarat =
+      penolakan barrier). Jalur **manual** di halaman Hutang
       tetap ada untuk koreksi & catatan di luar alur kasir.
   - `DELETE /api/customer-debts/:id` -> `{data:{id,deleted:true}}`
     - Hapus 1 baris mutasi (salah ketik). Sengaja TANPA cek sisa: hapus
@@ -1017,6 +1064,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - `sale` juga memuat **`customer_id`** + **`customer_name`** (snapshot, sejak
     2026-10-04) — sumber baris `Pelanggan:` di struk ulang dan "Bill to"
     invoice A4. Baris lama bernama `''` = tampilkan "Pelanggan Umum".
+  - Sejak putaran 13 (2026-10-06) `sale` memuat **`sisa_hutang`** — penanda
+    "nota ini berhutang", CASE komputasi **SAMA PERSIS** dengan
+    `GET /api/sales` (lihat butir `sisa_hutang` di sana untuk rasional &
+    batas maknanya).
   - Tiap baris `items` memuat **`base_unit`** (satuan dasar produk lewat
     `LEFT JOIN products`, `NULL` untuk item manual) sejak 2026-10-01 — dipakai
     tombol **Cetak ulang struk** di halaman Riwayat: struk hanya mencetak
@@ -1025,7 +1076,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `''` bila tanpa) lewat `SELECT si.*` — dipakai cetak ulang supaya baris
     catatan ikut tercetak persis seperti struk aslinya.
 * `GET /api/sales?date=&limit=&offset=`
-  -> `{data:[{id,shift_id,created_at,invoice_no,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
+  -> `{data:[{id,shift_id,created_at,invoice_no,customer_id,customer_name,sisa_hutang,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).
     Read-only: tidak mengubah `products.version` dan tidak perlu.
   - `date` default hari UTC (`YYYY-MM-DD`). Divalidasi round-trip
@@ -1039,6 +1090,21 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - `n_items` = jumlah `sale_items` per nota (subquery). Daftar sengaja TIDAK
     menarik isi itemnya — isi diambil saat baris dibuka lewat `GET /api/sales/:id`,
     jadi satu hari ratusan nota tidak ditarik sekaligus.
+  - **`customer_id` + `customer_name`** ikut terbawa otomatis lewat `s.*`
+    (snapshot kolom `sales`, lihat POST /api/sales).
+  - **`sisa_hutang` (putaran 13, 2026-10-06 — penanda transaksi HUTANG di
+    halaman Riwayat)**: **computed per baris, bukan kolom tersimpan** —
+    `CASE WHEN pay_method='tunai' AND total > cash_in AND customer_id IS NOT
+    NULL AND customer_name <> 'Pelanggan Umum' THEN total - cash_in ELSE 0
+    END`. Syaratnya PERSIS kondisi catat-hutang otomatis di POS (putaran 12):
+    uang kurang/0 + pelanggan valid -> nota ini berhutang; pelanggan bawaan
+    "Pelanggan Umum" / non-tunai / lunas -> 0. **Maknanya = KEJADIAN saat
+    nota, bukan saldo ledger live**: sisa di `customer_debts` bisa berubah
+    (dibayar/dihapus di halaman Hutang) sedangkan penanda nota tetap —
+    saldo aktual selalu dibaca dari halaman Hutang. CASE yang sama juga
+    dikirim oleh `GET /api/sales/:id`. Jangan mengganti ini dengan JOIN ke
+    ledger: `customer_debts` tidak punya FK/relasi ke `sales` (charge hanya
+    di-note `Nota <invoice_no> — sisa bayar POS`).
   - Urutan `created_at DESC, rowid DESC` (yang terbaru di atas).
 * `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor,nominal>0,admin>=0,pay_method?,shift_id?,cashier?}`
   - `provider` = **kode jenis layanan** (bukan brand). Nilai yang digunakan POS:

@@ -161,6 +161,41 @@ const tSemua = await p.textContent('#hutang-body');
 chk('muncul lagi di "Semua riwayat" dengan status Lunas', tSemua.includes('UjiHutang Papa Baru') && tSemua.includes('Lunas'),
   tSemua.replace(/\s+/g, ' ').slice(0, 90));
 
+console.log('=== 11. Cetak A4 rincian: ringkas = tabel garis-bawah, semua tabel striped ===');
+// Putaran 15 (2026-10-06): "bagian bawah ... dibuat garis tabel bawah saja
+// jangan box ... setiap tabel buat striped termasuk tabel yang atas".
+// Stub window.print di SELURUH context sebelum popup (pola e2e-struk) —
+// invoice A4 memanggil print() otomatis saat load.
+await p.context().addInitScript(() => { window.print = () => {}; });
+await p.click(`[data-rincian="${papa.id}"]`); await p.waitForSelector('#rincian-body');
+await p.waitForTimeout(600);
+const [popA4] = await Promise.all([
+  p.waitForEvent('popup'),
+  p.click('.modal [data-ok]'), // okLabel rincian = "Cetak A4" (modal tidak auto-close)
+]);
+await popA4.waitForLoadState('domcontentloaded');
+const a4 = await popA4.evaluate(() => {
+  const css = document.querySelector('style')?.textContent ?? '';
+  const rk = document.querySelector('table.ringkas');
+  return {
+    ringkas: !!rk,
+    baris: rk ? rk.querySelectorAll('tbody tr').length : 0,
+    kotak: document.body.innerHTML.includes('kotak'),
+    garis: /table\.ringkas td \{[^}]*border-bottom/.test(css),
+    stripeLedger: css.includes('table.ledger tbody tr:nth-child(even)'),
+    stripeRingkas: css.includes('table.ringkas tr:nth-child(even)'),
+    isi: rk ? rk.innerText.replace(/\s+/g, ' ') : '',
+  };
+});
+chk('ringkas A4 = tabel 3 baris (Total dihutang/dibayar/sisa) TANPA box',
+  a4.ringkas && a4.baris === 3 && !a4.kotak
+    && a4.isi.includes('Total dihutang') && a4.isi.includes('Rp50.000'),
+  a4.isi);
+chk('striping ledger + ringkas aktif, ringkas pakai garis bawah-saja',
+  a4.stripeLedger && a4.stripeRingkas && a4.garis, JSON.stringify(a4));
+await popA4.close().catch(() => {});
+await p.click('.modal [data-x]'); await p.waitForTimeout(300);
+
 chk('tidak ada pageerror', err.length === 0, err.join(' ~ '));
 await b.close();
 

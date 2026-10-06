@@ -35,6 +35,11 @@ type SaleRow = {
   /** Pelanggan pada transaksi (SNAPSHOT server, sejak 2026-10-04). '' / absen
    *  = baris lama tanpa kontak -> tampil "Pelanggan Umum". */
   customer_name?: string | null;
+  /** Penanda NOTA BERHUTANG (computed server, putaran 13 2026-10-06): kas
+   *  sisa = total − uang diterima bila tunai + pelanggan valid (bukan bawaan
+   *  "Pelanggan Umum") — kondisi syarat catat-hutang otomatis di POS. Ini
+   *  menunjuk KEJADIAN saat nota; saldo ledger live ada di halaman Hutang. */
+  sisa_hutang?: number;
 };
 
 type TopupRow = {
@@ -86,6 +91,8 @@ const state = {
   det: null as { key: string; items: ItemRow[] } | null,
   detMuat: false,
   detErr: '',
+  /** Filter "hutang saja" (putaran 13) — chip #h-hutang di kepala(). */
+  hutangOnly: false,
 };
 
 let host: HTMLElement | null = null;
@@ -109,6 +116,21 @@ function errMsg(e: unknown): string {
 const METODE: Record<string, string> = { tunai: 'Tunai', qris: 'QRIS', transfer: 'Transfer' };
 const metode = (m: string) => METODE[m] ?? m;
 
+/** Sisa hutang yang tercatat pada nota ini (field computed `sisa_hutang` dari
+ *  GET /api/sales — putaran 13). 0 / absen = lunas / baris lama. */
+const sisaHutang = (s: SaleRow) => s.sisa_hutang ?? 0;
+
+/** Chip penanda transaksi BERHUTANG (merah) — gaya chip sama dengan halaman
+ *  Hutang (`!border-red-500/40 !text-red-700`). "" bila nota lunas. */
+function chipHutang(s: SaleRow): string {
+  const sisa = sisaHutang(s);
+  if (sisa <= 0) return '';
+  const nama = (s.customer_name ?? '').trim() || 'Pelanggan Umum';
+  const nota = s.invoice_no ?? s.id.slice(0, 8);
+  return `<span class="chip !border-red-500/40 !text-red-700 dark:!text-red-400"
+    title="Tercatat otomatis di halaman Hutang — atas nama ${esc(nama)}, nota ${esc(nota)}">${icon('alert')}<span>Hutang ${rp(sisa)}</span></span>`;
+}
+
 const LAYANAN: Record<string, string> = {
   'E-WALLET': 'Isi e-wallet', 'PULSA': 'Pulsa', 'PLN-TOKEN': 'PLN token', 'PLN-BILL': 'PLN tagihan',
   'TARIK-EWALLET': 'Tarik e-wallet', 'TARIK-BANK': 'Tarik bank',
@@ -122,6 +144,7 @@ function kepala(): string {
   const nTopup = r ? r.topup.reduce((a, k) => a + k.n, 0) : 0;
   const nominal = r ? r.topup.reduce((a, k) => a + k.nominal, 0) : 0;
   const admin = r ? r.topup.reduce((a, k) => a + k.admin, 0) : 0;
+  const nHutang = state.sales.filter((s) => sisaHutang(s) > 0).length;
   const hariIniKah = state.date === hariIni();
   return `
   <div class="card">
@@ -140,6 +163,14 @@ function kepala(): string {
         <span class="chip" title="Nominal topup/tarik (admin di luar omzet, lihat Laporan)">
           ${icon('wallet')}<span>${nTopup} topup/tarik · ${rp(nominal)}${admin ? ` + ${rp(admin)} admin` : ''}</span>
         </span>
+        <button type="button" id="h-hutang" class="chip${
+          state.hutangOnly
+            ? ' !border-red-500 !bg-red-50 !text-red-700 dark:!bg-red-500/10 dark:!text-red-400 font-semibold'
+            : ''
+        }" aria-pressed="${state.hutangOnly}"
+          title="Saring hanya transaksi berhutang — tercatat otomatis di halaman Hutang">
+          ${icon('alert')}<span>Hutang${nHutang ? ` (${nHutang})` : ''}</span>
+        </button>
       </div>
     </div>
   </div>`;
@@ -159,11 +190,16 @@ function baris(): Baris[] {
   // Kriteria sama dengan kedua endpoint: waktu terbaru dulu; saat detiknya sama
   // (banyak nota tercipta dalam satu detik) penjualan didahulukan supaya urutan
   // selalu stabil antar-render.
-  return [...s, ...t].sort((a, b) =>
+  const gabung = [...s, ...t].sort((a, b) =>
     a.created_at === b.created_at
       ? (a.s ? -1 : 1) - (b.s ? -1 : 1)
       : a.created_at < b.created_at ? 1 : -1,
   );
+  // Filter "hutang saja" (putaran 13): sisakan penjualan ber-badge Hutang;
+  // topup/tarik tidak pernah berhutang jadi ikut tersingkir.
+  return state.hutangOnly
+    ? gabung.filter((b) => b.s !== undefined && sisaHutang(b.s) > 0)
+    : gabung;
 }
 
 function detailJual(s: SaleRow): string {
@@ -171,6 +207,7 @@ function detailJual(s: SaleRow): string {
   if (state.detErr) return `<div class="card"><div class="empty">${icon('alert')}<span>${esc(state.detErr)}</span></div></div>`;
   const items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
   const discBaris = Math.max(0, s.subtotal - s.discount - s.total); // terturun dari kolom (lihat insertSale)
+  const sisaH = sisaHutang(s); // penanda hutang (putaran 13)
   const rows = items
     .map((it) => {
       const bersih = it.amount - it.discount;
@@ -209,6 +246,14 @@ function detailJual(s: SaleRow): string {
       ${ket('Total', rp(s.total), true)}
       ${ket('Metode', metode(s.pay_method))}
       ${s.pay_method === 'tunai' ? ket('Uang diterima', rp(s.cash_in)) + ket('Kembali', rp(s.change)) : ''}
+      ${sisaH > 0 ? `
+        <div class="mt-1 flex items-baseline justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1 dark:border-red-500/30 dark:bg-red-500/10">
+          <span class="text-xs font-semibold text-red-700 dark:text-red-400">Hutang</span>
+          <span class="text-sm font-bold tabular-nums text-red-700 dark:text-red-400">${rp(sisaH)}</span>
+        </div>
+        <div class="text-[11px] leading-relaxed text-red-600/80 dark:text-red-400/80">
+          Otomatis tercatat di halaman Hutang — Nota ${esc(s.invoice_no ?? s.id.slice(0, 8))} · ${esc((s.customer_name ?? '').trim() || 'Pelanggan Umum')}
+        </div>` : ''}
       ${ket('Kasir', esc(s.cashier))}
       ${ket('Pelanggan', esc((s.customer_name ?? '').trim() || 'Pelanggan Umum'))}
       ${ket('Shift', s.shift_id ? `#${s.shift_id}` : '—')}
@@ -267,7 +312,11 @@ function renderTabel(): string {
   if (!rows.length) {
     return `<div class="card">
       <div class="empty empty-hero">${icon('receipt')}
-        <span>Belum ada transaksi pada ${esc(tglPanjang(state.date))}. Pilih hari lain, atau mulai jualan di layar Kasir.</span>
+        <span>${
+          state.hutangOnly
+            ? `Tidak ada transaksi berhutang pada ${esc(tglPanjang(state.date))}. Klik chip Hutang sekali lagi untuk melihat semua transaksi.`
+            : `Belum ada transaksi pada ${esc(tglPanjang(state.date))}. Pilih hari lain, atau mulai jualan di layar Kasir.`
+        }</span>
       </div>
     </div>`;
   }
@@ -295,7 +344,7 @@ function renderTabel(): string {
       return `
       <tr data-trx="${esc(b.key)}" class="cursor-pointer${terbuka ? ' bg-gray-50 dark:bg-gray-800/50' : ''}" aria-expanded="${terbuka}">
         <td class="td whitespace-nowrap tabular-nums">${esc(waktuCell)}</td>
-        <td class="td">${badge(b.jenis)}</td>
+        <td class="td"><span class="flex flex-wrap items-center gap-1">${badge(b.jenis)}${b.s ? chipHutang(b.s) : ''}</span></td>
         <td class="td">${keterangan}</td>
         <td class="td whitespace-nowrap">${esc(metodeCell)}</td>
         <td class="td td-num font-semibold">${rp(total)}</td>
@@ -333,9 +382,11 @@ function renderTabel(): string {
   </div>
   ${kelebihan}
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-    ${rows.length} baris ditampilkan${state.totalSales + state.totalTopup > rows.length
-      ? ` dari ${state.totalSales + state.totalTopup} transaksi hari itu`
-      : ''}. Klik baris untuk membuka rincian. Topup/tarik tidak masuk omzet — lihat halaman Laporan.
+    ${rows.length} baris ditampilkan${state.hutangOnly ? ' · disaring hanya transaksi hutang' : ''}${
+      state.totalSales + state.totalTopup > rows.length
+        ? ` dari ${state.totalSales + state.totalTopup} transaksi hari itu`
+        : ''
+    }. Klik baris untuk membuka rincian. Topup/tarik tidak masuk omzet — lihat halaman Laporan.
   </p>`;
 }
 
@@ -372,6 +423,15 @@ function bind(): void {
     state.buka = '';
     state.det = null;
     void load();
+  });
+  // Filter hutang saja (putaran 13) — murni client-side di atas data yang
+  // sudah termuat, jadi tanpa reload. Bukan elemen [data-h] supaya tidak
+  // tertangkap handler geser tanggal di atas.
+  root.querySelector('#h-hutang')?.addEventListener('click', () => {
+    state.hutangOnly = !state.hutangOnly;
+    state.buka = '';
+    state.det = null;
+    paint();
   });
   root.querySelectorAll<HTMLElement>('[data-trx]').forEach((tr) =>
     tr.addEventListener('click', () => {

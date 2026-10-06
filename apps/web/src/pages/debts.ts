@@ -252,7 +252,8 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
 <style>
   @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .kop { display: flex; justify-content: space-between; align-items: flex-start; }
   .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
   .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
@@ -272,12 +273,22 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
   table.ledger th.r, table.ledger td.r { text-align: right; }
   table.ledger th.c, table.ledger td.c { text-align: center; }
   table.ledger td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
+  /* Striping SEMUA tabel dokumen ini (permintaan pemilik putaran 15
+     2026-10-06: "setiap tabel buat striped termasuk tabel yang atas") —
+     print-color-adjust: exact di body supaya arsiran tetap tercetak walau
+     opsi "Background graphics" dialog cetak mati. */
+  table.ledger tbody tr:nth-child(even) td { background: #f3f3f3; }
   .nowrap { white-space: nowrap; }
   .kosong { padding: 14px 6px; color: #777; border-bottom: 1px solid #e2e2e2; }
-  .ringkas { width: 55%; margin-left: auto; margin-top: 14px; }
-  .kotak { display: flex; justify-content: space-between; border: 1px solid #444; padding: 5px 9px; margin-bottom: 7px; }
-  .kotak .lbl { font-weight: 700; }
-  .kotak.sisa { border-width: 2px; font-size: 13px; }
+  /* Ringkas bawah = TABEL garis-bawah-saja, BUKAN box (putaran 15:
+     "garis tabel bawah saja jangan box seperti itu") — tiap baris punya
+     garis bawah, tanpa garis samping/atas; baris sisa ditutup garis tegas. */
+  table.ringkas { width: 55%; margin-left: auto; margin-top: 14px; border-collapse: collapse; }
+  table.ringkas td { padding: 5px 9px; border-bottom: 1px solid #999; }
+  table.ringkas td:first-child { font-weight: 700; }
+  table.ringkas td.r { text-align: right; white-space: nowrap; }
+  table.ringkas tr:nth-child(even) td { background: #f3f3f3; }
+  table.ringkas tr:last-child td { border-bottom: 1px solid #444; font-weight: 700; }
   .status { display: inline-block; padding: 2px 8px; border: 1px solid #444; font-weight: 700; font-size: 10px; }
   .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
 </style>
@@ -323,11 +334,13 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
     <tbody>${baris}</tbody>
   </table>`
   }
-  <div class="ringkas">
-    <div class="kotak"><span class="lbl">Total dihutang</span><span>${rp(r.charge)}</span></div>
-    <div class="kotak"><span class="lbl">Total dibayar</span><span>${rp(r.bayar)}</span></div>
-    <div class="kotak sisa"><span class="lbl">${lunas ? 'Sisa (lunas)' : 'Sisa hutang'}</span><span>${rp(Math.max(0, r.sisa))}</span></div>
-  </div>
+  <table class="ringkas">
+    <tbody>
+      <tr><td>Total dihutang</td><td class="r">${rp(r.charge)}</td></tr>
+      <tr><td>Total dibayar</td><td class="r">${rp(r.bayar)}</td></tr>
+      <tr><td>${lunas ? 'Sisa (lunas)' : 'Sisa hutang'}</td><td class="r">${rp(Math.max(0, r.sisa))}</td></tr>
+    </tbody>
+  </table>
   <div class="foot">Dicetak dari Ravaa POS &middot; ${escA4(tglCetak)}</div>
   <script>
     // Cetak otomatis begitu dokumen siap (pola invoice.ts). Gagal/stall print
