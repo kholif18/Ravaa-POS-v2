@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS topup_txns (
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   kind        TEXT NOT NULL,           -- topup | tarik
   provider    TEXT NOT NULL,           -- jenis layanan: E-WALLET | PULSA | PLN-TOKEN | PLN-BILL | TARIK-EWALLET | TARIK-BANK
-  nomor       TEXT NOT NULL,           -- no HP / no pelanggan
+  nomor       TEXT NOT NULL DEFAULT '',-- no HP / no pelanggan ('' = layanan tanpa nomor: e-wallet/pulsa/tarik, pemilik 2026-10-06)
+  token       TEXT NOT NULL DEFAULT '',-- Nomor Token PLN (dicetak di struk; kosong untuk layanan lain)
   nominal     INTEGER NOT NULL,        -- nilai isi/tarik
   admin       INTEGER NOT NULL DEFAULT 0, -- biaya admin (pendapatan)
   total       INTEGER NOT NULL,        -- nominal + admin (yang dibayar pelanggan)

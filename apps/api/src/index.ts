@@ -1362,15 +1362,22 @@ app.post('/api/topups', async (c) => {
     const admin = Number(body?.admin ?? 0);
     if (!(nominal > 0)) return c.json({ error: 'nominal harus > 0' }, 400);
     if (!(admin >= 0)) return c.json({ error: 'admin harus >= 0' }, 400);
-    if (!body?.provider || !body?.nomor) return c.json({ error: 'provider dan nomor wajib' }, 400);
+    // `nomor` OPSIONAL sejak 2026-10-06 (permintaan pemilik): e-wallet/pulsa
+    // "untuk pencatatan saja tidak perlu nomor HP" dan tarik tunai cukup
+    // nominal+admin — kosong = memang tanpa nomor (PLN token/tagihan tetap
+    // mengisi no meter/ID pelanggan). `token` = Nomor Token PLN (ikut dicetak
+    // di struk belanja); layanan lain mengirim kosong.
+    if (!body?.provider) return c.json({ error: 'provider wajib' }, 400);
+    const nomor = String(body?.nomor ?? '');
+    const token = String(body?.token ?? '');
     const id = body.id ?? randomUUID();
     const dup = db.prepare('SELECT * FROM topup_txns WHERE id=?').get(id);
     if (dup) return c.json({ data: dup, duplicate: true });
     const total = nominal + admin; // yang dibayar pelanggan
     const row = db.prepare(
-      `INSERT INTO topup_txns (id, shift_id, kind, provider, nomor, nominal, admin, total, pay_method, cashier)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    ).get(id, body.shift_id ?? null, kind, String(body.provider).toUpperCase(), String(body.nomor),
+      `INSERT INTO topup_txns (id, shift_id, kind, provider, nomor, token, nominal, admin, total, pay_method, cashier)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    ).get(id, body.shift_id ?? null, kind, String(body.provider).toUpperCase(), nomor, token,
       nominal, admin, total, body.pay_method ?? 'tunai', body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir');
     return c.json({ data: row }, 201);
   } catch (e) {
