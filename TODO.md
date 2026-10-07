@@ -24,12 +24,12 @@ terhapus, bukti utama sudah diekstrak ke laporan chat 2026-10-04).
       pintasan baru **F5** (kosongkan keranjang — sekalian memperbaiki kolom
       diskon yang tidak ikut dikosongkan) dan **F6** (fokus kolom diskon) di
       `bindPintasan()`, preventDefault F5/F6 agar Chrome tidak reload/find.
-- [ ] **P4 dirombak pemilik 2026-10-06: tampilan grid TIDAK diperlukan**
+- [x] **P4 dirombak pemilik 2026-10-06: tampilan grid TIDAK diperlukan**
       (*"P4 tidak perlu tampilan grid"*). Yang diminta sebagai gantinya:
       **layout mobile sendiri + tombol perpindah mode** (*"untuk mobile
       nanti buat layout sendiri … tambahkan layout untuk berpindah ke mode
-      mobile saja"*) — task terpisah, dikerjakan setelah batch urutan yang
-      disetujui (lihat Menyusul: "Layout mobile").
+      mobile saja"*) — dikerjakan sebagai **Tahap 5** (lihat entri
+      "Layout mobile + tombol pindah mode").
 - [x] **P5 — Tahan/pending transaksi** — SELESAI 2026-10-04: snapshot keranjang
       (`Hold` = items/diskon/pelanggan/waktu/kasir) ke **IndexedDB per device**
       (`getHolds()`/`saveHolds()` di `store.ts`, kv key `'holds'` — tanpa
@@ -809,25 +809,106 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       (No..Nama = 609px terukur, dulu 1086px penuh)** — baris kosong tetap
       `colspan="8"`. Selector test (`data-act=note`, `tr.note-row`) tak
       berubah; 933 hijau.
-- [ ] **Layout mobile + tombol pindah mode** (pengganti P4 grid, keputusan
-      pemilik 2026-10-06: *"untuk mobile nanti buat layout sendiri …
-      tambahkan layout untuk berpindah ke mode mobile saja"*) — pindah ke
-      akhir urutan batch yang disetujui. Buka Laci Kasir ikut **keputusan
-      2026-10-06: OTOMATIS tiap penjualan tunai** (kick ESC/POS lewat
-      `kirimPrint()`, nol perubahan API/agent).
+- [x] **Layout mobile + tombol pindah mode — SELESAI (Tahap 5, 2026-10-06)**
+      (pengganti P4 grid, keputusan pemilik: *"untuk mobile nanti buat
+      layout sendiri … tambahkan layout untuk berpindah ke mode mobile
+      saja"*): tombol **`#pos-mobile` "Mobile" KANAN chip Qty** di scan bar
+      (ikon `smartphone` baru) → toggle `mobileMode` + pref
+      `ravaa.mobile-layout` — semua grid POS dipaksa 1 kolom
+      (`gridUtamaCls()` + `gridCls`/`batas` info bar; listener di `paint()`
+      semua mode). Probe 14/14 (urutan Cari→Qty→Mobile, stack 1 kolom,
+      pref tersimpan, kembali desktop); kartu-list keranjang = opsi lanjut
+      setelah approve tampilan.
+- [x] **Info bar di mode topup/tarik — SELESAI (2026-10-06)**: pemilik
+      *"mode topup dan tarik mengapa bagian ini hilang ya?"* — dulu
+      conditional `mode === 'jual'` sehingga Waktu/Kasir/Shift/**Tutup
+      shift** ikut lenyap. Kini `infoBarHtml()` dirender **semua mode**;
+      cell 2/3 topup = "Mode" (judul·jenis) + "Total dibayar"
+      (`#pos-grand`/`#pos-owncount` disinkron `paintTopup()`), listener
+      pindah ke `paint()` (dulu `bindCart` = tombol mati di topup), back
+      duplikat di baris Mode dihapus. Probe 8/8 + suite 934 hijau.
+- [x] **Form topup/tarik disesuaikan per jenis — SELESAI (2026-10-06)**:
+      permintaan pemilik: e-wallet/pulsa *"tidak perlu nomor HP"* (cukup
+      Nominal + Admin), tarik tunai *"hanya nominal saja dan admin"*, tagihan
+      PLN sudah sesuai (ID pelanggan + nominal + admin), **PLN token tetap
+      No meter + form BARU Nomor Token yang ikut dicetak di struk**
+      (`butuhNomor`/`butuhToken` di `TOPUP_JENIS`/`TARIK_JENIS`, field
+      `#tp-token`, baris struk `Token:`), admin = fee toko (PLN 50-50 mitra
+      diketahui — angka tetap diisi kasir). Server: `nomor` jadi OPSIONAL
+      (`''` = tanpa nomor) + kolom baru **`topup_txns.token`** (ALTER
+      in-place, backup `data.db.bak.topup-token`); Riwayat menyembunyikan
+      nomor kosong & menampilkan Token. e2e-struk section C diperluas
+      (e-wallet tanpa input nomor + struk PLN token) → **939 asersi hijau**.
+      **Revisi lanjutan (masih 2026-10-06)**: pemilik *"biaya admin itu
+      letakkan di bawahnya nominal saja"* + *"mode topup dan tarik tunai
+      semua sama tampilannya … yang berbeda hanya card [kiri]"* → input
+      `#tp-admin` pindah dari sidebar kanan ke **card kiri tepat di bawah
+      Nominal**; sidebar kanan jadi murni ringkasan read-only (NOMINAL →
+      ADMIN `#tp-admin-view` → Total → metode → uang diterima → Proses),
+      struktur identik untuk kedua mode (id/listener tidak berubah, e2e
+      tetap pakai `inputValue('#tp-admin')`).
+      **⚠ Digantikan refactor 1 layout 2026-10-07 — lihat entri di bawah.**
+- [x] **Refactor 1 layout desktop: sidebar bayar identik SEMUA mode —
+      SELESAI (2026-10-07)**: permintaan pemilik *"untuk mode topup dan
+      tarik tunai gunakan layout yang sama dengan mode penjualan … yang
+      berbeda hanya keranjang belanja"* → seluruh POS jadi SATU layout:
+      area kiri saja berubah (jual = `cartKiriHtml()` tabel; topup/tarik =
+      `topupHtml()` form per jenis), sidebar kanan **`sidebarBayarHtml()`
+      identik** (Aksi cepat → Menu cepat → Diskon item → diskon transaksi →
+      Bayar F10 + Bayar pas F12; listener `bindSidebar()` dari `bindCart`
+      + `bindTopup`). **Kolom uang `#tp-tunai`, tombol `#tp-submit`,
+      ringkasan `#tp-nominal-view`/`#tp-admin-view`/`#tp-total`/
+      `#tp-kembali` DIHAPUS** — angka pindah ke info bar (`paintTopup()`),
+      transaksi diproses lewat **MODAL BAYAR bersama**: `pay()` meneruskan
+      non-jual ke `submitTopup()` (`totalBayar()` = nominal+admin), barrier
+      tunai ATURAN LAMA utuh (topup wajib uang >0 & ≥ total; tarik
+      dikecualikan >0; `0 < uang < total` tolak kedua mode) — gagal barrier
+      = buka modal + fokus `#pos-cash`; sukses = `tutupBayar()` (topup
+      tetap TANPA dialog resume) + reset `cashIn`. Pintasan: F1/F8 semua
+      mode; F10/F12/F2 → `pay()`/`bisaBayar()`; F6/F7 non-jual → toast;
+      aksi Tahan/Item manual/Diskon sidebar → toast (Opsi A disetujui
+      pemilik); `muatHold()` dari topup otomatis pindah ke `jual`;
+      `bayarPas()` mode-aware (topup tunai = uang pas, tarik = cashIn tak
+      disentuh). e2e-struk section C dialihkan ke alur modal (`#pos-bayar`
+      → `#pos-cash` → `#pos-pay`), jumlah asersi **tetap 138 → 939 total
+      hijau**; probe barrier `/tmp/opencode/probe-barrier-topup.mjs`
+      9/9; screenshot 4 mode `/tmp/opencode/refactor-{jual,topup,
+      topup-modal,tarik}.png` — sidebar identik terverifikasi visual.
+      tsc `--force` 0, build web ✓. API TIDAK berubah.
+- [x] **Buka Laci Kasir OTOMATIS — SELESAI (Tahap 4a, 2026-10-06)**:
+      penjualan **tunai** sukses di `pay()` → `bukaLaciOtomatis()` kirim kick
+      **`ESC p 00 19 FA`** (`bukaLaci()` di `escpos.ts`) lewat `kirimPrint()`
+      **TANPA syarat saklar "Cetak struk otomatis"** (laci = bagian transaksi
+      tunai, bukan cetak; QRIS/transfer tidak kick), segera saat server
+      konfirmasi & tanpa menunggu modal resume; gagal = `console.warn` saja
+      (penjualan tak pernah dibatalkan). Nol perubahan API/agent.
+      Unit: `escpos-test.ts` (+1, ekspek 70→71). Probe:
+      `/tmp/opencode/probe-laci2.mjs` — payload persis `1b700019fa`,
+      agent `ok:true via /dev/usb/lp0`, struk tak ikut (cetak mati),
+      QRIS +0 request, 0 pageerror.
 - [x] **Tombol Voucher → Riwayat — SUDAH (2026-10-06)**: `data-soon="Voucher"`
       dibuang, slot kini `a[href="#/history"]` (lihat item sidebar di atas;
       fitur voucher sendiri DITOLAK, lihat P6 di Backlog).
-- [ ] **Tombol Cetak ulang → nota TERAKHIR** (*"nota terakhir"*, keputusan
-      pemilik 2026-10-06): simpan id nota sukses terakhir → dialog
-      [Thermal][A4] jalur yang sama dengan Riwayat. Pasangan alami:
-      **Lihat Struk ›** pratinjau popup HTML (kandidat riset 2026-10-06)
-      digabung ke dialog itu bila jadi.
-- [ ] **Tutup shift dari dalam POS** — **keputusan pemilik 2026-10-06:
-      "tombol merah di pos seperti kula pos"** (bukan tautan). Letak: tombol
-      merah di POS → dialog konfirmasi tutup yang sama; rumus
-      `kasSeharusnya()`/`hitungSelisih()` diangkat dari `shifts.ts` ke
-      helper BERSAMA (satu sumber kebenaran, jangan diduplikasi — AGENTS §5).
+- [x] **Tombol Cetak ulang → nota TERAKHIR — SUDAH (Tahap 2, 2026-10-06)**:
+      id nota sukses disimpan `pay()` ke localStorage `ravaa.nota-terakhir`
+      (per device) → tombol `#pos-reprint` disabled sampai ada nota → klik =
+      fetch `GET /api/sales/:id` → **`cetakUlang()` (di-export dari
+      `history.ts`)** dialog [Thermal][A4][Batal] jalur Riwayat, tanpa
+      pratinjau Lihat Struk (keputusan pemilik: menyusul). Probe:
+      `/tmp/opencode/probe-cetak-ulang.mjs` (disabled→enabled, invoice
+      `261007-000002`, dialog 3 pilihan, 0 pageerror).
+- [x] **Tutup shift dari dalam POS — SUDAH (Tahap 1, 2026-10-06)**: tombol
+      **merah `#pos-shift-tutup` RATA KANAN info bar** (revisi pemilik
+      "tombol ini letakkan di rata kanan" — track auto ke-4 grid
+      `[1fr_1fr_1fr_auto]`, 3 kolom utama tetap sama rata; versi awal
+      sebelah Kasir+Shift dipindah). Keputusan dasar: "tombol merah di pos
+      seperti kula pos". Rumus + `dialogTutupShift()` diangkat ke
+      **`pages/shift-tutup.ts`** (bersama `#/shifts` — satu sumber kebenaran
+      `kasSeharusnya()`/`hitungSelisih()`, AGENTS §5); setelah tutup, POS
+      kembali ke gate "Buka shift dulu".
+      Probe: `/tmp/opencode/probe-shift-merah.mjs` +
+      `/tmp/opencode/probe-tutup-kanan.mjs` (1440/1024/390 — jarak tepi
+      kanan 13px, 0 pageerror).
 - [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
       KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah

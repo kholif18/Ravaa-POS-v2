@@ -49,6 +49,11 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// printpause='0': bawaan aplikasi JEDA cetak — suite ini memverifikasi payload
+// via route **/print (mock, tak menyentuh :9100), jadi pause dimatikan dulu.
+await page.addInitScript(() => {
+  try { localStorage.setItem('ravaa.printpause', '0'); } catch { /* */ }
+});
 const errs = [];
 page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });
@@ -56,7 +61,13 @@ page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.te
 const tercetak = [];
 await page.route('**/print', async (route) => {
   const body = JSON.parse(route.request().postData() || '{}');
-  tercetak.push(body.data_base64 || '');
+  const b64 = body.data_base64 || '';
+  // Kick laci ESC p (Tahap 4a) — bukan struk; buang supaya index tercetak[] tidak bergeser.
+  if (Buffer.from(b64, 'base64').equals(Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa]))) {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, via: 'test' }) });
+    return;
+  }
+  tercetak.push(b64);
   await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, via: 'test' }) });
 });
 

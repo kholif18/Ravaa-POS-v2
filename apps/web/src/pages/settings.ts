@@ -14,7 +14,7 @@
 import { apiGet, apiPost, HttpError } from '../api';
 import { confirmDialog } from '../ui/confirm';
 import { icon } from '../ui/icons';
-import { getAutoPrint, getStrukLayout, setAutoPrint, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
+import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPause, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
@@ -161,6 +161,7 @@ function kartuToko(): string {
 function kartuCetak(): string {
   const nyala = getAutoPrint();
   const layout = getStrukLayout();
+  const jeda = getPrintPause();
   const isiSaklar = nyala
     ? `Setiap penjualan selesai, dialog menawarkan pilihan <b>[Thermal] [A4] [Tidak]</b> —
         kasir memilih kertas per transaksi (A4 = invoice gaya Aronium). Topup/tarik
@@ -175,6 +176,11 @@ function kartuCetak(): string {
         membuka invoice A4 (dicetak lewat browser, bukan print-agent).`
     : `Layout tersimpan: <b>Thermal 58mm</b> — 32 kolom, diakhiri potong kertas; dipakai
         untuk struk topup/tarik. Pilihan A4 saat penjualan tetap membuka invoice A4.`;
+  const isiJeda = jeda
+    ? `JEDA CETAK <b>AKTIF</b> — semua kirim ke printer (struk, label harga, kick laci)
+        ditahan di browser; nol kertas terbuang. Invoice A4 lewat browser tetap muncul
+        bila diklik manual. Matikan saklar ini hanya setelah pemilik memerintahkan.`
+    : `Jeda cetak <b>nonaktif</b> — struk/label/kick laci mengirim ke printer seperti biasa.`;
   return `
     <div class="card">
       <div class="flex flex-wrap items-start justify-between gap-3">
@@ -182,12 +188,14 @@ function kartuCetak(): string {
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Cetak struk</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiSaklar}</p>
           <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">${isiLayout}</p>
+          <p class="mt-2 text-sm ${jeda ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500 dark:text-gray-400'}">${isiJeda}</p>
           <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
             Berlaku untuk <b>device ini saja</b> (tersimpan di browser, tidak ikut ke
             kasir lain) — karena dua PC bisa menempel pada printer yang berbeda.
           </p>
         </div>
         <div class="flex shrink-0 flex-col items-end gap-2">
+          ${switchHtml('set-pause', !jeda, jeda ? 'Dijeda' : 'Cetak ON')}
           ${switchHtml('set-cetak', nyala, nyala ? 'Aktif' : 'Nonaktif')}
           <select id="set-layout" class="input input-sm" aria-label="Layout struk">
             <option value="thermal"${layout === 'thermal' ? ' selected' : ''}>Thermal 58mm</option>
@@ -350,9 +358,20 @@ function bind(): void {
     }
   });
 
-  // Kartu "Cetak struk": dua preferensi per-device, langsung tersimpan tanpa
+  // Kartu "Cetak struk": preferensi per-device, langsung tersimpan tanpa
   // konfirmasi (non-destruktif & bisa dibalik — alasan sama dengan Backup).
   // Di-paint ulang supaya label saklar ("Aktif"/"Nonaktif") ikut terbarui.
+  host?.querySelector<HTMLInputElement>('#set-pause')?.addEventListener('change', (e) => {
+    const nyala = (e.target as HTMLInputElement).checked;
+    setPrintPause(!nyala); // saklar menyala = CETAK menyala = pause mati
+    toast(
+      nyala
+        ? 'Jeda cetak DIMATIKAN — struk/label/kick laci kirim ke printer lagi'
+        : 'Jeda cetak AKTIF — semua kirim ke printer ditahan (kertas aman)',
+      nyala ? 'success' : 'warning',
+    );
+    paint();
+  });
   host?.querySelector<HTMLInputElement>('#set-cetak')?.addEventListener('change', (e) => {
     const nyala = (e.target as HTMLInputElement).checked;
     setAutoPrint(nyala);

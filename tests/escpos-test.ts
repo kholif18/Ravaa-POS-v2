@@ -2,7 +2,7 @@
 // Jalankan: npx tsx escpos-test.ts
 import {
   COLS, COLS_A4, ascii, rp, potong, tengah, kanan, labelHarga, teksLabel, gabungLabel,
-  keBase64, struk, strukA4, strukUntuk, sesuaikanPrinter, type ProdukLabel,
+  keBase64, struk, strukA4, strukUntuk, sesuaikanPrinter, bukaLaci, type ProdukLabel,
 } from '../apps/web/src/escpos.ts';
 
 let lolos = 0, gagal = 0;
@@ -250,6 +250,13 @@ console.log('=== G. struk A4 (Epson L3110) & pilihan layout ===');
   ok('sesuaikanPrinter a4: 0 potongan', !a4.some((_, i) => a4[i] === 0x1d && a4[i + 1] === 0x56 && a4[i + 2] === 0x00));
   ok('sesuaikanPrinter a4: ditutup Form Feed', a4[a4.length - 1] === 0x0c, a4.slice(-4));
   ok('sesuaikanPrinter a4: isi label tetap utuh', teksDari(a4).includes('Sampoerna Mild') && teksDari(a4).includes('Rp4.000'));
+}
+
+{
+  // bukaLaci (Tahap 4a, kick ESC/POS): 5 byte persis ESC p m t1 t2 —
+  // 0x1B 0x70 0x00 0x19 0xFA. Dipakai POS untuk penjualan tunai OTOMATIS
+  // (tanpa syarat saklar cetak); byte ini wajib dikenali printer thermal.
+  eq('bukaLaci = ESC p 00 19 FA (5 byte)', bukaLaci(), [0x1b, 0x70, 0x00, 0x19, 0xfa]);
 }
 
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);

@@ -36,14 +36,19 @@ import {
 } from '../store';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
-import { getAutoPrint, setAutoPrint, setStrukLayout } from '../ui/print-pref';
-import { kirimPrint, strukUntuk, type Struk } from '../escpos';
+import { getAutoPrint, getPrintPause, setAutoPrint, setStrukLayout } from '../ui/print-pref';
+import { kirimPrint, strukUntuk, bukaLaci, type Struk } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
 import { toast } from '../ui/toast';
 import { openModal, type ModalHandle } from '../ui/modal';
 import { icon, type IconName } from '../ui/icons';
 import { AMBAT_EXPIRY, statusExpiry, tglExpiry } from '../ui/expiry';
+import { dialogTutupShift, type ShiftRow } from './shift-tutup';
+// cetakUlang = jalur Riwayat (Tahap 2 2026-10-06): tombol "Cetak ulang" di
+// Aksi cepat memakai dialog + struk yang SAMA PERSIS — jangan ditulis ulang
+// di pos.ts (AGENTS §5: bila kemiripan ≥80% → satu modul).
+import { cetakUlang, type SaleRow } from './history';
 
 /* ---------- tipe ---------- */
 
@@ -249,6 +254,24 @@ async function cetak(bytes: number[]): Promise<void> {
   }
 }
 
+/** Buka laci kasir OTOMATIS — Tahap 4a (keputusan pemilik 2026-10-06:
+ *  "Buka Laci Kasir ... OTOMATIS tiap penjualan tunai, walau saklar cetak
+ *  mati"). Kirim kick ESC/POS TERPISAH dari struk: `if (!autoPrint) return`
+ *  di cetak() sengaja TIDAK dipakai di sini (laci = bagian transaksi tunai,
+ *  bukan cetak). Gagal (agent mati / kabel lepas) hanya console.warn —
+ *  penjualan tidak pernah dibatalkan, dan tanpa toast supaya kasir tidak
+ *  dibanjiri peringatan tiap nota (jalur struk punya toast sendiri). */
+async function bukaLaciOtomatis(): Promise<void> {
+  // Jeda cetak (print-pref.ts): kick laci = kirim fisik juga — senyap saja,
+  // JANGAN spam console.warn tiap penjualan selama pemilik belum perintah nyala.
+  if (getPrintPause()) return;
+  try {
+    await kirimPrint(bukaLaci());
+  } catch (e) {
+    console.warn('[laci] kick gagal:', e instanceof Error ? e.message : e);
+  }
+}
+
 /** Isi badan "modal resume" pasca-bayar (putaran 11, 2026-10-05 — permintaan
  *  pemilik "setelah bayar tambahkan modal resume"): ringkasan compact di
  *  bawah judul hero KEMBALIAN — No. nota → daftar item (maks 5 baris +
@@ -393,12 +416,36 @@ async function pilihCetakSelesai(
 
 /* ---------- state topup / tarik ---------- */
 let mode: Mode = 'jual';
+/** Layout mobile (Tahap 5, 2026-10-06 — pengganti P4 grid, keputusan pemilik
+ *  "untuk mobile nanti buat layout sendiri … tambahkan layout untuk berpindah
+ *  ke mode mobile saja"): true = semua grid POS dipaksa 1 kolom (info bar
+ *  menumpuk, panel bayar di bawah selebar layar — preview layout HP di
+ *  desktop; di HP asli <lg memang sudah menumpuk natural). Pref per-device
+ *  `ravaa.mobile-layout` ('1'), toggle lewat tombol #pos-mobile di scan bar. */
+let mobileMode = (() => {
+  try {
+    return localStorage.getItem('ravaa.mobile-layout') === '1';
+  } catch {
+    return false;
+  }
+})();
+
+/** Class grid utama POS (keranjang+sidebar bayar / form topup+panel):
+ *  `mobileMode` → 1 kolom penuh (panel ikut di bawah selebar layar — layout
+ *  mobile, pengganti P4 grid); normal → sidebar 320px di ≥lg. */
+function gridUtamaCls(): string {
+  return mobileMode
+    ? 'grid min-h-0 flex-1 gap-2 grid-cols-1'
+    : 'grid min-h-0 flex-1 gap-2 lg:grid-cols-[1fr_320px]';
+}
 let topJenis: TopupJenis | '' = '';  // jenis layanan yang dipilih
-let topNomor = '';           // nomor HP / rekening
+let topNomor = '';           // nomor HP / no meter / ID pelanggan ('' = tanpa nomor)
+let topToken = '';           // Nomor Token PLN (dicetak di struk; jenis lain kosong)
 let topNominal = 0;
 let topAdmin = 0;
 let topAdminTouched = false; // setelah kasir ubah sendiri, jangan ditimpa lagi
-let topTunai = 0;            // uang diterima (tidak relevan untuk QRIS/transfer)
+// Uang diterima topup/tarik = `cashIn` BERSAMA (state modal bayar) sejak
+// refactor 1 layout 2026-10-07 — kolom #tp-tunai di panel kanan DIHAPUS.
 
 /** Tier admin kasir. WAJIB sama dengan `GET /api/topups/suggest-admin`
  *  (apps/api/src/index.ts) supaya layar kasir tidak melenceng dari server. */
@@ -429,6 +476,30 @@ const diskonBaris = () => cart.reduce((s, l) => s + l.discount, 0);
 const total = () => Math.max(0, subtotal() - diskonBaris() - discount);
 const count = () => cart.reduce((s, l) => s + l.qty, 0);
 const change = () => Math.max(0, cashIn - total());
+
+/** Total tagihan untuk MODAL BAYAR — mode jual = total keranjang; mode
+ *  topup/tarik = nominal + biaya admin. Satu sumber untuk judul modal, kartu
+ *  "Total tagihan", barrier tunai, dan kembalian (refactor 1 layout desktop
+ *  2026-10-07: panel bayar IDENTIK di semua mode, yang beda hanya area kiri). */
+const totalBayar = () => (mode === 'jual' ? total() : topNominal + topAdmin);
+
+/** Kembalian modal = uang diterima − total tagihan (0 bila uang belum diisi). */
+const kembalianBayar = () => (cashIn > 0 ? Math.max(0, cashIn - totalBayar()) : 0);
+
+/** Teks konteks kembalian untuk SEMUA mode (mengikuti totalBayar): "Kurang
+ *  Rp…" / "Uang pas…" — SATU aturan untuk jual maupun topup/tarik. */
+function teksKembalianBayar(): string {
+  if (!(cashIn > 0)) return '';
+  const t = totalBayar();
+  if (cashIn < t) return `Kurang ${rp(t - cashIn)}`;
+  if (cashIn === t) return 'Uang pas. Tidak ada kembalian.';
+  return '';
+}
+
+/** Bolehkah tombol Bayar / Bayar pas aktif di mode saat ini: mode jual =
+ *  keranjang terisi; mode topup/tarik = nominal terisi (0 = form masih
+ *  kosong, klik hanya membingungkan — persis aturan lama `!cart.length`). */
+const bisaBayar = () => (mode === 'jual' ? !!cart.length : topNominal > 0);
 
 /** Kelas warna angka KEMBALIAN (hasil besar di form bayar: hijau = cukup/
  *  lebih, merah = kurang, abu = belum diisi). Dipakai lewat kelasPosChange()
@@ -527,6 +598,35 @@ function bacaQtyKode(v: string): { qty: number; q: string } | null {
   return { qty: Number(m[1]), q };
 }
 
+/** Resolusi satuan jual → `{unit, factor, price}` FINAL untuk satu baris.
+ *  Satuan dasar / kosong → `{p.unit, 1, p.price}`; alternatif dari
+ *  `product_units`: `price` eksplisit bila diisi, ikut `products.price × factor`
+ *  bila NULL (aturan kontrak GET /api/products `units[]`).
+ *  Satuan tak dikenal jatuh ke dasar (pola addProduct lama — jangan dilempar
+ *  error di sini; server tetap penjaga terakhir saat bayar).
+ *  SATU sumber kebenaran untuk addProduct, gantiSatuan, dan muatKeranjang
+ *  (AGENTS §5). */
+function resolusiSatuan(
+  p: Product,
+  unitSlug?: string,
+): { unit: string; factor: number; price: number } {
+  const ru = unitSlug && unitSlug !== p.unit
+    ? (p.units ?? []).find((u) => u.unit === unitSlug)
+    : undefined;
+  return ru
+    ? { unit: ru.unit, factor: ru.factor, price: ru.price ?? Math.round(p.price * ru.factor) }
+    : { unit: p.unit, factor: 1, price: p.price };
+}
+
+/** Daftar pilihan select satuan per baris: dasar + alternatif (bila kosong
+ *  = produk hanya punya satu satuan → select TIDAK dirender). */
+function daftarSatuan(p: Product): { unit: string; factor: number; price: number }[] {
+  const list = [resolusiSatuan(p), ...(p.units ?? []).map((u) => resolusiSatuan(p, u.unit))];
+  // Guard duplikat: satuan dasar kontrak sengaja bukan baris units[], tapi
+  // cache lama / data import bisa saja memuatnya — select opsi dobel = bingung.
+  return list.filter((o, i) => list.findIndex((x) => x.unit === o.unit) === i);
+}
+
 function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1): void {
   // Key menyertakan satuan: 2 pcs dan 2 pack adalah baris BERBEDA, bukan penambahan.
   // Produk harga khusus (price_dynamic) key-nya ikut memuat HARGA beli baris
@@ -612,6 +712,52 @@ function setHarga(key: string, nilai: number): void {
       tabrakan.discount = Math.min(tabrakan.discount, jumlahBaris(tabrakan));
       cart = cart.filter((l) => l.key !== key);
     } else line.key = keyBaru;
+  }
+  clampDiskonTransaksi();
+  simpanKeranjang();
+  paintCart();
+}
+
+/** Ganti satuan baris yang SUDAH ada di keranjang (Tahap 3, 2026-10-06).
+ *  Keputusan FINAL pemilik: select/dropdown satuan PER BARIS; **qty ANGKA SAMA
+ *  pindah satuan** (5 pcs → 5 pack); **diskon baris DI-RESET** (total uang
+ *  berubah — diskon lama tidak relevan); harga diambil ulang dari
+ *  `product_units` lewat `resolusiSatuan` (server tetap mengunci harga non-
+ *  dinamis saat bayar). Re-key `<id>:<unit>` (+ `:<harga>` bila price_dynamic)
+ *  — bila baris lain sudah memakai key itu, kuantitas DIGABUNG (aturan scan
+ *  yang sama, lihat setHarga). */
+function gantiSatuan(key: string, unitSlug: string): void {
+  const line = cart.find((l) => l.key === key);
+  if (!line || line.product_id === null || !unitSlug || unitSlug === line.unit) return;
+  const p = products.find((x) => x.id === line.product_id);
+  if (!p) return;
+  const res = resolusiSatuan(p, unitSlug);
+  // Satuan tak ada di master baris ini (cache basi) — resolusiSatuan jatuh ke
+  // satuan dasar; kalau dasar pun bukan pilihan yang diklik, abaikan.
+  if (res.unit !== unitSlug) return;
+  const qty = line.qty; // angka qty TETAP — hanya satuan & harga yang berganti
+  const keyBaru = p.price_dynamic ? `${p.id}:${res.unit}:${res.price}` : `${p.id}:${res.unit}`;
+  if (keyBaru !== line.key) {
+    const tabrakan = cart.find((l) => l.key === keyBaru);
+    if (tabrakan) {
+      // Baris tujuan sudah ada (satu produk+satuan[+harga]) — gabung kuantitas,
+      // baris lama dibuang. Diskon baris tujuan TIDAK di-reset: ia milik baris
+      // lain yang tidak ikut berganti.
+      tabrakan.qty += qty;
+      if (!tabrakan.discManual) tabrakan.discount = hitungPrefill(tabrakan);
+      tabrakan.discount = Math.min(tabrakan.discount, jumlahBaris(tabrakan));
+      cart = cart.filter((l) => l.key !== key);
+    } else {
+      line.key = keyBaru;
+      line.unit = res.unit;
+      line.factor = res.factor;
+      line.price = res.price;
+      // Diskon baris DI-RESET (keputusan pemilik 2026-10-06). discManual=true
+      // supaya prefill produk TIDAK "bangkit" lagi saat qty berubah — kasir
+      // melihat angka 0 dan boleh mengisi sendiri kalau memang mau.
+      line.discount = 0;
+      line.discManual = true;
+    }
   }
   clampDiskonTransaksi();
   simpanKeranjang();
@@ -704,6 +850,39 @@ function bindShiftGate(): void {
       btn.textContent = 'Buka Shift';
     }
   });
+}
+
+/* ---------- tutup shift dari POS (tombol merah info bar) ---------- */
+
+/** Buka dialog tutup shift dari info bar POS (keputusan pemilik 2026-10-06:
+ *  "tombol merah di pos seperti kula pos"). Baris shift diambil SEGAR dari
+ *  `GET /api/shifts?status=open&cashier=` supaya angka agregat (omzet/tunai/
+ *  topup) pada dialog selalu terkini — `shift` di memori POS tidak memuat
+ *  kolom agregat. Setelah sukses: reload `shift` (null -> gate "Buka shift
+ *  dulu" tampil lagi; keranjang TETAP di memori + localStorage). */
+async function tutupShiftDariPos(): Promise<void> {
+  if (!shift || busy) return;
+  // Klik ganda / modal sudah terbuka = jangan menumpuk dialog kedua.
+  if (document.querySelector('.modal-overlay:not(.is-closing)')) return;
+  busy = true;
+  try {
+    const r = await apiGet<{ data: ShiftRow[] }>(
+      `/api/shifts?status=open&cashier=${encodeURIComponent(getCashier())}&limit=10`,
+    );
+    const s = r.data.find((x) => x.id === shift!.id) ?? r.data[0];
+    if (!s) {
+      toast('Shift ini tidak ditemukan di server — muat ulang dulu', 'warning');
+      return;
+    }
+    dialogTutupShift(s, async () => {
+      await loadShift(); // null -> paint() menampilkan gate buka shift
+      paint();
+    });
+  } catch (e) {
+    toast(`Gagal memuat shift: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error');
+  } finally {
+    busy = false;
+  }
 }
 
 /* ---------- layar keranjang ---------- */
@@ -807,26 +986,57 @@ function infoBarHtml(): string {
         )
         .join('')
     : `<option value="">Pelanggan Umum</option>`;
+  // Info bar dirender di SEMUA mode (revisi pemilik 2026-10-06: "mode topup
+  // dan tarik mengapa bagian ini hilang ya?" — dulu conditional
+  // `mode === 'jual'` sehingga Waktu/Kasir/Shift/Tutup shift ikut lenyap;
+  // kolom Pelanggan & Total Belanja hanya relevan jual, jadi di topup/tarik
+  // diganti Mode (judul·jenis) & Total dibayar (nominal+admin, disinkronkan
+  // paintTopup()). mode mobile = semua cell menumpuk 1 kolom (border atas).
+  const jual = mode === 'jual';
+  const gridCls = mobileMode
+    ? 'grid gap-2'
+    : 'grid items-center gap-2 lg:grid-cols-3 lg:gap-4';
+  const batas = mobileMode
+    ? 'border-t border-gray-200 pt-2 dark:border-gray-700'
+    : 'border-t border-gray-200 pt-2 dark:border-gray-700 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0';
+  const j = jual ? null : jenisAktif();
+  const judulTop = mode === 'topup' ? 'Topup' : 'Tarik tunai';
   return `
     <div class="card info-bar !p-3">
       <!-- Tiga kolom SAMA RATA (permintaan pemilik 2026-10-04 putaran 9:
            "buat kolomnya sama rata, jangan lebar di tengah, belum sama
-           rata ukuran kolomnya") — lg:grid-cols-3 menggantikan
-           [auto_1fr_auto] yang membuat kolom select pelanggan menyerap
-           seluruh sisa lebar. lg:min-w-[340px] lama ikut DIBUANG: track
-           sudah 1/3, dan min-width itu akan meluap di layar tepat 1024px.
+           rata ukuran kolomnya") — lg:grid-cols-3. Revisi pemilik
+           2026-10-06: tombol Tutup shift BUKAN track ke-4 di ujung baris,
+           tapi "tetap di kolom [kiri ini] … cuma rata kanan, mepet ke
+           kanan" — jadi track auto dibuang, tombol disisipkan di cell kiri
+           dengan ml-auto. Jangan kembalikan [auto_1fr_auto] yang memberi
+           sisa lebar ke kolom tengah.
            Kolom dipisah garis vertikal — border-l hanya >=lg (layar sempit
            kolom menumpuk, garis jadi noise). Kolom kanan = label+qty di
            KIRI, angka TOTAL di KANAN. -->
-      <div class="grid items-center gap-2 lg:grid-cols-3 lg:gap-4">
+      <div class="${gridCls}">
         <div class="flex items-center gap-2 whitespace-nowrap text-xs text-gray-600 dark:text-gray-300">
           ${tombolKembaliHtml()}
           <div class="flex flex-col gap-y-0.5">
             <span class="flex items-center gap-1.5">${icon('clock')}<span class="font-semibold">Waktu:</span><span id="pos-jam" class="tabular-nums">${jamPos()}</span></span>
             <span class="flex items-center gap-1.5">${icon('users')}<span class="font-semibold">Kasir:</span><span>${esc(getCashier())}</span><span class="text-gray-400">· Shift #${shift?.id}</span></span>
           </div>
+          <!-- Tombol MERAH tutup shift — revisi pemilik 2026-10-06: tetap di
+               kolom ini (bukan kolom terpisah seperti versi track-auto),
+               "cuma rata kanan, mepet ke kanan" → ml-auto menempelkan ke
+               tepi kanan cell (sebelum border-l kolom Pelanggan). Dialog =
+               modul bersama shift-tutup.ts (sama persis dengan halaman
+               Shift); kula-07-pos-kasir.png taruh "Tutup Sesi Kas" di
+               toolbar atas. -->
+          <button type="button" id="pos-shift-tutup"
+            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-xs !text-red-600 !border-red-300 hover:!border-red-400 hover:!bg-red-50 dark:!border-red-500/50 dark:!text-red-400 dark:hover:!bg-red-500/10"
+            title="Tutup shift kasir (hitung laci dulu)" aria-label="Tutup shift">
+            ${icon('logout')}<span>Tutup shift</span>
+          </button>
         </div>
-        <div class="min-w-0 border-t border-gray-200 pt-2 dark:border-gray-700 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        ${
+          jual
+            ? `<div class="min-w-0 ${batas}">
           <!-- Select selebar form (permintaan pemilik 2026-10-04 — dulu
                dibatasi max-w-[520px]) + tombol CARI (putaran 7 2026-10-04,
                "tambahkan cari seperti cari produk F3"): layar cari penuh
@@ -848,21 +1058,26 @@ function infoBarHtml(): string {
               <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-xs font-semibold tracking-wide">F9</span></button>
             </div>
           </div>
-        </div>
+        </div>`
+            : `<div class="min-w-0 ${batas}">
+          <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Mode</div>
+          <div class="text-sm font-semibold text-gray-900 dark:text-white">${judulTop} · ${esc(j?.label ?? '')}</div>
+        </div>`
+        }
         <!-- Kolom total = track 1/3 (sama rata, lihat komentar grid di atas).
              justify-between tetap menempelkan label+n item ke KIRI kolom dan
              angka #pos-grand ke KANAN — tanpa min-w yang dulu dipakai untuk
              memberi ruang pada track auto. -->
-        <div class="flex items-center justify-between gap-3 border-t border-gray-200 pt-2 dark:border-gray-700 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        <div class="flex items-center justify-between gap-3 ${batas}">
           <div class="min-w-0 text-left">
-            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total belanja</div>
-            <div id="pos-owncount" class="text-xs text-gray-500 dark:text-gray-400">${cart.length ? `${cart.length} item (${count()} Qty)` : '0 item'}</div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${jual ? 'Total belanja' : 'Total dibayar'}</div>
+            <div id="pos-owncount" class="text-xs text-gray-500 dark:text-gray-400">${jual ? (cart.length ? `${cart.length} item (${count()} Qty)` : '0 item') : `Nominal ${rp(topNominal)} + admin ${rp(topAdmin)}`}</div>
           </div>
           <!-- text-[48px] ukuran KUSTOM (Tailwind arbitrary value) = 2x lipat
                text-2xl lama (24px) — permintaan pemilik 2026-10-04 "custom
                ukuran font, besarkan lagi 2x lipat". Total belanja = angka
                terpenting di layar kasir. -->
-          <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums text-primary">${rp(total())}</div>
+           <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums text-primary">${rp(jual ? total() : topNominal + topAdmin)}</div>
         </div>
       </div>
     </div>`;
@@ -888,10 +1103,15 @@ function cartHtml(): string {
           <!-- Ukuran DISAMAKAN dengan tombol Cari/F3 di sebelahnya (permintaan
                pemilik 2026-10-04) — dulu kelas chip jadi lebih pendek/menempel. -->
           <button type="button" id="pos-qty" class="btn btn-ghost${qtyNext > 1 ? ' !border-primary !text-primary' : ''}" title="Qty untuk item BERIKUTNYA, dipakai sekali lalu kembali ke 1">Qty ${qtyNext}${kbd('F4')}</button>` : ''}
+          <!-- Tombol pindah LAYOUT MOBILE (Tahap 5, 2026-10-06 — keputusan
+               pemilik: "tambahkan layout untuk berpindah ke mode mobile saja";
+               posisi = KANAN chip Qty sesuai permintaan). Toggle mobileMode +
+               persist ravaa.mobile-layout; listener di paint() (universal,
+               seperti #pos-autoprint). -->
+          <button type="button" id="pos-mobile" class="btn btn-ghost${mobileMode ? ' !border-primary !text-primary' : ''}" title="Pindah layout mobile / desktop (preview tampilan HP)" aria-pressed="${mobileMode}">${icon('smartphone')}<span>Mobile</span></button>
           ${products.length ? '' : `<a href="#/products" class="chip !border-amber-500 !text-amber-600 dark:!text-amber-400">${icon('alert')}<span>Cache produk kosong — sinkron dulu di Manage</span></a>`}
         </div>
         <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
-          ${mode === 'jual' ? '' : tombolKembaliHtml()}
           <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Mode</span>
           <div id="pos-modes" class="flex flex-wrap gap-2">
             <button type="button" data-mode="jual" class="chip${mode === 'jual' ? ' !border-primary !text-primary' : ''}">Penjualan</button>
@@ -901,7 +1121,7 @@ function cartHtml(): string {
           <span class="rounded border border-gray-200 px-2 py-1 dark:border-gray-700">
             ${switchHtml('pos-autoprint', autoPrint, 'Cetak struk otomatis')}
           </span>
-          ${mode !== 'jual' ? '<span class="ml-auto text-xs text-gray-500 dark:text-gray-400">Nomor HP / rekening + nominal, admin otomatis per tier toko</span>' : ''}
+          ${mode !== 'jual' ? '<span class="ml-auto text-xs text-gray-500 dark:text-gray-400">Isi nominal + admin (saran otomatis per tier toko), lalu Bayar (F10) — uang diterima di form bayar</span>' : ''}
         </div>
       </div>`;
   // Ketiga mode memakai pembungkus yang sama: flex column setinggi halaman
@@ -912,28 +1132,19 @@ function cartHtml(): string {
   const body = mode === 'jual' ? cartGridHtml() : topupHtml();
   return `
   <div class="flex h-full min-h-0 flex-col gap-2">
-    ${mode === 'jual' ? infoBarHtml() : ''}
+    ${infoBarHtml()}
     ${scanBar}
     ${mode === 'jual' ? stripStokMenipis() + stripKadaluarsa() : ''}
     ${body}
   </div>`;
 }
 
-/** Keranjang + panel bayar (mode Penjualan). */
-function cartGridHtml(): string {
-  // Ringkasan sidebar kini hanya "Diskon item" (putaran 7: baris Subtotal
-  // DIHAPUS) — `sub`/`tot` lokal tidak dipakai lagi di dalam fungsi ini.
-  // Panel bayar = SIDEBAR KANAN 320px (revisi pemilik 2026-10-04 putaran 4:
-  // footer horizontal ala KulaPOS DITOLAK — "tidak usah, tetap jadi sidebar
-  // kanan tadi"), isi = ringkasan -> **Aksi cepat (Tahan/Pending P5 + Item
-  // manual/Diskon + placeholder Voucher/Cetak ulang)** -> diskon transaksi F6
-  // -> DUA tombol bayar (permintaan pemilik 2026-10-04 putaran 5: isian
-  // pembayaran PINDAH KE MODAL, lihat bukaBayar()/formBayarHtml(); putaran 6:
-  // "bayar uang pas letakkan di sidepanel bawahnya Bayar F10" = `#pos-pay-pas`
-  // menempel di bawah `#pos-bayar`). Baris "Grand total" DIHAPUS (duplikat
-  // TOTAL BELANJA di info bar — permintaan pemilik 2026-10-04).
+/** Kartu KIRI mode Penjualan: label baris (Keranjang/Bersihkan) + tabel
+ *  keranjang. Panel bayar TERPISAH di sidebarBayarHtml() — dipasang di
+ *  ketiga mode (refactor 1 layout desktop 2026-10-07: "seluruh POS 1
+ *  layout, yang berbeda hanya keranjang belanja"). */
+function cartKiriHtml(): string {
   return `
-    <div class="grid min-h-0 flex-1 gap-2 lg:grid-cols-[1fr_320px]">
       <div class="card-flush flex min-h-0 flex-col overflow-hidden">
         <!-- Label keranjang di ATAS tabel (referensi KulaPOS: "Keranjang 2 item
              ... Bersihkan [F5]" kanan-atas). -->
@@ -965,8 +1176,24 @@ function cartGridHtml(): string {
             <tbody id="pos-rows">${cartRows()}</tbody>
           </table>
         </div>
-      </div>
+      </div>`;
+}
 
+/** Panel bayar SIDEBAR KANAN 320px — **IDENTIK di ketiga mode** (refactor 1
+ *  layout desktop 2026-10-07: "seluruh POS 1 layout, yang berbeda hanya
+ *  keranjang belanja"). Riwayat layout: sidebar = keputusan pemilik
+ *  2026-10-04 (footer horizontal KulaPOS ditolak); isian pembayaran pindah
+ *  ke MODAL (bukaBayar()/formBayarHtml), `#pos-pay-pas` menempel di bawah
+ *  `#pos-bayar`; baris "Grand total" dihapus (duplikat info bar). Isi =
+ *  Aksi cepat (Tahan/Pending P5, Item manual, Diskon, Riwayat, Cetak ulang)
+ *  -> Menu cepat -> Diskon item -> Diskon transaksi F6 -> DUA tombol bayar.
+ *  Kondisi tombol mengikuti mode: Bayar/Bayar pas = bisaBayar() (keranjang
+ *  terisi saat jual / nominal terisi saat topup-tarik); input Diskon
+ *  transaksi DI-DISABLE di luar mode jual — keranjang tidak terlihat dari
+ *  sana, aksinya khusus Penjualan (lihat bindSidebar()). */
+function sidebarBayarHtml(): string {
+  const bayarMati = !bisaBayar() || busy;
+  return `
       <div class="card flex min-h-0 flex-col gap-2.5 overflow-y-auto !p-3">
         <!-- 1. Aksi cepat (permintaan pemilik 2026-10-04) — kini di POSISI
              ATAS kartu (permintaan pemilik 2026-10-06: "diskon item pindah
@@ -975,19 +1202,21 @@ function cartGridHtml(): string {
              Item manual & Diskon memanggil aksi yang sudah ada; **Riwayat**
              = anchor hash ke #/history, MENGGANTIKAN slot Voucher (keputusan
              pemilik 2026-10-06 "tombol bisa di ubah ke history transaksi" —
-             voucher & PPN ditutup permanen); Cetak ulang masih PLACEHOLDER
-             (nota terakhir, menyusul). Pending kini ber-pintasan **F8**
+             voucher & PPN ditutup permanen); **Cetak ulang** = nota TERAKHIR
+             device ini (keputusan pemilik 2026-10-06 — id nota sukses disimpan
+             di localStorage lalu dilewatkan ke cetakUlang() jalur Riwayat;
+             dialog [Thermal][A4][Batal]). Pending kini ber-pintasan **F8**
              (keputusan 2026-10-06 — F8 dulu alias fokus scan, kini F1
              saja yang ke scan). -->
         <div>
           <span class="label">Aksi cepat</span>
           <div class="grid grid-cols-2 gap-1.5">
-            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${cart.length ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
+            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${cart.length && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
             <button type="button" id="pos-hold-open" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
             <button type="button" id="pos-qa-manual" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">${icon('pencil')}<span>Item manual</span></button>
             <button type="button" id="pos-qa-disc" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">Diskon${kbd('F6')}</button>
             <a href="#/history" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
-            <button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" data-soon="Cetak ulang">${icon('print')}<span>Cetak ulang</span></button>
+            <button type="button" id="pos-reprint" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
           </div>
         </div>
         <div class="border-t border-gray-100 dark:border-gray-700" role="separator"></div>
@@ -1023,7 +1252,11 @@ function cartGridHtml(): string {
              tombol **Diskon F6** di grid Aksi cepat. -->
         <div class="space-y-1.5">
           <label class="label" for="pos-discount">Diskon transaksi (Rp)</label>
-          <input id="pos-discount" class="input input-sm" type="number" inputmode="numeric" min="0" step="500" value="${discount || ''}" placeholder="0" />
+          <!-- Disabled di luar mode jual (refactor 1 layout): keranjang tidak
+               terlihat dari mode topup/tarik, mengedit diskonnya dari sana
+               membingungkan — input tetap dirender supaya layout sidebar
+               IDENTIK. -->
+          <input id="pos-discount" class="input input-sm" type="number" inputmode="numeric" min="0" step="500" value="${discount || ''}" placeholder="0"${mode === 'jual' ? '' : ' disabled'} />
         </div>
         <!-- 4. Tombol Bayar = BUKA FORM BAYAR (modal), permintaan pemilik
              2026-10-04: metode bayar + uang diterima + chip nominal +
@@ -1040,7 +1273,7 @@ function cartGridHtml(): string {
              (kembalian), uang kurang (jadi HUTANG — wajib pelanggan terpilih
              selain "Pelanggan Umum"), dan metode pembayaran lain. -->
         <div class="mt-auto flex flex-col gap-1.5">
-          <button type="button" id="pos-bayar" class="btn btn-primary w-full !py-3.5 text-sm"${cart.length ? '' : ' disabled'}>${icon('check')}<span>Bayar</span>${kbd('F10')}</button>
+          <button type="button" id="pos-bayar" class="btn btn-primary w-full !py-3.5 text-sm"${bayarMati ? ' disabled' : ''}>${icon('check')}<span>Bayar</span>${kbd('F10')}</button>
           <!-- Revisi putaran 8b/8c (2026-10-04): outline sempat dipakai lalu
                diminta pemilik "style hilang yang tombol warna hijaunya" —
                class btn-outline MEMANG tidak ada di styles.css (no-op, jadi
@@ -1048,11 +1281,17 @@ function cartGridHtml(): string {
                hijau LEBIH GELAP (8c: "hover tombol F12 juga ubah ke hijau
                jangan biru, karena tombolnya warna hijau" — versi hover biru
                sempat dipakai 8b lalu dibatalkan). -->
-          <button type="button" id="pos-pay-pas" class="btn w-full !py-4 text-base font-semibold text-white bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-700/50 transition-all"${cart.length ? '' : ' disabled'} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
+          <button type="button" id="pos-pay-pas" class="btn w-full !py-4 text-base font-semibold text-white bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-700/50 transition-all"${bayarMati ? ' disabled' : ''} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
           <p class="text-center text-xs text-gray-500 dark:text-gray-400">${kbd('F10')} form bayar · ${kbd('F12')} bayar pas</p>
         </div>
-      </div>
-    </div>`;
+      </div>`;
+}
+
+/** Keranjang + panel bayar (mode Penjualan) — pembungkus grid dua kolom yang
+ *  SAMA dengan area topup/tarik (lihat topupHtml): kiri = isi mode, kanan =
+ *  sidebarBayarHtml() identik untuk semua mode. */
+function cartGridHtml(): string {
+  return `<div class="${gridUtamaCls()}">${cartKiriHtml()}${sidebarBayarHtml()}</div>`;
 }
 
 /* ---------- form bayar (modal) ---------- */
@@ -1065,11 +1304,12 @@ let bayarApi: ModalHandle | null = null;
 
 const formBayarTerbuka = (): boolean => !!bayarApi?.el.isConnected;
 
-/** Judul modal (`Bayar — Rp…`) ikut total terkini — dipanggil paintCart(). */
+/** Judul modal (`Bayar — Rp…`) ikut total tagihan TERKINI — dipanggil
+ *  paintCart() (mode jual) & paintBayarAktif() (topup/tarik). */
 function segarJudulBayar(): void {
   if (!formBayarTerbuka()) return;
   const judul = bayarApi!.el.querySelector('.modal-header h3');
-  if (judul) judul.textContent = `Bayar — ${rp(total())}`;
+  if (judul) judul.textContent = `Bayar — ${rp(totalBayar())}`;
 }
 
 /** Validasi pelanggan untuk pembayaran UANG KURANG / UANG 0 (jadi HUTANG —
@@ -1154,7 +1394,12 @@ function cekHutangDiperbolehkan(): string {
  *    Fokus `#pos-cash` saat buka TIDAK berubah; "uang pas" tetap hanya
  *    F12 `#pos-pay-pas` / chip pecahan. */
 function formBayarHtml(): string {
-  const tot = total();
+  // Total tagihan & kembalian mengikuti mode: keranjang (jual) atau
+  // nominal+admin (topup/tarik) — lihat totalBayar(). Blok Pelanggan dan
+  // petunjuk HUTANG hanya mode jual: topup/tarik tidak mengirim customer_id
+  // dan uang kurangnya BUKAN hutang (refactor 1 layout 2026-10-07).
+  const jual = mode === 'jual';
+  const tot = totalBayar();
   const tunai = payMethod === 'tunai';
   const sel = document.querySelector<HTMLSelectElement>('#pos-customer');
   const namaCust = sel?.selectedOptions[0]?.text.trim() || 'Pelanggan Umum';
@@ -1167,13 +1412,17 @@ function formBayarHtml(): string {
           <div class="text-xs text-gray-500 dark:text-gray-400">Total tagihan</div>
           <div id="bayar-total" class="text-[36px] font-extrabold tabular-nums text-primary">${rp(tot)}</div>
         </div>
-        <div class="mb-3 flex items-center gap-2.5">
+        ${
+          jual
+            ? `<div class="mb-3 flex items-center gap-2.5">
           <span class="shrink-0 text-primary [&>svg]:size-7">${icon('users')}</span>
           <div class="min-w-0">
             <div class="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pelanggan</div>
             <div id="bayar-cust" class="truncate text-sm font-bold text-gray-900 dark:text-white">${esc(namaCust)}</div>
           </div>
-        </div>
+        </div>`
+            : ''
+        }
         <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Metode pembayaran</div>
         <div class="grid grid-cols-2 gap-2">
           ${PAY_METHODS.map((m) => {
@@ -1213,17 +1462,21 @@ function formBayarHtml(): string {
           </div>
           <div class="rounded-lg border border-dashed border-gray-300 bg-white p-3 text-center dark:border-gray-600 dark:bg-gray-800">
             <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</div>
-            <div id="pos-change" class="${kelasPosChange()}">${rp(change())}</div>
-            <p id="pos-change-ctx" class="text-xs font-medium ${teksKembalian() ? '' : 'hidden'} ${
-              cashIn > 0 && cashIn < total() ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
-            }">${teksKembalian()}</p>
+            <div id="pos-change" class="${kelasPosChange()}">${rp(kembalianBayar())}</div>
+            <p id="pos-change-ctx" class="text-xs font-medium ${teksKembalianBayar() ? '' : 'hidden'} ${
+              cashIn > 0 && cashIn < tot ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+            }">${teksKembalianBayar()}</p>
           </div>
-          <!-- Uang kurang / uang 0 = HUTANG OTOMATIS (putaran 12, instruksi
+          ${
+            jual
+              ? `<!-- Uang kurang / uang 0 = HUTANG OTOMATIS (putaran 12, instruksi
                pemilik 2026-10-06: "uang kurang / uang 0 akan otomatis masuk
                ke hutang dengan catatan harus terpilih customer") — tanpa
                konfirmasi swal; pelanggan tidak memenuhi syarat = penolakan
                barrier, lihat cekHutangDiperbolehkan() + pay(). -->
-          <p class="text-xs text-gray-500 dark:text-gray-400">Uang kurang / uang 0 <b>otomatis</b> jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Uang kurang / uang 0 <b>otomatis</b> jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>`
+              : ''
+          }
         </div>
         <p id="bayar-non-tunai" class="text-xs text-gray-500 dark:text-gray-400"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
       </div>
@@ -1234,12 +1487,16 @@ function formBayarHtml(): string {
  *  **F10** (referensi Aronium: "Payment (F10) opens payment form"). Sudah
  *  terbuka -> cukup fokus kolom uang, jangan ada dua modal ganda. */
 function bukaBayar(): void {
-  if (mode !== 'jual' || !shift || busy) return;
+  // Refactor 1 layout (2026-10-07): modal bayar DIPAKAI KETIGA MODE —
+  // topup/tarik kini lewat form ini juga (dulu punya kolom uang & tombol
+  // Proses sendiri di panel kanan). Guard = shift + tidak sedang proses;
+  // syarat isi transaksi = bisaBayar() (keranjang / nominal terisi).
+  if (!shift || busy) return;
   if (formBayarTerbuka()) {
     bayarApi!.el.querySelector<HTMLInputElement>('#pos-cash')?.focus();
     return;
   }
-  if (!cart.length) return;
+  if (!bisaBayar()) return;
   // Putaran 10d (2026-10-05, "form uang diterima jangan langsung di isi uang
   // pas … jadi default 0"): auto-isi (P1) DIHAPUS — kolom SELALU dibuka
   // kosong, karena tujuannya memasukkan uang KURANG / LEBIH sesungguhnya.
@@ -1248,7 +1505,7 @@ function bukaBayar(): void {
   cashIn = 0;
   cashTouched = false;
   bayarApi = openModal({
-    title: `Bayar — ${rp(total())}`,
+    title: `Bayar — ${rp(totalBayar())}`,
     body: formBayarHtml(),
     wide: true, // putaran 10: panel 5/7 ala v1 butuh max-w-3xl (max-w-lg terlalu sempit)
     okLabel: 'Bayar',
@@ -1305,6 +1562,48 @@ function paintFormBayar(): void {
   });
 }
 
+/** Sinkronkan MODAL BAYAR dengan cashIn terkini — dipanggil listener
+ *  bindFormBayar(). Mode jual = paintCart() (lengkap, termasuk baris tabel);
+ *  topup/tarik = hanya bagian modal (total tagihan, kembalian, chip) karena
+ *  keranjang tidak terlihat di sana (refactor 1 layout 2026-10-07). */
+function paintBayarAktif(): void {
+  if (mode === 'jual') {
+    paintCart();
+    return;
+  }
+  const t = totalBayar();
+  const set = (sel: string, v: string) => {
+    const el = document.querySelector(sel);
+    if (el) el.textContent = v;
+  };
+  const cashEl = document.querySelector<HTMLInputElement>('#pos-cash');
+  if (cashEl) {
+    cashEl.placeholder = String(t);
+    if (!cashTouched) cashEl.value = cashIn ? String(cashIn) : '';
+  }
+  set('#bayar-total', rp(t));
+  segarJudulBayar();
+  set('#pos-change', rp(kembalianBayar()));
+  const ctx = document.querySelector('#pos-change-ctx');
+  if (ctx) {
+    const teks = teksKembalianBayar();
+    const pendek = cashIn > 0 && cashIn < t;
+    ctx.textContent = teks;
+    ctx.className =
+      `text-xs font-medium ${pendek ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}` +
+      (teks ? '' : ' hidden');
+  }
+  const changeEl = document.querySelector('#pos-change');
+  if (changeEl) changeEl.className = kelasPosChange();
+  // Sorot chip pecahan yang cocok dengan cashIn (pola paintCart).
+  document.querySelectorAll<HTMLElement>('[data-cash]').forEach((b) => {
+    const nilai = Number(b.dataset.cash ?? 0);
+    const aktif = cashIn > 0 && cashIn === nilai;
+    b.classList.toggle('!border-primary', aktif);
+    b.classList.toggle('!text-primary', aktif);
+  });
+}
+
 /** Pasang listener isi form bayar. Dipanggil SATU KALI tiap modal dibuka
  *  (isian tidak dirender ulang — lihat formBayarHtml). */
 function bindFormBayar(overlay: HTMLElement): void {
@@ -1312,29 +1611,29 @@ function bindFormBayar(overlay: HTMLElement): void {
     b.addEventListener('click', () => {
       payMethod = (b.dataset.pay as PayMethod) || 'tunai';
       // Ganti metode = mulai lagi dari awal: kolom uang kosong (cashIn=0,
-      // cashTouched=false) — paintCart menulis ulang isian lewat guard
+      // cashTouched=false) — paintBayarAktif menulis ulang isian lewat guard
       // `!cashTouched`. Sama persis dengan aturan lama di sidebar.
       cashIn = 0;
       cashTouched = false;
-      paintCart();
+      paintBayarAktif();
       paintFormBayar();
       if (payMethod === 'tunai') overlay.querySelector<HTMLInputElement>('#pos-cash')?.focus();
     }),
   );
 
   overlay.querySelector('#pos-cash')?.addEventListener('input', (e) => {
-    // Kasir menyentuh kolom -> tandai `cashTouched` (sinkronisasi paintCart
-    // berhenti menulis ulang isian).
+    // Kasir menyentuh kolom -> tandai `cashTouched` (sinkronisasi
+    // paintBayarAktif berhenti menulis ulang isian).
     cashTouched = true;
     cashIn = Number((e.target as HTMLInputElement).value || 0);
-    paintCart();
+    paintBayarAktif();
   });
 
   // Nominal cepat (4 pecahan; putaran 10c: tanpa chip "Uang pas" — sudah ada
   // F12 Bayar pas di side panel): satu klik mengisi kolom uang
   // diterima + kembalian, menghindari salah ketik nol saat kas menerima
-  // pecahan besar. paintCart tidak merender ulang form, jadi input & state
-  // aktif chip dijaga manual di sana. Fokus DIPERBALIKAN ke kolom uang
+  // pecahan besar. paintBayarAktif tidak merender ulang form, jadi input &
+  // state aktif chip dijaga manual di sana. Fokus DIPERBALIKAN ke kolom uang
   // setelah klik chip (putaran 10, "tanpa mengurangi kecepatan"): kasir
   // tinggal Enter untuk bayar — sebelumnya fokus tertinggal di chip dan
   // Enter menekan chip yang sama lagi.
@@ -1345,7 +1644,7 @@ function bindFormBayar(overlay: HTMLElement): void {
       cashIn = Number(b.dataset.cash || 0);
       const inp = overlay.querySelector<HTMLInputElement>('#pos-cash');
       if (inp) inp.value = cashIn ? String(cashIn) : '';
-      paintCart();
+      paintBayarAktif();
       inp?.focus();
     }),
   );
@@ -1353,13 +1652,13 @@ function bindFormBayar(overlay: HTMLElement): void {
   // Tombol × di samping kolom uang (ala btn-clear-huge Ravaa POS v1):
   // salah ketik nominal dibersihkan satu klik lalu fokus balik — tanpa
   // harus select-all manual. Kolom yang sengaja dikosongkan ditandai
-  // cashTouched supaya sinkronisasi paintCart tidak mengisi ulang.
+  // cashTouched supaya sinkronisasi paintBayarAktif tidak mengisi ulang.
   overlay.querySelector('#bayar-clear')?.addEventListener('click', () => {
     cashTouched = true;
     cashIn = 0;
     const inp = overlay.querySelector<HTMLInputElement>('#pos-cash');
     if (inp) inp.value = '';
-    paintCart();
+    paintBayarAktif();
     inp?.focus();
   });
 }
@@ -1371,18 +1670,28 @@ const QUICK_NOMINAL = [10000, 20000, 50000, 100000, 200000, 500000];
 /** Layanan dalam mode Topup. Tidak ada pilih provider (DANA/OVO/…): kasir mau
  *  sedikit klik, jadi yang dipilih cuma jenis layanannya. Nilai `provider` yang
  *  dikirim ke API adalah kode jenis ini — kolomnya jadi label jenis layanan. */
+/** Form per jenis (revisi pemilik 2026-10-06):
+ *  - e-wallet/pulsa: *"untuk pencatatan saja tidak perlu nomor HP"* → cukup
+ *    Nominal + Admin (`butuhNomor:false` = input nomor TIDAK dirender).
+ *  - tarik tunai: *"hanya nominal saja dan admin"* → kedua jenis tarik tanpa
+ *    nomor HP/rekening.
+ *  - pln-token: No meter tetap + **Nomor Token baru** (`butuhToken`) — ikut
+ *    dicetak di struk belanja.
+ *  - pln-bill (tagihan): ID pelanggan/Nomor meter + nominal + admin (sudah
+ *    sesuai — tidak diubah). */
 const TOPUP_JENIS: Jenis[] = [
-  { key: 'e-wallet', label: 'E-wallet', ringkas: 'E-wallet', hint: 'Isi saldo DANA/OVO/GoPay', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx' },
-  { key: 'pulsa', label: 'Pulsa', ringkas: 'Pulsa', hint: 'Paket data & nelpon', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx' },
-  { key: 'pln-token', label: 'Token PLN', ringkas: 'Token PLN', hint: 'Beli token listrik', nomorLabel: 'Nomor meter', nomorPh: 'Nomor meter' },
+  { key: 'e-wallet', label: 'E-wallet', ringkas: 'E-wallet', hint: 'Isi saldo DANA/OVO/GoPay', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx', butuhNomor: false },
+  { key: 'pulsa', label: 'Pulsa', ringkas: 'Pulsa', hint: 'Paket data & nelpon', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx', butuhNomor: false },
+  { key: 'pln-token', label: 'Token PLN', ringkas: 'Token PLN', hint: 'Beli token listrik', nomorLabel: 'Nomor meter', nomorPh: 'Nomor meter', butuhToken: true },
   { key: 'pln-bill', label: 'Tagihan PLN', ringkas: 'Tagihan PLN', hint: 'Bayar listrik', nomorLabel: 'ID pelanggan / meter', nomorPh: 'ID pelanggan' },
 ];
 
 /** Mode Tarik: uang keluar dari laci. Sumber dana bisa e-wallet (cash out) atau
- *  transfer rekening — bukan cuma bank. */
+ *  transfer rekening — bukan cuma bank. Keduanya tanpa nomor (pemilik: tarik
+ *  tunai hanya nominal + admin). */
 const TARIK_JENIS: Jenis[] = [
-  { key: 'tarik-ewallet', label: 'Dari e-wallet', ringkas: 'e-wallet', hint: 'Cash out ke tunai', nomorLabel: 'Nomor HP pemilik e-wallet', nomorPh: '08xxxxxxxxxx' },
-  { key: 'tarik-bank', label: 'Dari rekening', ringkas: 'rekening', hint: 'Tarik ke tunai', nomorLabel: 'Nomor rekening', nomorPh: 'Nomor rekening' },
+  { key: 'tarik-ewallet', label: 'Dari e-wallet', ringkas: 'e-wallet', hint: 'Cash out ke tunai', nomorLabel: 'Nomor HP pemilik e-wallet', nomorPh: '08xxxxxxxxxx', butuhNomor: false },
+  { key: 'tarik-bank', label: 'Dari rekening', ringkas: 'rekening', hint: 'Tarik ke tunai', nomorLabel: 'Nomor rekening', nomorPh: 'Nomor rekening', butuhNomor: false },
 ];
 
 /** Jenis bawaan tiap mode, supaya kasir tidak perlu klik tambahan saat
@@ -1400,6 +1709,10 @@ interface Jenis {
   hint: string;
   nomorLabel: string;
   nomorPh: string;
+  /** `false` = form TANPA input nomor (default: `true` = wajib diisi). */
+  butuhNomor?: boolean;
+  /** `true` = tampilkan input Nomor Token (PLN token) — ikut dicetak struk. */
+  butuhToken?: boolean;
 }
 
 function jenisList(): Jenis[] {
@@ -1418,11 +1731,9 @@ function jenisKode(): string {
 }
 
 function topupHtml(): string {
-  const total = topNominal + topAdmin;
   const j = jenisAktif();
-  const judul = mode === 'topup' ? 'Topup' : 'Tarik tunai';
   return `
-  <div class="grid min-h-0 flex-1 gap-2 lg:grid-cols-[1fr_320px]">
+  <div class="${gridUtamaCls()}">
     <div class="card min-h-0 space-y-3 overflow-y-auto !p-3">
       <div>
         <span class="label">Jenis layanan</span>
@@ -1437,10 +1748,23 @@ function topupHtml(): string {
             .join('')}
         </div>
       </div>
-      <div>
+      ${
+        j.butuhNomor === false
+          ? '' // layanan tanpa nomor (e-wallet/pulsa/tarik) — cukup Nominal + Admin
+          : `<div>
         <label class="label" for="tp-nomor">${j.nomorLabel}</label>
         <input id="tp-nomor" class="input" type="tel" inputmode="numeric" autocomplete="off" placeholder="${j.nomorPh}" value="${topNomor}" />
-      </div>
+      </div>`
+      }
+      ${
+        j.butuhToken
+          ? `<div>
+        <label class="label" for="tp-token">Nomor Token</label>
+        <input id="tp-token" class="input" type="text" inputmode="text" autocomplete="off" placeholder="Nomor token PLN" value="${topToken}" />
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Ikut dicetak di struk belanja.</p>
+      </div>`
+          : ''
+      }
       <div>
         <label class="label" for="tp-nominal">Nominal (Rp)</label>
         <input id="tp-nominal" class="input text-sm font-semibold" type="number" inputmode="numeric" min="0" step="1000" placeholder="0" value="${topNominal || ''}" />
@@ -1448,48 +1772,21 @@ function topupHtml(): string {
           ${QUICK_NOMINAL.map((n) => `<button type="button" class="chip" data-quick="${n}">${rp(n)}</button>`).join('')}
         </div>
       </div>
-      <p class="text-xs text-gray-500 dark:text-gray-400">Nominal adalah saldo yang diterima pelanggan, bukan omzet toko. Omzet toko dari layanan ini adalah biaya admin.</p>
-    </div>
-
-    <div class="card flex min-h-0 flex-col gap-2 overflow-y-auto !p-3">
-      <div class="flex items-baseline justify-between border-b border-gray-200 pb-2 dark:border-gray-700">
-        <span class="text-sm font-semibold text-gray-900 dark:text-white">${judul}</span>
-        <span id="tp-kind" class="chip">${j.label}</span>
-      </div>
-      <div class="flex items-baseline justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Nominal</span>
-        <span id="tp-nominal-view" class="text-sm font-semibold text-gray-900 dark:text-white">${rp(topNominal)}</span>
-      </div>
+      <!-- Biaya admin di bawah nominal (permintaan pemilik 2026-10-06:
+           "biaya admin itu letakkan di bawahnya nominal saja"). Panel kanan
+           lama (ringkasan + metode + uang diterima + tombol Proses) DIHAPUS
+           refactor 1 layout 2026-10-07 — ringkasan terbaca dari info bar,
+           bayar lewat MODAL BAYAR bersama (sidebar kanan identik semua mode). -->
       <div>
         <label class="label" for="tp-admin">Biaya admin (Rp)</label>
         <input id="tp-admin" class="input input-sm" type="number" inputmode="numeric" min="0" step="500" value="${topAdmin || ''}" placeholder="0" />
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Saran otomatis sesuai nominal, boleh diubah.</p>
       </div>
-      <div class="flex items-baseline justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
-        <span class="text-sm font-semibold text-gray-900 dark:text-white">Total dibayar</span>
-        <span id="tp-total" class="text-sm font-bold text-primary">${rp(total)}</span>
-      </div>
-      <div>
-        <span class="label">Pelanggan bayar dengan</span>
-        <div class="flex flex-wrap gap-2">
-          ${PAY_METHODS.map((m) => `<button type="button" data-pay="${m.key}" class="chip${payMethod === m.key ? ' !border-primary !text-primary' : ''}">${m.label}</button>`).join('')}
-        </div>
-      </div>
-      ${
-        payMethod === 'tunai'
-          ? `<div>
-               <label class="label" for="tp-tunai">Uang diterima (Rp)</label>
-               <input id="tp-tunai" class="input input-sm" type="number" inputmode="numeric" min="0" step="1000" value="${topTunai || ''}" placeholder="0" />
-             </div>
-             <div class="flex items-baseline justify-between">
-               <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</span>
-               <span id="tp-kembali" class="text-sm font-semibold ${topTunai > 0 && topTunai < total ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}">${rp(topTunai > 0 ? topTunai - total : 0)}</span>
-             </div>`
-          : ''
-      }
-      <button type="button" id="tp-submit" class="btn btn-primary mt-auto w-full !py-3 text-sm"${busy ? ' disabled' : ''}>${icon('check')}<span>Proses ${judul}</span></button>
-      <p class="text-center text-xs text-gray-500 dark:text-gray-400">Tekan <kbd class="rounded border border-gray-300 px-1 dark:border-gray-600">Enter</kbd> untuk proses, <kbd class="rounded border border-gray-300 px-1 dark:border-gray-600">F2</kbd> untuk proses cepat</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Nominal adalah saldo yang diterima pelanggan, bukan omzet toko. Omzet toko dari layanan ini adalah biaya admin.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Selesai isi — tekan ${kbd('Enter')} atau tombol ${kbd('F10')} Bayar: metode & uang diterima diisi di form bayar (sama dengan mode Penjualan).</p>
     </div>
+
+    ${sidebarBayarHtml()}
   </div>`;
 }
 
@@ -1520,12 +1817,29 @@ function cartRows(): string {
             aria-label="Catatan ${esc(l.name)}" />
         </td>
       </tr>` : '';
+      // SELECT SATUAN per baris (Tahap 3, 2026-10-06 — keputusan FINAL pemilik
+      // (a): dropdown satuan PER BARIS). Hanya untuk produk yang PUNYA satuan
+      // alternatif (units[] tidak kosong) — tanpa alternatif memang tidak ada
+      // yang bisa dipilih, teks lama "jual per X" tetap untuk kasus luar.
+      // Ganti satuan → gantiSatuan(): qty ANGKA SAMA pindah satuan, diskon
+      // baris di-reset, harga ulang dari product_units.
+      const pAlt = l.product_id !== null ? products.find((x) => x.id === l.product_id) : undefined;
+      const unitUi = pAlt && (pAlt.units?.length ?? 0) > 0
+        ? `<select class="input input-sm !w-auto" data-act="unit" data-key="${l.key}"
+             aria-label="Satuan ${esc(l.name)}"
+             title="Ganti satuan jual — qty tetap, diskon baris di-reset">
+            ${daftarSatuan(pAlt)
+              .map((o) => `<option value="${esc(o.unit)}"${o.unit === l.unit ? ' selected' : ''}>${esc(o.unit)}${o.factor !== 1 ? ` ×${o.factor}` : ''}</option>`)
+              .join('')}
+          </select>`
+        : l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` · jual per ${l.unit}` : '';
       return `<tr data-key="${l.key}" class="hover:bg-primary-soft dark:hover:bg-primary/15 transition-colors">
       <td class="td td-num text-center text-gray-500">${i + 1}</td>
       <td class="td font-mono text-xs">${l.sku ? esc(l.sku) : '<span class="text-gray-400">—</span>'}</td>
       <td class="td">
         <div class="cell-strong">${esc(l.name)}</div>
-        <div class="cell-sub">${l.product_id === null ? 'item manual' : l.track_stock ? '' : 'jasa'}${l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` · jual per ${l.unit}` : ''}${expBarisKeranjang(l.product_id)}</div>
+        <div class="cell-sub">${l.product_id === null ? 'item manual' : l.track_stock ? '' : 'jasa'}${expBarisKeranjang(l.product_id)}</div>
+        ${unitUi ? `<div class="mt-0.5 flex items-center gap-1">${unitUi}</div>` : ''}
       </td>
       <td class="td td-num">${l.dyn
         ? `<input class="input input-sm !w-24 !px-2 text-right" data-act="price" data-key="${l.key}" type="number"
@@ -1575,10 +1889,12 @@ function bukaModeLayanan(p: Product): void {
   mode = /tarik/i.test(p.name) || /tarik/i.test(p.sku) ? 'tarik' : 'topup';
   topJenis = defaultJenis(mode);
   topNomor = '';
+  topToken = '';
   topNominal = 0;
   topAdmin = 0;
   topAdminTouched = false;
-  topTunai = 0;
+  cashIn = 0;
+  cashTouched = false;
   paint();
   toast(`${p.name} — isi form ${mode === 'topup' ? 'topup' : 'tarik tunai'}`, 'info');
 }
@@ -1598,6 +1914,20 @@ function paint(): void {
     autoPrint = (e.target as HTMLInputElement).checked;
     setAutoPrint(autoPrint);
   });
+  // Listener info bar & toggle layout mobile dipasang DI SINI (bukan di
+  // bindCart): info bar kini tampil di SEMUA mode (revisi pemilik 2026-10-06)
+  // dan tombol #pos-mobile ada di scan bar semua mode — sama alasan dengan
+  // #pos-autoprint di atas (bindCart hanya mode jual).
+  host.querySelector('#pos-shift-tutup')?.addEventListener('click', () => void tutupShiftDariPos());
+  host.querySelector('#pos-cust-cari')?.addEventListener('click', openCariPelanggan);
+  host.querySelector('#pos-mobile')?.addEventListener('click', () => {
+    mobileMode = !mobileMode;
+    try {
+      localStorage.setItem('ravaa.mobile-layout', mobileMode ? '1' : '0');
+    } catch { /* private mode: pref sesi ini saja */ }
+    toast(mobileMode ? 'Layout MOBILE — kolom menumpuk, panel bayar di bawah' : 'Layout desktop — sidebar kanan 320px', 'info');
+    paint();
+  });
   if (!shift) {
     bindShiftGate();
     return;
@@ -1605,7 +1935,8 @@ function paint(): void {
   if (mode === 'jual') bindCart();
   else bindTopup();
   if (mode === 'jual') host.querySelector<HTMLInputElement>('#pos-q')?.focus();
-  else host.querySelector<HTMLInputElement>('#tp-nomor')?.focus();
+  // Fokus awal form topup: nomor bila jenis butuh, kalau tidak langsung Nominal.
+  else (host.querySelector<HTMLInputElement>('#tp-nomor') ?? host.querySelector<HTMLInputElement>('#tp-nominal'))?.focus();
 }
 
 function paintCart(): void {
@@ -1690,6 +2021,10 @@ function paintCart(): void {
   const holdOpen = host!.querySelector<HTMLButtonElement>('#pos-hold-open');
   if (holdOpen) holdOpen.disabled = holds.length === 0;
   set('#pos-hold-count', String(holds.length));
+  // Cetak ulang: mati sampai device ini punya nota sukses (pola Pending —
+  // tidak ada yang bisa dicetak = klik hanya membingungkan).
+  const reprint = host!.querySelector<HTMLButtonElement>('#pos-reprint');
+  if (reprint) reprint.disabled = !bacaNotaTerakhir();
   // Chip nominal cepat: sorot yang cocok dengan cashIn (putaran 10c: tanpa
   // cabang "Uang pas" — chip itu sudah dihapus, tersisa 4 pecahan angka).
   document.querySelectorAll<HTMLElement>('[data-cash]').forEach((b) => {
@@ -1698,6 +2033,15 @@ function paintCart(): void {
     b.classList.toggle('!border-primary', aktif);
     b.classList.toggle('!text-primary', aktif);
   });
+}
+
+/** Repaint panel sesuai mode yang sedang aktif — dipanggil dari jalur yang
+ *  bisa berjalan di semua mode (finally bayar, bersihkan keranjang, muat
+ *  hold), supaya state tombol tidak pernah tertinggal setelah pergantian
+ *  mode di tengah proses (refactor 1 layout 2026-10-07). */
+function paintAktif(): void {
+  if (mode === 'jual') paintCart();
+  else paintTopup();
 }
 
 /* ---------- aksi keranjang ---------- */
@@ -1714,7 +2058,7 @@ function bersihkanKeranjang(): void {
   cashIn = 0;
   cashTouched = false;
   simpanKeranjang(); // "Bersihkan" ikut menulis localStorage — reload tidak boleh memulihkan baris yang sudah dibersihkan
-  paintCart();
+  paintAktif();
   const disc = host?.querySelector<HTMLInputElement>('#pos-discount');
   if (disc) disc.value = '';
   host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
@@ -1795,7 +2139,31 @@ function muatKeranjang(): boolean {
           continue;
         }
         l.key = k;
-      } else l.price = p.price;
+      } else {
+        // Harga non-dinamis disamakan ke cache master — TAPI memakai harga
+        // SATUAN BARIS (resolusiSatuan), bukan `p.price` dasar: baris "2 pack"
+        // yang dipulihkan jangan jatuh ke harga per pcs (tampilan subtotal
+        // salah walau server menghitung ulang saat bayar). Factor juga ikut
+        // disinkronkan kalau master product_units berubah.
+        const r = resolusiSatuan(p, l.unit);
+        l.price = r.price;
+        l.factor = r.factor;
+        if (r.unit !== l.unit) {
+          // Satuan baris sudah tidak dijual lagi di master (units berubah di
+          // server) — jatuh ke satuan dasar + re-key; kalau key sudah ada,
+          // gabung kuantitas (pola dobel di atas).
+          l.unit = r.unit;
+          const k2 = `${p.id}:${r.unit}`;
+          const dobel2 = items.find((x) => x.key === k2);
+          if (dobel2) {
+            dobel2.qty += l.qty;
+            if (!dobel2.discManual) dobel2.discount = hitungPrefill(dobel2);
+            dobel2.discount = Math.min(dobel2.discount, jumlahBaris(dobel2));
+            continue;
+          }
+          l.key = k2;
+        }
+      }
     } else l.dyn = false;
     l.note = (l.note ?? '').slice(0, 200);
     l.discount = Math.min(Math.max(0, Math.round(l.discount || 0)), jumlahBaris(l));
@@ -1854,7 +2222,7 @@ async function tahanKeranjang(): Promise<void> {
   const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
   if (sel) sel.value = customerId === null ? '' : String(customerId);
   simpanKeranjang(); // sinkronkan pelanggan bawaan (isi kosong sudah ditulis bersihkanKeranjang)
-  paintCart();
+  paintAktif();
   toast(`Transaksi ditahan — ${holds.length} tertahan`, 'info');
 }
 
@@ -1905,8 +2273,17 @@ async function muatHold(h: Hold): Promise<void> {
   if (disc) disc.value = discount ? String(discount) : '';
   const cash = document.querySelector<HTMLInputElement>('#pos-cash');
   if (cash) cash.value = '';
-  paintCart();
-  host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+  // Hold = isi keranjang MODE JUAL. Modal Pending bisa dibuka dari mode
+  // topup/tarik (F8/Tahan-Pending semua mode sejak refactor 1 layout), jadi
+  // bila Lanjutkan ditekan dari sana — pindah dulu ke Penjualan supaya baris
+  // yang dimuat langsung terlihat; dari mode jual repaint biasa seperti lama.
+  if (mode !== 'jual') {
+    mode = 'jual';
+    paint();
+  } else {
+    paintCart();
+    host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+  }
   toast('Transaksi tertahan dilanjutkan', 'success');
 }
 
@@ -1925,7 +2302,7 @@ async function hapusHold(h: Hold, api: ModalHandle, tampil: () => void): Promise
   if (!ok) return;
   holds = holds.filter((x) => x.id !== h.id);
   await simpanTertahan();
-  paintCart();
+  paintAktif(); // badge Pending & disable tombol ikut mode aktif (Pending bisa dibuka di semua mode)
   if (!holds.length) {
     api.close();
     return;
@@ -2178,13 +2555,9 @@ function addProduct(p: Product, unitSlug?: string, qtyOverride?: number): void {
     bukaModeLayanan(p);
     return;
   }
-  const ru = unitSlug && unitSlug !== p.unit
-    ? (p.units ?? []).find((u) => u.unit === unitSlug)
-    : undefined;
-  const unit = ru ? ru.unit : p.unit;
-  const factor = ru ? ru.factor : 1;
-  // price di baris satuan = harga grosir eksplisit; NULL = ikut rumus.
-  const hargaTampil = ru ? (ru.price ?? Math.round(p.price * factor)) : p.price;
+  // Satuan + harga final lewat helper bersama (resolusiSatuan) — jalur yang
+  // SAMA dipakai gantiSatuan & muatKeranjang.
+  const { unit, factor, price: hargaTampil } = resolusiSatuan(p, unitSlug);
 
   addLine(p, hargaTampil, qtyPakai(), unit, factor);
   paintCart();
@@ -2598,17 +2971,94 @@ function openManualItem(): void {
  *  eksplisit; sejak putaran 10d tidak ada auto-isi yang bisa menimpa), lalu
  *  paintCart menyinkronkan chip/kembalian sebelum pay() membaca `cashIn`. */
 function bayarPas(): void {
-  if (!cart.length || busy) return;
-  if (payMethod === 'tunai') {
-    cashIn = total();
+  if (busy) return;
+  if (mode === 'jual') {
+    if (!cart.length) return;
+    if (payMethod === 'tunai') {
+      cashIn = total();
+      cashTouched = true;
+      paintCart();
+    }
+    void pay();
+    return;
+  }
+  // Topup/tarik (refactor 1 layout 2026-10-07): topup tunai = uang persis
+  // total (cashIn = totalBayar); tarik TIDAK menyetel uang diterima — di
+  // sana uang mengalir keluar, struknya memakai baris label metode (aturan
+  // lama saat kolom uangnya masih di panel kanan). Non-tunai langsung bayar.
+  if (!(topNominal > 0)) return;
+  if (mode === 'topup' && payMethod === 'tunai') {
+    cashIn = totalBayar();
     cashTouched = true;
-    paintCart();
   }
   void pay();
 }
 
+/* ---------- cetak ulang nota terakhir (Tahap 2, 2026-10-06) ---------- */
+
+/** localStorage id nota sukses TERAKHIR device ini — sumber tombol
+ *  "Cetak ulang" di Aksi cepat. Per device (bukan per shift/kasir): pref
+ *  cetak juga per device, dan device A tidak boleh mencetak ulang nota
+ *  yang belum pernah lewat sana. */
+const LS_NOTA_TERAKHIR = 'ravaa.nota-terakhir';
+
+/** Catat id nota sukses. Dipanggil di pay() SEBELUM cart di-reset — id
+ *  didapat dari server (`res.data.sale.id`, uuid idempotent, jadi outbox /
+ *  retry pun akan menunjuk id yang sama). Gagal tulis (private mode) diam —
+ *  fitur reprint hanya mati sampai penjualan berikutnya tersimpan. */
+function simpanNotaTerakhir(id: string): void {
+  try {
+    localStorage.setItem(LS_NOTA_TERAKHIR, id);
+  } catch {
+    /* localStorage penuh/terblokir — tombol tetap enabled, fetch nanti error sendiri */
+  }
+}
+
+function bacaNotaTerakhir(): string {
+  try {
+    return localStorage.getItem(LS_NOTA_TERAKHIR) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** Aksi tombol "Cetak ulang" (Aksi cepat): ambil baris nota terakhir lewat
+ *  GET /api/sales/:id (kontrak yang sama dengan detail Riwayat), lalu serahkan
+ *  ke cetakUlang() — dialog [Thermal][A4][Batal] + susunan struk IDENTIK dengan
+ *  cetak ulang dari halaman Riwayat (satu modul, AGENTS §5). Tanpa pratinjau
+ *  "Lihat Struk" (keputusan pemilik 2026-10-06: menyusul / digabung bila jadi). */
+async function cetakNotaTerakhir(): Promise<void> {
+  const id = bacaNotaTerakhir();
+  if (!id) {
+    toast('Belum ada nota terakhir dari device ini', 'warning');
+    return;
+  }
+  try {
+    const j = await apiGet<{ data: { sale: SaleRow } }>(
+      `/api/sales/${encodeURIComponent(id)}`,
+    );
+    await cetakUlang(j.data.sale);
+  } catch (e) {
+    // 404 = id tidak ada (DB diganti / nota belum masuk setelah offline),
+    // status 0 = jaringan mati — dua-duanya jangan dibaca sebagai "tidak ada".
+    toast(
+      `Nota terakhir tidak bisa dimuat: ${e instanceof Error ? e.message : 'gagal'}`,
+      'warning',
+      9000,
+    );
+  }
+}
+
 async function pay(opts?: { hutang?: boolean }): Promise<void> {
-  if (!shift || busy || !cart.length) return;
+  if (!shift || busy) return;
+  // Mode topup/tarik (refactor 1 layout 2026-10-07): SEMUA jalur bayar —
+  // tombol Bayar sidebar, F2, Enter, F12 Bayar pas, OK modal — diteruskan
+  // ke submitTopup() yang memegang validasi form + barrier tunai + struknya.
+  if (mode !== 'jual') {
+    await submitTopup();
+    return;
+  }
+  if (!cart.length) return;
   // BARRIER TUNAI (keluhan pemilik 2026-10-03): uang diterima WAJIB diisi
   // dan tidak kurang dari total — meniru payment screen Aronium yang tak bisa
   // konfirmasi sebelum Paid amount masuk.
@@ -2759,6 +3209,16 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     // auto-print. Saklar hanya menentukan apakah tombol Thermal/A4 benar-benar
     // mengirim ke printer. Snapshot data resume WAJIB diambil SEBELUM
     // cart/cashIn di-reset beberapa baris di bawah.
+    // Nota terakhir device ini (sumber tombol "Cetak ulang" di Aksi cepat) —
+    // disimpan SEBELUM snapshot resume & reset cart, saat server sudah
+    // mengkonfirmasi id (uuid idempotent).
+    simpanNotaTerakhir(res.data.sale.id);
+    // Tahap 4a — BUKA LACI OTOMATIS (penjualan TUNAI saja, semua jalur bayar
+    // F2/Enter/F10/F12 lewat sini): kick ESC/POS SEGERA saat server
+    // konfirmasi, tanpa menunggu pilihan cetak modal resume, tanpa syarat
+    // saklar autoPrint. QRIS/transfer TIDAK mengirim kick — laci hanya untuk
+    // uang fisik masuk.
+    if (payMethod === 'tunai') void bukaLaciOtomatis();
     void pilihCetakSelesai(res.data.sale.id, strukJual, tot, kembalian, {
       invoiceNo: res.data.sale.invoice_no,
       items: cart.map((l) => ({ qty: l.qty, nama: l.name, net: jumlahBaris(l) - l.discount })),
@@ -2796,33 +3256,55 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     toast(`Gagal menyimpan penjualan: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
   } finally {
     busy = false;
-    paintCart();
+    paintAktif();
   }
 }
 
 /* ---------- topup / tarik ---------- */
 
-/** Panel kanan penuh repaint tanpa kehilangan isi form. */
+/** Sinkron ANGKA & STATE TOMBOL saat nominal/admin berubah — TANPA repaint
+ *  penuh, supaya fokus input form tidak hilang. Sejak refactor 1 layout
+ *  (2026-10-07) panel kanan = sidebar bayar IDENTIK semua mode: ringkasan
+ *  lama (#tp-nominal-view/#tp-admin-view/#tp-total/#tp-kembali) sudah
+ *  berpindah ke info bar, jadi yang disetel di sini = info bar + state
+ *  tombol Bayar/Bayar pas/Tahan/Pending/Cetak ulang (+ tombol OK modal
+ *  bila terbuka). */
 function paintTopup(): void {
-  if (!host || !shift) return;
+  if (!host || !shift || mode === 'jual') return;
   const set = (sel: string, v: string) => {
     const el = host!.querySelector(sel);
     if (el) el.textContent = v;
   };
-  set('#tp-nominal-view', rp(topNominal));
-  set('#tp-total', rp(topNominal + topAdmin));
-  const kembali = topTunai > 0 ? topTunai - (topNominal + topAdmin) : 0;
-  set('#tp-kembali', rp(kembali));
-  const k = host.querySelector('#tp-kembali');
-  if (k) k.className = `text-sm font-semibold ${topTunai > 0 && kembali < 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`;
+  // Info bar mode topup/tarik — Total dibayar sinkron dengan isi form.
+  set('#pos-grand', rp(topNominal + topAdmin));
+  set('#pos-owncount', `Nominal ${rp(topNominal)} + admin ${rp(topAdmin)}`);
+  // Tombol bayar (sidebar + OK modal bila terbuka): mati saat nominal kosong
+  // / sedang proses — aturan sama dengan mode jual (!cart.length / busy).
+  const bayarMati = !bisaBayar() || busy;
+  for (const sel of ['#pos-bayar', '#pos-pay-pas']) {
+    const b = host.querySelector<HTMLButtonElement>(sel);
+    if (b) b.disabled = bayarMati;
+  }
+  const ok = document.querySelector<HTMLButtonElement>('#pos-pay');
+  if (ok) ok.disabled = bayarMati;
+  // Aksi keranjang di sidebar (kartu identik dengan mode jual): Tahan =
+  // keranjang terisi, Pending = ada antrian, Cetak ulang = ada nota terakhir.
+  const holdBtn = host.querySelector<HTMLButtonElement>('#pos-hold');
+  if (holdBtn) holdBtn.disabled = !cart.length || busy;
+  const holdOpen = host.querySelector<HTMLButtonElement>('#pos-hold-open');
+  if (holdOpen) holdOpen.disabled = holds.length === 0;
+  set('#pos-hold-count', String(holds.length));
+  const reprint = host.querySelector<HTMLButtonElement>('#pos-reprint');
+  if (reprint) reprint.disabled = !bacaNotaTerakhir();
 }
 
 async function submitTopup(): Promise<void> {
-  if (!host || !shift || busy) return;
+  if (!host || !shift || busy || mode === 'jual') return;
+  const j = jenisAktif();
+  const butuhNomor = j.butuhNomor !== false;
   const nomor = topNomor.trim();
   const total = topNominal + topAdmin;
-  const j = jenisAktif();
-  if (!nomor) {
+  if (butuhNomor && !nomor) {
     toast(`${j.nomorLabel} wajib diisi`, 'error');
     host.querySelector<HTMLInputElement>('#tp-nomor')?.focus();
     return;
@@ -2836,38 +3318,37 @@ async function submitTopup(): Promise<void> {
     toast('Biaya admin tidak boleh negatif', 'error');
     return;
   }
-  // BARRIER TUNAI topup (sama dengan pay()): uang diterima kasir WAJIB terisi
-  // & cukup. Mode TARIK sengaja dikecualikan — di sana uang MENGALIR KELUAR,
-  // jadi "uang diterima" memang tidak selalu diisi; cek lama (kurang dari
-  // total -> tolak) tetap berlaku untuk keduanya.
-  if (payMethod === 'tunai' && mode === 'topup') {
-    if (!(topTunai > 0)) {
+  // BARRIER TUNAI — aturan LAMA dipertahankan persis, hanya sumber uangnya
+  // berpindah dari kolom #tp-tunai panel kanan ke MODAL BAYAR (cashIn):
+  // topup tunai = uang diterima WAJIB terisi & cukup; tarik sengaja boleh
+  // tanpa uang (aliran keluar), tapi cek "0 < uang < total -> tolak" tetap
+  // berlaku untuk keduanya. Gagal barrier = BUKA FORM BAYAR + fokus kolom
+  // uang (sama seperti pay() mode jual), bukan sekadar toast.
+  if (payMethod === 'tunai') {
+    if (mode === 'topup' && !(cashIn > 0)) {
       toast('Uang diterima belum diisi — ketik nominal uang dari pelanggan', 'error');
-      host.querySelector<HTMLInputElement>('#tp-tunai')?.focus();
+      bukaBayar();
+      document.querySelector<HTMLInputElement>('#pos-cash')?.focus();
       return;
     }
-    if (topTunai < total) {
+    if (cashIn > 0 && cashIn < total) {
       toast(`Uang diterima kurang dari total ${rp(total)}`, 'error');
-      host.querySelector<HTMLInputElement>('#tp-tunai')?.focus();
+      bukaBayar();
+      document.querySelector<HTMLInputElement>('#pos-cash')?.focus();
       return;
     }
-  }
-  if (payMethod === 'tunai' && topTunai > 0 && topTunai < total) {
-    toast(`Uang diterima kurang dari total ${rp(total)}`, 'error');
-    host.querySelector<HTMLInputElement>('#tp-tunai')?.focus();
-    return;
   }
   busy = true;
-  const btn = host.querySelector<HTMLButtonElement>('#tp-submit');
-  if (btn) btn.disabled = true;
+  paintTopup(); // matikan Bayar/Bayar pas/OK modal selama proses
   try {
-    const res = await apiPost<{ data: { id: string; kind: string; provider: string; nomor: string; nominal: number; admin: number; total: number }; duplicate: boolean }>(
+    const res = await apiPost<{ data: { id: string; kind: string; provider: string; nomor: string; token: string; nominal: number; admin: number; total: number }; duplicate: boolean }>(
       '/api/topups',
       {
         id: uuid(),
         kind: mode,
         provider: jenisKode(),
-        nomor,
+        nomor: butuhNomor ? nomor : '', // layanan tanpa nomor -> '' (server: nomor opsional)
+        token: j.butuhToken ? topToken.trim() : '',
         nominal: topNominal,
         admin: topAdmin,
         pay_method: payMethod,
@@ -2875,7 +3356,7 @@ async function submitTopup(): Promise<void> {
         cashier: getCashier(),
       },
     );
-    const kembali = payMethod === 'tunai' && topTunai > 0 ? topTunai - total : 0;
+    const kembali = payMethod === 'tunai' && cashIn > 0 ? cashIn - total : 0;
     // Ditangkap sebelum state topup di-reset di bawah.
     const strukTop: Struk = {
       judul: getToko(),
@@ -2887,13 +3368,16 @@ async function submitTopup(): Promise<void> {
       ],
       items: [],
       baris: [
-        { kiri: j.nomorLabel, kanan: nomor },
+        // Baris nomor hanya bila terisi (e-wallet/pulsa/tarik tanpa nomor);
+        // baris Token khusus PLN token — keduanya dicatat pemilik 2026-10-06.
+        ...(nomor ? [{ kiri: j.nomorLabel, kanan: nomor }] : []),
+        ...(topToken.trim() ? [{ kiri: 'Token', kanan: topToken.trim() }] : []),
         { kiri: 'Nominal', kanan: rp(topNominal) },
         ...(topAdmin > 0 ? [{ kiri: 'Admin', kanan: rp(topAdmin) }] : []),
         { kiri: 'TOTAL', kanan: rp(total), tebal: true },
-        ...(payMethod === 'tunai' && topTunai > 0
+        ...(payMethod === 'tunai' && cashIn > 0
           ? [
-              { kiri: 'Tunai', kanan: rp(topTunai) },
+              { kiri: 'Tunai', kanan: rp(cashIn) },
               { kiri: 'Kembalian', kanan: rp(kembali) },
             ]
           : [{ kiri: labelMetode(payMethod), kanan: rp(total) }]),
@@ -2902,25 +3386,32 @@ async function submitTopup(): Promise<void> {
     };
     void cetak(strukUntuk(strukTop));
     toast(
-      `${res.duplicate ? 'Sudah tercatat' : mode === 'topup' ? 'Topup' : 'Tarik'} ${j.ringkas} · ${nomor} · ${rp(total)}` +
+      `${res.duplicate ? 'Sudah tercatat' : mode === 'topup' ? 'Topup' : 'Tarik'} ${j.ringkas}` +
+        (nomor ? ` · ${nomor}` : '') + ` · ${rp(total)}` +
         (kembali > 0 ? ` · kembalian ${rp(kembali)}` : ''),
       'success',
       5000,
     );
+    // Modal bayar (bila dibuka lewat F10/klik Bayar) ikut ditutup — topup/
+    // tarik TANPA dialog resume pilihan cetak (keputusan lama dipertahankan:
+    // struk langsung dikirim, hanya penjualan yang memilih Thermal/A4).
+    tutupBayar();
     // Sisa nominal jadi modal, jadi kembalikan ke kasir. Sisakan jenis supaya
-    // transaksi berikutnya (mis. 3x pulsa) tinggal ganti nominal.
+    // transaksi berikutnya (mis. 3x pulsa) tinggal ganti nominal. Uang
+    // diterima kembali 0 (form berikutnya buka kolom kosong, pola 10d).
     topNomor = '';
+    topToken = '';
     topNominal = 0;
     topAdmin = 0;
     topAdminTouched = false;
-    topTunai = 0;
+    cashIn = 0;
+    cashTouched = false;
     paint();
   } catch (e) {
     toast(`Gagal menyimpan ${mode}: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
   } finally {
     busy = false;
-    const b = host?.querySelector<HTMLButtonElement>('#tp-submit');
-    if (b) b.disabled = false;
+    paintAktif(); // aktifkan kembali tombol bayar (paint() saat sukses jalan dgn busy=true)
   }
 }
 
@@ -2934,11 +3425,11 @@ function bindModeBar(): void {
       if (next === mode) return;
       mode = next;
       results = [];
-      topTunai = 0;
       cashIn = 0;
       cashTouched = false;
       topJenis = defaultJenis(next);
       topNomor = '';
+      topToken = '';
       paint();
     }),
   );
@@ -2955,8 +3446,9 @@ function bindTopup(): void {
       const next = b.dataset.jenis as TopupJenis;
       if (next === topJenis) return;
       topJenis = next;
-      // Nomor yang sudah diketik (HP vs rekening vs meter) tidak berlaku untuk jenis lain.
+      // Nomor yang sudah diketik (HP vs meter) & token tidak berlaku untuk jenis lain.
       topNomor = '';
+      topToken = '';
       paint();
     }),
   );
@@ -2971,6 +3463,10 @@ function bindTopup(): void {
 
   host!.querySelector('#tp-nomor')?.addEventListener('input', (e) => {
     topNomor = (e.target as HTMLInputElement).value;
+  });
+
+  host!.querySelector('#tp-token')?.addEventListener('input', (e) => {
+    topToken = (e.target as HTMLInputElement).value;
   });
 
   // Nominal berubah -> admin ikut saran selama kasir belum ubah sendiri.
@@ -2990,23 +3486,85 @@ function bindTopup(): void {
     paintTopup();
   });
 
-  host!.querySelector('#tp-tunai')?.addEventListener('input', (e) => {
-    topTunai = Math.max(0, Number((e.target as HTMLInputElement).value || 0));
-    paintTopup();
-  });
-
-  host!.querySelectorAll<HTMLElement>('[data-pay]').forEach((b) =>
-    b.addEventListener('click', () => {
-      payMethod = (b.dataset.pay as PayMethod) || 'tunai';
-      topTunai = 0;
-      paint();
-    }),
-  );
-
-  host!.querySelector('#tp-submit')?.addEventListener('click', () => void submitTopup());
+  // Panel kanan = sidebar bayar IDENTIK semua mode (refactor 1 layout
+  // 2026-10-07) — listener dipasang bersama lewat bindSidebar().
+  // Kolom uang diterima & tombol Proses lama (#tp-tunai/#tp-submit) DIHAPUS:
+  // kini isian bayar ada di MODAL (bukaBayar), proses lewat pay().
+  bindSidebar();
 
   // Enter/F2 diproses bindPintasan() di level document — dulu menempel di host
   // sehingga mati saat fokus keluar dari halaman POS.
+}
+
+/** Listener PANEL KANAN (sidebar bayar) — dipanggil dari bindCart (mode
+ *  jual) DAN bindTopup (topup/tarik), sebab sidebar kini dirender di SEMUA
+ *  mode dengan tampilan identik (refactor 1 layout desktop 2026-10-07:
+ *  "seluruh POS 1 layout, yang berbeda hanya keranjang belanja").
+ *  Aksi yang menyentuh keranjang (Tahan/Item manual/Diskon) menolak dengan
+ *  toast di luar mode Penjualan — tombolnya tetap tampil (layout tak boleh
+ *  berubah), hanya fungsinya yang khusus mode jual. Pending/Riwayat/Menu
+ *  cepat/Cetak ulang berlaku di semua mode. */
+function bindSidebar(): void {
+  // Diskon transaksi — input DI-DISABLE di luar mode jual saat render
+  // (sidebarBayarHtml), jadi listener ini di mode topup tidak pernah kena.
+  host!.querySelector('#pos-discount')?.addEventListener('input', (e) => {
+    const v = Number((e.target as HTMLInputElement).value || 0);
+    discount = Math.max(0, v);
+    // Batasnya sisa SETELAH diskon item: total tidak boleh < 0, dan server
+    // juga menolak "diskon melebihi subtotal".
+    const maks = Math.max(0, subtotal() - diskonBaris());
+    if (discount > maks) {
+      discount = maks;
+      (e.target as HTMLInputElement).value = String(discount);
+    }
+    simpanKeranjang();
+    paintAktif(); // di luar mode jual input disabled (listener tak kena) — aman apa pun mode
+  });
+
+  // Tombol Bayar (sidebar) = BUKA FORM BAYAR (modal) — permintaan pemilik
+  // 2026-10-04; sejak refactor 1 layout juga menjadi jalur bayar topup/tarik.
+  // Listener isian bayar (#pos-cash, data-pay, data-cash, #pos-pay) terpasang
+  // di bindFormBayar(), sekali tiap modal dibuka (elemennya tidak ada di DOM
+  // selama modal tertutup).
+  host!.querySelector('#pos-bayar')?.addEventListener('click', () => bukaBayar());
+
+  // Bayar pas = DI SIDE PANEL, tepat di bawah Bayar F10 (permintaan pemilik
+  // putaran kedua 2026-10-04). Tunai persis total dalam satu ketukan,
+  // TANPA buka form — pakai jalur pay() yang sama (F12 memanggil fungsi ini).
+  host!.querySelector('#pos-pay-pas')?.addEventListener('click', () => bayarPas());
+
+  // Aksi cepat (sidebar) — Tahan/Pending = fitur P5, Item manual & Diskon
+  // memanggil aksi lama (openManualItem / fokus kolom F6) dari satu tempat.
+  host!.querySelector('#pos-hold')?.addEventListener('click', () => {
+    if (mode !== 'jual') {
+      toast('Tahan khusus mode Penjualan', 'info');
+      return;
+    }
+    void tahanKeranjang();
+  });
+  host!.querySelector('#pos-hold-open')?.addEventListener('click', () => bukaTertahan());
+  host!.querySelector('#pos-qa-manual')?.addEventListener('click', () => {
+    if (mode !== 'jual') {
+      toast('Item manual khusus mode Penjualan', 'info');
+      return;
+    }
+    openManualItem();
+  });
+  host!.querySelector('#pos-qa-disc')?.addEventListener('click', () => {
+    if (mode !== 'jual') {
+      toast('Diskon transaksi khusus mode Penjualan', 'info');
+      return;
+    }
+    host!.querySelector<HTMLInputElement>('#pos-discount')?.focus();
+  });
+  // Cetak ulang nota terakhir (Tahap 2) — dialog jalur Riwayat, tanpa
+  // pratinjau Lihat Struk (keputusan pemilik 2026-10-06).
+  host!.querySelector('#pos-reprint')?.addEventListener('click', () => void cetakNotaTerakhir());
+  // Placeholder [data-soon]: tombol sudah dirender, fiturnya menyusul
+  // (permintaan pemilik 2026-10-04 "placeholder/hardcode dulu tidak apa-apa").
+  host!.querySelectorAll<HTMLElement>('[data-soon]').forEach((b) =>
+    b.addEventListener('click', () => toast(`Fitur ${b.dataset.soon} — menyusul`, 'info')),
+  );
 }
 
 /* ---------- events ---------- */
@@ -3091,8 +3649,13 @@ function bindPintasan(): void {
       if (e.key === 'F6') {
         // P3: lompat ke kolom "Diskon transaksi" (labelnya polos — <kbd>F6</kbd>
         // ada di tombol "Diskon F6" grid Aksi cepat, permintaan pemilik
-        // putaran 7 2026-10-04).
-        if (mode !== 'jual' || !shift) return;
+        // putaran 7 2026-10-04). Mode topup/tarik: input diskon di-disable
+        // (keranjang tak terlihat) — kasir diberi tahu, bukan diam-diam batal.
+        if (!shift) return;
+        if (mode !== 'jual') {
+          toast('Diskon transaksi khusus mode Penjualan', 'info');
+          return;
+        }
         const d = host?.querySelector<HTMLInputElement>('#pos-discount');
         if (d) {
           d.focus();
@@ -3106,7 +3669,14 @@ function bindPintasan(): void {
         // cari, jadi Tahan tidak bisa memakai F3 seperti KulaPOS. Guard sama
         // persis dengan tombolnya (#pos-hold): mode jual + shift + keranjang
         // terisi; kalau kosong biarkan saja (tombolnya juga disabled).
-        if (mode !== 'jual' || !shift || !cart.length) return;
+        // Mode topup/tarik: tombol ikut tampil (layout identik) tapi menolak
+        // dengan toast — lihat bindSidebar().
+        if (!shift) return;
+        if (mode !== 'jual') {
+          toast('Tahan khusus mode Penjualan', 'info');
+          return;
+        }
+        if (!cart.length) return;
         void tahanKeranjang();
         return;
       }
@@ -3114,9 +3684,10 @@ function bindPintasan(): void {
       if (e.key === 'F1') {
         // F1 = KulaPOS ("Jumlah Beli * Kode [F1/Cmd+K]" + fokus search).
         // Esc juga fokus scan tapi 2 langkah saat dropdown terbuka (Esc
-        // pertama tutup dropdown). F1 = 1 tekan.
+        // pertama tutup dropdown). F1 = 1 tekan. Kolom scan ada di SEMUA
+        // mode (refactor 1 layout), jadi F1 tidak lagi dibatasi mode jual.
         e.preventDefault();
-        if (mode !== 'jual' || !shift) return;
+        if (!shift) return;
         focusScan();
         return;
       }
@@ -3128,9 +3699,10 @@ function bindPintasan(): void {
         // F8 memang terpakai (alias F1), tapi kehilangan alias itu tidak
         // mengurangi apa pun — F1 tetap 1 tekan ke scan. Kosong → toast dari
         // bukaTertahan() ("Belum ada transaksi tertahan"), sama dengan
-        // tombol #pos-hold-open yang disabled.
+        // tombol #pos-hold-open yang disabled. Berlaku di semua mode
+        // (refactor 1 layout): keranjang mode jual bisa ditahan dari topup.
         e.preventDefault();
-        if (mode !== 'jual' || !shift) return;
+        if (!shift) return;
         bukaTertahan();
         return;
       }
@@ -3148,8 +3720,10 @@ function bindPintasan(): void {
       if (e.key === 'F10') {
         // Buka FORM BAYAR (modal). Referensi Aronium (help.aronium.com,
         // artikel Workspace): "Payment (F10) Opens advanced payment form".
+        // Semua mode (refactor 1 layout): syarat = bisaBayar() — keranjang
+        // terisi (jual) / nominal terisi (topup-tarik).
         e.preventDefault();
-        if (mode !== 'jual' || !shift || !cart.length) return;
+        if (!shift || !bisaBayar()) return;
         bukaBayar();
         return;
       }
@@ -3160,23 +3734,25 @@ function bindPintasan(): void {
         // quick payment buttons will automatically close current order" =
         // pembayaran cepat TANPA form. Di Ravaa: metode tunai = uang persis
         // total (sama dengan tombol hijau "Bayar pas"), metode lain = bayar
-        // dengan metode aktif.
+        // dengan metode aktif. Topup/tarik ikut (refactor 1 layout) —
+        // bayarPas() yang menentukan aturan uang per mode.
         e.preventDefault();
-        if (mode !== 'jual' || !shift || !cart.length) return;
+        if (!shift || !bisaBayar()) return;
         if (payMethod === 'tunai') bayarPas();
         else void pay();
         return;
       }
 
       if (e.key === 'F2') {
-        // Bayar cepat (mode jual) / proses topup — boleh dari fokus mana pun,
-        // termasuk sambil mengetik di kolom uang (alur Aronium: ketik -> F2).
+        // Bayar cepat (mode jual) / proses topup-tarik — boleh dari fokus
+        // mana pun, termasuk sambil mengetik di kolom uang (alur Aronium:
+        // ketik -> F2). pay() yang memilih jalur: penjualan / submitTopup.
         e.preventDefault();
         if (!shift) return;
         if (mode === 'jual') {
           if (cart.length) void pay();
         } else {
-          void submitTopup();
+          void pay();
         }
         return;
       }
@@ -3220,13 +3796,14 @@ function bindPintasan(): void {
         return;
       }
 
-      // Mode topup/tarik: aturan lama dipindahkan utuh — nominal & admin adalah
-      // "input tuner" yang angkanya masih diketik, jadi Enter-nya jangan submit;
-      // nomor HP / tunai dibiarkan (Enter = proses, seperti sebelumnya).
+      // Mode topup/tarik: nominal & admin adalah "input tuner" yang angkanya
+      // masih diketik, jadi Enter-nya jangan submit; nomor HP / token
+      // dibiarkan (Enter = proses, seperti sebelumnya). pay() meneruskan ke
+      // submitTopup() — uang kurang = form bayar terbuka (refactor 1 layout).
       if (t?.id === 'tp-admin' || t?.id === 'tp-nominal' || diTombol) return;
       if (!shift) return;
       e.preventDefault();
-      void submitTopup();
+      void pay();
     },
     { signal: posKeyAbort.signal },
   );
@@ -3241,8 +3818,9 @@ function bindCart(): void {
   // Keduanya hanya dirender di mode jual — `?.` supaya mode lain aman.
   host!.querySelector('#pos-qty')?.addEventListener('click', () => void setQtyNext());
   host!.querySelector('#pos-cari')?.addEventListener('click', openCariProduk);
-  // Cari pelanggan di info bar (putaran 7 2026-10-04) — layar cari ala F3.
-  host!.querySelector('#pos-cust-cari')?.addEventListener('click', openCariPelanggan);
+  // Info bar (#pos-cust-cari, #pos-shift-tutup) pindah ke paint() — info bar
+  // kini tampil di semua mode, listener menetap di bindCart (mode jual saja)
+  // akan membuat tombolnya MATEK di mode topup/tarik.
   const q = host!.querySelector<HTMLInputElement>('#pos-q');
   const box = host!.querySelector<HTMLElement>('#pos-results');
 
@@ -3364,7 +3942,11 @@ function bindCart(): void {
       return;
     }
     const inp = el.closest<HTMLInputElement>('[data-act="qty"]');
-    if (inp) setQty(inp.dataset.key!, Number(inp.value || 0));
+    if (inp) { setQty(inp.dataset.key!, Number(inp.value || 0)); return; }
+    // SELECT satuan per baris (Tahap 3): ganti satuan baris yang sudah ada —
+    // qty angka sama, diskon baris reset, re-key + gabung (lihat gantiSatuan).
+    const unitSel = el.closest<HTMLSelectElement>('[data-act="unit"]');
+    if (unitSel) gantiSatuan(unitSel.dataset.key!, unitSel.value);
   });
 
   // Catatan per baris (produk use_note): `input` (live), BUKAN `change` —
@@ -3381,31 +3963,6 @@ function bindCart(): void {
     }
   });
 
-  host!.querySelector('#pos-discount')?.addEventListener('input', (e) => {
-    const v = Number((e.target as HTMLInputElement).value || 0);
-    discount = Math.max(0, v);
-    // Batasnya sisa SETELAH diskon item: total tidak boleh < 0, dan server
-    // juga menolak "diskon melebihi subtotal".
-    const maks = Math.max(0, subtotal() - diskonBaris());
-    if (discount > maks) {
-      discount = maks;
-      (e.target as HTMLInputElement).value = String(discount);
-    }
-    simpanKeranjang();
-    paintCart();
-  });
-
-  // Tombol Bayar (sidebar) = BUKA FORM BAYAR (modal) — permintaan pemilik
-  // 2026-10-04. Listener isian bayar (#pos-cash, data-pay, data-cash,
-  // #pos-pay) kini terpasang di bindFormBayar(), sekali tiap modal dibuka,
-  // karena elemennya tidak ada di DOM selama modal tertutup.
-  host!.querySelector('#pos-bayar')?.addEventListener('click', () => bukaBayar());
-
-  // Bayar pas = DI SIDE PANEL, tepat di bawah Bayar F10 (permintaan pemilik
-  // putaran kedua 2026-10-04). Tunai persis total dalam satu ketukan,
-  // TANPA buka form — pakai jalur pay() yang sama (F12 memanggil fungsi ini).
-  host!.querySelector('#pos-pay-pas')?.addEventListener('click', () => bayarPas());
-
   // Pilih pelanggan di info bar (revisi 2026-10-04): hanya menyimpan state —
   // id-nya dikirim server saat pay() dan di-SNAPSHOT jadi sales.customer_name.
   host!.querySelector('#pos-customer')?.addEventListener('change', (e) => {
@@ -3416,19 +3973,11 @@ function bindCart(): void {
 
   host!.querySelector('#pos-clear')?.addEventListener('click', () => bersihkanKeranjang());
 
-  // Aksi cepat (sidebar) — Tahan/Pending = fitur P5, Item manual & Diskon
-  // memanggil aksi lama (openManualItem / fokus kolom F6) dari satu tempat.
-  host!.querySelector('#pos-hold')?.addEventListener('click', () => void tahanKeranjang());
-  host!.querySelector('#pos-hold-open')?.addEventListener('click', () => bukaTertahan());
-  host!.querySelector('#pos-qa-manual')?.addEventListener('click', () => openManualItem());
-  host!.querySelector('#pos-qa-disc')?.addEventListener('click', () =>
-    host!.querySelector<HTMLInputElement>('#pos-discount')?.focus(),
-  );
-  // Placeholder [data-soon]: tombol sudah dirender, fiturnya menyusul
-  // (permintaan pemilik 2026-10-04 "placeholder/hardcode dulu tidak apa-apa").
-  host!.querySelectorAll<HTMLElement>('[data-soon]').forEach((b) =>
-    b.addEventListener('click', () => toast(`Fitur ${b.dataset.soon} — menyusul`, 'info')),
-  );
+  // Panel kanan (diskon transaksi, Bayar, Bayar pas, Tahan/Pending, Item
+  // manual, Cetak ulang, placeholder) — listener BERSAMA untuk semua mode,
+  // lihat bindSidebar(). Listener khusus jual di atas (#pos-rows,
+  // #pos-customer, #pos-clear) tetap di sini.
+  bindSidebar();
 
   // F2 = bayar cepat, Esc = fokus input scan: lihat bindPintasan() (document).
 }
@@ -3479,10 +4028,10 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   mode = 'jual';
   topJenis = defaultJenis('jual');
   topNomor = '';
+  topToken = '';
   topNominal = 0;
   topAdmin = 0;
   topAdminTouched = false;
-  topTunai = 0;
   results = [];
   // KERPERSISTEN (putaran 16, 2026-10-06 — permintaan pemilik: "produk yang
   // berada di keranjang jika kasir pindah ke halaman dashboard atau tidak

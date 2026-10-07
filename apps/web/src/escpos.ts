@@ -16,7 +16,7 @@
 // Setiap baris WAJIB <= kolom layout-nya setelah `ascii()`, karena byte di luar
 // 0x20-0x7E bisa menggeser posisi cetak di firmware printer.
 
-import { getStrukLayout, type LayoutStruk } from './ui/print-pref';
+import { getPrintPause, getStrukLayout, type LayoutStruk } from './ui/print-pref';
 
 export const COLS = 32;
 /** Lebar struk layout A4 (Epson L3110) — 64 kolom aman jauh di bawah lebar
@@ -352,6 +352,19 @@ export function keBase64(bytes: number[]): string {
 /** URL print-agent per device (bisa beda tiap PC kasir). Disimpan di localStorage
  *  karena host web bisa jalan di server sementara agent di PC kasir. */
 export const AGENT_KEY = 'ravaa.printagent';
+
+/** Buka laci kasir (cash drawer kick) — Tahap 4a, keputusan pemilik
+ *  2026-10-06: "Buka Laci Kasir OTOMATIS tiap penjualan tunai (kick ESC/POS
+ *  lewat kirimPrint(), nol perubahan API/agent)".
+ *
+ *  Perintah `ESC p m t1 t2` (0x1B 0x70): pin 2 laci dinyalakan 25×10ms lalu
+ *  dimatikan 250×10ms — paket standar Epson ESC/POS yang dikenali hampir semua
+ *  printer thermal 58mm (Kassen/Xprinter setara). Sengaja KECIL (5 byte) dan
+ *  TERPISAH dari struk: kick tidak boleh ikut mati saat saklar "Cetak struk
+ *  otomatis" off (laci = bagian transaksi tunai, bukan cetak). */
+export function bukaLaci(): number[] {
+  return [0x1b, 0x70, 0x00, 0x19, 0xfa];
+}
 export function urlAgent(): string {
   try {
     return localStorage.getItem(AGENT_KEY) || 'http://localhost:9100';
@@ -361,8 +374,15 @@ export function urlAgent(): string {
 }
 
 /** Kirim bytes ke print-agent. Melempar Error dengan pesan yang bisa ditampilkan
- *  ke kasir (agent tidak jalan / printer tidak ketemu / CORS). */
+ *  ke kasir (agent tidak jalan / printer tidak ketemu / CORS).
+ *
+ *  **JEDA CETAK (pemilik 2026-10-06)**: `getPrintPause()` true (bawaan!) →
+ *  melempar Error SEBELUM fetch, jadi NOL request ke print-agent — struk,
+ *  label, kick laci semua berhenti di browser. Lihat print-pref.ts. */
 export async function kirimPrint(bytes: number[]): Promise<string> {
+  if (getPrintPause()) {
+    throw new Error('cetak sedang DIJEDA (saklar "Jeda semua cetak" menyala)');
+  }
   const res = await fetch(`${urlAgent()}/print`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

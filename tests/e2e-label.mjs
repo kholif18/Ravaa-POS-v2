@@ -46,8 +46,13 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 // Harus sebelum skrip aplikasi jalan: urlAgent() membaca kunci ini saat mencetak.
+// printpause='0': bawaan aplikasi JEDA cetak — agent khusus :9101 menulis ke
+// file tiruan (aman), jadi pause dimatikan supaya alur print teruji utuh.
 await page.addInitScript((url) => localStorage.setItem('ravaa.printagent', url),
   `http://localhost:${AGENT_PORT}`);
+await page.addInitScript(() => {
+  try { localStorage.setItem('ravaa.printpause', '0'); } catch { /* */ }
+});
 const errs = [];
 page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });

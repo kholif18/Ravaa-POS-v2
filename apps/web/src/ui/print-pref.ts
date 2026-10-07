@@ -19,6 +19,33 @@ export type LayoutStruk = 'thermal' | 'a4';
 
 export const KEY_CETAK = 'ravaa.cetak';
 export const KEY_LAYOUT = 'ravaa.struklayout';
+export const KEY_PAUSE = 'ravaa.printpause';
+
+/** JEDA SEMUA CETAK — keputusan pemilik 2026-10-06: *"jangan print dulu sebelum
+ *  saya perintah … menghabiskan kertas terus"*. Selama `true`,
+ *  `kirimPrint()` di escpos.ts BERHENTI sebelum menyentuh print-agent:
+ *  struk, label harga, invoice ESC/POS, MAUPUN kick laci (bukaLaci) tidak
+ *  pernah keluar dari browser — nol risiko kertas terbuang saat dev/test.
+ *
+ *  Default **PAUSED** (kunci absen = jeda; harus `setPrintPause(false)` untuk
+ *  mengaktifkan) — keselamatan kertas didahulukan sampai pemilik memberi
+ *  perintah menyala. Nyalakan/matikan lewat kartu "Cetak struk" di halaman
+ *  Sistem (saklar "Jeda semua cetak"). Per-device seperti pref lain. */
+export function getPrintPause(): boolean {
+  try {
+    return localStorage.getItem(KEY_PAUSE) !== '0';
+  } catch {
+    return true; // gagal baca = tetap jeda (aman untuk kertas)
+  }
+}
+
+export function setPrintPause(jeda: boolean): void {
+  try {
+    localStorage.setItem(KEY_PAUSE, jeda ? '1' : '0');
+  } catch {
+    /* private mode: pref tetap berlaku sesi ini via memori pemanggil */
+  }
+}
 
 /** Izin mengirim struk ke printer setelah tiap penjualan/topup (sejak
  *  putaran 11 2026-10-05: modal resume + pilihan Thermal/A4 muncul SETELAH

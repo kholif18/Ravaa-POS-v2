@@ -108,6 +108,16 @@ try {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  // printpause='0' + route **/print di-mock: TEST TIDAK BOLEH mengirim kertas
+  // fisik (dulu klik [Thermal] di sini menulis struk asli ke /dev/usb/lp0 tiap
+  // `npm test` — itulah biang kertas terbuang; keputusan pemilik 2026-10-06:
+  // semua print pause sampai diperintah).
+  await page.addInitScript(() => {
+    try { localStorage.setItem('ravaa.printpause', '0'); } catch { /* */ }
+  });
+  await page.route('**/print', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, via: 'test' }) });
+  });
   const errs = [];
   page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });

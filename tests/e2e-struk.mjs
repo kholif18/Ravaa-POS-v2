@@ -50,10 +50,19 @@ page.on('console', (m) => {
 });
 
 const tercetak = [];   // { base64 }
+const kickLaci = [];   // ESC p (Tahap 4a) — kick laci BUKAN struk, jangan dihitung
 let gagalCetak = false;
 await page.route('**/print', async (route) => {
   const body = JSON.parse(route.request().postData() || '{}');
-  tercetak.push(body.data_base64 || '');
+  const b64 = body.data_base64 || '';
+  // Kick laci = 5 byte ESC p 00 19 FA (bukaLaci()) — dikirim pay() tunai SEBELUM
+  // struk; tanpa filter ini index tercetak[] bergeser & asersi struk patah.
+  if (Buffer.from(b64, 'base64').equals(Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa]))) {
+    kickLaci.push(b64);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, via: 'test' }) });
+    return;
+  }
+  tercetak.push(b64);
   if (gagalCetak) {
     await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'PRINTER_PATH tidak ada' }) });
   } else {
@@ -146,8 +155,14 @@ try {
   // Kunci layout THERMAL untuk suite ini: puluhan asersi di bawah menguji
   // kolom 32 + ekor CUT, jadi jangan bergantung pada nilai default pref yang
   // bisa berubah. Layout A4 diuji terpisah di section E.
+  // printpause='0': bawaan aplikasi JEDA cetak (pemilik 2026-10-06) — suite ini
+  // memverifikasi payload kirim, jadi pause dimatikan; TIDAK ada risiko kertas
+  // karena route **/print di-mock (fulfill tanpa menyentuh :9100).
   await page.addInitScript(() => {
-    try { localStorage.setItem('ravaa.struklayout', 'thermal'); } catch { /* */ }
+    try {
+      localStorage.setItem('ravaa.struklayout', 'thermal');
+      localStorage.setItem('ravaa.printpause', '0');
+    } catch { /* */ }
   });
 
   console.log('=== A. Saklar & penjualan ===');
@@ -234,7 +249,9 @@ try {
   await page.fill('#pos-q', 'PRD00018');
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   await page.click('#pos-results .suggest-item');
-  await page.waitForSelector('#tp-submit', { timeout: 8000 });
+  // Sejak refactor 1 layout (2026-10-07) tombol Proses #tp-submit DIHAPUS —
+  // penanda form topup/tarik dirender = input nominal.
+  await page.waitForSelector('#tp-nominal', { timeout: 8000 });
   const adaTarikBank = await page.locator('#tp-jenis [data-jenis="tarik-bank"]').count();
   const adaEWallet = await page.locator('#tp-jenis [data-jenis="e-wallet"]').count();
   ok('produk "Tarik tunai" membuka mode TARIK (bukan topup)',
@@ -248,15 +265,23 @@ try {
   await page.click('label[for="pos-autoprint"]');
   ok('saklar bisa dinyalakan lagi', await page.isChecked('#pos-autoprint'));
   await page.click('[data-mode="topup"]');
-  await page.waitForSelector('#tp-submit', { timeout: 8000 });
-  await page.fill('#tp-nomor', '081234567890');
+  await page.waitForSelector('#tp-nominal', { timeout: 8000 });
+  // Revisi pemilik 2026-10-06: e-wallet "untuk pencatatan saja tidak perlu
+  // nomor HP" — form cukup Nominal + Admin, input #tp-nomor TIDAK dirender.
+  const nNomorEwallet = await page.locator('#tp-nomor').count();
+  ok('e-wallet TIDAK punya input nomor', nNomorEwallet === 0, nNomorEwallet);
   await page.fill('#tp-nominal', '50000');
   await page.waitForTimeout(400);          // suggest-admin memanggil API
   const admin = await page.inputValue('#tp-admin');
   // Kontrak: <50rb -> 3000, <200rb -> 5000. Rp50.000 bukan "<50rb" -> tier 5000.
   ok('admin terisi otomatis sesuai tier (<200rb = Rp5.000)', admin === '5000', admin);
-  await page.fill('#tp-tunai', '60000');
-  await page.click('#tp-submit');
+  // Refactor 1 layout: kolom uang diterima #tp-tunai DIHAPUS — bayar lewat
+  // MODAL BAYAR bersama (sidebar #pos-bayar, sama dengan mode jual).
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-cash', { timeout: 8000 });
+  await page.click('[data-pay="tunai"]');   // pastikan metode tunai (default ikut state test sebelumnya)
+  await page.fill('#pos-cash', '60000');
+  await page.click('#pos-pay');
   await page.waitForFunction(
     () => document.querySelector('#toast-root')?.textContent?.match(/Topup /),
     { timeout: 15000 },
@@ -269,7 +294,8 @@ try {
   const t3 = teksDari(s3);
   const b3 = barisStruk(s3);
   ok('memuat judul layanan', /TOPUP/.test(t3), b3[0]);
-  ok('memuat nomor tujuan', t3.includes('081234567890'));
+  ok('TANPA baris nomor (e-wallet tanpa nomor HP)',
+    !t3.includes('081234567890') && !/Nomor HP/.test(t3), b3);
   ok('memuat nominal & admin', t3.includes('Rp50.000') && t3.includes('Rp5.000'),
     b3.filter((x) => /Nominal|Admin/.test(x)));
   ok('memuat TOTAL Rp55.000', t3.includes('Rp55.000'), b3.filter((x) => x.includes('TOTAL')));
@@ -280,12 +306,42 @@ try {
   const lewat3 = b3.filter((x) => x.length > COLS);
   ok('semua baris topup <= 32 kolom', lewat3.length === 0, lewat3);
 
+  // Revisi pemilik 2026-10-06: PLN Token = No meter (tetap) + Nomor Token BARU
+  // yang ikut dicetak di struk belanja; admin PLN dibagi toko/mitra 50-50
+  // (angka admin tetap kasir yang isi — tidak ada perhitungan otomatis).
+  await page.click('#tp-jenis [data-jenis="pln-token"]');
+  ok('PLN token: input nomor meter + token keduanya tampil',
+    (await page.locator('#tp-nomor').count()) === 1 && (await page.locator('#tp-token').count()) === 1);
+  await page.fill('#tp-nomor', '14001234567');
+  await page.fill('#tp-token', '1234-5678-9012');
+  await page.fill('#tp-nominal', '100000');
+  await page.waitForTimeout(400);
+  // Alur modal bayar bersama (refactor 1 layout) — sama seperti e-wallet di atas.
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-cash', { timeout: 8000 });
+  await page.click('[data-pay="tunai"]');
+  await page.fill('#pos-cash', '105000');
+  await page.click('#pos-pay');
+  await page.waitForFunction(
+    () => document.querySelector('#toast-root')?.textContent?.match(/Topup Token PLN/),
+    { timeout: 15000 },
+  );
+  await tungguTercetak(3);
+  ok('struk PLN token dikirim', tercetak.length === 3, tercetak.length);
+  const s3b = Buffer.from(tercetak[2], 'base64');
+  const t3b = teksDari(s3b);
+  const b3b = barisStruk(s3b);
+  ok('struk PLN memuat nomor meter', t3b.includes('14001234567'),
+    b3b.filter((x) => /meter|1400/.test(x)));
+  ok('struk PLN memuat baris Token', /Token/.test(t3b) && t3b.includes('1234-5678-9012'),
+    b3b.filter((x) => /Token/.test(x)));
+
   console.log('=== D. Gagal cetak TIDAK membatalkan penjualan ===');
   gagalCetak = true;
   await page.click('[data-mode="jual"]');
   await page.waitForSelector('#pos-q', { timeout: 8000 });
   await jual({ q: 'PRD00013', tunai: 20000 });
-  ok('permintaan cetak tetap dikirim (dicoba)', tercetak.length === 3, tercetak.length);
+  ok('permintaan cetak tetap dikirim (dicoba)', tercetak.length === 4, tercetak.length);
   // Toast peringatan muncul SESUDAH tombol dialog Thermal diklik (alur cetak
   // baru jalan saat itu) — tunggu eksplisit, jangan balapan dengan render.
   await page.waitForFunction(
@@ -326,8 +382,8 @@ try {
   ok('E: memuat item terjual + Total ringkasan + Paid amount',
     teksE.includes('Aqua 600ml') && /Total\b/.test(teksE) && teksE.includes('Paid amount'),
     teksE.replace(/\s+/g, ' ').slice(-220));
-  ok('E: invoice lewat browser — /print print-agent TIDAK ikut (tetap 3)',
-    tercetak.length === 3, tercetak.length);
+  ok('E: invoice lewat browser — /print print-agent TIDAK ikut (tetap 4)',
+    tercetak.length === 4, tercetak.length);
 
   console.log('=== F. Nominal cepat + pintasan level document ===');
   // Bug yang ditutup: F2/Enter dulu menempel di `host`, jadi mati begitu fokus
@@ -450,7 +506,7 @@ try {
   ok('pra-syarat: fokus jatuh ke body', await page.evaluate(() => document.activeElement?.tagName) === 'BODY');
   await page.keyboard.press('F2');
   await pilihCetak('Thermal');
-  await tungguCetak(4);
+  await tungguCetak(5);
 
   // Enter = bayar dari kolom uang (alur kas: ketik -> Enter), bukan cuma F2.
   await page.fill('#pos-q', 'PRD00013');
@@ -464,7 +520,7 @@ try {
   await page.fill('#pos-cash', '4000');
   await page.keyboard.press('Enter');
   await pilihCetak('Thermal');
-  await tungguCetak(5);
+  await tungguCetak(6);
 
   // F12 = bayar pas TANPA membuka form (referensi Aronium: "Default payment
   // can be accessed using F12 key ... automatically close current order").
@@ -474,7 +530,7 @@ try {
   await page.waitForSelector('#pos-rows tr[data-key]', { timeout: 8000 });
   await page.keyboard.press('F12');
   await pilihCetak('Thermal');
-  await tungguCetak(6);
+  await tungguCetak(7);
   ok('F12 bayar pas selesai tanpa membuka form bayar',
     (await page.locator('.modal-overlay:not(.is-closing)').count()) === 0,
     await page.locator('.modal-overlay:not(.is-closing)').count());
@@ -582,10 +638,10 @@ try {
   await page.fill('#pos-cash', '20000');
   await page.click('#pos-pay');
   await pilihCetak('Thermal');
-  await tungguCetak(7);
+  await tungguCetak(8);
   // Indeks ABSOLUT: setiap section menambah penjualan — struk ke-7 = slot 7
   // (dulu [5] sebelum section F menambah kasus F12 bayar pas).
-  const s7 = Buffer.from(tercetak[6], 'base64');
+  const s7 = Buffer.from(tercetak[7], 'base64'); // +1: struk topup PLN token (section C)
   const t7 = teksDari(s7);
   const b7 = barisStruk(s7);
   ok('struk memuat baris catatan indented di bawah item',
@@ -648,7 +704,7 @@ try {
   const cekPas = { pay: await page.locator('#pos-pay').count(), ov: await page.locator('.modal-overlay:not(.is-closing)').count() };
   ok('Bayar pas membayar tanpa membuka form bayar', cekPas.pay === 0 && cekPas.ov === 0, JSON.stringify(cekPas));
   await pilihCetak('Thermal');
-  await tungguCetak(8);
+  await tungguCetak(9);
 
   // 3) Uang kurang + pelanggan BAWAAN = tetap ditolak barrier (hutang butuh
   //    pelanggan nyata) — pesan persis barrier lama, penjualan tidak terkirim.
@@ -723,7 +779,7 @@ try {
   ok('resume memuat baris HUTANG sisa Rp1.000 (merah)',
     isiPopup.includes('Hutang') && isiPopup.includes('Rp1.000'), isiPopup.slice(0, 200));
   await pilihCetak('Thermal');
-  await tungguCetak(9);
+  await tungguCetak(10);
 
   const daftarJ = await (await fetch(`${API}/api/sales?date=${hari}`)).json();
   const notaJ = await (await fetch(`${API}/api/sales/${encodeURIComponent(daftarJ.data?.[0]?.id ?? '')}`)).json();
@@ -759,7 +815,7 @@ try {
     isi0.includes('Hutang') && isi0.includes('Rp4.000') && isi0.includes('Tunai'),
     isi0.slice(0, 220));
   await pilihCetak('Thermal');
-  await tungguCetak(10);
+  await tungguCetak(11);
   const daftar0 = await (await fetch(`${API}/api/sales?date=${hari}`)).json();
   const nota0 = await (await fetch(`${API}/api/sales/${encodeURIComponent(daftar0.data?.[0]?.id ?? '')}`)).json();
   const led0 = await (await fetch(`${API}/api/customer-debts/${cidJ}`)).json();

@@ -56,9 +56,11 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           `ui/shell.ts`) **TANPA `<header>` sama sekali**
                           (permintaan pemilik 2026-10-04 "full hapus" — tidak
                           ada judul "Kasir (POS)"). Tombol kembali ke
-                          dashboard = `tombolKembaliHtml()` (pos.ts): kiri
-                          info bar (mode jual) + kiri baris Mode
-                          (topup/tarik, info bar tak dirender) supaya kasir
+                           dashboard = `tombolKembaliHtml()` (pos.ts): kiri
+                           info bar (**SEMUA mode** — dulu topup/tarik tak
+                           punya info bar, revisi pemilik 2026-10-06 "mode
+                           topup dan tarik mengapa bagian ini hilang ya?";
+                           back duplikat di baris Mode topup DIHAPUS) supaya kasir
                            tidak terkunci di `#/pos`). Scan bar = input `#pos-q` + dropdown
                            cari — input memuat **badge `<kbd>F1</kbd>` di ujung
                            kanan** (`pr-14` + span absolut; putaran 8 2026-10-04,
@@ -68,11 +70,37 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            `bacaQtyKode()`, qty eksplisit menang atas chip
                            Qty/F4 dan sengaja TIDAK mengosongkan preset itu;
                            aturan sama untuk Enter & klik hasil; tanpa `*`
-                           perilaku lama dipertahankan), **info bar** (mode Penjualan: kolom kiri =
+                           perilaku lama dipertahankan),                           **info bar** (SEMUA mode sejak revisi 2026-10-06;
+                           kolom 2/3 menyesuaikan: mode jual = Pelanggan +
+                           Total belanja seperti semula, **topup/tarik =
+                           cell "Mode" (judul·jenis aktif) + "Total dibayar"**
+                           — `#pos-grand`/`#pos-owncount` disinkronkan
+                           `paintTopup()`; listener info bar
+                           `#pos-shift-tutup`/`#pos-cust-cari` dipindah ke
+                           `paint()` universal (dulu di `bindCart` yang hanya
+                           mode jual = tombol mati di topup)): kolom kiri =
                           tombol ⬅ + tumpukan dua baris **Waktu** (atas) /
                           **Kasir + Shift** (bawah) — jam live
                           `jamPos()`/`mulaiJam()` — jam lokal konsisten
                           `waktuStruk()`, dihentikan di `unmountPosPage`;
+                          **tombol MERAH `#pos-shift-tutup` "Tutup shift"**
+                          **di DALAM kolom kiri info bar** (cell tombol ⬅ +
+                          tumpukan Waktu/Kasir), menempel ke tepi KANAN cell
+                          lewat `ml-auto` — revisi pemilik 2026-10-06 kedua:
+                          *"maksudnya tetap di kolom [kiri] … cuma rata kanan,
+                          mepet ke kanan"* (versi antara berupa track ke-4 grid
+                          `lg:grid-cols-[1fr_1fr_1fr_auto]` di ujung baris
+                          DITOLAK/DIGANTI; grid kini `lg:grid-cols-3` sama
+                          rata ala putaran 9 — jangan kembalikan track auto
+                          atau `[auto_1fr_auto]`);
+                          **`dialogTutupShift()` dari `pages/shift-tutup.ts`**
+                          — modul BERSAMA dengan halaman `#/shifts`
+                          (satu sumber kebenaran `kasSeharusnya()`/
+                          `hitungSelisih()`/`ShiftRow`, AGENTS §5); handler
+                          `tutupShiftDariPos()` fetch shift segar
+                          `GET /api/shifts?status=open&cashier=…`, guard
+                          `.modal-overlay:not(.is-closing)`, setelah sukses
+                          `loadShift()`+`paint()` → gate "Buka shift dulu";
                           select `#pos-customer` pelanggan + tombol
                           `#pos-cust-cari` **INLINE sebelah select** (flex
                           row; putaran 8b 2026-10-04 "tombol dan dropdown
@@ -172,6 +200,20 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           panel kanan `#pos-qa-manual`), input catatan per
                           baris (produk
                           `use_note`, ikut ke struk via `items[].note`).
+                          **Tombol `#pos-mobile` "Mobile" = KANAN chip Qty**
+                          (Tahap 5, 2026-10-06 — pengganti P4 grid;
+                          *"tambahkan layout untuk berpindah ke mode mobile
+                          saja"*): toggle `mobileMode` + persist pref
+                          `ravaa.mobile-layout` ('1') — saat NYALA semua grid
+                          POS dipaksa 1 kolom (`gridUtamaCls()` keranjang‖
+                          sidebar & form topup‖panel; `gridCls`/`batas` di
+                          `infoBarHtml()` → cell info bar menumpuk border-atas),
+                          ikon `smartphone` (baru di icons.ts); listener di
+                          `paint()` (semua mode) + toast konfirmasi. Di HP
+                          asli <lg memang sudah menumpuk natural — toggle =
+                          tukar/preview layout di desktop. Kartu-list keranjang
+                          (bukan tabel) untuk HP = menyusul setelah pemilik
+                          approve tampilan.
                             **Panel bayar = SIDEBAR KANAN 320px** (grid
                             `lg:grid-cols-[1fr_320px]` — putaran 4 2026-10-04:
                             footer horizontal DITOLAK pemilik, "tetap jadi
@@ -250,9 +292,18 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                             lama; **Riwayat** (anchor `#/history`,
                             MENGGANTIKAN slot **Voucher** — keputusan pemilik
                             2026-10-06, voucher & PPN ditutup permanen);
-                            **Cetak ulang** = masih placeholder
-                            `[data-soon]` (toast "menyusul" — permintaan
-                            pemilik "placeholder dulu, fitur nanti").
+                            **Cetak ulang `#pos-reprint` = nota TERAKHIR
+                            device ini** (Tahap 2, 2026-10-06): id nota sukses
+                            disimpan `ravaa.nota-terakhir` (localStorage per
+                            device, ditulis `pay()` saat server konfirmasi) →
+                            tombol disabled sampai device punya nota → klik
+                            fetch `GET /api/sales/:id` lalu serahkan ke
+                            **`cetakUlang()` di-EXPORT dari `history.ts`**
+                            (dialog [Thermal][A4][Batal] + susunan struk
+                            IDENTIK jalur Riwayat — jangan ditulis ulang di
+                            pos.ts, AGENTS §5); tanpa pratinjau "Lihat Struk"
+                            (keputusan pemilik 2026-10-06: menyusul/bila jadi
+                            digabung ke dialog ini).
                             **Isian bayar = FORM BAYAR (modal)** (putaran 5
                             2026-10-04, permintaan pemilik "pindahkan ke modal
                             ketika klik bayar" — ala payment screen Aronium
@@ -450,9 +501,16 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           memunculkannya saat saklar ON). "Cetak struk
                           otomatis" kini **hanya menentukan apakah tombol
                           Thermal/A4 benar-benar mengirim ke printer**
-                          (guard di cabang `pilihCetakSelesai` + `cetak()`;
-                          klik saat mati = toast "Cetak sedang mati…").
-                          Isi dialog = judul hero **KEMBALIAN** (bila
+                           (guard di cabang `pilihCetakSelesai` + `cetak()`;
+                           klik saat mati = toast "Cetak sedang mati…").
+                           **LACI OTOMATIS (Tahap 4a, 2026-10-06)**: sebelum
+                           modal resume dibuka, penjualan **tunai** mengirim
+                           kick `bukaLaci()` (`ESC p` via `kirimPrint()`,
+                           `bukaLaciOtomatis()`) — **TANPA syarat saklar
+                           autoPrint**, segera saat server konfirmasi, hanya
+                           tunai (QRIS/transfer tidak), gagal = `console.warn`
+                           (tak membatalkan & tak menambah toast).
+                           Isi dialog = judul hero **KEMBALIAN** (bila
                           `kembalian > 0`) / "Pembayaran berhasil" —
                           **putaran 11b** (2026-10-05, "kembalian kurang
                           besar"): judul di-HTML dua baris, label "Kembalian"
@@ -587,13 +645,15 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
                           kunci `store_*` di POST /api/settings, tanpa swal —
                           kop INVOICE A4 tersimpan di server supaya semua
                           device mencetak kop yang sama), PLUS kartu
-                          **Cetak struk** (preferensi
-                          PER-DEVICE lewat ui/print-pref.ts: saklar auto-print
-                          — sejak putaran 11 2026-10-05 hanya IZIN kirim ke
-                          printer, modal resume+tetap tampil tiap penjualan —
-                          + select layout thermal/A4, tanpa swal & tanpa API —
-                          printer tiap PC kasir beda, jangan dipindah ke
-                          server), PLUS kartu
+                           **Cetak struk** (preferensi
+                           PER-DEVICE lewat ui/print-pref.ts: saklar auto-print
+                           — sejak putaran 11 2026-10-05 hanya IZIN kirim ke
+                           printer, modal resume+tetap tampil tiap penjualan —
+                           + select layout thermal/A4 + **saklar "Jeda semua
+                           cetak" `#set-pause`** (2026-10-06: default PAUSED,
+                           lihat getPrintPause), tanpa swal & tanpa API —
+                           printer tiap PC kasir beda, jangan dipindah ke
+                           server), PLUS kartu
                            **Backup data** (tombol "Backup sekarang" ->
                            POST /api/backup + daftar file + Unduh per baris dari
                            GET /api/backup; tanpa swal — non-destruktif; daftar
@@ -633,7 +693,13 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            `customer-debt-test.mjs` section 11 (popup A4:
                            tabel 3 baris tanpa `kotak` + kedua aturan
                            striping ada).
-apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print-agent.
+apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print-agent
+                          + **`bukaLaci()` (Tahap 4a 2026-10-06)** — kick
+                          `ESC p 00 19 FA` (5 byte) dibuka OTOMATIS tiap
+                          penjualan TUNAI sukses lewat `bukaLaciOtomatis()`
+                          di pos.ts, TANPA syarat saklar autoPrint (laci ≠
+                          cetak); QRIS/transfer tidak kick; gagal = warn
+                          console saja. Jangan gabungkan kick ke stream struk.
                           Layout struk: `thermal` 32 kolom (COLS) ekor FEED+CUT —
                           bawaan toko; `a4` 64 kolom (COLS_A4) ekor FEED+Form
                           Feed 0x0C TANPA CUT — untuk Epson L3110 (inkjet tanpa
@@ -690,17 +756,30 @@ apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                           produk, panel mode POS, dan kartu Sistem.
 apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
-                          getAutoPrint/setAutoPrint (`ravaa.cetak`, default
-                          nyala — matikan lewat panel Sistem -> Cetak struk
-                          atau scan bar POS; penjualan TIDAK PERNAH dibatalkan
-                          oleh gagal cetak) dan getStrukLayout/setStrukLayout
-                          (`ravaa.struklayout` = `thermal`|`a4`, default
-                          `thermal`). `a4` = pref struk topup/tarik + pilihan
-                          terakhir dialog cetak (A4 penjualan sendiri lewat
-                          `invoice.ts`, bukan struk ESC/POS). SATU sumber untuk
-                          panel Sistem + scan bar
-                          POS + strukUntuk()/sesuaikanPrinter() — jangan baca
-                          localStorage langsung dari halaman lain.
+                           getAutoPrint/setAutoPrint (`ravaa.cetak`, default
+                           nyala — matikan lewat panel Sistem -> Cetak struk
+                           atau scan bar POS; penjualan TIDAK PERNAH dibatalkan
+                           oleh gagal cetak) dan getStrukLayout/setStrukLayout
+                           (`ravaa.struklayout` = `thermal`|`a4`, default
+                           `thermal`). `a4` = pref struk topup/tarik + pilihan
+                           terakhir dialog cetak (A4 penjualan sendiri lewat
+                           `invoice.ts`, bukan struk ESC/POS).
+                           **`getPrintPause/setPrintPause` (`ravaa.printpause`,
+                           pemilik 2026-10-06 "jangan print dulu sebelum saya
+                           perintah — menghabiskan kertas")**: default **PAUSED**
+                           (kunci absen = jeda; harus set false untuk nyala) →
+                           `kirimPrint()` melempar Error SEBELUM fetch: struk,
+                           label, kick laci nol request ke print-agent; nyalakan
+                           lewat saklar "Jeda semua cetak" di kartu Cetak struk
+                           (settings.ts `#set-pause`). Test yang memang mau
+                           memverifikasi payload harus set `'0'` via
+                           addInitScript + route-mock `**/print` (jangan sampai
+                           menyentuh :9100 — biang kertas dulu = history-test
+                           klik [Thermal] menulis struk asli ke /dev/usb/lp0 tiap
+                           `npm test`). SATU sumber untuk
+                           panel Sistem + scan bar
+                           POS + strukUntuk()/sesuaikanPrinter() — jangan baca
+                           localStorage langsung dari halaman lain.
 apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
                          adanya), hariIni()/geser()/tglPanjang()/tglPendek()/
                          hariPendek() — SATU aturan hari UTC untuk Riwayat,
@@ -1216,18 +1295,31 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     ledger: `customer_debts` tidak punya FK/relasi ke `sales` (charge hanya
     di-note `Nota <invoice_no> — sisa bayar POS`).
   - Urutan `created_at DESC, rowid DESC` (yang terbaru di atas).
-* `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor,nominal>0,admin>=0,pay_method?,shift_id?,cashier?}`
+* `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor?,token?,nominal>0,admin>=0,pay_method?,shift_id?,cashier?}`
   - `provider` = **kode jenis layanan** (bukan brand). Nilai yang digunakan POS:
     `E-WALLET | PULSA | PLN-TOKEN | PLN-BILL` (kind=topup) dan `TARIK-EWALLET | TARIK-BANK` (kind=tarik).
     Kontrak API tidak berubah; kolom tetap TEXT non-kosong. Penambahan brand
     (DANA/OVO/GoPay/BCA) dilakukan sebagai kolom baru jika dibutuhkan, bukan
     dengan mengubah `provider` menjadi opsional.
+  - **`nomor` OPSIONAL sejak 2026-10-06 (revisi pemilik)**: e-wallet/pulsa
+    "untuk pencatatan saja tidak perlu nomor HP" dan tarik tunai "hanya nominal
+    saja dan admin" — client mengirim `''` untuk jenis itu (hanya `provider`
+    yang wajib, error `"provider wajib"`). PLN token/tagihan tetap mengisi no
+    meter / ID pelanggan. `nomor TEXT NOT NULL DEFAULT ''` di skema.
+  - **`token` (baru 2026-10-06, kolom `topup_txns.token`)**: Nomor Token PLN —
+    form POS hanya menampilkannya untuk `PLN-TOKEN`, dan **ikut dicetak di
+    struk belanja** (baris `Token: <isi>`). Layanan lain mengirim `''`
+    (default). `GET /api/topups` & `GET /api/sales`-style `SELECT *`
+    otomatis mengembalikannya.
 * `GET /api/topups?date=&limit=&offset=` -> `{data:[<baris topup_txns>], total}`
   - Daftar topup/tarik untuk menu **Riwayat transaksi**; aturan `date`
     (validasi round-trip, default hari UTC, filter `date(created_at)=date(?)`),
     `limit`/`offset`, dan urutan **sama persis** dengan `GET /api/sales`
     di atas, supaya keduanya bisa digabung jadi satu linimasa tanpa tanggal
     yang bertengkar.
+  - Baris memuat **`token`** (isi Nomor Token PLN; `''` untuk layanan lain).
+    Riwayat menyembunyikan baris nomor bila `''` dan menampilkan baris
+    `Token` pada rincian PLN token.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
   -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock}}`
@@ -1335,7 +1427,49 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-04 (Pelanggan toko — nomor urut + alamat +
+  **Migrasi terakhir 2026-10-06 (Topup/tarik — nomor opsional + token PLN):**
+  kolom **`topup_txns.token`** (`TEXT NOT NULL DEFAULT ''`) + kontrak `nomor`
+  jadi opsional. **ALTER in-place di dev (bukan re-create)** — riwayat topup
+  sudah berisi (backup `data.db.bak.topup-token`, dibuat DENGAN
+  `PRAGMA wal_checkpoint(TRUNCATE)` dulu):
+  ```bash
+  sqlite3 apps/api/data/data.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+  cp apps/api/data/data.db apps/api/data/data.db.bak.topup-token
+  sqlite3 apps/api/data/data.db "ALTER TABLE topup_txns ADD COLUMN token TEXT NOT NULL DEFAULT '';"
+  ```
+  Setelah `index.ts` berubah, API via `tsx watch` restart sendiri; kalau DB
+  diganti file (bukan ALTER), proses API **wajib di-restart** (pkill pattern
+  `[w]atch`). Install yang TIDAK boleh di-recreate: jalankan SQL ALTER yang
+  sama. `db/schema.sql` sudah menulis kolom `token` + komentar `nomor` default
+  `''`.   Form POS per jenis (e-wallet/pulsa/tarik tanpa nomor, PLN token +
+  field Nomor Token) ada di `topupHtml()` `apps/web/src/pages/pos.ts` —
+  **urutan card kiri (revisi 2026-10-06)**: Jenis layanan (tiles) → [No meter/
+  Nomor Token bila jenis butuh] → Nominal + chip cepat → **Biaya admin
+  (input, langsung di bawah nominal — permintaan pemilik "biaya admin itu
+  letakkan di bawahnya nominal saja"; form input HANYA di card kiri, topup &
+  tarik tampil sama semua)** → paragraf bantuan. Listener `#tp-admin`
+  tidak berubah (id sama).
+  **Refactor 1 layout desktop (2026-10-07, permintaan pemilik)**: seluruh
+  POS = SATU layout — area kiri saja yang berganti (jual = tabel keranjang
+  via `cartKiriHtml()`; topup/tarik = form layanan via `topupHtml()`), sidebar
+  kanan = **`sidebarBayarHtml()` IDENTIK semua mode** (Aksi cepat → Menu
+  cepat → Diskon item → input diskon transaksi → Bayar F10 + Bayar pas F12;
+  listener `bindSidebar()` dipanggil dari `bindCart()` DAN `bindTopup()`).
+  **Ringkasan #tp-nominal-view/#tp-admin-view/#tp-total/#tp-kembali dan
+  kolom uang #tp-tunai + tombol #tp-submit DIHAPUS** — angkanya pindah ke
+  info bar (`paintTopup()`), transaksi diproses lewat **MODAL BAYAR
+  bersama** (`bukaBayar()` → `pay()` → `submitTopup()`; `totalBayar()` =
+  nominal+admin di luar mode jual). Barrier tunai topup tetap ATURAN LAMA
+  (topup tunai wajib uang ≥ total, tarik dikecualikan dari syarat `>0`,
+  `0 < uang < total` ditolak kedua mode) tapi gagal barrier = buka modal +
+  fokus `#pos-cash`. Aksi sidebar di luar mode jual: Tahan F7 / Item manual /
+  Diskon F6 menolak dengan **toast** (layout tak boleh berubah, Opsi A
+  disetujui pemilik); Pending F8 / Riwayat / Menu cepat / Cetak ulang jalan
+  di semua mode; `muatHold()` dari mode topup otomatis pindah ke `jual`.
+  Topup/tarik TETAP tanpa dialog resume (struk langsung). Teruji
+  `tests/e2e-struk.mjs` 138 asersi (section C alur modal) + probe barrier
+  `/tmp/opencode/probe-barrier-topup.mjs` (9/9).
+  **Migrasi sebelumnya 2026-10-04 (Pelanggan toko — nomor urut + alamat +
   pelanggan pada penjualan):** 3 kolom `customers` (`code`, `supplier_no`,
   `address`) + 2 kolom `sales` (`customer_id`, `customer_name`).
   **Dijalankan sebagai ALTER in-place di dev (bukan re-create)** — keputusan

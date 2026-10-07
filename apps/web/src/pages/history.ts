@@ -25,7 +25,10 @@ import { choiceDialog } from '../ui/confirm';
 
 /* ---------- tipe ---------- */
 
-type SaleRow = {
+/** Baris penjualan (kontrak GET /api/sales + GET /api/sales/:id.sale).
+ *  Di-export sejak Tahap 2 (2026-10-06) — dipakai POS untuk tombol
+ *  "Cetak ulang" nota terakhir (lihat cetakUlang di bawah). */
+export type SaleRow = {
   id: string; shift_id: number | null; created_at: string; pay_method: string;
   subtotal: number; discount: number; total: number; cash_in: number; change: number;
   cashier: string; n_items: number;
@@ -44,7 +47,7 @@ type SaleRow = {
 
 type TopupRow = {
   id: string; shift_id: number | null; created_at: string; kind: 'topup' | 'tarik';
-  provider: string; nomor: string; nominal: number; admin: number; total: number;
+  provider: string; nomor: string; token?: string; nominal: number; admin: number; total: number;
   pay_method: string; cashier: string;
 };
 
@@ -279,7 +282,8 @@ function detailTopup(t: TopupRow): string {
       <div>
         <h3 class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">${t.kind === 'tarik' ? 'Penarikan' : 'Pengisian'}</h3>
         ${ket('Jenis layanan', esc(layanan(t.provider)))}
-        ${ket(t.kind === 'tarik' ? 'Ke rekening' : 'Nomor tujuan', esc(t.nomor))}
+        ${t.nomor ? ket(t.kind === 'tarik' ? 'Ke rekening' : 'Nomor tujuan', esc(t.nomor)) : ''}
+        ${t.token ? ket('Token', esc(t.token)) : ''}
         ${ket('Metode', metode(t.pay_method))}
       </div>
       <div>
@@ -330,7 +334,7 @@ function renderTabel(): string {
         // untuk baris lama tanpa nomor (revisi pemilik 2026-10-04).
         ? `<div class="cell-strong">${b.s.n_items} item · Nota ${esc(b.s.invoice_no ?? b.s.id.slice(0, 8))}</div>
            <div class="cell-sub">Kasir ${esc(b.s.cashier)}${b.s.discount ? ` · diskon ${rp(b.s.discount)}` : ''}</div>`
-        : `<div class="cell-strong">${esc(layanan(b.t!.provider))} · ${esc(b.t!.nomor)}</div>
+        : `<div class="cell-strong">${esc(layanan(b.t!.provider))}${b.t!.nomor ? ` · ${esc(b.t!.nomor)}` : ''}</div>
            <div class="cell-sub">Kasir ${esc(b.t!.cashier)}${
              b.t!.kind === 'topup' && b.t!.admin ? ` · admin ${rp(b.t!.admin)}` : ''
            }</div>`;
@@ -481,11 +485,14 @@ function waktuStrukRiwayat(createdAt: string): string {
   });
 }
 
-/** Cetak ulang struk satu nota dari data Riwayat. Susunan Struk MENIRU pay()
- *  di pos.ts (judul/meta/item/subtotal-diskon-total/tunai) supaya hasilnya sama
- *  dengan struk asli saat penjualan. Gagal cetak TIDAK membatalkan apa pun —
- *  hanya toast, seperti alur POS. */
-async function cetakUlang(s: SaleRow): Promise<void> {
+/** Cetak ulang struk satu nota (jalur Riwayat & tombol "Cetak ulang" POS —
+ *  Tahap 2, 2026-10-06: id nota terakhir disimpan per device, lalu barisnya
+ *  di-fetch lewat GET /api/sales/:id dan dilewatkan ke sini — fungsi ini
+ *  sendiri mengambil itemnya bila belum ada di cache `state.det`).
+ *  Susunan Struk MENIRU pay() di pos.ts (judul/meta/item/subtotal-diskon-total/
+ *  tunai) supaya hasilnya sama dengan struk asli saat penjualan. Gagal cetak
+ *  TIDAK membatalkan apa pun — hanya toast, seperti alur POS. */
+export async function cetakUlang(s: SaleRow): Promise<void> {
   try {
     // Item dipakai kalau rincian nota ini sudah termuat; kalau belum (klik
     // kilat selesai GET), ambil sendiri — struk tanpa baris item = struk bohong.

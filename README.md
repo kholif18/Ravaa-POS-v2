@@ -465,9 +465,14 @@ npm run dev:api
     DITOLAK dengan toast bila uang diterima **kosong** ("Uang diterima belum
     diisi — ketik nominal atau tekan Bayar pas (F12)") atau **kurang dari total**
     ("Uang diterima kurang dari total RpX"); fokus dikembalikan ke kolom
-    uang. Dulu `cashIn=0` lolos cek dan transaksi bisa selesai tanpa menerima
-    uang. Barrier serupa berlaku untuk **topup tunai** (`#tp-tunai`);
-    mode **Tarik dikecualikan** (uang mengalir keluar, kolom boleh kosong).
+    uang.     Dulu `cashIn=0` lolos cek dan transaksi bisa selesai tanpa menerima
+    uang. Barrier serupa berlaku untuk **topup tunai** — sejak refactor 1
+    layout (2026-10-07) uang diterima diisi di **modal bayar bersama**
+    (`cashIn`, kolom `#tp-tunai` lama sudah dihapus); aturannya tetap sama:
+    topup tunai wajib uang > 0 dan ≥ total, gagal = modal tetap terbuka +
+    fokus kolom uang. Mode **Tarik dikecualikan dari syarat >0**
+    (uang mengalir keluar, kolom boleh kosong) — tapi `0 < uang < total`
+    tetap ditolak.
     Teruji 6 asersi regresi di `tests/e2e-struk.mjs` (section F).
   - **Uang kurang / uang 0 = HUTANG OTOMATIS** (putaran 12, instruksi
     pemilik 2026-10-06; syarat pelanggan sejak 2026-10-04): bila uang
