@@ -71,14 +71,18 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            Qty/F4 dan sengaja TIDAK mengosongkan preset itu;
                            aturan sama untuk Enter & klik hasil; tanpa `*`
                            perilaku lama dipertahankan),                           **info bar** (SEMUA mode sejak revisi 2026-10-06;
-                           kolom 2/3 menyesuaikan: mode jual = Pelanggan +
-                           Total belanja seperti semula, **topup/tarik =
-                           cell "Mode" (judul·jenis aktif) + "Total dibayar"**
-                           — `#pos-grand`/`#pos-owncount` disinkronkan
-                           `paintTopup()`; listener info bar
-                           `#pos-shift-tutup`/`#pos-cust-cari` dipindah ke
-                           `paint()` universal (dulu di `bindCart` yang hanya
-                           mode jual = tombol mati di topup)): kolom kiri =
+                           kolom 2/3 = blok **Pelanggan + F9 PERSIS SAMA di
+                           semua mode sejak revisi pemilik 2026-10-07**
+                           *"harusnya bagian ini juga tetap sama customer"* —
+                           sel "Mode" (judul·jenis) pengganti di topup/tarik
+                           **DIHAPUS**; kolom 3 tetap Total belanja (jual) /
+                           Total dibayar (topup/tarik — `#pos-grand`/
+                           `#pos-owncount` disinkronkan `paintTopup()`).
+                           Listener `#pos-shift-tutup`/`#pos-cust-cari`/
+                           **`#pos-customer`** semua di `paint()` universal
+                           (dulu di `bindCart` = mati di luar mode jual);
+                           pintasan **F9 = cari pelanggan semua mode**:
+                           kolom kiri =
                           tombol ⬅ + tumpukan dua baris **Waktu** (atas) /
                           **Kasir + Shift** (bawah) — jam live
                           `jamPos()`/`mulaiJam()` — jam lokal konsisten
@@ -122,7 +126,18 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           tengah; `lg:min-w-[340px]` kolom kanan ikut
                           dibuang) **dipisah garis vertikal**
                           `border-l` ≥lg — border-t saat kolom menumpuk),
-                          lalu scan bar, strip stok menipis
+                          lalu scan bar — **baris Mode slot kanan
+                          (`ml-auto`)**: mode jual = **notif ringkas
+                          `notifModeRow()`** (revisi pemilik 2026-10-07
+                          *"notif stok barang habis atau dll"*): chip
+                          hitungan `n stok habis` (merah, `stock<=0`) /
+                          `n stok menipis` (kuning, `0<stock<=min_stock`) /
+                          `n lewat kadaluarsa` (merah) → tautan #/stock atau
+                          #/products, tanpa temuan = slot kosong; sumber =
+                          cache lokal (pola strip, tanpa API), rincian nama
+                          tetap di strip di bawah; topup/tarik = petunjuk
+                          "Isi nominal + admin … Bayar (F10)", lalu strip
+                          stok menipis
                           & kadaluarsa, **label baris di ATAS tabel**
                           (`#pos-count` "n item"/"Keranjang kosong" kiri +
                           `#pos-clear` Bersihkan F5 kanan — dipindah dari

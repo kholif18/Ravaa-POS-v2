@@ -875,6 +875,33 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       9/9; screenshot 4 mode `/tmp/opencode/refactor-{jual,topup,
       topup-modal,tarik}.png` — sidebar identik terverifikasi visual.
       tsc `--force` 0, build web ✓. API TIDAK berubah.
+- [x] **Info bar: blok Pelanggan identik SEMUA mode — SELESAI (2026-10-07)**:
+      permintaan pemilik (blok HTML `#pos-customer` + tombol F9):
+      *"harusnya bagian ini juga tetap sama customer"* → sel "Mode"
+      (judul·jenis) pengganti di topup/tarik **DIHAPUS**, kolom tengah
+      selalu render blok Pelanggan + F9 persis seperti mode jual
+      (`infoBarHtml()` tanpa ternary `jual`); listener `#pos-customer`
+      pindah dari `bindCart()` ke `paint()` universal + **F9** dilepas dari
+      guard `mode !== 'jual'`. Pilihan pelanggan di topup/tarik = state
+      tampilan saja (POST /api/topups TIDAK mengirim customer_id — kontrak
+      tidak berubah). Verifikasi: DOM probe (`modeAktif=Topup`,
+      `#pos-customer` ada, teks info bar tanpa sel Mode; selectOption dari
+      topup OK), pixel bbox crop info bar (biru Rp0 kanan-atas + merah
+      Tutup shift kiri), tsc 0, 939 asersi hijau. Catatan tooling: read
+      tool sempat menyajikan gambar salah saat verifikasi visual — bukti
+      final memakai DOM + sampling piksel PNG.
+- [x] **Notif stok di baris Mode (mode Penjualan) — SELESAI (2026-10-07)**:
+      permintaan pemilik: slot `ml-auto` baris Mode yang di topup/tarik
+      berisi petunjuk Bayar, di jual *"bisa buat notif stok barang habis
+      atau dll"* → `notifModeRow()`: chip hitungan merah `n stok habis`
+      (`track_stock && stock<=0`), kuning `n stok menipis`
+      (`0<stock<=min_stock`), merah `n lewat kadaluarsa`
+      (`statusExpiry==='lewat'`) → tautan `#/stock`/`#/products`; tanpa
+      temuan = slot kosong. Sumber cache lokal (pola strip — tanpa API,
+      kesegaran ikut `syncMaster` mount), rincian nama tetap di strip
+      `stripStokMenipis`/`stripKadaluarsa` bawah scan bar. Teruji live:
+      seed punya PRD00016 stok=0 → chip "1 stok habis" tampil (probe DOM
+      count=1) + 939 asersi hijau.
 - [x] **Buka Laci Kasir OTOMATIS — SELESAI (Tahap 4a, 2026-10-06)**:
       penjualan **tunai** sukses di `pay()` → `bukaLaciOtomatis()` kirim kick
       **`ESC p 00 19 FA`** (`bukaLaci()` di `escpos.ts`) lewat `kirimPrint()`
@@ -909,6 +936,31 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       Probe: `/tmp/opencode/probe-shift-merah.mjs` +
       `/tmp/opencode/probe-tutup-kanan.mjs` (1440/1024/390 — jarak tepi
       kanan 13px, 0 pageerror).
+- [ ] **RENCANA:2 mode dalam1 transaksi — jasa/produk + topup/tarik dalam
+      NOTA & BAYAR SATU (Opsi B hybrid)** — permintaan pemilik 2026-10-07
+      *"PR bisa2 mode dalam1 transaksi"* (contoh: fotokopi50 lembar +
+      isi pulsa/e-wallet utk1 pelanggan). **Status saat ini: BELUM bisa**
+      — topup sengaja terpisah (`bukaModeLayanan()` → mode Topup →
+      `submitTopup()` → `POST /api/topups`; nota/bayar/struk terpisah dari
+      `POST /api/sales`; Item manual dipakai untuk topup = SALAH laporan).
+      **Desain Opsi B (disepakati utk dikerjakan)**: (1) keranjang
+      Penjualan punya **baris bertipe `topup`** (tombol/panel "Tambah
+      topup" — isi jenis/nomor/nominal/admin persis form topup); (2) saat
+      **Bayar SEKALI**: `pay()` mengirim **`POST /api/topups` dulu (bila ada
+      baris topup) LALU `POST /api/sales`** — record TETAP terpisah supaya
+      aturan domain utuh: topup tidak masuk omzet, `nominal` = mutasi
+      modal, `admin` = jasa, agregat shift `topup_nominal/topup_admin`
+      tetap benar; (3) **1 struk gabungan** (blok items + blok topup);
+      (4) barrier uang/hutang dihitung atas **total gabungan**; (5) persist
+      keranjang/holds + hold restore ikut tipe baris baru. **API TIDAK
+      berubah** (dua endpoint lama dipanggil berurutan — kontrak §3 tetap;
+      kegagalan ke-2 = rollback ringan / toast seperti pola ledger hutang).
+      Opsi C (topup jadi produk biasa) **DITOLAK**: nominal bebas + admin
+      editable bertabrakan dengan "harga non-dinamis dikunci server" +
+      omzet jadi kotor. Pekerjaan: `pos.ts` (tipe baris, form mini,
+      orkestrasi pay, struk), `escpos.ts` (blok topup di struk), test
+      e2e-scenario baru + update AGENTS §1/§3/§5. **Menunggu kunci desain
+      pemilik sebelum coding.**
 - [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
       KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah

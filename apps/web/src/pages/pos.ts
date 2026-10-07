@@ -944,6 +944,31 @@ function stripKadaluarsa(): string {
     </a>`;
 }
 
+/** Notif ringkas di slot KANAN baris Mode — khusus mode Penjualan
+ *  (permintaan pemilik 2026-10-07: slot yang di topup/tarik berisi petunjuk
+ *  "Isi nominal + admin … Bayar (F10)", di jual diisi peringatan
+ *  *"notif stok barang habis atau dll"*). Chip hitungan yang bisa diklik:
+ *  habis/lewat -> halaman terkait; rincian nama barang tetap di strip
+ *  `stripStokMenipis()`/`stripKadaluarsa()` di bawah scan bar. Sumber data
+ *  = cache lokal produk (pola strip — tanpa panggilan API; kesegaran ikut
+ *  syncMaster saat mount, sama seperti strip). Tanpa temuan = slot kosong. */
+function notifModeRow(): string {
+  const habis = products.filter((p) => p.track_stock && p.stock <= 0).length;
+  const menipis = products.filter((p) => p.track_stock && p.stock > 0 && p.min_stock > 0 && p.stock <= p.min_stock).length;
+  const lewat = products.filter((p) => statusExpiry(p.expiry_date) === 'lewat').length;
+  const merah = '!border-red-300 !text-red-700 dark:!border-red-500/50 dark:!text-red-300 hover:!bg-red-50 dark:hover:!bg-red-500/10';
+  const kuning = '!border-amber-300 !text-amber-700 dark:!border-amber-500/50 dark:!text-amber-300 hover:!bg-amber-50 dark:hover:!bg-amber-500/10';
+  const chip = (href: string, kelas: string, teks: string, judul: string) =>
+    `<a href="${href}" class="chip ${kelas}" title="${judul}">${icon('alert')}<span class="font-semibold">${teks}</span></a>`;
+  const daftar = [
+    habis ? chip('#/stock', merah, `${habis} stok habis`, 'Stok habis (0 / minus) — buka halaman Stok') : '',
+    menipis ? chip('#/stock', kuning, `${menipis} stok menipis`, 'Stok di bawah/equal stok minimum — buka halaman Stok') : '',
+    lewat ? chip('#/products', merah, `${lewat} lewat kadaluarsa`, 'Melewati tanggal kadaluarsa — buka halaman Produk') : '',
+  ].filter(Boolean).join('');
+  if (!daftar) return '';
+  return `<div class="ml-auto flex flex-wrap items-center gap-1.5">${daftar}</div>`;
+}
+
 /** Badge kadaluarsa untuk SATU baris keranjang: kasir melihatnya tepat saat
  *  produk diambil, bukan setelah struk keluar. Item manual & produk tanpa
  *  tanggal tidak menghasilkan apa-apa. */
@@ -988,10 +1013,13 @@ function infoBarHtml(): string {
     : `<option value="">Pelanggan Umum</option>`;
   // Info bar dirender di SEMUA mode (revisi pemilik 2026-10-06: "mode topup
   // dan tarik mengapa bagian ini hilang ya?" — dulu conditional
-  // `mode === 'jual'` sehingga Waktu/Kasir/Shift/Tutup shift ikut lenyap;
-  // kolom Pelanggan & Total Belanja hanya relevan jual, jadi di topup/tarik
-  // diganti Mode (judul·jenis) & Total dibayar (nominal+admin, disinkronkan
-  // paintTopup()). mode mobile = semua cell menumpuk 1 kolom (border atas).
+  // `mode === 'jual'` sehingga Waktu/Kasir/Shift/Tutup shift ikut lenyap).
+  // Revisi pemilik 2026-10-07 (refactor 1 layout): kolom tengah = blok
+  // **Pelanggan + F9 PERSIS sama di semua mode** — sel "Mode" pengganti yang
+  // sempat dipakai di topup/tarik DIHAPUS ("harusnya bagian ini juga tetap
+  // sama customer"); mode aktif sudah terbaca dari chip Mode + tile jenis.
+  // Kolom kanan tetap Total belanja (jual) / Total dibayar (topup/tarik,
+  // disinkronkan paintTopup()). mode mobile = semua cell menumpuk 1 kolom.
   const jual = mode === 'jual';
   const gridCls = mobileMode
     ? 'grid gap-2'
@@ -999,8 +1027,6 @@ function infoBarHtml(): string {
   const batas = mobileMode
     ? 'border-t border-gray-200 pt-2 dark:border-gray-700'
     : 'border-t border-gray-200 pt-2 dark:border-gray-700 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0';
-  const j = jual ? null : jenisAktif();
-  const judulTop = mode === 'topup' ? 'Topup' : 'Tarik tunai';
   return `
     <div class="card info-bar !p-3">
       <!-- Tiga kolom SAMA RATA (permintaan pemilik 2026-10-04 putaran 9:
@@ -1034,9 +1060,10 @@ function infoBarHtml(): string {
             ${icon('logout')}<span>Tutup shift</span>
           </button>
         </div>
-        ${
-          jual
-            ? `<div class="min-w-0 ${batas}">
+        <!-- Kolom tengah = blok Pelanggan PERSIS sama di semua mode (revisi
+             pemilik 2026-10-07 — sel "Mode" pengganti di topup/tarik
+             dihapus: "harusnya bagian ini juga tetap sama customer"). -->
+        <div class="min-w-0 ${batas}">
           <!-- Select selebar form (permintaan pemilik 2026-10-04 — dulu
                dibatasi max-w-[520px]) + tombol CARI (putaran 7 2026-10-04,
                "tambahkan cari seperti cari produk F3"): layar cari penuh
@@ -1058,12 +1085,7 @@ function infoBarHtml(): string {
               <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-xs font-semibold tracking-wide">F9</span></button>
             </div>
           </div>
-        </div>`
-            : `<div class="min-w-0 ${batas}">
-          <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Mode</div>
-          <div class="text-sm font-semibold text-gray-900 dark:text-white">${judulTop} · ${esc(j?.label ?? '')}</div>
-        </div>`
-        }
+        </div>
         <!-- Kolom total = track 1/3 (sama rata, lihat komentar grid di atas).
              justify-between tetap menempelkan label+n item ke KIRI kolom dan
              angka #pos-grand ke KANAN — tanpa min-w yang dulu dipakai untuk
@@ -1121,7 +1143,10 @@ function cartHtml(): string {
           <span class="rounded border border-gray-200 px-2 py-1 dark:border-gray-700">
             ${switchHtml('pos-autoprint', autoPrint, 'Cetak struk otomatis')}
           </span>
-          ${mode !== 'jual' ? '<span class="ml-auto text-xs text-gray-500 dark:text-gray-400">Isi nominal + admin (saran otomatis per tier toko), lalu Bayar (F10) — uang diterima di form bayar</span>' : ''}
+          ${mode === 'jual'
+            // Slot kanan baris Mode: notif stok/kadaluarsa (pemilik 2026-10-07).
+            ? notifModeRow()
+            : '<span class="ml-auto text-xs text-gray-500 dark:text-gray-400">Isi nominal + admin (saran otomatis per tier toko), lalu Bayar (F10) — uang diterima di form bayar</span>'}
         </div>
       </div>`;
   // Ketiga mode memakai pembungkus yang sama: flex column setinggi halaman
@@ -1920,6 +1945,16 @@ function paint(): void {
   // #pos-autoprint di atas (bindCart hanya mode jual).
   host.querySelector('#pos-shift-tutup')?.addEventListener('click', () => void tutupShiftDariPos());
   host.querySelector('#pos-cust-cari')?.addEventListener('click', openCariPelanggan);
+  // Pilih pelanggan di info bar — listener di paint() (UNIVERSAL semua mode,
+  // seperti #pos-cust-cari): sejak revisi pemilik 2026-10-07 blok Pelanggan
+  // tampil juga di topup/tarik (dulu listener ini di bindCart = mati di luar
+  // mode jual). Hanya menyimpan state — id dikirim server saat pay() mode
+  // jual (snapshot sales.customer_name); di topup/tarik sekadar pilihan tampilan.
+  host.querySelector('#pos-customer')?.addEventListener('change', (e) => {
+    const v = (e.target as HTMLSelectElement).value;
+    customerId = v ? Number(v) : null;
+    simpanKeranjang(); // ganti pelanggan tanpa repaint — tulis eksplisit
+  });
   host.querySelector('#pos-mobile')?.addEventListener('click', () => {
     mobileMode = !mobileMode;
     try {
@@ -3710,9 +3745,11 @@ function bindPintasan(): void {
       if (e.key === 'F9') {
         // Cari pelanggan (putaran 7 2026-10-04 + riset KulaPOS: F9 belum
         // standar, dipakai karena F1-F8 sudah terpakai). Mirip F3 layar cari
-        // produk tapi untuk pelanggan — buka openCariPelanggan().
+        // produk tapi untuk pelanggan — buka openCariPelanggan(). Berlaku
+        // SEMUA mode sejak revisi 2026-10-07 (blok Pelanggan ada di info bar
+        // topup/tarik juga — tampilan identik, pilihan hanya disimpan state).
         e.preventDefault();
-        if (mode !== 'jual' || !shift) return;
+        if (!shift) return;
         openCariPelanggan();
         return;
       }
@@ -3963,20 +4000,13 @@ function bindCart(): void {
     }
   });
 
-  // Pilih pelanggan di info bar (revisi 2026-10-04): hanya menyimpan state —
-  // id-nya dikirim server saat pay() dan di-SNAPSHOT jadi sales.customer_name.
-  host!.querySelector('#pos-customer')?.addEventListener('change', (e) => {
-    const v = (e.target as HTMLSelectElement).value;
-    customerId = v ? Number(v) : null;
-    simpanKeranjang(); // ganti pelanggan tanpa repaint — tulis eksplisit
-  });
-
   host!.querySelector('#pos-clear')?.addEventListener('click', () => bersihkanKeranjang());
 
   // Panel kanan (diskon transaksi, Bayar, Bayar pas, Tahan/Pending, Item
   // manual, Cetak ulang, placeholder) — listener BERSAMA untuk semua mode,
   // lihat bindSidebar(). Listener khusus jual di atas (#pos-rows,
-  // #pos-customer, #pos-clear) tetap di sini.
+  // #pos-clear) tetap di sini. Listener #pos-customer PINDAH ke paint()
+  // (info bar Pelanggan kini dirender di semua mode, revisi 2026-10-07).
   bindSidebar();
 
   // F2 = bayar cepat, Esc = fokus input scan: lihat bindPintasan() (document).
