@@ -127,6 +127,34 @@ let shift: Shift | null = null;
 let products: Product[] = [];
 let cart: CartLine[] = [];
 let manualSeq = 0;
+/** Baris TOPUP di keranjang MODE JUAL (Opsi B hybrid — permintaan pemilik
+ *  2026-10-07 *"bisa 2 mode dalam 1 transaksi"*, contoh: fotokopi 50 lembar +
+ *  isi pulsa dalam satu nota & satu pembayaran). Array TERPISAH dari `cart`
+ *  (baris produk/manual) supaya seluruh loop kartu keranjang — re-key,
+ *  diskon, qty, catatan, payload `items[]` POST /api/sales — tidak perlu
+ *  disentuh sama sekali: server TIDAK pernah menerima baris topup (nominal
+ *  topup BUKAN omzet, lihat AGENTS §1), hanya client yang menjumlahkannya ke
+ *  total tagihan & merender barisnya di tabel. Bayar = `POST /api/sales`
+ *  (produk saja) LALU `POST /api/topups` per baris — dua record terpisah,
+ *  satu struk gabungan (lihat `pay()`). Tarik tunai SENGJA tidak masuk sini
+ *  (uang mengalir keluar — nominalnya bukan bagian tagihan belanja); tetap
+ *  lewat mode Tarik seperti semula. */
+type TopupLine = {
+  /** uuid dibuat SAAT BARIS DIBUAT — dipakai sebagai `id` POST /api/topups,
+   *  jadi retry setelah gagal/timeout tetap idempotent (server menolak dobel
+   *  dan membalas `duplicate:true`, pola sama dengan id penjualan). */
+  id: string;
+  key: string;             // 'topup:<n>' — kunci hapus baris (tak pernah
+                            // menabrak <idproduk>:<unit> / manual:<n>)
+  jenis: TopupJenis;       // kunci jenis TOPUP_JENIS ('e-wallet'|'pulsa'|…)
+  nomor: string;           // '' = tanpa nomor (jenis yang boleh tanpa nomor)
+  token: string;           // nomor token PLN ('' bila bukan pln-token)
+  nominal: number;         // mutasi modal — ikut tagihan, BUKAN omzet
+  admin: number;           // pendapatan jasa — ikut tagihan
+};
+/** Baris topup di keranjang mode jual + nomor urutnya (pola `manualSeq`). */
+let cartTopup: TopupLine[] = [];
+let topupSeq = 0;
 let discount = 0;
 let payMethod: PayMethod = 'tunai';
 let cashIn = 0;
@@ -181,6 +209,8 @@ type Hold = {
   customerName: string;
   discount: number;         // diskon transaksi (per baris ikut di items)
   items: CartLine[];
+  /** Baris topup yang ikut ditahan (Opsi B) — OPSIONAL untuk hold lama. */
+  topups?: TopupLine[];
 };
 let holds: Hold[] = [];
 
@@ -475,13 +505,22 @@ const subtotal = () => cart.reduce((s, l) => s + l.price * l.qty, 0);
 const diskonBaris = () => cart.reduce((s, l) => s + l.discount, 0);
 const total = () => Math.max(0, subtotal() - diskonBaris() - discount);
 const count = () => cart.reduce((s, l) => s + l.qty, 0);
-const change = () => Math.max(0, cashIn - total());
+/** Total seluruh baris TOPUP di keranjang mode jual — nominal + admin per
+ *  baris (aturan domain §1: `total = nominal + admin`). Ikut TOTAL TAGIHAN
+ *  (bukan omzet — lihat `pay()` yang mengirimnya ke /api/topups terpisah). */
+const topupTotal = () => cartTopup.reduce((s, l) => s + l.nominal + l.admin, 0);
+/** Keranjang mode jual terisi = ADA baris produk/manual ATAU baris topup.
+ *  SATU sumber guard untuk Bayar/Bersihkan/F5/F2/Enter — tanpa ini baris
+ *  topup sendirian tidak bisa dibayar (guard `!cart.length` lama). */
+const keranjangTerisi = () => !!(cart.length || cartTopup.length);
+const change = () => Math.max(0, cashIn - totalBayar());
 
-/** Total tagihan untuk MODAL BAYAR — mode jual = total keranjang; mode
- *  topup/tarik = nominal + biaya admin. Satu sumber untuk judul modal, kartu
- *  "Total tagihan", barrier tunai, dan kembalian (refactor 1 layout desktop
- *  2026-10-07: panel bayar IDENTIK di semua mode, yang beda hanya area kiri). */
-const totalBayar = () => (mode === 'jual' ? total() : topNominal + topAdmin);
+/** Total tagihan untuk MODAL BAYAR — mode jual = total keranjang **+ baris
+ *  topup** (Opsi B: satu pelanggan, satu pembayaran — permintaan pemilik
+ *  2026-10-07); mode topup/tarik = nominal + biaya admin. Satu sumber untuk
+ *  judul modal, kartu "Total tagihan", barrier tunai, kembalian, dan angka
+ *  TOTAL BELANJA di info bar (refactor 1 layout desktop 2026-10-07). */
+const totalBayar = () => (mode === 'jual' ? total() + topupTotal() : topNominal + topAdmin);
 
 /** Kembalian modal = uang diterima − total tagihan (0 bila uang belum diisi). */
 const kembalianBayar = () => (cashIn > 0 ? Math.max(0, cashIn - totalBayar()) : 0);
@@ -497,9 +536,10 @@ function teksKembalianBayar(): string {
 }
 
 /** Bolehkah tombol Bayar / Bayar pas aktif di mode saat ini: mode jual =
- *  keranjang terisi; mode topup/tarik = nominal terisi (0 = form masih
- *  kosong, klik hanya membingungkan — persis aturan lama `!cart.length`). */
-const bisaBayar = () => (mode === 'jual' ? !!cart.length : topNominal > 0);
+ *  keranjang terisi (produk ATAU baris topup — `keranjangTerisi()`, Opsi B);
+ *  mode topup/tarik = nominal terisi (0 = form masih kosong, klik hanya
+ *  membingungkan — persis aturan lama `!cart.length`). */
+const bisaBayar = () => (mode === 'jual' ? keranjangTerisi() : topNominal > 0);
 
 /** Kelas warna angka KEMBALIAN (hasil besar di form bayar: hijau = cukup/
  *  lebih, merah = kurang, abu = belum diisi). Dipakai lewat kelasPosChange()
@@ -508,7 +548,7 @@ const bisaBayar = () => (mode === 'jual' ? !!cart.length : topNominal > 0);
  *  saat dirawat. */
 function kelasKembalian(): string {
   if (!(cashIn > 0)) return 'text-gray-900 dark:text-white';
-  return cashIn < total()
+  return cashIn < totalBayar()
     ? 'text-red-600 dark:text-red-400'
     : 'text-emerald-600 dark:text-emerald-400';
 }
@@ -527,9 +567,9 @@ function kelasPosChange(): string {
  *  permintaan pemilik; saat uang lebih, angka KEMBALIAN saja sudah menjelaskan,
  *  jadi teks kosong. SATU sumber untuk render awal & update live (paintCart). */
 function teksKembalian(): string {
-  if (!(cashIn > 0) || !cart.length) return '';
-  if (cashIn < total()) return `Kurang ${rp(total() - cashIn)}`;
-  if (cashIn === total()) return 'Uang pas. Tidak ada kembalian.';
+  if (!(cashIn > 0) || !keranjangTerisi()) return '';
+  if (cashIn < totalBayar()) return `Kurang ${rp(totalBayar() - cashIn)}`;
+  if (cashIn === totalBayar()) return 'Uang pas. Tidak ada kembalian.';
   return '';
 }
 
@@ -1093,13 +1133,13 @@ function infoBarHtml(): string {
         <div class="flex items-center justify-between gap-3 ${batas}">
           <div class="min-w-0 text-left">
             <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${jual ? 'Total belanja' : 'Total dibayar'}</div>
-            <div id="pos-owncount" class="text-xs text-gray-500 dark:text-gray-400">${jual ? (cart.length ? `${cart.length} item (${count()} Qty)` : '0 item') : `Nominal ${rp(topNominal)} + admin ${rp(topAdmin)}`}</div>
+            <div id="pos-owncount" class="text-xs text-gray-500 dark:text-gray-400">${jual ? (keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item') : `Nominal ${rp(topNominal)} + admin ${rp(topAdmin)}`}</div>
           </div>
           <!-- text-[48px] ukuran KUSTOM (Tailwind arbitrary value) = 2x lipat
                text-2xl lama (24px) — permintaan pemilik 2026-10-04 "custom
                ukuran font, besarkan lagi 2x lipat". Total belanja = angka
                terpenting di layar kasir. -->
-           <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums text-primary">${rp(jual ? total() : topNominal + topAdmin)}</div>
+           <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums text-primary">${rp(totalBayar())}</div>
         </div>
       </div>
     </div>`;
@@ -1174,8 +1214,8 @@ function cartKiriHtml(): string {
         <!-- Label keranjang di ATAS tabel (referensi KulaPOS: "Keranjang 2 item
              ... Bersihkan [F5]" kanan-atas). -->
         <div class="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-          <span id="pos-count">${cart.length ? `${count()} item` : 'Keranjang kosong'}</span>
-          <button type="button" id="pos-clear" class="btn btn-ghost text-red-600 !min-h-[30px] !px-2.5 !py-1 text-xs" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${cart.length ? '' : ' disabled'}>${icon('trash')}<span class="hidden sm:inline">Bersihkan</span>${kbd('F5')}</button>
+          <span id="pos-count">${keranjangTerisi() ? `${count()} item` : 'Keranjang kosong'}</span>
+          <button type="button" id="pos-clear" class="btn btn-ghost text-red-600 !min-h-[30px] !px-2.5 !py-1 text-xs" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${keranjangTerisi() ? '' : ' disabled'}>${icon('trash')}<span class="hidden sm:inline">Bersihkan</span>${kbd('F5')}</button>
         </div>
         <div class="table-wrap table-scroll flex-1">
           <!-- "table-compact" = pola yang sama dengan halaman Produk & Stok
@@ -1236,9 +1276,14 @@ function sidebarBayarHtml(): string {
         <div>
           <span class="label">Aksi cepat</span>
           <div class="grid grid-cols-2 gap-1.5">
-            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${cart.length && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
+            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${keranjangTerisi() && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
             <button type="button" id="pos-hold-open" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
             <button type="button" id="pos-qa-manual" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">${icon('pencil')}<span>Item manual</span></button>
+            <!-- Tambah TOPUP ke keranjang (Opsi B hybrid, 2026-10-07): baris
+                 topup + produk dibayar SEKALI, catatan terpisah di
+                 /api/topups (nominal = mutasi modal, BUKAN omzet — AGENTS §1).
+                 Khusus mode Penjualan; di mode Topup/Tarik pakai formnya. -->
+            <button type="button" id="pos-qa-topup" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Tambah baris topup (pulsa/e-wallet/PLN) ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>Topup</span></button>
             <button type="button" id="pos-qa-disc" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">Diskon${kbd('F6')}</button>
             <a href="#/history" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
             <button type="button" id="pos-reprint" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
@@ -1815,11 +1860,39 @@ function topupHtml(): string {
   </div>`;
 }
 
+/** Label jenis topup untuk tampilan/struk: ambil dari TOPUP_JENIS (satu
+ *  sumber) — key tak dikenal (data lama) jatuh ke fallback, jangan melempar. */
+function jenisTopupLokal(key: TopupJenis | string): { label: string; nomorLabel: string } {
+  return TOPUP_JENIS.find((j) => j.key === key) ?? { label: 'Topup', nomorLabel: 'Nomor' };
+}
+
+/** Satu baris topup di tabel keranjang (Opsi B): colspan=8 penuh — topup
+ *  bukan baris belanja (tanpa qty/diskon/harga per unit), jadi kolom No/Kode/
+ *  dst. tidak berlaku; nominal + admin terbaca di Subtotal kanan. */
+function topupRowHtml(l: TopupLine): string {
+  const j = jenisTopupLokal(l.jenis);
+  const detail = [
+    l.nomor ? esc(l.nomor) : '',
+    l.token ? `token ${esc(l.token)}` : '',
+  ].filter(Boolean).join(' · ');
+  return `<tr data-key="${l.key}" class="topup-row hover:bg-primary-soft dark:hover:bg-primary/15 transition-colors">
+      <td class="td" colspan="8">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="cell-strong"><span class="mr-1.5 rounded bg-emerald-50 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Topup</span>${esc(j.label)} ${rp(l.nominal)}${detail ? ` <span class="cell-sub">${detail}</span>` : ''}</div>
+            <div class="cell-sub">admin ${rp(l.admin)} — topup, bukan stok (dibayar bersama nota ini)</div>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <span class="font-semibold tabular-nums text-gray-900 dark:text-white">${rp(l.nominal + l.admin)}</span>
+            <button type="button" class="row-btn row-btn-danger" data-act="topup-del" data-key="${l.key}" title="Hapus baris topup" aria-label="Hapus baris topup ${esc(j.label)}">${icon('trash')}</button>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+}
+
 function cartRows(): string {
-  if (!cart.length) {
-    return `<tr><td colspan="8"><div class="empty">Scan barcode atau ketik nama produk, lalu tekan Enter.</div></td></tr>`;
-  }
-  return cart
+  const rowsProduk = cart
     .map((l, i) => {
       const gross = jumlahBaris(l);
       const net = gross - l.discount;
@@ -1891,6 +1964,14 @@ function cartRows(): string {
     </tr>${trCatatan}`;
     })
     .join('');
+  // Baris TOPUP (Opsi B hybrid) disusun SETELAH baris produk. colspan=8:
+  // topup bukan baris belanja (tanpa qty/diskon) — diuji dari tagihan,
+  // bukan dari kolom tabel.
+  const rowsTopup = cartTopup.map(topupRowHtml).join('');
+  if (!rowsProduk && !rowsTopup) {
+    return `<tr><td colspan="8"><div class="empty">Scan barcode atau ketik nama produk, lalu tekan Enter — atau tombol Topup untuk isi pulsa/e-wallet.</div></td></tr>`;
+  }
+  return rowsProduk + rowsTopup;
 }
 
 /* ---------- render ---------- */
@@ -1901,7 +1982,7 @@ function cartRows(): string {
  *  `nominal` (mutasi modal, bukan omzet) + `admin` (pendapatan jasa) — lihat
  *  AGENTS.md §1 dan tabel `topup_txns`. Kalau produk ini dibiarkan masuk
  *  keranjang, seluruh `total` masuk ke `SUM(sales.total)` = omzet dan laporan
- *  jadi，过 overstated. Jadi produknya jadi PINTASAN: scan/cari -> buka mode
+ *  jadi overstated. Jadi produknya jadi PINTASAN: scan/cari -> buka mode
  *  yang tepat, transaksi tetap tercatat di `topup_txns`. */
 const KATEGORI_LAYANAN = 'topup';
 
@@ -1987,22 +2068,23 @@ function paintCart(): void {
     const el = document.querySelector(sel);
     if (el) el.textContent = v;
   };
-  set('#pos-count', cart.length ? `${count()} item` : 'Keranjang kosong');
+  set('#pos-count', keranjangTerisi() ? `${count()} item` : 'Keranjang kosong');
   // `#pos-subtotal` TIDAK diisi lagi — baris Subtotal sidebar dihapus putaran 7
-  // 2026-10-04; subtotal terbaca dari TOTAL BELANJA (#pos-grand) di info bar.
+  // 2026-04; subtotal terbaca dari TOTAL BELANJA (#pos-grand) di info bar.
   // Info bar (ala KulaPOS): TOTAL BELANJA besar + jumlah baris/Qty ikut
   // berubah tiap keranjang berubah — elemennya di luar area repaint tbody,
   // jadi disetel eksplisit di sini. Baris "Grand total" di sidebar sudah
   // DIHAPUS (duplikatnya; permintaan pemilik 2026-10-04) — #pos-grand
-  // = SATU-SATUNYA angka total besar.
-  set('#pos-grand', rp(total()));
-  set('#pos-owncount', cart.length ? `${cart.length} item (${count()} Qty)` : '0 item');
+  // = SATU-SATUNYA angka total besar. TOTAL = keranjang + baris topup
+  // (Opsi B — `totalBayar()`).
+  set('#pos-grand', rp(totalBayar()));
+  set('#pos-owncount', keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item');
   // Placeholder "Uang diterima" menampilkan amount due (pola Aronium) — form
   // bayar tidak dirender ulang di paintCart, jadi placeholder harus diikut-
   // setiap total berubah (render awal selalu 0 karena keranjang masih kosong).
   const cashEl = document.querySelector<HTMLInputElement>('#pos-cash');
   if (cashEl) {
-    cashEl.placeholder = String(total());
+    cashEl.placeholder = String(totalBayar());
     // `cashIn` = sumber kebenaran; tulis ke input hanya kalau kasir belum
     // menyentuh kolom (mis. ganti metode me-reset `cashIn=0` lewat handler
     // data-pay). `.value =` TIDAK memicu event `input`, jadi `cashTouched`
@@ -2010,14 +2092,14 @@ function paintCart(): void {
     if (!cashTouched) cashEl.value = cashIn ? String(cashIn) : '';
   }
   // Angka "Total tagihan" di kepala form bayar ikut total terkini.
-  set('#bayar-total', rp(total()));
+  set('#bayar-total', rp(totalBayar()));
   segarJudulBayar();
   set('#pos-change', rp(change()));
   // P2: teks konteks di bawah angka KEMBALIAN ("Kurang Rp…" / "Uang pas. …").
   const ctx = document.querySelector('#pos-change-ctx');
   if (ctx) {
     const t = teksKembalian();
-    const pendek = cashIn > 0 && cashIn < total();
+    const pendek = cashIn > 0 && cashIn < totalBayar();
     ctx.textContent = t;
     ctx.className =
       `text-xs font-medium ${pendek ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}` +
@@ -2037,22 +2119,22 @@ function paintCart(): void {
     changeEl.className = kelasPosChange();
   }
   const pay = document.querySelector<HTMLButtonElement>('#pos-pay');
-  if (pay) pay.disabled = cart.length === 0 || busy;
+  if (pay) pay.disabled = !keranjangTerisi() || busy;
   // Bayar pas ikut mati saat keranjang kosong / sedang proses (disable-nya
   // diperbarui bersama #pos-pay; keduanya kini di dalam form bayar).
   const payPas = document.querySelector<HTMLButtonElement>('#pos-pay-pas');
-  if (payPas) payPas.disabled = cart.length === 0 || busy;
+  if (payPas) payPas.disabled = !keranjangTerisi() || busy;
   // Tombol Bayar di sidebar = pembuka form bayar; mati saat keranjang kosong
   // atau sedang proses (sama aturan dengan #pos-pay dulu).
   const bayar = host!.querySelector<HTMLButtonElement>('#pos-bayar');
-  if (bayar) bayar.disabled = cart.length === 0 || busy;
+  if (bayar) bayar.disabled = !keranjangTerisi() || busy;
   const clr = host!.querySelector<HTMLButtonElement>('#pos-clear');
-  if (clr) clr.disabled = cart.length === 0;
+  if (clr) clr.disabled = !keranjangTerisi();
   // Aksi cepat (sidebar): Tahan mati saat keranjang kosong/sedang proses,
   // Pending mati saat tak ada yang tertahan; badge angkanya ikut jumlah holds
   // (dirender ulang hanya lewat paintCart — tombol panel tidak di-repaint penuh).
   const holdBtn = host!.querySelector<HTMLButtonElement>('#pos-hold');
-  if (holdBtn) holdBtn.disabled = cart.length === 0 || busy;
+  if (holdBtn) holdBtn.disabled = !keranjangTerisi() || busy;
   const holdOpen = host!.querySelector<HTMLButtonElement>('#pos-hold-open');
   if (holdOpen) holdOpen.disabled = holds.length === 0;
   set('#pos-hold-count', String(holds.length));
@@ -2087,8 +2169,9 @@ function paintAktif(): void {
  *  masih tertinggal (setelah pembayaran kolom itu memang dibersihkan manual —
  *  lihat pemanggilan di `pay()`). Sekarang SATU fungsi untuk keduanya. */
 function bersihkanKeranjang(): void {
-  if (!cart.length) return;
+  if (!keranjangTerisi()) return;
   cart = [];
+  cartTopup = []; // baris topup ikut dibersihkan (F5/Bersihkan = seluruh nota)
   discount = 0;
   cashIn = 0;
   cashTouched = false;
@@ -2108,7 +2191,14 @@ function bersihkanKeranjang(): void {
  *  dipersist hanya isi transaksi (baris + diskon + pelanggan); uang diterima
  *  & mode bayar TIDAK — kepemilikan uang berlaku per pembayaran, bukan
  *  per sesi. */
-type SimpananKeranjang = { items: CartLine[]; discount: number; customerId: number | null };
+type SimpananKeranjang = {
+  items: CartLine[];
+  discount: number;
+  customerId: number | null;
+  /** Baris topup keranjang (Opsi B) — OPSIONAL: snapshot lama (sebelum fitur
+   *  2026-10-07) tidak memuatnya, jadi pembaca wajib `?? []`. */
+  topups?: TopupLine[];
+};
 
 /** Tulis snapshot keranjang ke localStorage `ravaa.keranjang`. SINKRON —
  *  store.saveKeranjang memakai localStorage.setItem, jadi tidak ada antrean
@@ -2121,7 +2211,14 @@ type SimpananKeranjang = { items: CartLine[]; discount: number; customerId: numb
 let keranjangGagalLapor = false;
 function simpanKeranjang(): void {
   try {
-    saveKeranjang({ items: cart.map((l) => ({ ...l })), discount, customerId } satisfies SimpananKeranjang);
+    saveKeranjang({
+      items: cart.map((l) => ({ ...l })),
+      discount,
+      customerId,
+      // Baris topup (Opsi B) ikut snapshot — tanpa ini refresh/pindah halaman
+      // membuang baris topup sementara baris produk selamat (pincang).
+      topups: cartTopup.map((l) => ({ ...l })),
+    } satisfies SimpananKeranjang);
   } catch {
     if (!keranjangGagalLapor) {
       keranjangGagalLapor = true;
@@ -2148,11 +2245,11 @@ function simpanKeranjang(): void {
  *  master `customers` dimuat. Return true bila ada isi yang dipulihkan. */
 function muatKeranjang(): boolean {
   const s = getKeranjang<SimpananKeranjang>();
-  if (!s?.items?.length) return false;
+  if (!s?.items?.length && !(s?.topups?.length)) return false;
   const byId = new Map(products.map((p) => [p.id, p]));
   const items: CartLine[] = [];
   let dibuang = 0;
-  for (const l of s.items) {
+  for (const l of s.items ?? []) {
     if (l.product_id !== null) {
       const p = byId.get(l.product_id);
       if (!p) {
@@ -2205,6 +2302,28 @@ function muatKeranjang(): boolean {
     items.push(l);
   }
   cart = items;
+  // Baris topup (Opsi B) dipulihkan dengan validasi ringan: nominal wajib
+  // angka > 0 (baris rusak dibuang — jangan menagih angka NaN), admin
+  // dijepit >= 0, dan key dipaksa kembali ke pola `topup:<n>` (snapshot
+  // bisa datang dari versi/format berbeda). Seq didorong seperti manualSeq.
+  cartTopup = [];
+  for (const t of s.topups ?? []) {
+    const nominal = Math.round(Number(t.nominal));
+    if (!(nominal > 0)) continue;
+    const admin = Math.max(0, Math.round(Number(t.admin) || 0));
+    const m = /^topup:(\d+)$/.exec(t.key ?? '');
+    if (m) topupSeq = Math.max(topupSeq, Number(m[1]));
+    else t.key = `topup:${(topupSeq += 1)}`;
+    cartTopup.push({
+      id: t.id ?? uuid(),
+      key: t.key,
+      jenis: t.jenis,
+      nomor: String(t.nomor ?? ''),
+      token: String(t.token ?? ''),
+      nominal,
+      admin,
+    });
+  }
   discount = Math.max(0, Math.round(s.discount || 0));
   customerId = s.customerId ?? null;
   for (const l of cart) {
@@ -2213,16 +2332,21 @@ function muatKeranjang(): boolean {
   }
   clampDiskonTransaksi(); // diskon transaksi > sisa subtotal (harga berubah) dijepit sebelum paint
   if (dibuang) toast(`${dibuang} baris dibuang — produknya sudah dihapus dari katalog`, 'info');
-  if (cart.length) toast(`Keranjang dipulihkan — ${cart.length} baris`, 'success');
-  return cart.length > 0;
+  if (keranjangTerisi()) {
+    toast(`Keranjang dipulihkan — ${cart.length + cartTopup.length} baris`, 'success');
+  }
+  return keranjangTerisi();
 }
 
 /* ---------- tahan / pending (fitur P5) ---------- */
 
 /** Total sebuah hold = subtotal baris − diskon per baris − diskon transaksi
- *  (rumus sama dengan `total()` keranjang aktif). */
+ *  (rumus sama dengan `total()` keranjang aktif) + **baris topup** nominal+admin
+ *  (Opsi B — hitungHold dipakai kartu antrian, ringkasan preview, dan pesan
+ *  hapus, jadi angkanya harus persis totalBayar saat hold dibuat). */
 const hitungHold = (h: Hold) =>
-  Math.max(0, h.items.reduce((s, l) => s + Math.round(l.price * l.qty) - l.discount, 0) - h.discount);
+  Math.max(0, h.items.reduce((s, l) => s + Math.round(l.price * l.qty) - l.discount, 0) - h.discount) +
+  (h.topups ?? []).reduce((s, l) => s + l.nominal + l.admin, 0);
 
 /** Tulis daftar hold ke IndexedDB (kv 'holds'). Gagal menyimpan TIDAK
  *  membuang hold dari memori — kasir tetap bisa memakainya sesi ini; hanya
@@ -2241,7 +2365,7 @@ async function simpanTertahan(): Promise<void> {
  *  select kembali bawaan — pilihan ikut tertahan, divalidasi ulang saat
  *  `muatHold()` (id bisa saja sudah tidak ada di master). */
 async function tahanKeranjang(): Promise<void> {
-  if (busy || !cart.length) return;
+  if (busy || !keranjangTerisi()) return;
   holds.unshift({
     id: uuid(),
     waktu: new Date().toISOString(),
@@ -2250,6 +2374,8 @@ async function tahanKeranjang(): Promise<void> {
     customerName: customers.find((c) => c.id === customerId)?.name ?? 'Pelanggan Umum',
     discount,
     items: cart.map((l) => ({ ...l })),
+    // Baris topup ikut ditahan (Opsi B) — pulihkan di muatHold().
+    topups: cartTopup.map((l) => ({ ...l })),
   });
   await simpanTertahan();
   bersihkanKeranjang();
@@ -2266,10 +2392,10 @@ async function tahanKeranjang(): Promise<void> {
  *  kasir dikonfirmasi dulu (SweetAlert2 — bukan confirm() native). */
 async function muatHold(h: Hold): Promise<void> {
   if (busy) return;
-  if (cart.length) {
+  if (keranjangTerisi()) {
     const ok = await confirmDialog({
       title: 'Ganti keranjang saat ini?',
-      message: `${cart.length} baris di keranjang akan dibuang dan diganti isi transaksi tertahan ini.`,
+      message: `${cart.length + cartTopup.length} baris di keranjang akan dibuang dan diganti isi transaksi tertahan ini.`,
       okLabel: 'Ya, ganti',
       cancelLabel: 'Batal, jangan diganti',
     });
@@ -2285,6 +2411,10 @@ async function muatHold(h: Hold): Promise<void> {
     l.dyn = !!p?.price_dynamic;
     if (l.dyn) l.key = `${l.product_id}:${l.unit}:${l.price}`;
   }
+  // Baris topup ikut hold (Opsi B) — polos disalin; key `topup:<n>` didorong
+  // seq-nya di bawah (bersama item manual) supaya tambahan berikutnya tidak
+  // menabrak. Hold lama tanpa field topups = [] (kompabilitas mundur).
+  cartTopup = (h.topups ?? []).map((l) => ({ ...l }));
   discount = h.discount;
   // Pelanggan hold divalidasi terhadap master terkini — id lama yang sudah
   // tidak ada jatuh ke Pelanggan Umum, bukan ke select kosong.
@@ -2294,10 +2424,16 @@ async function muatHold(h: Hold): Promise<void> {
   const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
   if (sel) sel.value = customerId === null ? '' : String(customerId);
   // Item manual hold memakai key `manual:<n>` — dorong seq melampaui angka
-  // tertinggi supaya item manual BERIKUTNYA tidak menabrak key lama.
+  // tertinggi supaya item manual BERIKUTNYA tidak menabrak key lama. Baris
+  // topup (`topup:<n>`) didorong dari key yang sama di sini.
   for (const l of cart) {
     const m = /^manual:(\d+)$/.exec(l.key);
     if (m) manualSeq = Math.max(manualSeq, Number(m[1]));
+  }
+  for (const t of cartTopup) {
+    const m = /^topup:(\d+)$/.exec(t.key);
+    if (m) topupSeq = Math.max(topupSeq, Number(m[1]));
+    else t.key = `topup:${(topupSeq += 1)}`;
   }
   simpanKeranjang(); // isi keranjang kini = isi hold — tulis ke localStorage (konfirmasi ganti sudah lewat)
   holds = holds.filter((x) => x.id !== h.id);
@@ -2329,7 +2465,7 @@ async function muatHold(h: Hold): Promise<void> {
 async function hapusHold(h: Hold, api: ModalHandle, tampil: () => void): Promise<void> {
   const ok = await confirmDialog({
     title: 'Hapus transaksi tertahan?',
-    message: `${h.items.length} baris senilai ${rp(hitungHold(h))} akan dihapus permanen.`,
+    message: `${h.items.length + (h.topups ?? []).length} baris senilai ${rp(hitungHold(h))} akan dihapus permanen.`,
     okLabel: 'Ya, hapus',
     danger: true,
     cancelLabel: 'Batal, jangan dihapus',
@@ -2394,7 +2530,7 @@ function bukaTertahan(): void {
         <span class="truncate text-sm font-bold">${esc(h.customerName)}</span>
         <span class="shrink-0 text-xs font-bold tabular-nums${aktif ? ' text-white' : ' text-primary'}">${rp(hitungHold(h))}</span>
       </div>
-      <div class="mt-0.5 text-xs${aktif ? ' text-white/90' : ' text-gray-500 dark:text-gray-400'}">${h.items.length} baris (${qty} Qty)</div>
+      <div class="mt-0.5 text-xs${aktif ? ' text-white/90' : ' text-gray-500 dark:text-gray-400'}">${h.items.length + (h.topups ?? []).length} baris (${qty} Qty)</div>
       <div class="text-[10px]${aktif ? ' text-white/75' : ' text-gray-400 dark:text-gray-500'}">${stempel(h)}</div>
     </li>`;
   };
@@ -2429,8 +2565,27 @@ function bukaTertahan(): void {
         <div class="shrink-0 text-sm font-bold tabular-nums text-primary">${rp(net)}</div>
       </li>`;
     }).join('');
+    // Baris topup hold (Opsi B) — disusul di daftar produk; netto kanan =
+    // nominal + admin. Tanpa baris topup = keluaran PERSIS lama (uji §C3 aman).
+    const tops = (h.topups ?? []).map((t, i) => {
+      const j = jenisTopupLokal(t.jenis);
+      const sub = [
+        'Topup',
+        t.nomor ? esc(t.nomor) : '',
+        t.token ? `token ${esc(t.token)}` : '',
+        `admin ${rp(t.admin)}`,
+      ].filter(Boolean).join(' · ');
+      return `<li class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-700/40">
+        <div class="min-w-0">
+          <div class="truncate text-sm font-bold text-gray-900 dark:text-white">${h.items.length + i + 1}. ${esc(j.label)} ${rp(t.nominal)}</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">${sub}</div>
+        </div>
+        <div class="shrink-0 text-sm font-bold tabular-nums text-primary">${rp(t.nominal + t.admin)}</div>
+      </li>`;
+    }).join('');
     const subtotal = h.items.reduce(
       (s, l) => s + Math.round(l.price * l.qty) - (l.discount || 0), 0);
+    const topupTot = (h.topups ?? []).reduce((s, l) => s + l.nominal + l.admin, 0);
     return `
       <div class="p-4">
         <div class="mb-4 grid grid-cols-2 gap-4 border-b border-dashed border-gray-200 pb-4 dark:border-gray-700">
@@ -2444,8 +2599,8 @@ function bukaTertahan(): void {
             <div class="text-sm font-bold text-gray-900 dark:text-white">${stempel(h)}</div>
           </div>
         </div>
-        <div class="mb-3 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Daftar produk (${h.items.length} item)</div>
-        <ul class="flex flex-col gap-2">${produk}</ul>
+        <div class="mb-3 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Daftar produk (${h.items.length + (h.topups ?? []).length} item)</div>
+        <ul class="flex flex-col gap-2">${produk}${tops}</ul>
         <div class="mt-4 rounded-lg bg-gray-100 p-4 dark:bg-gray-700/50">
           <div class="mb-2 flex justify-between">
             <span class="text-gray-500 dark:text-gray-400">Subtotal</span>
@@ -2454,6 +2609,10 @@ function bukaTertahan(): void {
           ${h.discount ? `<div class="mb-2 flex justify-between">
             <span class="text-gray-500 dark:text-gray-400">Diskon</span>
             <span class="font-bold tabular-nums text-red-600 dark:text-red-400">-${rp(h.discount)}</span>
+          </div>` : ''}
+          ${topupTot ? `<div class="mb-2 flex justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Topup (${(h.topups ?? []).length} baris)</span>
+            <span class="font-bold tabular-nums">+${rp(topupTot)}</span>
           </div>` : ''}
           <div class="flex items-center justify-between border-t border-dashed border-gray-300 pt-2 dark:border-gray-500">
             <span class="font-bold">Total</span>
