@@ -1053,6 +1053,40 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       menyentuh stok). Test baru section **D2** `e2e-struk.mjs` (2 asersi:
       suggest & `#pc-list` memuat `sisa <stok server>`) → ekspek **143**;
       suite total **1005 hijau**.
+- [x] **Notif POS lebih informatif + notif selain stok habis — SELESAI
+      2026-10-08** — permintaan pemilik sambil menunjuk chip HTML `1 stok
+      habis`: *"buat agar lebih informatif, dan buat notif lain bukan hanya
+      stok habis"*. `notifModeRow()` kini membungkus **`notifChips()` enam
+      chip** di `#pos-notif`: stok habis (merah `#/stock`), stok menipis
+      (kuning `#/stock`), lewat kadaluarsa (merah `#/products`), **kadaluarsa
+      ≤30 hari** (kuning, `AMBAT_EXPIRY` — dulu hanya strip), **transaksi
+      antre offline** (biru `#/dashboard`, `data-notif-outbox` selalu dirender,
+      teks+visibilitas disegarkan `updateOutboxBadge()` di api.ts), **Cetak
+      dijeda** (abu `#/settings`, `getPrintPause()` — alasannya kasir tak boleh
+      menebak kenapa struk tak keluar). Informatif = nama produk PERTAMA +
+      `title` daftar penuh per chip. Strip `STOK HABIS` sempat ditambah lalu
+      **DIHAPUS lagi** atas keputusan pemilik yang sama (*"ini hapus saja
+      karena sudah ada di atasnya di dalam card"*); wadah `#pos-strips` tetap
+      (strip menipis/kadaluarsa) supaya `segNotifPos()` bisa menyegarkannya
+      dari `segarkanStokPos()` TANPA `paint()` penuh. Test baru
+      **`tests/pos-notif-test.mjs` (6 asersi)** — printpause=1 + outbox
+      palsu via addInitScript, satu produk diopname → jual → chip menyegar
+      tanpa reload, stok dipulihkan di `finally` → `run.mjs` ekspek **1011**.
+- [x] **Sidebar Bayar F10/F12 "naik mepet ke atas" saat dialog konfirmasi —
+      FIX 2026-10-08** — laporan pemilik: *"di modal resume ketika saya delete
+      dan muncul dialog konfirmasi delete, kenapa sidebar kanan berubah ya,
+      terlihat tombol Bayar F10 dan F12 naik mepet ke atas tombol-tombol
+      lain"*. Repro Playwright (probe `/tmp/opencode/probe-sidebar-delete.mjs`):
+      `.page` **900 → 660px**, card sidebar POS **782 → 542px**, `#pos-bayar`
+      y 744 → 504 — tepat saat swal backdrop terbuka. Akar masalah =
+      SweetAlert2 `heightAuto:true` (default) memasang class
+      `swal2-height-auto` ke `<html>`+`<body>` (sweetalert2.all.js `if
+      (params.heightAuto && params.backdrop && !params.toast)`) + CSS bawaan
+      `body.swal2-height-auto { height:auto !important }` → rantai
+      `html/body/#app{h-full}` runtuh → `mt-auto` blok bayar kehilangan ruang
+      bebas. Fix: **`heightAuto: false` di mixin `base` `ui/confirm.ts`**
+      (satu-satunya pintu Swal repo). Verifikasi: y Bayar 744 = identik
+      kondisi normal; **suite penuh 1011/1011 hijau**.
 - [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
       KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah

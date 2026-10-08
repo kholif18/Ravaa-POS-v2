@@ -84,13 +84,25 @@ export async function flushOutbox(onDone?: (key: string) => void): Promise<void>
 }
 
 export function updateOutboxBadge(): void {
-  const el = document.getElementById('outbox-badge');
-  if (!el) return;
   const n = outboxCount();
-  el.textContent = n > 0 ? `antrian ${n}` : 'online';
-  el.className = n > 0
-    ? 'badge-low'
-    : 'hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400';
+  const el = document.getElementById('outbox-badge');
+  if (el) {
+    el.textContent = n > 0 ? `antrian ${n}` : 'online';
+    el.className = n > 0
+      ? 'badge-low'
+      : 'hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400';
+  }
+  // Chip notif POS "n transaksi antre offline" (baris saklar cetak, `#pos-notif`)
+  // — teks & visibilitas disegarkan DI SINI supaya tidak basi sampai repaint
+  // POS berikutnya (revisi pemilik 2026-10-08, lihat notifChips() di pos.ts).
+  // Elemen dirender terus-menerus (hidden saat 0) supaya selalu ada untuk
+  // pembaruan ini.
+  const ob = document.querySelector<HTMLElement>('a[data-notif-outbox]');
+  if (ob) {
+    ob.classList.toggle('hidden', n === 0);
+    const span = ob.querySelector('span');
+    if (span) span.textContent = `${n} transaksi antre offline`;
+  }
 }
 
 setInterval(() => { void flushOutbox(); }, 5000);

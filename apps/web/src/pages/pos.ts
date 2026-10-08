@@ -29,7 +29,7 @@
 // Cache kasir hanya berisi is_active=1 (see AGENTS.md §3), jadi produk
 // nonaktif tidak mungkin masuk keranjang.
 
-import { apiGet, apiPost, uuid, HttpError } from '../api';
+import { apiGet, apiPost, uuid, HttpError, outboxCount } from '../api';
 import {
   getCachedProducts, syncMaster, getHolds, saveHolds, getKeranjang, saveKeranjang,
   type Product,
@@ -497,7 +497,7 @@ let mobileMode = (() => {
 function gridUtamaCls(): string {
   return mobileMode
     ? 'grid min-h-0 flex-1 gap-2 grid-cols-1'
-    : 'grid min-h-0 flex-1 gap-2 lg:grid-cols-[1fr_320px]';
+    : 'grid min-h-0 flex-1 gap-2 lg:grid-cols-[1fr_350px]';
 }
 
 /** Tier admin kasir. WAJIB sama dengan `GET /api/topups/suggest-admin`
@@ -1006,27 +1006,100 @@ function stripKadaluarsa(): string {
 }
 
 /** Notif ringkas di slot KANAN baris bawah scan bar (permintaan pemilik
- *  2026-10-07 *"notif stok barang habis atau dll"*): chip hitungan yang
- *  bisa diklik (stok habis / menipis / lewat kadaluarsa -> halaman terkait);
- *  rincian nama barang tetap di strip `stripStokMenipis()`/
- *  `stripKadaluarsa()` di bawah scan bar. Sumber data = cache lokal produk
- *  (pola strip — tanpa panggilan API; kesegaran ikut syncMaster saat mount,
- *  sama seperti strip). Tanpa temuan = slot kosong. */
+ *  2026-10-07 *"notif stok barang habis atau dll"*, direvisi 2026-10-08
+ *  *"buat agar lebih informatif, dan buat notif lain bukan hanya stok
+ *  habis"*): pembungkus beraid **`#pos-notif`** supaya bisa digambar ulang
+ *  `segNotifPos()` setelah stok berubah (pay() tidak menjalankan `paint()`
+ *  penuh — itu akan membuang fokus kolom scan). Isi = `notifChips()`.
+ *  Sumber data = cache lokal produk + `outboxCount()` + `getPrintPause()`
+ *  (semua tanpa panggilan API; kesegaran ikut syncMaster & flush outbox). */
 function notifModeRow(): string {
-  const habis = products.filter((p) => p.track_stock && p.stock <= 0).length;
-  const menipis = products.filter((p) => p.track_stock && p.stock > 0 && p.min_stock > 0 && p.stock <= p.min_stock).length;
-  const lewat = products.filter((p) => statusExpiry(p.expiry_date) === 'lewat').length;
+  return `<div id="pos-notif" class="ml-auto flex flex-wrap items-center gap-1.5">${notifChips()}</div>`;
+}
+
+/** Isi chip notif POS — enam jenis, urut prioritas:
+ *
+ *  1. **stok habis** (merah → `#/stock`)  2. **stok menipis** (kuning → `#/stock`)
+ *  3. **lewat kadaluarsa** (merah → `#/products`)  4. **kadaluarsa ≤ 30 hari**
+ *     (kuning → `#/products` — dulu hanya muncul di strip, chipnya tidak ada)
+ *  5. **transaksi antre offline** (biru → `#/dashboard`) — `data-notif-outbox`,
+ *     teks+visibilitas disegarkan `updateOutboxBadge()` (api.ts) tiap antrean
+ *     berubah, jadi tidak menunggu repaint POS
+ *  6. **cetak dijeda** (abu → `#/settings`) — saklar autoPrint boleh nyala tapi
+ *     `ravaa.printpause` menahan SEMUA pengiriman printer; tanpa chip ini kasir
+ *     hanya bisa menebak kenapa tidak ada struk keluar.
+ *
+ *  **Informatif** (revisi pemilik 2026-10-08 *"buat agar lebih informatif"*):
+ *  tiap chip memuat nama produk PERTAMA (stok/tanggalnya) di teks + `title`
+ *  memuat daftar penuh. Rincian menipis/kadaluarsa tetap di strip
+ *  `stripStokMenipis()`/`stripKadaluarsa()` di bawah scan bar; untuk **stok
+ *  habis TIDAK ada strip** — keputusan pemilik 2026-10-08 (strip merah yang
+ *  sempat ditambah *"ini hapus saja karena sudah ada di atasnya di dalam
+ *  card"*): chip + judulnya menampung info itu sendiri. Chip outbox SELALU
+ *  dirender (bila 0 = kelas `hidden`) supaya elemennya ada untuk pembaruan
+ *  langsung dari api.ts. */
+function notifChips(): string {
+  const habis = products.filter((p) => p.track_stock && p.stock <= 0);
+  const menipis = products.filter((p) => p.track_stock && p.stock > 0 && p.min_stock > 0 && p.stock <= p.min_stock);
+  const lewat = products.filter((p) => statusExpiry(p.expiry_date) === 'lewat');
+  const dekat = products.filter((p) => statusExpiry(p.expiry_date) === 'dekat');
+  const antre = outboxCount();
   const merah = '!border-red-300 !text-red-700 dark:!border-red-500/50 dark:!text-red-300 hover:!bg-red-50 dark:hover:!bg-red-500/10';
   const kuning = '!border-amber-300 !text-amber-700 dark:!border-amber-500/50 dark:!text-amber-300 hover:!bg-amber-50 dark:hover:!bg-amber-500/10';
-  const chip = (href: string, kelas: string, teks: string, judul: string) =>
-    `<a href="${href}" class="chip ${kelas}" title="${judul}">${icon('alert')}<span class="font-semibold">${teks}</span></a>`;
-  const daftar = [
-    habis ? chip('#/stock', merah, `${habis} stok habis`, 'Stok habis (0 / minus) — buka halaman Stok') : '',
-    menipis ? chip('#/stock', kuning, `${menipis} stok menipis`, 'Stok di bawah/equal stok minimum — buka halaman Stok') : '',
-    lewat ? chip('#/products', merah, `${lewat} lewat kadaluarsa`, 'Melewati tanggal kadaluarsa — buka halaman Produk') : '',
+  const biru = '!border-sky-300 !text-sky-700 dark:!border-sky-500/50 dark:!text-sky-300 hover:!bg-sky-50 dark:hover:!bg-sky-500/10';
+  const abu = '!border-gray-300 !text-gray-600 dark:!border-gray-600 dark:!text-gray-300 hover:!bg-gray-50 dark:hover:!bg-gray-500/10';
+  /** "Nama (angka)" bila cuma 1; "Nama +2 lain" bila banyak — teks chip jangan
+   *  meledak, daftar penuh tetap di `title` & strip. MENTAH (belum di-esc):
+   *  `chip()` yang men-esc sekali di akhir, kalau tidak dobel. */
+  const satu = (daftar: string[]): string =>
+    !daftar.length ? '' : daftar.length === 1 ? ` · ${daftar[0]}` : ` · ${daftar[0]} +${daftar.length - 1} lain`;
+  const judul = (daftar: string[]): string => daftar.join('; ');
+  const chip = (href: string, kelas: string, ikon: IconName, teks: string, teksJudul: string, extra = '') =>
+    `<a href="${href}" class="chip ${kelas}" title="${esc(teksJudul)}"${extra}>${icon(ikon)}<span class="font-semibold">${esc(teks)}</span></a>`;
+  return [
+    habis.length
+      ? chip('#/stock', merah, 'alert', `${habis.length} stok habis${satu(habis.map((p) => `${p.name} (${p.stock})`))}`,
+          `Stok habis/minus: ${judul(habis.map((p) => `${p.name} sisa ${p.stock}`))} — buka halaman Stok`)
+      : '',
+    menipis.length
+      ? chip('#/stock', kuning, 'alert', `${menipis.length} stok menipis${satu(menipis.map((p) => `${p.name} (${p.stock})`))}`,
+          `Stok di bawah/equal stok minimum: ${judul(menipis.map((p) => `${p.name} sisa ${p.stock} (min ${p.min_stock})`))} — buka halaman Stok`)
+      : '',
+    lewat.length
+      ? chip('#/products', merah, 'alert', `${lewat.length} lewat kadaluarsa${satu(lewat.map((p) => `${p.name}${p.expiry_date ? ` ${tglExpiry(p.expiry_date)}` : ''}`))}`,
+          `Sudah lewat tanggal kadaluarsa: ${judul(lewat.map((p) => `${p.name}${p.expiry_date ? ` (${tglExpiry(p.expiry_date)})` : ''}`))} — buka halaman Produk`)
+      : '',
+    dekat.length
+      ? chip('#/products', kuning, 'clock', `${dekat.length} kadaluarsa ${AMBAT_EXPIRY} hari${satu(dekat.map((p) => `${p.name}${p.expiry_date ? ` ${tglExpiry(p.expiry_date)}` : ''}`))}`,
+          `Kadaluarsa ${AMBAT_EXPIRY} hari ke depan: ${judul(dekat.map((p) => `${p.name}${p.expiry_date ? ` (${tglExpiry(p.expiry_date)})` : ''}`))} — buka halaman Produk`)
+      : '',
+    // SELALU dirender (hidden saat 0) — lihat catatan di notifModeRow().
+    chip('#/dashboard', antre ? biru : `${biru} hidden`, 'sync', `${antre} transaksi antre offline`,
+      `${antre} penjualan/topup belum terkirim ke server (dicoba ulang otomatis tiap 5 detik) — buka Dashboard untuk rincian`,
+      ' data-notif-outbox'),
+    getPrintPause()
+      ? chip('#/settings', abu, 'pause', 'Cetak dijeda',
+          'Saklar "Jeda semua cetak" aktif (Sistem → Cetak struk) — struk, label, dan kick laci TIDAK dikirim ke printer')
+      : '',
   ].filter(Boolean).join('');
-  if (!daftar) return '';
-  return `<div class="ml-auto flex flex-wrap items-center gap-1.5">${daftar}</div>`;
+}
+
+/** Gambar ulang chip notif + strip peringatan SETELAH stok berubah
+ *  (dipanggil `segarkanStokPos()` pasca-bayar). `paintCart()` sengaja tidak
+ *  menyentuh area scan bar (dia hanya tbody + sidebar), sementara `paint()`
+ *  penuh akan membuang fokus kolom scan — jadi pembaruan kecil ini jalan
+ *  sendiri di sini. Elemen belum ada (shift gate) = no-op. */
+function segNotifPos(): void {
+  const n = host?.querySelector('#pos-notif');
+  if (n) n.innerHTML = notifChips();
+  const s = host?.querySelector('#pos-strips');
+  if (s) {
+    const isi = stripStokMenipis() + stripKadaluarsa();
+    s.innerHTML = isi;
+    // Wadah kosong HARUS `hidden`: anak display:none bukan flex item, jadi
+    // gap-2 induk tidak menyisakan baris kosong.
+    s.className = isi ? 'flex flex-col gap-2' : 'hidden';
+  }
 }
 
 /** Badge kadaluarsa untuk SATU baris keranjang: kasir melihatnya tepat saat
@@ -1196,6 +1269,8 @@ function cartHtml(): string {
   // [kiri 1fr | sidebar 320px]. Kolom KIRI = scan bar + strip + keranjang,
   // kolom KANAN = sidebar bayar setinggi penuh.
   const isiKiri = cartKiriHtml();
+  // Wadah beraid `#pos-strips` supaya `segNotifPos()` bisa menyegarkan strip
+  // menipis/kadaluarsa tanpa `paint()` penuh. Wadah kosong = `hidden`.
   const strips = stripStokMenipis() + stripKadaluarsa();
   return `
   <div class="flex h-full min-h-0 flex-col gap-2">
@@ -1203,7 +1278,7 @@ function cartHtml(): string {
     <div class="${gridUtamaCls()}">
       <div class="flex min-h-0 flex-col gap-2">
         ${scanBar}
-        ${strips}
+        <div id="pos-strips" class="${strips ? 'flex flex-col gap-2' : 'hidden'}">${strips}</div>
         ${isiKiri}
       </div>
       ${sidebarBayarHtml()}
@@ -1275,19 +1350,19 @@ function sidebarBayarHtml(): string {
              saja yang ke scan). -->
         <div>
           <span class="label">Aksi cepat</span>
-          <div class="grid grid-cols-2 gap-1.5">
-            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${keranjangTerisi() && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
-            <button type="button" id="pos-hold-open" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
-            <button type="button" id="pos-qa-manual" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">${icon('pencil')}<span>Item manual</span></button>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${keranjangTerisi() && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
+            <button type="button" id="pos-hold-open" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
+            <button type="button" id="pos-qa-manual" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm">${icon('pencil')}<span>Item manual</span></button>
             <!-- Tambah LAYANAN ke keranjang (Opsi B hybrid, 2026-10-07;
                  direvisi 2026-10-08: topup DAN tarik tunai): baris layanan +
                  produk dibayar SEKALI, catatan terpisah di /api/topups
                  (nominal = mutasi modal, BUKAN omzet — AGENTS §1; nominal
                  tarik = uang keluar). -->
-            <button type="button" id="pos-qa-topup" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>Topup/Tarik</span></button>
-            <button type="button" id="pos-qa-disc" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs">Diskon${kbd('F6')}</button>
-            <a href="#/history" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
-            <button type="button" id="pos-reprint" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
+            <button type="button" id="pos-qa-topup" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>Topup/Tarik</span></button>
+            <button type="button" id="pos-qa-disc" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm">Diskon${kbd('F6')}</button>
+            <a href="#/history" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
+            <button type="button" id="pos-reprint" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
           </div>
         </div>
         <div class="border-t border-gray-100 dark:border-gray-700" role="separator"></div>
@@ -1296,9 +1371,9 @@ function sidebarBayarHtml(): string {
              dengan strip-low stok yang sudah ada (shell.ts parseRoute). -->
         <div>
           <span class="label">Menu cepat</span>
-          <div class="grid grid-cols-2 gap-1.5">
-            <a href="#/products" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>
-            <a href="#/stock" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>
+          <div class="grid grid-cols-2 gap-2.5">
+            <a href="#/products" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>
+            <a href="#/stock" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>
           </div>
         </div>
         <div class="border-t border-gray-100 dark:border-gray-700" role="separator"></div>
@@ -3340,6 +3415,9 @@ async function segarkanStokPos(): Promise<void> {
       active = 0;
       paintResults();
     }
+    // Chip notif + strip peringatan ikut menyegar (stok habis/menipis baru
+    // terbentuk / teratasi oleh penjualan ini) — lihat segNotifPos().
+    segNotifPos();
   } catch {
     /* offline: pakai cache lama sampai sync di mount berikutnya */
   }

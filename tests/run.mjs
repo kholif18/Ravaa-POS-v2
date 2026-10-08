@@ -72,6 +72,7 @@ const SUITE = [
   ['backup-test.mjs', 27],
   ['customer-debt-test.mjs', 35],
   ['harga-dinamis-test.mjs', 18],
+  ['pos-notif-test.mjs', 6],
 ];
 
 let total = 0;

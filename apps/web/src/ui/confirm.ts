@@ -16,6 +16,21 @@ import Swal from 'sweetalert2';
 const base = Swal.mixin({
   buttonsStyling: false,
   focusCancel: true,
+  // `heightAuto: false` — PERBAIKAN layout (permintaan pemilik 2026-10-08:
+  // *"kenapa sidebar kanan berubah ya, terlihat tombol Bayar F10 dan F12 naik
+  // mepet ke atas"*). SweetAlert2 default `heightAuto:true` menambahkan class
+  // `swal2-height-auto` ke `<html>`+`<body>` tiap dialog backdrop dibuka
+  // (sweetalert2.all.js: `if (params.heightAuto && params.backdrop &&
+  // !params.toast) addClass([document.documentElement, document.body], ...)`),
+  // dan CSS bawaannya `body.swal2-height-auto { height: auto !important; }`
+  // memaksa body tinggi-otomatis. Shell aplikasi memakai rantai
+  // `html/body/#app { height:100% }` -> `.app-layout h-full` -> `.main-col`
+  // -> `.page flex-1` (ukur Playwright: `.page` 900 -> 660px, card sidebar
+  // POS 782 -> 542px) sehingga grid POS ikut memendek dan blok `mt-auto`
+  // tombol Bayar (F10) / Bayar pas (F12) kehilangan ruang bebasnya — persis
+  // gejala yang dilaporkan. Menonaktifkan heightAuto membuat class itu tidak
+  // pernah dipasang (dialog tetap `position:fixed` + container full-screen).
+  heightAuto: false,
 });
 
 /** Kelas tombol & popup. Bahaya = merah, normal = primer, batal = outline. */

@@ -38,6 +38,12 @@ db/schema.sql            SUMBER KEBENARAN skema. Ubah skema = edit file ini + mi
 db/seed.sql              Master awal (8 kategori + contoh SKU).
 apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
+                         `updateOutboxBadge()` menghitung `outboxCount()` sekali
+                         lalu merawat DUA penampil: `#outbox-badge` (header, lama)
+                         + chip POS `a[data-notif-outbox]` di `#pos-notif`
+                         (toggles `hidden` + teks `n transaksi antre offline`) —
+                         supaya chip notif POS ikut hidup tiap antrean berubah
+                         tanpa menunggu repaint POS (revisi 2026-10-08).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync)
                          + **kv `'holds'` transaksi tertahan POS** (`getHolds()`/
                          `saveHolds()` — per device, P5)
@@ -129,16 +135,38 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           lalu scan bar — **baris Mode slot kanan
                           (`ml-auto`)**: mode jual = **notif ringkas
                           `notifModeRow()`** (revisi pemilik 2026-10-07
-                          *"notif stok barang habis atau dll"*): chip
-                          hitungan `n stok habis` (merah, `stock<=0`) /
-                          `n stok menipis` (kuning, `0<stock<=min_stock`) /
-                          `n lewat kadaluarsa` (merah) → tautan #/stock atau
-                          #/products, tanpa temuan = slot kosong; sumber =
-                          cache lokal (pola strip, tanpa API), rincian nama
-                          tetap di strip di bawah; topup/tarik = petunjuk
-                          "Isi nominal + admin … Bayar (F10)", lalu strip
-                          stok menipis
-                          & kadaluarsa, **label baris di ATAS tabel**
+                          *"notif stok barang habis atau dll"*, direvisi lagi
+                          2026-10-08 *"buat agar lebih informatif, dan buat
+                          notif lain bukan hanya stok habis"*): pembungkus
+                          `#pos-notif` berisi **`notifChips()` enam chip**
+                          — (1) `n stok habis` (merah → `#/stock`), (2) `n
+                          stok menipis` (kuning → `#/stock`), (3) `n lewat
+                          kadaluarsa` (merah → `#/products`), (4) `n
+                          kadaluarsa ≤30 hari` (kuning → `#/products`,
+                          `AMBAT_EXPIRY`, baru), (5) `n transaksi antre
+                          offline` (biru → `#/dashboard`, elemen
+                          `data-notif-outbox` **selalu dirender**/`hidden`
+                          saat 0, teks+visibilitas disegarkan
+                          `updateOutboxBadge()` di api.ts tiap antrean
+                          berubah), (6) `Cetak dijeda` (abu → `#/settings`,
+                          bila `getPrintPause()`). **Informatif**: tiap chip
+                          memuat nama produk PERTAMA (stok/tanggalnya) +
+                          `title` daftar penuh (esc sekali). Rincian
+                          menipis/kadaluarsa tetap di strip di bawah scan
+                          bar; **strip STOK HABIS sengaja TIDAK ada** —
+                          keputusan pemilik 2026-10-08 (strip merah sempat
+                          ditambah lalu *"ini hapus saja karena sudah ada
+                          di atasnya di dalam card"*), chip + judulnya
+                          menampung info itu. Sumber = cache lokal (pola
+                          strip, tanpa API); **`segNotifPos()`** merender
+                          ulang `#pos-notif` + `#pos-strips` (wadah beraid,
+                          `hidden` bila kosong) dari `segarkanStokPos()`
+                          sesudah penjualan, jadi chip ikut menyegar TANPA
+                          `paint()` penuh (regresi: `products` dulu hanya
+                          dimuat ulang saat mount). Uji
+                          `tests/pos-notif-test.mjs` (6 asersi); topup/tarik
+                          (mode lama) sudah dihapus 2026-10-08, **label baris
+                          di ATAS tabel**
                           (`#pos-count` "n item"/"Keranjang kosong" kiri +
                           `#pos-clear` Bersihkan F5 kanan — dipindah dari
                           bawah tabel 2026-10-04, id tetap), **tabel keranjang
@@ -857,13 +885,26 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           browser/CUPS `lp -d EPSON-L3110-Series`). Lempar Error
                           bila popup diblokir (POS men-toast, penjualan TIDAK
                           dibatalkan). Dipanggil dari POS (dialog A4) & Riwayat.
-apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
+ apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
                           konfirmasi destruktif), `alertDialog()` (satu tombol),
                           dan **`choiceDialog({title,message,choices,cancelLabel})`**
                           (baru 2026-10-03, resolve `key` choice | null) — SweetAlert2
                           punya tepat 3 slot (confirm/deny/cancel), jadi maks 3
                           pilihan. Dipakai pilihan cetak POS/Riwayat. Jangan pakai
                           `confirm()`/`prompt()` native (dilarang frontend-pos).
+                          **`heightAuto: false` WAJIB tetap di mixin `base`**
+                          (perbaikan pemilik 2026-10-08 *"sidebar kanan
+                          berubah … tombol Bayar F10 dan F12 naik mepet ke
+                          atas"*): default `heightAuto:true` memasang class
+                          `swal2-height-auto` ke `<html>`+`<body>` tiap dialog
+                          backdrop terbuka, dan CSS bawaan
+                          `body.swal2-height-auto { height:auto !important }`
+                          meruntuhkan rantai `html/body/#app{h-full}` ->
+                          `.page flex-1` (terukur 900 -> 660px), card sidebar
+                          POS 782 -> 542px, sehingga blok `mt-auto` tombol
+                          Bayar/Bayar pas kehilangan ruang bebasnya. Uji
+                          regresi visual: ukur `#pos-bayar` saat swal terbuka
+                          harus identik kondisi normal.
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                           produk, panel mode POS, dan kartu Sistem.
 apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
