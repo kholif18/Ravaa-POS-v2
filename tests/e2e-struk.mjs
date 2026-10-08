@@ -240,54 +240,78 @@ try {
   ok('TIDAK ada permintaan cetak tambahan', tercetak.length === 1, tercetak.length);
 
   // Pintasan katalog produk layanan (AGENTS §1): produk kategori `topup` bukan
-  // item jual — klik harus MEMBUKA form topup/tarik, bukan memasukkan ke keranjang.
-  // Sejak SKU seed jadi PRD#####, cabang `/tarik/i.test(p.sku)` tidak pernah cocok
-  // lagi untuk produk "Tarik tunai"; yang menentukan kini hanya NAMAnya.
-  // Test ini menutup celah itu — tanpanya perubahan nama bisa mematikan mode.
-  await page.click('[data-mode="jual"]');
+  // item jual — klik harus MEMBUKA DIALOG layanan, bukan memasukkan ke
+  // keranjang (mode Topup/Tarik dihapus 2026-10-08 — dialog satu-satunya
+  // jalur). Produk "Tarik tunai" membuka dialog dengan jenis tarik terpilih
+  // (saran dari nama; cabang SKU tak pernah cocok sejak seed PRD#####).
   await page.waitForSelector('#pos-q', { timeout: 8000 });
   await page.fill('#pos-q', 'PRD00018');
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
   await page.click('#pos-results .suggest-item');
-  // Sejak refactor 1 layout (2026-10-07) tombol Proses #tp-submit DIHAPUS —
-  // penanda form topup/tarik dirender = input nominal.
-  await page.waitForSelector('#tp-nominal', { timeout: 8000 });
-  const adaTarikBank = await page.locator('#tp-jenis [data-jenis="tarik-bank"]').count();
-  const adaEWallet = await page.locator('#tp-jenis [data-jenis="e-wallet"]').count();
-  ok('produk "Tarik tunai" membuka mode TARIK (bukan topup)',
-    adaTarikBank === 1 && adaEWallet === 0,
-    `tarik-bank=${adaTarikBank} e-wallet=${adaEWallet}`);
-  const toastPintasan = norm(await page.innerText('#toast-root'));
-  ok('produk layanan TIDAK masuk keranjang (toast mengajak isi form)',
-    /isi form tarik tunai/.test(toastPintasan), toastPintasan);
+  await page.waitForSelector('#ptk-nominal', { timeout: 8000 });
+  const tarikAktif = await page.locator('#ptk-jenis-tarik [data-ptk-jenis="tarik-ewallet"]').evaluate((el) => el.classList.contains('!border-primary'));
+  ok('produk "Tarik tunai" membuka dialog dengan jenis TARIK terpilih',
+    tarikAktif, `tarik-ewallet aktif=${tarikAktif}`);
+  ok('produk layanan TIDAK masuk keranjang',
+    (await page.locator('#pos-rows tr[data-key]').count()) === 0,
+    `baris=${await page.locator('#pos-rows tr[data-key]').count()}`);
+  // Dialog ditutup tanpa menambah (Esc) — keranjang tetap kosong untuk section C.
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.modal-overlay', { state: 'detached', timeout: 8000 });
 
   console.log('=== C. Topup tetap memakai saklar yang sama ===');
   await page.click('label[for="pos-autoprint"]');
   ok('saklar bisa dinyalakan lagi', await page.isChecked('#pos-autoprint'));
-  await page.click('[data-mode="topup"]');
-  await page.waitForSelector('#tp-nominal', { timeout: 8000 });
+  // Mode Topup DIHAPUS 2026-10-08 — layanan masuk keranjang lewat dialog
+  // Topup/Tarik (satu-satunya jalur); keranjang hanya-layanan kini MENAMPILKAN
+  // modal resume pasca-bayar (revisi pemilik 2026-10-08) dengan pilihan
+  // Thermal/A4/Selesai — A4 = strukA4 (saleId null), bukan invoice A4.
+  await page.click('#pos-qa-topup');
+  await page.waitForSelector('#ptk-nominal', { timeout: 8000 });
   // Revisi pemilik 2026-10-06: e-wallet "untuk pencatatan saja tidak perlu
-  // nomor HP" — form cukup Nominal + Admin, input #tp-nomor TIDAK dirender.
-  const nNomorEwallet = await page.locator('#tp-nomor').count();
-  ok('e-wallet TIDAK punya input nomor', nNomorEwallet === 0, nNomorEwallet);
-  await page.fill('#tp-nominal', '50000');
-  await page.waitForTimeout(400);          // suggest-admin memanggil API
-  const admin = await page.inputValue('#tp-admin');
+  // nomor HP" — dialog cukup Nominal + Admin, wrap nomor tersembunyi.
+  const nomorHidden = await page.locator('#ptk-nomor-wrap').evaluate((el) => el.classList.contains('hidden'));
+  ok('e-wallet TANPA kolom nomor', nomorHidden);
+  await page.fill('#ptk-nominal', '50000');
+  await page.waitForTimeout(400);          // saran admin tier lokal
+  const admin = await page.inputValue('#ptk-admin');
   // Kontrak: <50rb -> 3000, <200rb -> 5000. Rp50.000 bukan "<50rb" -> tier 5000.
   ok('admin terisi otomatis sesuai tier (<200rb = Rp5.000)', admin === '5000', admin);
-  // Refactor 1 layout: kolom uang diterima #tp-tunai DIHAPUS — bayar lewat
-  // MODAL BAYAR bersama (sidebar #pos-bayar, sama dengan mode jual).
+  await page.click('.modal [data-ok]');
+  await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
+  // Bayar lewat MODAL BAYAR bersama (sidebar #pos-bayar, sama dengan belanja).
   await page.click('#pos-bayar');
   await page.waitForSelector('#pos-cash', { timeout: 8000 });
   await page.click('[data-pay="tunai"]');   // pastikan metode tunai (default ikut state test sebelumnya)
   await page.fill('#pos-cash', '60000');
   await page.click('#pos-pay');
+  // Tunggu toast SPESIFIK nominal ini (bukan sekadar 'Topup tercatat'):
+  // pay PLN belakangan memakai teks yang sama — wait generik dipalsukan
+  // toast yang masih menumpuk.
   await page.waitForFunction(
-    () => document.querySelector('#toast-root')?.textContent?.match(/Topup /),
+    () => document.querySelector('#toast-root')?.textContent?.includes('Rp55.000'),
     { timeout: 15000 },
   );
-  // Topup/tarik TANPA dialog pilihan (keputusan: hanya penjualan yang memilih
-  // Thermal/A4) — struk langsung terkirim, tapi tetap ditunggu via polling.
+  const toastTop = norm(await page.innerText('#toast-root'));
+  ok('bayar layanan-saja -> toast "Topup tercatat · Rp55.000"',
+    toastTop.includes('Topup tercatat') && toastTop.includes('Rp55.000'), toastTop);
+  // Resume layanan-saja (revisi pemilik 2026-10-08): hero KEMBALIAN
+  // (60.000 − 55.000 = Rp5.000) + baris topup (nominal & admin terpisah) +
+  // pilihan [Thermal][A4][Selesai] — A4 layanan-saja = strukA4 (saleId null),
+  // jadi tombolnya TIDAK disembunyikan seperti penjualan+topup.
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  const rTop = await page.evaluate(() => ({
+    judul: document.querySelector('.swal2-title')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    isi: document.querySelector('.swal2-popup')?.innerText?.replace(/\s+/g, ' ').trim() ?? '',
+    tombol: [...document.querySelectorAll('.swal2-actions button')].filter((b) => b.offsetParent).map((b) => b.textContent.trim()),
+  }));
+  ok('layanan-saja menampilkan resume KEMBALIAN + baris topup + [Thermal][A4][Selesai]',
+    /Kembalian/.test(rTop.judul) && rTop.judul.includes('Rp5.000')
+      && rTop.isi.includes('Topup E-wallet Rp50.000') && rTop.isi.includes('Total Rp55.000')
+      && JSON.stringify(rTop.tombol) === JSON.stringify(['Thermal', 'A4', 'Selesai']),
+    JSON.stringify(rTop).slice(0, 300));
+  // Struk baru terkirim SETELAH tombol Thermal dipilih (pilihan cetak resume).
+  await pilihCetak('Thermal');
   await tungguTercetak(2);
   ok('struk topup dikirim', tercetak.length === 2, tercetak.length);
   const s3 = Buffer.from(tercetak[1], 'base64');
@@ -307,25 +331,39 @@ try {
   ok('semua baris topup <= 32 kolom', lewat3.length === 0, lewat3);
 
   // Revisi pemilik 2026-10-06: PLN Token = No meter (tetap) + Nomor Token BARU
-  // yang ikut dicetak di struk belanja; admin PLN dibagi toko/mitra 50-50
-  // (angka admin tetap kasir yang isi — tidak ada perhitungan otomatis).
-  await page.click('#tp-jenis [data-jenis="pln-token"]');
+  // yang ikut dicetak di struk belanja (kini lewat dialog keranjang); admin
+  // PLN dibagi toko/mitra 50-50 (angka admin tetap kasir yang isi — tidak ada
+  // perhitungan otomatis).
+  await page.click('#pos-qa-topup');
+  await page.waitForSelector('#ptk-nominal', { timeout: 8000 });
+  await page.click('[data-ptk-jenis="pln-token"]');
   ok('PLN token: input nomor meter + token keduanya tampil',
-    (await page.locator('#tp-nomor').count()) === 1 && (await page.locator('#tp-token').count()) === 1);
-  await page.fill('#tp-nomor', '14001234567');
-  await page.fill('#tp-token', '1234-5678-9012');
-  await page.fill('#tp-nominal', '100000');
+    !(await page.locator('#ptk-nomor-wrap').evaluate((el) => el.classList.contains('hidden')))
+    && !(await page.locator('#ptk-token-wrap').evaluate((el) => el.classList.contains('hidden'))));
+  await page.fill('#ptk-nomor', '14001234567');
+  await page.fill('#ptk-token', '1234-5678-9012');
+  await page.fill('#ptk-nominal', '100000');
   await page.waitForTimeout(400);
-  // Alur modal bayar bersama (refactor 1 layout) — sama seperti e-wallet di atas.
+  await page.click('.modal [data-ok]');
+  await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
+  // Alur modal bayar bersama — sama seperti e-wallet di atas.
   await page.click('#pos-bayar');
   await page.waitForSelector('#pos-cash', { timeout: 8000 });
   await page.click('[data-pay="tunai"]');
   await page.fill('#pos-cash', '105000');
   await page.click('#pos-pay');
+  // Sama seperti di atas: tunggu nominal spesifik (Rp105.000), bukan teks
+  // generik — toast e-wallet Rp55.000 masih menumpuk dan memalsukan wait.
   await page.waitForFunction(
-    () => document.querySelector('#toast-root')?.textContent?.match(/Topup Token PLN/),
+    () => document.querySelector('#toast-root')?.textContent?.includes('Rp105.000'),
     { timeout: 15000 },
   );
+  const toastPln = norm(await page.innerText('#toast-root'));
+  ok('topup PLN tercatat (toast nominal+admin Rp105.000)',
+    toastPln.includes('Topup tercatat') && toastPln.includes('Rp105.000'), toastPln);
+  // Resume layanan-saja muncul juga di sini (revisi 2026-10-08, lihat e-wallet
+  // di atas) — struk PLN baru terkirim SETELAH tombol Thermal dipilih.
+  await pilihCetak('Thermal');
   await tungguTercetak(3);
   ok('struk PLN token dikirim', tercetak.length === 3, tercetak.length);
   const s3b = Buffer.from(tercetak[2], 'base64');
@@ -338,7 +376,6 @@ try {
 
   console.log('=== D. Gagal cetak TIDAK membatalkan penjualan ===');
   gagalCetak = true;
-  await page.click('[data-mode="jual"]');
   await page.waitForSelector('#pos-q', { timeout: 8000 });
   await jual({ q: 'PRD00013', tunai: 20000 });
   ok('permintaan cetak tetap dikirim (dicoba)', tercetak.length === 4, tercetak.length);
@@ -357,10 +394,32 @@ try {
   const n2 = laporan?.data?.sales?.n ?? 0;
   ok(`3 penjualan tercatat di server (${n1} -> ${n2})`, n2 - n1 === 3, JSON.stringify({ n1, n2 }));
 
+  console.log('=== D2. Stok di suggest/F3 ikut ter-refresh setelah bayar ===');
+  // Permintaan pemilik 2026-10-08: *"stok di bawah nama produk tidak
+  // terefresh sehingga seolah-olah stok tidak berkurang"* — server sudah
+  // memotong stok, tapi array `products` POS dulu hanya dimuat ulang saat
+  // mount. Acuan = STOK SERVER sekarang (PRD00013 baru terjual 1 di section D).
+  const aqua = ((await (await fetch(`${API}/api/products?q=Aqua`)).json()).data ?? [])
+    .find((p) => p.sku === 'PRD00013');
+  const teksStok = aqua && aqua.stock > 0 ? `sisa ${aqua.stock}` : 'stok habis';
+  await page.fill('#pos-q', 'Aqua');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  const sugg = norm(await page.innerText('#pos-results'));
+  ok('dropdown suggest menampilkan stok TERBARU setelah bayar',
+    sugg.includes(teksStok), `server=${JSON.stringify(aqua?.stock)} · ${sugg.slice(0, 160)}`);
+  await page.fill('#pos-q', '');
+  await page.waitForSelector('#pos-results', { state: 'hidden', timeout: 8000 });
+  await page.keyboard.press('F3');
+  await page.waitForSelector('#pc-list .suggest-item', { timeout: 8000 });
+  const pcList = norm(await page.innerText('#pc-list'));
+  ok('modal Cari produk (F3) menampilkan stok terbaru',
+    pcList.includes(teksStok), `server=${JSON.stringify(aqua?.stock)} · ${pcList.slice(0, 160)}`);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.modal-overlay', { state: 'detached', timeout: 8000 });
+
   console.log('=== E. Invoice A4 (gaya Aronium) — pilihan A4 setelah bayar ===');
   // Section D meninggalkan mode gagal-cetak; kembalikan ke sukses dulu.
   gagalCetak = false;
-  await page.click('[data-mode="jual"]');
   await page.waitForSelector('#pos-q', { timeout: 8000 });
   // Bayar dengan pilihan 'A4' -> pilihCetakSelesai -> cetakInvoice() ->
   // fetch GET /api/sales/:id + /api/settings -> window.open popup berisi
@@ -395,7 +454,6 @@ try {
     // PERSIS n: kalau pay() ke-trigger dua kali, jumlahnya langsung > n.
     ok(`struk ke-${n} terkirim tepat sekali (tanpa bayar dobel)`, tercetak.length === n, tercetak.length);
   };
-  await page.click('[data-mode="jual"]');
   await page.waitForSelector('#pos-q', { timeout: 8000 });
   await page.fill('#pos-q', 'PRD00013');
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });

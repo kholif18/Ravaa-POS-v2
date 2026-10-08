@@ -976,6 +976,83 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       topup) dan **cetak ulang nota hybrid dari Riwayat** (baris topup tidak
       bisa direkonstruksi dari `sales` — `topup_txns` tidak menyimpan
       referensi nota).
+      **Revisi 2026-10-08 (permintaan lanjutan pemilik — SELESAI):**
+      (a) **tarik tunai ikut hybrid**: dialog `openDialogTopupKeranjang()`
+      punya grup chip Tarik (`TARIK_JENIS`) — baris tarik (`isTarik()`)
+      dikirim `pay()` dengan `kind:'tarik'` (provider `TARIK-*`); yang
+      ditagih HANYA admin (`tarikTotal()`, nominal = uang keluar diserahkan
+      tunai — harmonis dengan mode Tarik yang membolehkan uang 0); barrier
+      tetap tolak hutang untuk SEMUA baris layanan; struk/resume/hold ikut
+      blok tarik (nominal & admin terpisah, kaki "Nominal tarik sudah
+      diserahkan tunai"); tombol Aksi cepat jadi **Topup/Tarik**.
+      (b) **bug "tambah 1 topup masuk 2 baris"** (laporan pemilik, terbukti
+      via probe: 1x Enter = 2 baris): handler Enter di dialog (api.el) +
+      handler bawaan `modal.ts` (overlay Enter-di-INPUT → ok.click) menembak
+      `submit()` 2x — diperbaiki dengan guard `terkirim` setelah validasi
+      (dialog topup + item manual yang berpola sama). Teruji
+      `tests/e2e-topup-keranjang.mjs` section G (15 asersi tarik + 1 regresi
+      Enter) — suite kini **61 asersi**; `history-test.mjs` ikut diperkeras
+      (klik baris `sale:` pertama, bukan baris pertama — topup terbaru
+      tidak punya tombol cetak-ulang).
+- [x] **Hapus mode Topup/Tarik — semua layanan lewat keranjang (Opsi B
+      penuh) — SELESAI 2026-10-08** — keputusan pemilik: tombol
+      `data-mode="topup"/"tarik"` + form mode (`topupHtml()`/
+      `topupKiriHtml()`) "sudah tidak diperlukan ... bisa dibersihkan",
+      tarik "sudah digantikan modal untuk masuk ke keranjang". Yang
+      dihapus dari `pos.ts` (±380 baris): state `mode`/`top*`, form +
+      `bindTopup`/`paintTopup`/`submitTopup`/`bindModeBar`, helper
+      `defaultJenis`/`jenisList`/`jenisAktif`/`jenisKode`,
+      `paintBayarAktif`/`teksKembalianBayar`/`kembalianBayar`, dan SEMUA
+      cabang mode (pay/bayarPas/pintasan/render/info bar/scan bar/sidebar/
+      hold). Pintasan katalog produk kategori `topup` kini membuka DIALOG
+      (jenis disarankan dari nama). Satu-satunya penyederhanaan perilaku:
+      tidak ada lagi form nominal terpisah — kasir yang butuh topup
+      cepat tetap 1 klik (tombol Topup/Tarik) + isi dialog. Ditambah
+      permintaan yang sama: **tombol dialog ~1.5x** (chip jenis 39px/16px,
+      footer Batal/Tambah 51px/20px). `e2e-struk.mjs` section B-tail + C
+      ditulis ulang ke alur dialog (141 asersi, +3); suite total
+      **1003 hijau**. Catatan test: wait toast HARUS spesifik nominal
+      (toast lama menumpuk dan memalsukan wait generik).
+- [x] **Resume pasca-bayar untuk layanan-saja + rapikan dialog Topup/Tarik —
+      SELESAI 2026-10-08** — laporan pemilik: *"resume setelah bayar tidak
+      muncul, kemarin ada modal resume kembalian, dan ada tombol pilih cetak
+      thermal print atau inkjet dan selesai"*. Ternyata penjualan/hybrid
+      SELALU menampilkan resume (repro F12 & F10 hijau) — satu-satunya jalur
+      tanpa resume = keranjang hanya-layanan (`if (!cart.length)` di `pay()`,
+      by-design sejak awal). Kini jalur itu memanggil
+      `pilihCetakSelesai(null, …)` dengan argumen snapshot `topups` (nominal &
+      admin terpisah, `metode`, `uang`); **`saleId: string | null`** → pilihan
+      A4 tetap ditawarkan (`saleId !== null` hanya untuk sembunyi A4 penjualan
+      hybrid) tapi `saleId === null` mencetak **strukA4** via print-agent —
+      invoice A4 butuh `sale.id`. Struk langsung otomatis DIHAPUS dari cabang
+      ini (cetak hanya via pilihan resume); toast `${judul} tercatat · RpX`
+      tetap. Dialog topup ikut dirapikan searah referensi pemilik (modal
+      resume = bahasa visual utama): judul blok terpusat uppercase
+      `text-xs`, pemisah `border-dashed`, input balik `.input` polos +
+      `space-y-1` (pola modal Cari produk/Item manual yang disebut "rapi"),
+      chip jenis → `btn-ghost` radius 8px seukuran sidebar, footer
+      `!min-h-[32px] !text-xs` + ikon check, baris ringkasan `#ptk-total`
+      (`tampilTotal()`: topup = nominal+admin, tarik = admin saja). Test:
+      4 asersi "TANPA modal resume" di `e2e-struk.mjs` (section C) +
+      `e2e-topup-keranjang.mjs` (F topup-saja & G tarik-saja) **direpurpos**
+      jadi assert judul/isi/tombol resume + klik Thermal sebelum
+      `tungguTercetak` — jumlah asersi TIDAK berubah (141 & 61);
+      `run.mjs` ekspek 1003 utuh.
+- [x] **Stok di suggest/F3 ter-refresh setelah bayar — SELESAI 2026-10-08** —
+      laporan pemilik: *"setelah transaksi selesai, stok di bawah nama produk
+      tidak terefresh sehingga seolah-olah stok tidak berkurang"* (dropdown
+      `#pos-results` + modal Cari produk `#pc-list` menampilkan `sisa 49`
+      padahal server sudah memotong). Fakta: potongan stok SUDAH benar di
+      server (`POST /api/sales` → `UPDATE products SET stock = stock −
+      qty×factor` + `stock_moves`, dibuktikan curl: Pulpen Hitam 49 → 47) —
+      yang basi hanya array `products` POS yang **dulu hanya dimuat ulang di
+      `mountPosPage()`**. Perbaikan: `segarkanStokPos()` dipanggil di `pay()`
+      segera setelah `POST /api/sales` terkonfirmasi (delta sync +
+      `getCachedProducts()` + gambar ulang dropdown bila terbuka); gagal/
+      offline senyap, cabang layanan-saja tidak memanggil (topup tak
+      menyentuh stok). Test baru section **D2** `e2e-struk.mjs` (2 asersi:
+      suggest & `#pc-list` memuat `sisa <stok server>`) → ekspek **143**;
+      suite total **1005 hijau**.
 - [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
       KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah

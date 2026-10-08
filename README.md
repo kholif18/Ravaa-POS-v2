@@ -173,32 +173,37 @@ npm run dev:api
   ArrowDown menyorot, Enter atau klik memasukkan ke keranjang, Escape menutup.
   Ujung kanan input memuat badge **`F1`** — penanda shortcut fokus scan
   (F1; Esc juga kembali ke sini).
-   Mode: **Penjualan / Topup / Tarik** (bar yang sama). Topup-tarik memakai
-   `POST /api/topups`; admin terisi otomatis dari tier toko yang sama dengan
-   `GET /api/topups/suggest-admin`, dan bisa diedit kasir.
-  - **Dua mode dalam satu transaksi (Opsi B hybrid, 2026-10-07)**: keranjang
-    Penjualan bisa memuat **baris topup** (tombol **Topup** di Aksi cepat —
-    dialog jenis/nomor/token/nominal/admin persis form topup) supaya
-    fotokopi + isi pulsa dibayar **sekali** dan tercetak **satu struk
-    gabungan**. Record tetap **terpisah** di server: saat Bayar, POS mengirim
-    `POST /api/topups` per baris DULU (id uuid stabil → retry idempotent),
+   Scan bar: input scan + tombol **Cari** (F3), **Qty** (F4), **Mobile**,
+   saklar cetak, dan notif stok/kadaluarsa. Pilihan mode
+   Penjualan/Topup/Tarik **DIHAPUS 2026-10-08** — satu-satunya layar:
+   layanan (topup/tarik) masuk keranjang lewat tombol **Topup/Tarik**
+   (dialog jenis/nomor/token/nominal/admin; admin ikut tier
+   `GET /api/topups/suggest-admin` dan bisa diedit kasir).
+  - **Belanja + layanan dalam satu transaksi (Opsi B hybrid, 2026-10-07; tarik
+    menyusul 2026-10-08)**: keranjang bisa memuat **baris topup
+    maupun tarik tunai** (tombol **Topup/Tarik** di Aksi cepat — dialog
+    jenis/nomor/token/nominal/admin, plus grup Tarik)
+    supaya fotokopi + isi pulsa + tarik tunai dibayar **sekali** dan
+    tercetak **satu struk gabungan**. Baris tarik = uang keluar (nominal
+    diserahkan tunai, yang ditagih hanya admin). Record tetap **terpisah**
+    di server: saat Bayar, POS mengirim `POST /api/topups` per baris DULU
+    (`kind` topup/tarik ikut jenisnya, id uuid stabil → retry idempotent),
     lalu `POST /api/sales` — nominal topup bukan omzet, admin tetap
     pendapatan jasa, agregat shift tetap benar. Barrier uang memakai total
-    gabungan dan **baris topup tidak bisa jadi hutang** (uang kurang =
+    gabungan dan **baris layanan tidak bisa jadi hutang** (uang kurang =
     tolak, fokus kolom uang; hutang otomatis hanya berlaku tanpa baris
-    topup). Keranjang hanya-topup juga jalan (tanpa modal resume). Baris
-    topup ikut keranjang persisten & transaksi tertahan. Teruji
-    `tests/e2e-topup-keranjang.mjs` (45 asersi).
+    layanan). Keranjang hanya-layanan juga jalan (tanpa modal resume).
+    Baris layanan ikut keranjang persisten & transaksi tertahan. Teruji
+    `tests/e2e-topup-keranjang.mjs` (61 asersi).
   - **Tanpa header judul** (permintaan pemilik 2026-10-04): `renderPosShell()`
     (`ui/shell.ts`) TIDAK merender `<header>` sama sekali — tidak ada strip
     "Kasir (POS)"; layar kasir mulai langsung dari baris pertama seperti
     referensi KulaPOS. **Tombol kembali ke dashboard (⬅) kini ada di
-    konten** lewat `tombolKembaliHtml()` (`pos.ts`): kiri **info bar** pada
-    mode Penjualan, dan kiri **baris Mode** pada mode Topup/Tarik (info bar
-    tidak dirender di sana) — supaya kasir tidak pernah terkunci di `#/pos`.
-    Susunan atas-ke-bawah = referensi: **info bar → scan bar (+ Mode) →
+    konten** lewat `tombolKembaliHtml()` (`pos.ts`): kiri **info bar** —
+    supaya kasir tidak pernah terkunci di `#/pos`.
+    Susunan atas-ke-bawah = referensi: **info bar → scan bar →
     label keranjang → tabel ‖ sidebar kanan**.
-  - **Info bar = elemen pertama** (mode Penjualan saja, sejak 2026-10-04,
+  - **Info bar = elemen pertama** (sejak 2026-10-04,
     mengikuti layout KulaPOS): kolom kiri = tombol ⬅ + tumpukan dua baris
     **Waktu** (atas) dan **Kasir + Shift** (bawah, permintaan pemilik
     "kasir pindah di bawah waktu") — **jam live** berjalan tiap detik (jam
@@ -479,13 +484,11 @@ npm run dev:api
     diisi — ketik nominal atau tekan Bayar pas (F12)") atau **kurang dari total**
     ("Uang diterima kurang dari total RpX"); fokus dikembalikan ke kolom
     uang.     Dulu `cashIn=0` lolos cek dan transaksi bisa selesai tanpa menerima
-    uang. Barrier serupa berlaku untuk **topup tunai** — sejak refactor 1
-    layout (2026-10-07) uang diterima diisi di **modal bayar bersama**
-    (`cashIn`, kolom `#tp-tunai` lama sudah dihapus); aturannya tetap sama:
-    topup tunai wajib uang > 0 dan ≥ total, gagal = modal tetap terbuka +
-    fokus kolom uang. Mode **Tarik dikecualikan dari syarat >0**
-    (uang mengalir keluar, kolom boleh kosong) — tapi `0 < uang < total`
-    tetap ditolak.
+    uang. Barrier dihitung atas **total gabungan** (belanja + tagihan
+    baris layanan; nominal tarik = uang keluar, bukan tagihan): uang
+    kosong/kurang = tolak + fokus kolom uang, **tanpa jalur hutang**
+    untuk keranjang berisi layanan. Uang diterima selalu diisi di
+    **modal bayar bersama** (`cashIn`).
     Teruji 6 asersi regresi di `tests/e2e-struk.mjs` (section F).
   - **Uang kurang / uang 0 = HUTANG OTOMATIS** (putaran 12, instruksi
     pemilik 2026-10-06; syarat pelanggan sejak 2026-10-04): bila uang
@@ -566,10 +569,11 @@ npm run dev:api
   hanya maknanya yang jadi kode jenis. Putar `GET /api/reports/daily` untuk
   memecah omzet per jenis.
 * Produk kategori **`topup`** (`PRD00017` topup, `PRD00018` tarik) **bukan item jual**:
-  scan/ketik/klik produk itu membuka mode topup atau tarik, tidak pernah masuk
-  keranjang. Alasannya satu produk hanya punya satu harga, sedangkan topup butuh
-  dua angka (`nominal` + `admin`); kalau jadi `sale_item`, `SUM(sales.total)`
-  ikut ditambah dan omzet jadi lebih besar dari kenyataan.
+  scan/ketik/klik produk itu membuka **dialog layanan** (jenis disarankan
+  dari namanya), tidak pernah masuk keranjang. Alasannya satu produk hanya
+  punya satu harga, sedangkan topup butuh dua angka (`nominal` + `admin`);
+  kalau jadi `sale_item`, `SUM(sales.total)` ikut ditambah dan omzet jadi
+  lebih besar dari kenyataan.
 * Rokok: SKU per-bungkus dan ketengan terpisah.
 * Produk punya status **aktif / nonaktif**. Nonaktif disembunyikan dari kasir; bisa
   diaktifkan kembali dari halaman Products (filter status **Nonaktif**).
@@ -640,8 +644,10 @@ npm run dev:api
   Thermal/A4 mengirim ke printer** — klik saat saklar mati = toast
   "Cetak sedang mati…", modal tetap muncul. Gagal cetak **tidak pernah**
   membatalkan transaksi (cukup toast peringatan sekali per sesi).
-  **Topup/tarik tanpa dialog** — struk langsung dikirim sesuai layout
-  per-device.
+  **Topup/tarik tanpa dialog mode** — layanan masuk keranjang lewat
+  modal Topup/Tarik, lalu ikut modal resume yang sama dengan penjualan
+  ([Thermal][A4][Selesai]; A4 layanan-saja = struk 64 kolom, karena
+  tidak ada nota sale untuk invoice).
   - **Pilihan A4 = INVOICE A4 gaya Aronium** (baru 2026-10-03): membuka tab
     baru berisi nota invoice A4 (kop **INVOICE** + nama/alamat/Phone/Email
     toko + logo "R", Bill to pelanggan terpilih — *Pelanggan Umum* bila

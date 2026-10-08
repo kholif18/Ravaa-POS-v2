@@ -67,6 +67,21 @@ const tungguTercetak = async (n, ms = 15000) => {
 const toastIsi = async () => norm(await page.innerText('#toast-root').catch(() => ''));
 const tungguToast = (frag) =>
   page.waitForFunction((f) => document.querySelector('#toast-root')?.textContent?.includes(f), frag, { timeout: 15000 });
+// Klik OK modal dengan 1x ulangan: animasi spring-in modal + CPU sibuk kadang
+// membuat klik pertama jatuh ke backdrop (modal tertutup TANPA submit —
+// tanpa error apa pun, persis gejala flake yang pernah terjadi sekali di
+// run penuh: baris tak muncul, timeout 8 detik). Terdeteksi dari modal yang
+// masih terbuka; bila sudah tertutup (submit jalan) langsung kembali.
+const klikOkModal = async () => {
+  for (let i = 0; i < 2; i++) {
+    await page.click('.modal [data-ok]');
+    try {
+      await page.waitForSelector('.modal', { state: 'detached', timeout: 3000 });
+      return;
+    } catch { /* klik meleset — ulangi sekali */ }
+  }
+  await page.waitForSelector('.modal', { state: 'detached', timeout: 8000 });
+};
 const LS = (k) => page.evaluate((key) => localStorage.getItem(key), k);
 
 try {
@@ -84,8 +99,8 @@ try {
 
   await page.click('#pos-qa-topup');
   await page.waitForSelector('#ptk-nominal', { timeout: 8000 });
-  chk('dialog "Tambah topup ke keranjang" terbuka',
-    norm(await page.locator('.modal-header h3').innerText()) === 'Tambah topup ke keranjang');
+  chk('dialog "Tambah topup / tarik tunai" terbuka',
+    norm(await page.locator('.modal-header h3').innerText()) === 'Tambah topup / tarik tunai');
   const tersembunyi = (sel) => page.locator(sel).evaluate((el) => el.classList.contains('hidden'));
   chk('default E-wallet = tanpa kolom nomor (butuhNomor:false)',
     await tersembunyi('#ptk-nomor-wrap'));
@@ -106,7 +121,7 @@ try {
   await page.fill('#ptk-nominal', '10000');
   chk('admin tetap 2000 setelah nominal kembali 10000',
     (await page.inputValue('#ptk-admin')) === '2000');
-  await page.click('.modal [data-ok]');
+  await klikOkModal();
   await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
   const snap1 = JSON.parse((await LS('ravaa.keranjang')) ?? '{}');
   const t1 = snap1?.topups?.[0] ?? {};
@@ -136,9 +151,10 @@ try {
   await page.waitForSelector('#pos-pay', { timeout: 8000 });
   await page.fill('#pos-cash', '5000');
   await page.click('#pos-pay');
-  await tungguToast('baris topup tidak bisa jadi hutang');
-  chk('uang kurang + ada topup -> tolak "tidak bisa jadi hutang"',
-    (await toastIsi()).includes('Uang diterima kurang dari total Rp15.000'));
+  await tungguToast('topup/tarik tidak bisa jadi hutang');
+  chk('uang kurang + ada layanan -> tolak "tidak bisa jadi hutang"',
+    (await toastIsi()).includes('Uang diterima kurang dari total Rp15.000')
+      && (await toastIsi()).includes('topup/tarik tidak bisa jadi hutang'));
   chk('barrier tidak membuka swal / tidak memproses penjualan',
     (await page.locator('.swal2-popup').count()) === 0);
   chk('jumlah penjualan hari ini tidak bertambah setelah barrier', (await nSalesHariIni()) === nAwal,
@@ -198,10 +214,9 @@ try {
   await page.fill('#ptk-nominal', '20000');
   chk('topup-saja default E-wallet: nomor tetap tersembunyi',
     await tersembunyi('#ptk-nomor-wrap'));
-  await page.click('.modal [data-ok]');
-  await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
-  chk('keranjang topup-saja: label #pos-count menyebut topup (bukan "0 item")',
-    norm(await page.innerText('#pos-count')) === '1 topup', await page.innerText('#pos-count'));
+  await klikOkModal();
+  chk('keranjang topup-saja: label #pos-count menyebut layanan (bukan "0 item")',
+    norm(await page.innerText('#pos-count')) === '1 layanan', await page.innerText('#pos-count'));
   // Tong sampah baris topup (data-act="topup-del") — baris topup BUKAN baris
   // `cart`, jadi ini menguji cabang hapus khusus di delegasi klik #pos-rows.
   await page.click('#pos-rows .topup-row [data-act="topup-del"]');
@@ -214,21 +229,122 @@ try {
   await page.click('#pos-qa-topup');
   await page.waitForSelector('#ptk-nominal', { timeout: 8000 });
   await page.fill('#ptk-nominal', '20000');
-  await page.click('.modal [data-ok]');
+  await klikOkModal();
   await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
   await page.keyboard.press('F12'); // Bayar pas = persis nominal+admin
   await tungguToast('Topup tercatat');
   chk('F12 topup-saja -> toast "Topup tercatat"', (await toastIsi()).includes('Topup tercatat · Rp23.000'));
-  chk('topup-saja TANPA modal resume (bukan penjualan)',
-    (await page.locator('.swal2-popup').count()) === 0);
+  // Resume layanan-saja (revisi pemilik 2026-10-08): F12 bayar pas = tanpa
+  // kembalian -> judul "Pembayaran berhasil"; isi memuat baris topup
+  // (nominal & admin terpisah) + Total Rp23.000; tombol [Thermal][A4][Selesai]
+  // (A4 = strukA4, saleId null).
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  const rTop = await page.evaluate(() => ({
+    judul: document.querySelector('.swal2-title')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    isi: document.querySelector('.swal2-popup')?.innerText?.replace(/\s+/g, ' ').trim() ?? '',
+    tombol: [...document.querySelectorAll('.swal2-actions button')].filter((b) => b.offsetParent).map((b) => b.textContent.trim()),
+  }));
+  chk('topup-saja menampilkan resume + [Thermal][A4][Selesai]',
+    rTop.judul.includes('Pembayaran berhasil') && rTop.isi.includes('Total Rp23.000')
+      && JSON.stringify(rTop.tombol) === JSON.stringify(['Thermal', 'A4', 'Selesai']),
+    JSON.stringify(rTop).slice(0, 300));
   chk('keranjang kosong setelah topup-saja',
     (await page.locator('#pos-rows tr[data-key]').count()) === 0);
+  // Struk baru terkirim SETELAH tombol Thermal dipilih (bukan otomatis).
+  await page.click('.swal2-confirm');
+  await page.waitForSelector('.swal2-popup', { state: 'detached', timeout: 8000 });
   await tungguTercetak(nCetak1 + 1);
   const struk2 = tercetak[tercetak.length - 1] ?? '';
   chk('struk topup-saja memuat baris E-wallet + total', struk2.includes('Topup E-wallet Rp20.000') && struk2.includes('TOTAL Rp23.000'), '');
   const top2 = ((await (await fetch(`${API}/api/topups?date=${hariIni}`)).json()).data ?? [])
     .find((r) => r.provider === 'E-WALLET' && r.nominal === 20000 && r.admin === 3000);
   chk('POST /api/topups topup-saja (E-WALLET, 20.000 + admin 3.000)', !!top2, JSON.stringify(top2));
+
+  // ——— G. baris TARIK di keranjang (uang keluar, 2026-10-08) ———
+  // Tarik tunai ikut hybrid: nominal diserahkan tunai (BUKAN tagihan), yang
+  // ditagih hanya admin. Submit PAKAI Enter sekaligus membuktikan guard
+  // anti-double-submit (1 tekan = 1 baris — regresi bug "masuk 2").
+  await page.click('#pos-qa-topup');
+  await page.waitForSelector('#ptk-nominal', { timeout: 8000 });
+  chk('grup Tarik tunai menawarkan 2 jenis (Dari e-wallet / Dari rekening)',
+    (await page.locator('#ptk-jenis-tarik [data-ptk-jenis]').count()) === 2);
+  await page.click('[data-ptk-jenis="tarik-ewallet"]');
+  const sembunyiT = async (sel) => page.locator(sel).evaluate((el) => el.classList.contains('hidden'));
+  chk('tarik = tanpa kolom nomor/token (uang keluar, tanpa tujuan)',
+    (await sembunyiT('#ptk-nomor-wrap')) && (await sembunyiT('#ptk-token-wrap')));
+  await page.fill('#ptk-nominal', '50000');
+  chk('admin tarik ikut tier suggestAdmin (50rb -> Rp5.000)',
+    (await page.inputValue('#ptk-admin')) === '5000', await page.inputValue('#ptk-admin'));
+  await page.press('#ptk-nominal', 'Enter'); // submit via Enter (regresi double-submit)
+  await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
+  const barisTarik = await page.locator('#pos-rows .topup-row').allInnerTexts();
+  chk('1x Enter = TEPAT 1 baris (guard anti-double-submit)',
+    (await page.locator('#pos-rows .topup-row').count()) === 1, JSON.stringify(barisTarik));
+  chk('baris tarik ber-badge Tarik (amber, bukan Topup)',
+    /tarik/i.test(barisTarik.join(' ')) && !/topup/i.test(barisTarik.join(' ')), barisTarik.join(' | '));
+  chk('TOTAL = admin saja (50rb nominal TIDAK ditagih) -> Rp5.000',
+    norm(await page.innerText('#pos-grand')) === 'Rp5.000', await page.innerText('#pos-grand'));
+  const snapG = JSON.parse((await LS('ravaa.keranjang')) ?? '{}');
+  const tgId = snapG?.topups?.[0]?.id ?? '';
+  const nCetakG = tercetak.length;
+  await page.keyboard.press('F12'); // Bayar pas = persis admin
+  await tungguToast('Tarik tercatat');
+  chk('F12 tarik-saja -> toast "Tarik tercatat · Rp5.000"',
+    (await toastIsi()).includes('Tarik tercatat · Rp5.000'), await toastIsi());
+  // Resume tarik-saja (revisi pemilik 2026-10-08): Total = admin SAJA
+  // (Rp5.000 — nominal keluar tidak ditagih), hero tanpa kembalian.
+  await page.waitForSelector('.swal2-popup', { timeout: 8000 });
+  const rTarik = await page.evaluate(() => ({
+    judul: document.querySelector('.swal2-title')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    isi: document.querySelector('.swal2-popup')?.innerText?.replace(/\s+/g, ' ').trim() ?? '',
+    tombol: [...document.querySelectorAll('.swal2-actions button')].filter((b) => b.offsetParent).map((b) => b.textContent.trim()),
+  }));
+  chk('tarik-saja menampilkan resume Total Rp5.000 + [Thermal][A4][Selesai]',
+    rTarik.judul.includes('Pembayaran berhasil') && rTarik.isi.includes('Total Rp5.000')
+      && /Tarik/i.test(rTarik.isi) && JSON.stringify(rTarik.tombol) === JSON.stringify(['Thermal', 'A4', 'Selesai']),
+    JSON.stringify(rTarik).slice(0, 300));
+  chk('keranjang kosong setelah tarik-saja',
+    (await page.locator('#pos-rows tr[data-key]').count()) === 0);
+  await page.click('.swal2-confirm');
+  await page.waitForSelector('.swal2-popup', { state: 'detached', timeout: 8000 });
+  await tungguTercetak(nCetakG + 1);
+  const strukG = tercetak[tercetak.length - 1] ?? '';
+  chk('struk tarik-saja memuat "Tarik" + TOTAL Rp5.000 (nominal ikut tercetak sebagai info)',
+    strukG.includes('Tarik') && strukG.includes('TOTAL Rp5.000'), '');
+  const topG = ((await (await fetch(`${API}/api/topups?date=${hariIni}`)).json()).data ?? [])
+    .find((r) => r.id === tgId);
+  chk('POST /api/topups tarik-saja (kind=tarik, TARIK-EWALLET, 50.000 + admin 5.000)',
+    !!topG && topG.kind === 'tarik' && topG.provider === 'TARIK-EWALLET' && topG.nominal === 50000 && topG.admin === 5000,
+    JSON.stringify(topG));
+
+  // Campuran belanja + tarik: tagihan = produk + admin tarik SAJA.
+  await page.fill('#pos-q', 'PRD00001');
+  await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+  await page.click('#pos-results .suggest-item');
+  await page.waitForFunction(() => document.querySelectorAll('#pos-rows tr[data-key]').length >= 1, { timeout: 8000 });
+  await page.click('#pos-qa-topup');
+  await page.waitForSelector('#ptk-nominal', { timeout: 8000 });
+  await page.click('[data-ptk-jenis="tarik-ewallet"]');
+  await page.fill('#ptk-nominal', '50000');
+  await klikOkModal();
+  await page.waitForFunction(() => document.querySelectorAll('#pos-rows tr[data-key]').length === 2, { timeout: 8000 });
+  chk('campuran produk + tarik: TOTAL = 3.000 + admin 5.000 = Rp8.000',
+    norm(await page.innerText('#pos-grand')) === 'Rp8.000', await page.innerText('#pos-grand'));
+  const nCampur = await nSalesHariIni();
+  await page.click('#pos-bayar');
+  await page.waitForSelector('#pos-pay', { timeout: 8000 });
+  await page.fill('#pos-cash', '5000');
+  await page.click('#pos-pay');
+  await tungguToast('topup/tarik tidak bisa jadi hutang');
+  chk('uang kurang + ada tarik -> tolak (nominal tarik tak bisa dihutang)',
+    (await toastIsi()).includes('Uang diterima kurang dari total Rp8.000'));
+  chk('barrier campuran tidak menambah penjualan', (await nSalesHariIni()) === nCampur);
+  await page.keyboard.press('Escape'); // tutup form bayar (masih terbuka setelah barrier)
+  await page.waitForSelector('.modal-overlay', { state: 'detached', timeout: 8000 });
+  await page.click('#pos-clear');
+  await page.waitForFunction(() => !document.querySelectorAll('#pos-rows tr[data-key]').length, { timeout: 8000 });
+  chk('Bersihkan mengosongkan campuran produk + tarik',
+    (await page.locator('#pos-rows tr[data-key]').count()) === 0);
 
   chk('tanpa pageerror', errs.length === 0, errs.slice(0, 3));
 } catch (e) {

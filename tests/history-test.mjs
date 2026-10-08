@@ -135,7 +135,12 @@ try {
       ringkas.includes(`${rep.sales.n} penjualan`) && ringkas.includes('omzet'), ringkas);
 
     if (dflt.body.total > 0) {
-      await page.locator('#page tbody tr[data-trx]').first().click();
+      // Baris pertama linimasa BELUM TENTU penjualan: suite lain (mis.
+      // e2e-topup-keranjang yang menulis topup tepat sebelum suite ini)
+      // bisa meninggalkan topup sebagai transaksi terbaru — dan rincian
+      // topup tidak punya tombol cetak-ulang. Pilih baris penjualan
+      // pertama: key-nya `sale:<id>` (lihat tipe Baris di history.ts).
+      await page.locator('#page tbody tr[data-trx^="sale:"]').first().click();
       await page.waitForTimeout(1000);
       ok('klik baris -> rincian terbuka', await page.locator('#page tbody tr.det-row').count() === 1);
 

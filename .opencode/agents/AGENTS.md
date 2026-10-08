@@ -525,6 +525,24 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            autoPrint**, segera saat server konfirmasi, hanya
                            tunai (QRIS/transfer tidak), gagal = `console.warn`
                            (tak membatalkan & tak menambah toast).
+                           **SEGAR STOK SETELAH JUAL (revisi pemilik
+                           2026-10-08 — "stok di bawah nama produk tidak
+                           terefresh sehingga seolah-olah stok tidak
+                           berkurang")**: segera setelah `POST /api/sales`
+                           terkonfirmasi, `pay()` memanggil
+                           **`segarkanStokPos()`** — `syncMaster(?since=)` +
+                           `products = await getCachedProducts()` (+ gambar
+                           ulang dropdown `#pos-results` bila sedang terbuka).
+                           Alasan: server SUDAH memotong stok (`stock = stock
+                           − qty×factor` + `stock_moves`), tapi array
+                           `products` POS dulu hanya dimuat ulang di
+                           `mountPosPage()`, jadi suggest scan & modal Cari
+                           produk (F3) mempertunjukkan angka basi selama
+                           sesi. Gagal/offline = senyap (penjualan tak pernah
+                           dibatalkan); cabang layanan-saja tidak memanggilnya
+                           (topup/tarik tak menyentuh stok). Diuji section D2
+                           `e2e-struk.mjs` (suggest + `#pc-list` sama-sama
+                           memuat `sisa <stok server>`).
                            Isi dialog = judul hero **KEMBALIAN** (bila
                           `kembalian > 0`) / "Pembayaran berhasil" —
                           **putaran 11b** (2026-10-05, "kembalian kurang
@@ -638,13 +656,53 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           **resume** memuat baris topup (nominal & admin
                           terpisah) dengan **pilihan A4 disembunyikan saat
                           ada topup** (invoice server tidak memuat topup);
-                          keranjang HANYA topup = jalur topup-saja (POST
-                          topup + struk langsung, tanpa resume — server
-                          menolak `items` kosong). Persist keranjang/holds ikut
+                          keranjang HANYA topup/tarik = jalur layanan-saja
+                          (POST topup — server menolak `items` kosong — lalu
+                          **modal resume yang SAMA** sejak revisi pemilik
+                          2026-10-08 *"resume setelah bayar tidak muncul"*;
+                          `saleId = null` sehingga pilihan A4 = **strukA4**
+                          lewat print-agent, bukan invoice A4). Persist
+                          keranjang/holds ikut
                           `topups` (restore memvalidasi jenis dikenal +
                           nominal > 0; snapshot lama tanpa field = []).
-                          Teruji **`tests/e2e-topup-keranjang.mjs` 45
-                          asersi** (suite total 984 hijau).
+                          Teruji **`tests/e2e-topup-keranjang.mjs` 61
+                          asersi** (suite total 985 hijau).
+                          **Revisi 2026-10-08 (tarik ikut hybrid + bugfix):**
+                          dialog `openDialogTopupKeranjang()` (`Tambah topup
+                          / tarik tunai`, tombol Aksi cepat **Topup/Tarik**)
+                          punya grup chip `TARIK_JENIS`; baris tarik
+                          (`isTarik()`) = uang keluar — ditagih HANYA admin
+                          (`tarikTotal()`), dikirim `kind:'tarik'`, badge
+                          amber + angka kanan = admin, struk/resume/hold
+                          memuat blok tarik (nominal & admin terpisah, kaki
+                          "Nominal tarik sudah diserahkan tunai"); barrier
+                          menolak hutang untuk SEMUA baris layanan.
+                          **Bug "tambah 1 topup masuk 2 baris"** (laporan
+                          pemilik 2026-10-08, terbukti probe): 1x Enter =
+                          handler `keydown` dialog (api.el === overlay,
+                          terdaftar setelah milik modal.ts) + handler bawaan
+                          modal.ts (Enter-di-INPUT → ok.click) = `submit()`
+                          2x — diperbaiki guard `terkirim` setelah validasi
+                          (dialog topup + item manual yang berpola sama;
+                          layar cari aman via `stopPropagation`/resolve
+                          idempotent).
+                          **Mode Topup/Tarik DIHAPUS (2026-10-08, keputusan
+                          pemilik: tombol `data-mode` + form mode "sudah
+                          tidak diperlukan ... bisa dibersihkan")** — POS
+                          kini SATU mode: `pos.ts` kehilangan ±380 baris
+                          (state `mode`/`top*`, `topupKiriHtml()`,
+                          `bindTopup()`/`paintTopup()`/`submitTopup()`/
+                          `bindModeBar()`, `defaultJenis`/`jenisList`/
+                          `jenisAktif`/`jenisKode`, `paintBayarAktif()`/
+                          `teksKembalianBayar()`/`kembalianBayar()`, semua
+                          cabang mode di pay/bayarPas/pintasan/render/info
+                          bar/scan bar/sidebar/hold; `bisaBayar()` =
+                          `keranjangTerisi()`, `paintAktif()` =
+                          `paintCart()`). Pintasan katalog `topup` membuka
+                          dialog (`jenisAwal` dari nama). Tombol dialog
+                          ~1.5x (chip 39px/16px, footer 51px/20px).
+                          `e2e-struk.mjs` B-tail + C ditulis ulang ke dialog
+                          (141 asersi); suite total **1003 hijau**.
  apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS
@@ -1364,10 +1422,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     struk belanja** (baris `Token: <isi>`). Layanan lain mengirim `''`
     (default). `GET /api/topups` & `GET /api/sales`-style `SELECT *`
     otomatis mengembalikannya.
-  - **Kontrak TIDAK berubah sejak Opsi B hybrid (2026-10-07)**: POS juga
-    memakai endpoint ini dari keranjang Penjualan — baris topup dikirim
-    `pay()` SEBELUM `POST /api/sales` dengan `id` uuid stabil (retry aman,
-    `duplicate:true`); orkestrasi + alokasi uang ada di client (§2 `pos.ts`).
+  - **Kontrak TIDAK berubah sejak Opsi B hybrid (2026-10-07, direvisi
+    tarik 2026-10-08)**: POS juga memakai endpoint ini dari keranjang
+    Penjualan — baris topup (`kind:'topup'`) maupun tarik (`kind:'tarik'`,
+    provider `TARIK-*`) dikirim `pay()` SEBELUM `POST /api/sales` dengan
+    `id` uuid stabil (retry aman, `duplicate:true`); orkestrasi + alokasi
+    uang ada di client (§2 `pos.ts`).
 * `GET /api/topups?date=&limit=&offset=` -> `{data:[<baris topup_txns>], total}`
   - Daftar topup/tarik untuk menu **Riwayat transaksi**; aturan `date`
     (validasi round-trip, default hari UTC, filter `date(created_at)=date(?)`),
@@ -1507,25 +1567,14 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   tarik tampil sama semua)** → paragraf bantuan. Listener `#tp-admin`
   tidak berubah (id sama).
   **Refactor 1 layout desktop (2026-10-07, permintaan pemilik)**: seluruh
-  POS = SATU layout — area kiri saja yang berganti (jual = tabel keranjang
-  via `cartKiriHtml()`; topup/tarik = form layanan via `topupHtml()`), sidebar
-  kanan = **`sidebarBayarHtml()` IDENTIK semua mode** (Aksi cepat → Menu
-  cepat → Diskon item → input diskon transaksi → Bayar F10 + Bayar pas F12;
-  listener `bindSidebar()` dipanggil dari `bindCart()` DAN `bindTopup()`).
-  **Ringkasan #tp-nominal-view/#tp-admin-view/#tp-total/#tp-kembali dan
-  kolom uang #tp-tunai + tombol #tp-submit DIHAPUS** — angkanya pindah ke
-  info bar (`paintTopup()`), transaksi diproses lewat **MODAL BAYAR
-  bersama** (`bukaBayar()` → `pay()` → `submitTopup()`; `totalBayar()` =
-  nominal+admin di luar mode jual). Barrier tunai topup tetap ATURAN LAMA
-  (topup tunai wajib uang ≥ total, tarik dikecualikan dari syarat `>0`,
-  `0 < uang < total` ditolak kedua mode) tapi gagal barrier = buka modal +
-  fokus `#pos-cash`. Aksi sidebar di luar mode jual: Tahan F7 / Item manual /
-  Diskon F6 menolak dengan **toast** (layout tak boleh berubah, Opsi A
-  disetujui pemilik); Pending F8 / Riwayat / Menu cepat / Cetak ulang jalan
-  di semua mode; `muatHold()` dari mode topup otomatis pindah ke `jual`.
-  Topup/tarik TETAP tanpa dialog resume (struk langsung). Teruji
-  `tests/e2e-struk.mjs` 138 asersi (section C alur modal) + probe barrier
-  `/tmp/opencode/probe-barrier-topup.mjs` (9/9).
+  POS = SATU layout — area kiri (scan + keranjang via `cartKiriHtml()`),
+  sidebar kanan = `sidebarBayarHtml()` (Aksi cepat → Menu cepat → Diskon
+  item → input diskon transaksi → Bayar F10 + Bayar pas F12). Semua bayar
+  lewat **MODAL BAYAR bersama** (`bukaBayar()` → `pay()`).
+  **Mode Topup/Tarik DIHAPUS 2026-10-08** (keputusan pemilik — detail
+  penghapusan lihat §2 `pos.ts`): tidak ada lagi form/kolom `#tp-*`,
+  `submitTopup()`, atau cabang mode; layanan hanya lewat keranjang
+  (dialog Topup/Tarik).
   **Migrasi sebelumnya 2026-10-04 (Pelanggan toko — nomor urut + alamat +
   pelanggan pada penjualan):** 3 kolom `customers` (`code`, `supplier_no`,
   `address`) + 2 kolom `sales` (`customer_id`, `customer_name`).
