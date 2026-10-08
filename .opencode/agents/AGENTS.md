@@ -607,6 +607,44 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           reload** (cart sengaja penuh di sana untuk uji sync
                           master — tanpa clear, restore menggandakan qty dan
                           barrier menolak dengan total membengkak).
+                          **Opsi B hybrid — 2 mode dalam 1 transaksi (SELESAI
+                          2026-10-07, permintaan pemilik *"PR bisa 2 mode
+                          dalam 1 transaksi"* — contoh fotokopi + isi pulsa):**
+                          keranjang Penjualan bisa memuat **baris topup**
+                          (`cartTopup: TopupLine[]`, array TERPISAH dari
+                          `cart` — loop produk/qty/diskon/payload `items[]`
+                          tidak disentuh) lewat dialog
+                          `openDialogTopupKeranjang()` (tombol **Topup** di
+                          Aksi cepat `#pos-qa-topup`; jenis hanya
+                          `TOPUP_JENIS` — tarik tetap mode Tarik). Baris
+                          membawa `id` uuid STABIL (kunci idempotensi retry:
+                          `POST /api/topups` membalas `duplicate:true`),
+                          `key topup:<n>`, jenis/nomor/token/nominal/admin;
+                          admin pakai saran `suggestAdmin()` sampai kasir
+                          mengedit sendiri. Saat bayar `pay()` mengirim
+                          **`POST /api/topups` DULU per baris, LALU
+                          `POST /api/sales`** (record tetap TERPISAH —
+                          nominal bukan omzet, admin = jasa; kontrak §3 tidak
+                          berubah), barrier uang = **total gabungan
+                          `totalBayar()`** dan **baris topup TIDAK BISA jadi
+                          hutang** (uang kurang = tolak + fokus kolom uang;
+                          penanda `sisa_hutang` server dihitung dari porsi
+                          penjualan saja), `cash_in` nota = `total +
+                          kembalian` (invarian server `change = cash_in −
+                          total` tetap sah; jalur hutang tanpa topup tetap
+                          mengirim uang apa adanya). Satu **struk gabungan**
+                          (items produk + baris `Topup <ringkas>`/`Biaya
+                          admin`/`Nomor`/`Token` sebelum TOTAL = gabungan) +
+                          **resume** memuat baris topup (nominal & admin
+                          terpisah) dengan **pilihan A4 disembunyikan saat
+                          ada topup** (invoice server tidak memuat topup);
+                          keranjang HANYA topup = jalur topup-saja (POST
+                          topup + struk langsung, tanpa resume — server
+                          menolak `items` kosong). Persist keranjang/holds ikut
+                          `topups` (restore memvalidasi jenis dikenal +
+                          nominal > 0; snapshot lama tanpa field = []).
+                          Teruji **`tests/e2e-topup-keranjang.mjs` 45
+                          asersi** (suite total 984 hijau).
  apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS
@@ -1326,6 +1364,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     struk belanja** (baris `Token: <isi>`). Layanan lain mengirim `''`
     (default). `GET /api/topups` & `GET /api/sales`-style `SELECT *`
     otomatis mengembalikannya.
+  - **Kontrak TIDAK berubah sejak Opsi B hybrid (2026-10-07)**: POS juga
+    memakai endpoint ini dari keranjang Penjualan — baris topup dikirim
+    `pay()` SEBELUM `POST /api/sales` dengan `id` uuid stabil (retry aman,
+    `duplicate:true`); orkestrasi + alokasi uang ada di client (§2 `pos.ts`).
 * `GET /api/topups?date=&limit=&offset=` -> `{data:[<baris topup_txns>], total}`
   - Daftar topup/tarik untuk menu **Riwayat transaksi**; aturan `date`
     (validasi round-trip, default hari UTC, filter `date(created_at)=date(?)`),

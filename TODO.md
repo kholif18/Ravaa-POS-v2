@@ -936,11 +936,11 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       Probe: `/tmp/opencode/probe-shift-merah.mjs` +
       `/tmp/opencode/probe-tutup-kanan.mjs` (1440/1024/390 — jarak tepi
       kanan 13px, 0 pageerror).
-- [ ] **RENCANA:2 mode dalam1 transaksi — jasa/produk + topup/tarik dalam
-      NOTA & BAYAR SATU (Opsi B hybrid)** — permintaan pemilik 2026-10-07
-      *"PR bisa2 mode dalam1 transaksi"* (contoh: fotokopi50 lembar +
-      isi pulsa/e-wallet utk1 pelanggan). **Status saat ini: BELUM bisa**
-      — topup sengaja terpisah (`bukaModeLayanan()` → mode Topup →
+- [x] **2 mode dalam 1 transaksi — jasa/produk + topup/tarik dalam NOTA &
+      BAYAR SATU (Opsi B hybrid) — SELESAI 2026-10-07** — permintaan pemilik
+      2026-10-07 *"PR bisa 2 mode dalam 1 transaksi"* (contoh: fotokopi 50
+      lembar + isi pulsa/e-wallet untuk 1 pelanggan). **Status SEBELUM
+      dikerjakan: BELUM bisa** — dulu topup sengaja terpisah (`bukaModeLayanan()` → mode Topup →
       `submitTopup()` → `POST /api/topups`; nota/bayar/struk terpisah dari
       `POST /api/sales`; Item manual dipakai untuk topup = SALAH laporan).
       **Desain Opsi B (disepakati utk dikerjakan)**: (1) keranjang
@@ -959,8 +959,23 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       editable bertabrakan dengan "harga non-dinamis dikunci server" +
       omzet jadi kotor. Pekerjaan: `pos.ts` (tipe baris, form mini,
       orkestrasi pay, struk), `escpos.ts` (blok topup di struk), test
-      e2e-scenario baru + update AGENTS §1/§3/§5. **Menunggu kunci desain
-      pemilik sebelum coding.**
+      e2e-scenario baru + update AGENTS §1/§3/§5. **HASIL (2026-10-07,
+      dikerjakan):** semua butir desain di atas jalan — `cartTopup:
+      TopupLine[]` TERPISAH dari `cart` + dialog `openDialogTopupKeranjang()`
+      (tombol **Topup** di Aksi cepat, jenis hanya `TOPUP_JENIS`), `pay()`
+      POST topup DULU (id uuid stabil = retry idempotent `duplicate:true`)
+      lalu sales, barrier atas **total gabungan** dengan **baris topup TIDAK
+      BISA hutang**, 1 struk gabungan + resume berisi baris topup (nominal &
+      admin terpisah; **pilihan A4 disembunyikan saat ada topup**), `cash_in`
+      nota = total + kembalian (invarian server `change = cash_in − total`),
+      keranjang hanya-topup = jalur topup-saja (tanpa resume), persist
+      keranjang/holds ikut `topups` + validasi restore (jenis dikenal,
+      nominal > 0). Teruji **`tests/e2e-topup-keranjang.mjs` 45 asersi**
+      (suite total **984 hijau**); AGENTS §2/§3 + README diperbarui.
+      Sisa/keputusan menyusul: **A4 gabungan** (invoice server tidak memuat
+      topup) dan **cetak ulang nota hybrid dari Riwayat** (baris topup tidak
+      bisa direkonstruksi dari `sales` — `topup_txns` tidak menyimpan
+      referensi nota).
 - [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
       KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah

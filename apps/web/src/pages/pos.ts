@@ -37,7 +37,7 @@ import {
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
 import { getAutoPrint, getPrintPause, setAutoPrint, setStrukLayout } from '../ui/print-pref';
-import { kirimPrint, strukUntuk, bukaLaci, type Struk } from '../escpos';
+import { kirimPrint, strukUntuk, bukaLaci, type Struk, type StrukBaris } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
 import { toast } from '../ui/toast';
@@ -312,6 +312,10 @@ async function bukaLaciOtomatis(): Promise<void> {
 function htmlResumePenjualan(o: {
   invoiceNo?: string | null;
   items: { qty: number; nama: string; net: number }[];
+  /** Baris topup keranjang (Opsi B hybrid) — ditampilkan SETELAH daftar
+   *  produk; nominal & admin tetap dua baris terpisah (aturan domain §1).
+   *  Absen/[] = keluaran PERSIS seperti sebelum fitur (uji lama aman). */
+  topups?: { label: string; nominal: number; admin: number }[];
   metode: PayMethod;
   uang: number;
   tot: number;
@@ -334,6 +338,17 @@ function htmlResumePenjualan(o: {
       `<div class="text-gray-500 dark:text-gray-400">… +${sisa} item lainnya</div>`,
     );
   }
+  // Baris topup (Opsi B): label + nominal, admin sebagai sub-baris abu
+  // (dilewati bila 0) — mengikuti blok struk, jangan disatukan.
+  const tops = (o.topups ?? [])
+    .map(
+      (t) =>
+        `<div class="flex items-baseline justify-between gap-4"><span class="min-w-0 truncate">Topup ${esc(t.label)}</span><span class="tabular-nums shrink-0">${rp(t.nominal)}</span></div>` +
+        (t.admin > 0
+          ? `\n      <div class="flex items-baseline justify-between gap-4 pl-3 text-gray-500 dark:text-gray-400"><span>admin</span><span class="tabular-nums shrink-0">${rp(t.admin)}</span></div>`
+          : ''),
+    )
+    .join('\n      ');
   // Jam cetak lokal HH:MM + subtitle layan-berikutnya — riset KulaPOS
   // (2026-10-06, permintaan pemilik "ok 1 dulu"): sukses modal mereka memuat
   // subjudul "Transaksi tersimpan. Siap melayani pelanggan berikutnya." dan
@@ -346,7 +361,7 @@ function htmlResumePenjualan(o: {
       <div class="text-center text-[11px] leading-snug text-gray-500 dark:text-gray-400">Transaksi tersimpan. Siap melayani pelanggan berikutnya.</div>
       <div class="text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">No. ${esc(o.invoiceNo ?? '-')} · ${jamCetak}</div>
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
-      ${baris.join('\n      ')}
+      ${baris.join('\n      ')}${tops ? `\n      ${tops}` : ''}
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
       <div class="flex items-baseline justify-between gap-4 font-bold text-gray-900 dark:text-white"><span>Total</span><span class="tabular-nums shrink-0">${rp(o.tot)}</span></div>
       <div class="flex items-baseline justify-between gap-4"><span>${o.metode === 'tunai' ? 'Tunai' : labelMetode(o.metode)}</span><span class="tabular-nums shrink-0">${o.metode === 'tunai' ? rp(o.uang) : rp(o.tot)}</span></div>${
@@ -381,7 +396,7 @@ async function pilihCetakSelesai(
   struk: Struk,
   tot: number,
   kembalian: number,
-  resume: { invoiceNo?: string | null; items: { qty: number; nama: string; net: number }[]; metode: PayMethod; uang: number; hutang?: number },
+  resume: { invoiceNo?: string | null; items: { qty: number; nama: string; net: number }[]; topups?: { label: string; nominal: number; admin: number }[]; metode: PayMethod; uang: number; hutang?: number },
 ): Promise<void> {
   const pilihan = await choiceDialog({
     // Judul hero KEMBALIAN — putaran 11b (2026-10-05, permintaan pemilik
@@ -399,10 +414,17 @@ async function pilihCetakSelesai(
         : 'Pembayaran berhasil',
     html: htmlResumePenjualan({ ...resume, tot }),
     icon: kembalian > 0 ? 'success' : 'question',
-    choices: [
-      { key: 'thermal', label: 'Thermal' },
-      { key: 'a4', label: 'A4' },
-    ],
+    // Baris topup (Opsi B hybrid) = 1 struk gabungan hanya di THERMAL.
+    // Invoice A4 masih menarik nota dari server (`GET /api/sales/:id` — topup
+    // tidak ada di `sale_items`), jadi pilihan A4 disembunyikan saat ada
+    // topup — jangan mencetak invoice yang totalnya beda dari yang dibayar.
+    // (Menyusul bila pemilik minta A4 gabungan.)
+    choices: resume.topups?.length
+      ? [{ key: 'thermal', label: 'Thermal' }]
+      : [
+          { key: 'thermal', label: 'Thermal' },
+          { key: 'a4', label: 'A4' },
+        ],
     cancelLabel: 'Selesai',
     // Esc = TUTUP LANGSUNG (putaran 11c, 2026-10-05 — permintaan pemilik
     // "jika di esc langsung close untuk mempercepat transaksi selanjutnya").
@@ -1862,8 +1884,23 @@ function topupHtml(): string {
 
 /** Label jenis topup untuk tampilan/struk: ambil dari TOPUP_JENIS (satu
  *  sumber) — key tak dikenal (data lama) jatuh ke fallback, jangan melempar. */
-function jenisTopupLokal(key: TopupJenis | string): { label: string; nomorLabel: string } {
-  return TOPUP_JENIS.find((j) => j.key === key) ?? { label: 'Topup', nomorLabel: 'Nomor' };
+function jenisTopupLokal(key: TopupJenis | string): Pick<Jenis, 'label' | 'ringkas' | 'nomorLabel'> {
+  return TOPUP_JENIS.find((j) => j.key === key) ?? { label: 'Topup', ringkas: 'Topup', nomorLabel: 'Nomor' };
+}
+
+/** Baris rincian struk untuk SATU baris topup keranjang (Opsi B hybrid):
+ *  nominal & admin SELALU dua baris terpisah (aturan domain — nominal =
+ *  mutasi modal, admin = pendapatan jasa; jangan disatukan), nomor & token
+ *  menyusul bila terisi. Dipakai struk penjualan gabungan DAN struk
+ *  topup-saja (keranjang tanpa baris produk). */
+function barisStrukTopup(t: TopupLine): StrukBaris[] {
+  const j = jenisTopupLokal(t.jenis);
+  return [
+    { kiri: `Topup ${j.ringkas}`, kanan: rp(t.nominal) },
+    ...(t.admin > 0 ? [{ kiri: 'Biaya admin', kanan: rp(t.admin) }] : []),
+    ...(t.nomor ? [{ kiri: j.nomorLabel, kanan: t.nomor }] : []),
+    ...(t.token ? [{ kiri: 'Token', kanan: t.token }] : []),
+  ];
 }
 
 /** Satu baris topup di tabel keranjang (Opsi B): colspan=8 penuh — topup
@@ -2068,7 +2105,10 @@ function paintCart(): void {
     const el = document.querySelector(sel);
     if (el) el.textContent = v;
   };
-  set('#pos-count', keranjangTerisi() ? `${count()} item` : 'Keranjang kosong');
+  // Topup-saja (tanpa baris produk): Qty tetap 0 — tampilkan jumlah baris
+  // topup supaya label tidak berbohong "0 item" padahal keranjang berisi.
+  const nQty = count();
+  set('#pos-count', keranjangTerisi() ? (nQty > 0 ? `${nQty} item` : `${cartTopup.length} topup`) : 'Keranjang kosong');
   // `#pos-subtotal` TIDAK diisi lagi — baris Subtotal sidebar dihapus putaran 7
   // 2026-04; subtotal terbaca dari TOTAL BELANJA (#pos-grand) di info bar.
   // Info bar (ala KulaPOS): TOTAL BELANJA besar + jumlah baris/Qty ikut
@@ -2310,6 +2350,9 @@ function muatKeranjang(): boolean {
   for (const t of s.topups ?? []) {
     const nominal = Math.round(Number(t.nominal));
     if (!(nominal > 0)) continue;
+    // Jenis tak dikenal (snapshot korup / dari versi lain) dibuang — jangan
+    // pernah mengirim `provider` ngawur ke POST /api/topups saat bayar.
+    if (!TOPUP_JENIS.some((j) => j.key === t.jenis)) continue;
     const admin = Math.max(0, Math.round(Number(t.admin) || 0));
     const m = /^topup:(\d+)$/.exec(t.key ?? '');
     if (m) topupSeq = Math.max(topupSeq, Number(m[1]));
@@ -2411,10 +2454,17 @@ async function muatHold(h: Hold): Promise<void> {
     l.dyn = !!p?.price_dynamic;
     if (l.dyn) l.key = `${l.product_id}:${l.unit}:${l.price}`;
   }
-  // Baris topup ikut hold (Opsi B) — polos disalin; key `topup:<n>` didorong
-  // seq-nya di bawah (bersama item manual) supaya tambahan berikutnya tidak
-  // menabrak. Hold lama tanpa field topups = [] (kompabilitas mundur).
-  cartTopup = (h.topups ?? []).map((l) => ({ ...l }));
+  // Baris topup ikut hold (Opsi B) — divalidasi ringan saat dimuat (jenis
+  // dikenal + nominal > 0; admin dijepit) supaya hold korup tidak meledak
+  // di layar bayar. Key `topup:<n>` didorong seq-nya di bawah.
+  cartTopup = (h.topups ?? [])
+    .filter((t) => TOPUP_JENIS.some((j) => j.key === t.jenis) && Math.round(Number(t.nominal)) > 0)
+    .map((t) => ({
+      ...t,
+      admin: Math.max(0, Math.round(Number(t.admin) || 0)),
+      nomor: String(t.nomor ?? ''),
+      token: String(t.token ?? ''),
+    }));
   discount = h.discount;
   // Pelanggan hold divalidasi terhadap master terkini — id lama yang sudah
   // tidak ada jatuh ke Pelanggan Umum, bukan ke select kosong.
@@ -3156,6 +3206,130 @@ function openManualItem(): void {
   });
 }
 
+/** Dialog "Tambah topup" — baris topup masuk keranjang MODE JUAL (Opsi B
+ *  hybrid, 2026-10-07). Mini-form dari form mode Topup: jenis (TOPUP_JENIS
+ *  saja — tarik tunai sengaja TIDAK ditawarkan karena uang mengalir keluar,
+ *  tetap lewat mode Tarik), nomor/token sesuai jenis, nominal + biaya admin
+ *  (saran tier `suggestAdmin`, berhenti menimpa setelah kasir mengedit
+ *  sendiri). Baris tersimpan dengan `id` uuid STABIL — kunci idempotensi
+ *  retry POST /api/topups di pay() (server membalas duplicate:true). */
+function openDialogTopupKeranjang(): void {
+  openModal({
+    title: 'Tambah topup ke keranjang',
+    okLabel: 'Tambah',
+    body: `<div class="space-y-3">
+      <div>
+        <span class="label">Jenis topup</span>
+        <div class="grid grid-cols-2 gap-2" id="ptk-jenis">
+          ${TOPUP_JENIS.map((j) => `<button type="button" class="chip justify-center" data-ptk-jenis="${j.key}">${j.label}</button>`).join('')}
+        </div>
+      </div>
+      <div id="ptk-nomor-wrap" class="hidden">
+        <label class="label" for="ptk-nomor" id="ptk-nomor-label">Nomor HP tujuan</label>
+        <input id="ptk-nomor" class="input" type="text" value="" />
+      </div>
+      <div id="ptk-token-wrap" class="hidden">
+        <label class="label" for="ptk-token">Nomor Token</label>
+        <input id="ptk-token" class="input" type="text" inputmode="numeric" value="" />
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label" for="ptk-nominal">Nominal (Rp)</label>
+          <input id="ptk-nominal" class="input" type="number" inputmode="numeric" min="0" step="1000" value="" />
+        </div>
+        <div>
+          <label class="label" for="ptk-admin">Biaya admin (Rp)</label>
+          <input id="ptk-admin" class="input" type="number" inputmode="numeric" min="0" step="500" value="" />
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 dark:text-gray-400">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup (nominal bukan omzet, admin = jasa).</p>
+    </div>`,
+    onMount: (api) => {
+      let jenis: TopupJenis = 'e-wallet';
+      let adminTouched = false;
+      const wrapJenis = api.el.querySelector<HTMLElement>('#ptk-jenis')!;
+      const wrapNomor = api.el.querySelector<HTMLElement>('#ptk-nomor-wrap')!;
+      const labelNomor = api.el.querySelector<HTMLElement>('#ptk-nomor-label')!;
+      const inpNomor = api.el.querySelector<HTMLInputElement>('#ptk-nomor')!;
+      const wrapToken = api.el.querySelector<HTMLElement>('#ptk-token-wrap')!;
+      const inpToken = api.el.querySelector<HTMLInputElement>('#ptk-token')!;
+      const inpNominal = api.el.querySelector<HTMLInputElement>('#ptk-nominal')!;
+      const inpAdmin = api.el.querySelector<HTMLInputElement>('#ptk-admin')!;
+      const aktif = () => TOPUP_JENIS.find((j) => j.key === jenis) ?? TOPUP_JENIS[0];
+      const tampilJenis = () => {
+        const j = aktif();
+        wrapJenis.querySelectorAll<HTMLElement>('[data-ptk-jenis]').forEach((b) => {
+          const on = b.dataset.ptkJenis === jenis;
+          b.classList.toggle('!border-primary', on);
+          b.classList.toggle('!text-primary', on);
+        });
+        const butuhNomor = j.butuhNomor !== false;
+        // classList.toggle('hidden') — BUKAN `.hidden =` (property): wrapper
+        // dirender dengan class Tailwind `hidden`, jadi properti saja tidak
+        // pernah memunculkannya kembali (class display:none tetap menang).
+        wrapNomor.classList.toggle('hidden', !butuhNomor);
+        labelNomor.textContent = j.nomorLabel;
+        inpNomor.placeholder = j.nomorPh;
+        wrapToken.classList.toggle('hidden', !j.butuhToken);
+      };
+      wrapJenis.addEventListener('click', (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLElement>('[data-ptk-jenis]');
+        if (!b?.dataset.ptkJenis) return;
+        jenis = b.dataset.ptkJenis as TopupJenis;
+        tampilJenis();
+      });
+      // Saran admin mengikuti tier form topup; berhenti menimpa begitu kasir
+      // mengedit kolomnya sendiri (pola topAdminTouched form mode Topup).
+      inpNominal.addEventListener('input', () => {
+        if (!adminTouched) inpAdmin.value = String(suggestAdmin(Number(inpNominal.value || 0)) || '');
+      });
+      inpAdmin.addEventListener('input', () => {
+        adminTouched = true;
+      });
+      tampilJenis();
+      inpNominal.focus();
+      const submit = () => {
+        const j = aktif();
+        const butuhNomor = j.butuhNomor !== false;
+        const nominal = Math.round(Number(inpNominal.value || 0));
+        const admin = Math.max(0, Math.round(Number(inpAdmin.value || 0)));
+        const nomor = butuhNomor ? inpNomor.value.trim() : '';
+        if (!(nominal > 0)) {
+          toast('Nominal harus lebih dari 0', 'error');
+          inpNominal.focus();
+          return;
+        }
+        if (butuhNomor && !nomor) {
+          toast(`${j.nomorLabel} wajib diisi`, 'error');
+          inpNomor.focus();
+          return;
+        }
+        topupSeq += 1;
+        cartTopup.push({
+          id: uuid(),
+          key: `topup:${topupSeq}`,
+          jenis,
+          nomor,
+          token: wrapToken.classList.contains('hidden') ? '' : inpToken.value.trim(),
+          nominal,
+          admin,
+        });
+        simpanKeranjang();
+        api.close();
+        paintCart();
+        host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+      };
+      api.ok.addEventListener('click', submit);
+      api.el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submit();
+        }
+      });
+    },
+  });
+}
+
 /* ---------- bayar ---------- */
 
 /** Bayar pas (tombol footer, revisi pemilik 2026-10-04): uang diterima =
@@ -3167,9 +3341,11 @@ function openManualItem(): void {
 function bayarPas(): void {
   if (busy) return;
   if (mode === 'jual') {
-    if (!cart.length) return;
+    if (!keranjangTerisi()) return;
     if (payMethod === 'tunai') {
-      cashIn = total();
+      // Uang pas = persis TOTAL GABUNGAN (keranjang + baris topup, Opsi B) —
+      // satu-satunya jalur "tanpa kembalian" yang sah juga saat ada topup.
+      cashIn = totalBayar();
       cashTouched = true;
       paintCart();
     }
@@ -3252,7 +3428,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     await submitTopup();
     return;
   }
-  if (!cart.length) return;
+  if (!keranjangTerisi()) return;
   // BARRIER TUNAI (keluhan pemilik 2026-10-03): uang diterima WAJIB diisi
   // dan tidak kurang dari total — meniru payment screen Aronium yang tak bisa
   // konfirmasi sebelum Paid amount masuk.
@@ -3271,11 +3447,26 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
   // diam-diam tanpa kontak yang bisa menampung hutangnya.
   // `opts.hutang` = sudah lewat jalur otomatis ini; F2/Enter/F12 tidak pernah
   // membawa opsi itu.
-  if (payMethod === 'tunai' && !opts?.hutang && cashIn < total()) {
+  //
+  // (Opsi B hybrid) Threshold barrier = TOTAL GABUNGAN (`totalBayar()` =
+  // keranjang + baris topup) dan **baris topup TIDAK BISA jadi hutang**:
+  // uang kurang saat ada topup = tolak mutlak (buka form + fokus kolom uang).
+  // Alasan: penanda `sisa_hutang` nota di server dihitung dari
+  // `sales.total − cash_in` — porsi penjualan saja — sehingga utang porsi
+  // topup tidak bisa diwakilinya; nominal topup juga mutasi modal yang sudah
+  // dibayar ke penyedia (pulsa/listrik), bukan barang yang bisa ditalangi.
+  const totBayar = totalBayar();
+  if (payMethod === 'tunai' && !opts?.hutang && cashIn < totBayar) {
+    if (cartTopup.length) {
+      toast(`Uang diterima kurang dari total ${rp(totBayar)} — baris topup tidak bisa jadi hutang`, 'error');
+      bukaBayar();
+      document.querySelector<HTMLInputElement>('#pos-cash')?.focus();
+      return;
+    }
     const alasan = cekHutangDiperbolehkan();
     if (alasan) {
       if (!(cashIn > 0)) toast(`Uang diterima belum diisi — ${alasan}`, 'error');
-      else toast(`Uang diterima kurang dari total ${rp(total())} — ${alasan}`, 'error');
+      else toast(`Uang diterima kurang dari total ${rp(totBayar)} — ${alasan}`, 'error');
       // Form bayar dibuka kalau belum (F2 dari layar utama = bayar cepat):
       // tanpa ini kasir hanya melihat toast tanpa kolom untuk membetulkannya.
       bukaBayar();
@@ -3287,13 +3478,109 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
   }
   busy = true;
   paintCart();
+  // Tahap untuk pesan catch: topup dikirim lebih dulu, jadi kegagalan bisa
+  // datang dari dua request berbeda — pesan jangan menyesatkan.
+  let tahap: 'topup' | 'penjualan' = 'topup';
   try {
+    // ---------- (Opsi B hybrid) baris TOPUP dikirim DULU ----------
+    // Urutan disepakati (TODO "Opsi B"): POST /api/topups per baris LALU baru
+    // POST /api/sales — record tetap terpisah (nominal topup bukan omzet,
+    // admin = jasa; agregat shift tetap benar), satu struk gabungan.
+    // `id` tiap baris STABIL (uuid dibuat saat baris dibuat, ikut persist
+    // keranjang/hold) sehingga menekan Bayar lagi setelah gagal mengirim id
+    // yang sama — server membalas `duplicate:true` tanpa menggandakan
+    // (idempotent, kontrak POST /api/topups).
+    for (const t of cartTopup) {
+      await apiPost<{ data: unknown; duplicate?: boolean }>('/api/topups', {
+        id: t.id,
+        kind: 'topup',
+        provider: t.jenis.toUpperCase(), // E-WALLET | PULSA | PLN-TOKEN | PLN-BILL
+        nomor: t.nomor, // '' = jenis tanpa nomor (server: nomor opsional)
+        token: t.jenis === 'pln-token' ? t.token : '',
+        nominal: t.nominal,
+        admin: t.admin,
+        pay_method: payMethod,
+        shift_id: shift.id,
+        cashier: getCashier(),
+      });
+    }
+    // Snapshot SEBELUM apa pun direset — struk & modal resume tidak punya
+    // sumber data lagi setelah cart/cashIn dibersihkan di bawah.
+    const sub = subtotal();
+    const discItem = diskonBaris();
+    const tot = total();
+    const topupTot = topupTotal();
+    const kembalian = payMethod === 'tunai' ? change() : 0;
+    // SISA HUTANG — hanya bisa muncul lewat jalur `opts.hutang`; barrier di
+    // atas sudah memvalidasi pelanggan DAN memblokir hutang saat ada baris
+    // topup. Dicatat ke ledger /api/customer-debts SETELAH nota tersimpan.
+    const sisaHutang = opts?.hutang && payMethod === 'tunai' && cashIn < tot ? tot - cashIn : 0;
+    const namaHutang = customers.find((c) => c.id === customerId)?.name ?? '';
+
+    // Keranjang hanya berisi baris TOPUP (tanpa produk): POST /api/sales
+    // tanpa items ditolak server, jadi cukup catat topup + struknya langsung
+    // (pola submitTopup) — tanpa modal resume (tidak ada nota untuk cetak
+    // ulang / invoice A4).
+    if (!cart.length) {
+      const strukTopOnly: Struk = {
+        judul: getToko(),
+        subjudul: 'TOPUP',
+        meta: [
+          `${waktuStruk()} · No. ${cartTopup[0].id.slice(0, 8)}`,
+          `Kasir: ${getCashier()}`,
+          `Shift: ${shift.id}`,
+        ],
+        items: [],
+        baris: [
+          ...cartTopup.flatMap(barisStrukTopup),
+          { kiri: 'TOTAL', kanan: rp(topupTot), tebal: true },
+          ...(payMethod === 'tunai' && cashIn > 0
+            ? [
+                { kiri: 'Tunai', kanan: rp(cashIn) },
+                { kiri: 'Kembalian', kanan: rp(kembalian) },
+              ]
+            : [{ kiri: labelMetode(payMethod), kanan: rp(topupTot) }]),
+        ],
+        kaki: ['Simpan struk ini sebagai bukti'],
+      };
+      void cetak(strukUntuk(strukTopOnly));
+      toast(
+        `Topup tercatat · ${rp(topupTot)}` +
+          (kembalian > 0 ? ` · kembalian ${rp(kembalian)}` : ''),
+        'success',
+        5000,
+      );
+      tutupBayar();
+      cartTopup = [];
+      discount = 0;
+      cashIn = 0;
+      cashTouched = false;
+      customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
+      const selCustTop = host?.querySelector<HTMLSelectElement>('#pos-customer');
+      if (selCustTop) selCustTop.value = customerId === null ? '' : String(customerId);
+      simpanKeranjang();
+      const discTop = host?.querySelector<HTMLInputElement>('#pos-discount');
+      if (discTop) discTop.value = '';
+      const cashTop = document.querySelector<HTMLInputElement>('#pos-cash');
+      if (cashTop) cashTop.value = '';
+      paintCart();
+      host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+      return;
+    }
+
+    tahap = 'penjualan';
     const res = await apiPost<{ data: { sale: { id: string; total: number; invoice_no?: string | null; customer_name?: string } ; duplicate: boolean } }>('/api/sales', {
       id: uuid(),
       shift_id: shift.id,
       pay_method: payMethod,
       discount,
-      cash_in: payMethod === 'tunai' ? cashIn : 0,
+      // Alokasi uang ke nota (Opsi B): kembalian diberikan atas TOTAL
+      // GABUNGAN, jadi cash_in nota = total + kembalian — invarian server
+      // `change = cash_in − total` tetap benar (porsi topup implisit dibayar
+      // pas; kembalian tidak pernah tercatat sebagai kelebihan nota). Kasus
+      // hutang mengirim uang fisik APA ADANYA karena server memakai
+      // `total > cash_in` sebagai penanda `sisa_hutang`.
+      cash_in: payMethod === 'tunai' ? (sisaHutang > 0 ? cashIn : tot + kembalian) : 0,
       cashier: getCashier(),
       // Pelanggan terpilih di info bar (revisi 2026-10-04). Server memvalidasi
       // id + men-SNAPSHOT nama ke sales.customer_name — absen = transaksi
@@ -3315,22 +3602,6 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         note: l.note,
       })),
     });
-    const kembalian = payMethod === 'tunai' ? change() : 0;
-    // WAJIB dihitung sebelum `cart`/`discount`/`cashIn` di-reset di bawah —
-    // begitu direset, struk tidak punya sumber data lagi.
-    const sub = subtotal();
-    const discItem = diskonBaris();
-    const tot = total();
-    // SISA HUTANG (permintaan pemilik 2026-10-04: "uang kurang = jadi Hutang
-    // dengan catatan harus ada customer yang terpilih, bukan default/umum";
-    // otomatis tanpa konfirmasi sejak putaran 12, 2026-10-06). Angka ini
-    // hanya bisa muncul lewat jalur `opts.hutang` — barrier di atas sudah
-    // memvalidasi pelanggan. Dicatat ke ledger
-    // /api/customer-debts (type=charge) SETELAH penjualan tersimpan supaya
-    // catatannya menyebut nomor nota; gagal = tetap jadi nota sukses + toast
-    // penunjuk halaman Hutang (penjualan TIDAK dibatalkan, pola gagal cetak).
-    const sisaHutang = opts?.hutang && payMethod === 'tunai' && cashIn < tot ? tot - cashIn : 0;
-    const namaHutang = customers.find((c) => c.id === customerId)?.name ?? '';
     let catatanHutang = '';
     if (sisaHutang > 0 && customerId !== null) {
       try {
@@ -3380,7 +3651,12 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         // total = subtotal - diskon item - diskon transaksi.
         ...(discItem > 0 ? [{ kiri: 'Diskon item', kanan: `-${rp(discItem)}` }] : []),
         ...(discount > 0 ? [{ kiri: 'Diskon', kanan: `-${rp(discount)}` }] : []),
-        { kiri: 'TOTAL', kanan: rp(tot), tebal: true },
+        // Blok topup (Opsi B hybrid): nominal & admin TETAP baris terpisah
+        // (aturan domain — nominal = mutasi modal, admin = jasa), TOTAL =
+        // gabungan yang benar-benar dibayar pelanggan. Tanpa baris topup
+        // keluaran identik dengan struk lama (topupTot 0).
+        ...cartTopup.flatMap(barisStrukTopup),
+        { kiri: 'TOTAL', kanan: rp(tot + topupTot), tebal: true },
         // Tunai ditampilkan walau uang diterima 0 (transaksi hutang penuh
         // lewat form) — selain itu cabang lama menganggapnya metode biasa.
         ...(payMethod === 'tunai' && (cashIn > 0 || sisaHutang > 0)
@@ -3390,7 +3666,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
               ...(sisaHutang > 0 ? [{ kiri: 'Hutang', kanan: rp(sisaHutang) }] : []),
               { kiri: 'Kembalian', kanan: rp(kembalian) },
             ]
-          : [{ kiri: labelMetode(payMethod), kanan: rp(tot) }]),
+          : [{ kiri: labelMetode(payMethod), kanan: rp(tot + topupTot) }]),
       ],
       kaki: ['Terima kasih sudah berbelanja'],
     };
@@ -3413,9 +3689,16 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     // saklar autoPrint. QRIS/transfer TIDAK mengirim kick — laci hanya untuk
     // uang fisik masuk.
     if (payMethod === 'tunai') void bukaLaciOtomatis();
-    void pilihCetakSelesai(res.data.sale.id, strukJual, tot, kembalian, {
+    void pilihCetakSelesai(res.data.sale.id, strukJual, tot + topupTot, kembalian, {
       invoiceNo: res.data.sale.invoice_no,
       items: cart.map((l) => ({ qty: l.qty, nama: l.name, net: jumlahBaris(l) - l.discount })),
+      // Baris topup ikut di resume (Opsi B) — nominal & admin tetap terpisah
+      // (aturan domain); snapshot sebelum cartTopup di-reset di bawah.
+      topups: cartTopup.map((t) => ({
+        label: jenisTopupLokal(t.jenis).label,
+        nominal: t.nominal,
+        admin: t.admin,
+      })),
       metode: payMethod,
       uang: cashIn,
       // Baris HUTANG merah di resume (putaran 12) — sisa sudah tercatat ke
@@ -3423,6 +3706,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       hutang: sisaHutang,
     });
     cart = [];
+    cartTopup = []; // baris topup ikut dikosongkan setelah nota sukses (Opsi B)
     discount = 0;
     cashIn = 0;
     cashTouched = false; // penjualan baru -> form berikutnya buka kolom kosong (10d)
@@ -3434,6 +3718,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     simpanKeranjang(); // penjualan sukses = keranjang kosong di localStorage (reload berikutnya tidak memulihkan nota ini)
     toast(
       `Terjual ${res.data.sale.invoice_no ?? res.data.sale.id.slice(0, 8)} · ${rp(res.data.sale.total)}` +
+        (topupTot > 0 ? ` · topup ${rp(topupTot)}` : '') +
         (kembalian > 0 ? ` · kembalian ${rp(kembalian)}` : '') +
         catatanHutang,
       'success',
@@ -3447,7 +3732,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     paintCart();
     host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
   } catch (e) {
-    toast(`Gagal menyimpan penjualan: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
+    toast(`Gagal menyimpan ${tahap}: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
   } finally {
     busy = false;
     paintAktif();
@@ -3484,7 +3769,7 @@ function paintTopup(): void {
   // Aksi keranjang di sidebar (kartu identik dengan mode jual): Tahan =
   // keranjang terisi, Pending = ada antrian, Cetak ulang = ada nota terakhir.
   const holdBtn = host.querySelector<HTMLButtonElement>('#pos-hold');
-  if (holdBtn) holdBtn.disabled = !cart.length || busy;
+  if (holdBtn) holdBtn.disabled = !keranjangTerisi() || busy;
   const holdOpen = host.querySelector<HTMLButtonElement>('#pos-hold-open');
   if (holdOpen) holdOpen.disabled = holds.length === 0;
   set('#pos-hold-count', String(holds.length));
@@ -3744,6 +4029,16 @@ function bindSidebar(): void {
     }
     openManualItem();
   });
+  // Tambah TOPUP ke keranjang (Opsi B hybrid, 2026-10-07) — khusus mode
+  // Penjualan; di topup/tarik pakai formnya sendiri (layout sidebar memang
+  // tampil identik, jadi tombolnya menolak dengan toast, bukan disembunyikan).
+  host!.querySelector('#pos-qa-topup')?.addEventListener('click', () => {
+    if (mode !== 'jual') {
+      toast('Topup ke keranjang khusus mode Penjualan — pakai mode Topup untuk transaksi topup saja', 'info');
+      return;
+    }
+    openDialogTopupKeranjang();
+  });
   host!.querySelector('#pos-qa-disc')?.addEventListener('click', () => {
     if (mode !== 'jual') {
       toast('Diskon transaksi khusus mode Penjualan', 'info');
@@ -3835,7 +4130,7 @@ function bindPintasan(): void {
       if (e.key === 'F5') {
         // P3: kosongkan keranjang (tombol "Bersihkan F5"). Tanpa preventDefault
         // Chrome me-reload halaman — sudah dijepit di baris guard atas.
-        if (mode !== 'jual' || !shift || !cart.length) return;
+        if (mode !== 'jual' || !shift || !keranjangTerisi()) return;
         bersihkanKeranjang();
         return;
       }
@@ -3870,7 +4165,7 @@ function bindPintasan(): void {
           toast('Tahan khusus mode Penjualan', 'info');
           return;
         }
-        if (!cart.length) return;
+        if (!keranjangTerisi()) return;
         void tahanKeranjang();
         return;
       }
@@ -3946,7 +4241,7 @@ function bindPintasan(): void {
         e.preventDefault();
         if (!shift) return;
         if (mode === 'jual') {
-          if (cart.length) void pay();
+          if (keranjangTerisi()) void pay();
         } else {
           void pay();
         }
@@ -3986,7 +4281,7 @@ function bindPintasan(): void {
         // Isian selain kolom uang (diskon, dll): biarkan. Kolom uang = alur
         // kas: ketik nominal -> Enter -> bayar (tanpa perlu klik tombol).
         if (diIsian && t?.id !== 'pos-cash') return;
-        if (!shift || !cart.length) return;
+        if (!shift || !keranjangTerisi()) return;
         e.preventDefault();
         void pay();
         return;
@@ -4114,6 +4409,18 @@ function bindCart(): void {
     const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!btn) return;
     const key = btn.dataset.key!;
+    // Baris topup BUKAN baris `cart` (array terpisah, Opsi B hybrid) — hapus
+    // di sini SEBELUM pencarian baris produk (tanpa cabang ini klik tong
+    // sampah baris topup tidak menemukan key dan diam).
+    if (btn.dataset.act === 'topup-del') {
+      const i = cartTopup.findIndex((l) => l.key === key);
+      if (i >= 0) {
+        cartTopup.splice(i, 1);
+        simpanKeranjang();
+        paintCart();
+      }
+      return;
+    }
     const line = cart.find((l) => l.key === key);
     if (!line) return;
     if (btn.dataset.act === 'inc') setQty(key, line.qty + 1);

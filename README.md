@@ -176,6 +176,19 @@ npm run dev:api
    Mode: **Penjualan / Topup / Tarik** (bar yang sama). Topup-tarik memakai
    `POST /api/topups`; admin terisi otomatis dari tier toko yang sama dengan
    `GET /api/topups/suggest-admin`, dan bisa diedit kasir.
+  - **Dua mode dalam satu transaksi (Opsi B hybrid, 2026-10-07)**: keranjang
+    Penjualan bisa memuat **baris topup** (tombol **Topup** di Aksi cepat —
+    dialog jenis/nomor/token/nominal/admin persis form topup) supaya
+    fotokopi + isi pulsa dibayar **sekali** dan tercetak **satu struk
+    gabungan**. Record tetap **terpisah** di server: saat Bayar, POS mengirim
+    `POST /api/topups` per baris DULU (id uuid stabil → retry idempotent),
+    lalu `POST /api/sales` — nominal topup bukan omzet, admin tetap
+    pendapatan jasa, agregat shift tetap benar. Barrier uang memakai total
+    gabungan dan **baris topup tidak bisa jadi hutang** (uang kurang =
+    tolak, fokus kolom uang; hutang otomatis hanya berlaku tanpa baris
+    topup). Keranjang hanya-topup juga jalan (tanpa modal resume). Baris
+    topup ikut keranjang persisten & transaksi tertahan. Teruji
+    `tests/e2e-topup-keranjang.mjs` (45 asersi).
   - **Tanpa header judul** (permintaan pemilik 2026-10-04): `renderPosShell()`
     (`ui/shell.ts`) TIDAK merender `<header>` sama sekali — tidak ada strip
     "Kasir (POS)"; layar kasir mulai langsung dari baris pertama seperti
