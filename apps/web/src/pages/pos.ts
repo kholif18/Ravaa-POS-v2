@@ -1211,18 +1211,23 @@ function cartHtml(): string {
             : '<span class="ml-auto text-xs text-gray-500 dark:text-gray-400">Isi nominal + admin (saran otomatis per tier toko), lalu Bayar (F10) — uang diterima di form bayar</span>'}
         </div>
       </div>`;
-  // Ketiga mode memakai pembungkus yang sama: flex column setinggi halaman
-  // (h-full dari main.page -> flex-1), supaya panel di bawahnya jadi
-  // `flex-1 min-h-0` dan benar-benar mengisi layar, bukan tinggi isi konten.
-  // Urut = referensi KulaPOS (kula-02-transaksi-pos.png): INFO BAR (Waktu/
-  // Kasir/Pelanggan/Total) dulu, baru scan bar — kebalikan dari susunan lama.
-  const body = mode === 'jual' ? cartGridHtml() : topupHtml();
+  // Layout 2 kolom: info bar tetap penuh di atas; di bawahnya grid
+  // [kiri 1fr | sidebar 320px]. Kolom KIRI = scan bar + strip + isi mode
+  // (keranjang / form topup), kolom KANAN = sidebar bayar setinggi penuh
+  // (memotong scan bar — lebar scan = lebar keranjang).
+  const isiKiri = mode === 'jual' ? cartKiriHtml() : topupKiriHtml();
+  const strips = mode === 'jual' ? stripStokMenipis() + stripKadaluarsa() : '';
   return `
   <div class="flex h-full min-h-0 flex-col gap-2">
     ${infoBarHtml()}
-    ${scanBar}
-    ${mode === 'jual' ? stripStokMenipis() + stripKadaluarsa() : ''}
-    ${body}
+    <div class="${gridUtamaCls()}">
+      <div class="flex min-h-0 flex-col gap-2">
+        ${scanBar}
+        ${strips}
+        ${isiKiri}
+      </div>
+      ${sidebarBayarHtml()}
+    </div>
   </div>`;
 }
 
@@ -1232,7 +1237,7 @@ function cartHtml(): string {
  *  layout, yang berbeda hanya keranjang belanja"). */
 function cartKiriHtml(): string {
   return `
-      <div class="card-flush flex min-h-0 flex-col overflow-hidden">
+      <div class="card-flush flex min-h-0 flex-1 flex-col overflow-hidden">
         <!-- Label keranjang di ATAS tabel (referensi KulaPOS: "Keranjang 2 item
              ... Bersihkan [F5]" kanan-atas). -->
         <div class="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -1377,13 +1382,6 @@ function sidebarBayarHtml(): string {
           <p class="text-center text-xs text-gray-500 dark:text-gray-400">${kbd('F10')} form bayar · ${kbd('F12')} bayar pas</p>
         </div>
       </div>`;
-}
-
-/** Keranjang + panel bayar (mode Penjualan) — pembungkus grid dua kolom yang
- *  SAMA dengan area topup/tarik (lihat topupHtml): kiri = isi mode, kanan =
- *  sidebarBayarHtml() identik untuk semua mode. */
-function cartGridHtml(): string {
-  return `<div class="${gridUtamaCls()}">${cartKiriHtml()}${sidebarBayarHtml()}</div>`;
 }
 
 /* ---------- form bayar (modal) ---------- */
@@ -1822,11 +1820,12 @@ function jenisKode(): string {
   return jenisAktif().key.toUpperCase();
 }
 
-function topupHtml(): string {
+/** Kartu KIRI mode Topup/Tarik (form layanan). Dipasang di kolom kiri
+ *  bersama scan bar — pasangannya cartKiriHtml() di mode jual. */
+function topupKiriHtml(): string {
   const j = jenisAktif();
   return `
-  <div class="${gridUtamaCls()}">
-    <div class="card min-h-0 space-y-3 overflow-y-auto !p-3">
+    <div class="card min-h-0 flex-1 space-y-3 overflow-y-auto !p-3">
       <div>
         <span class="label">Jenis layanan</span>
         <div class="grid grid-cols-2 gap-2" id="tp-jenis">
@@ -1876,10 +1875,7 @@ function topupHtml(): string {
       </div>
       <p class="text-xs text-gray-500 dark:text-gray-400">Nominal adalah saldo yang diterima pelanggan, bukan omzet toko. Omzet toko dari layanan ini adalah biaya admin.</p>
       <p class="text-xs text-gray-500 dark:text-gray-400">Selesai isi — tekan ${kbd('Enter')} atau tombol ${kbd('F10')} Bayar: metode & uang diterima diisi di form bayar (sama dengan mode Penjualan).</p>
-    </div>
-
-    ${sidebarBayarHtml()}
-  </div>`;
+    </div>`;
 }
 
 /** Label jenis topup untuk tampilan/struk: ambil dari TOPUP_JENIS (satu
@@ -1939,7 +1935,7 @@ function cartRows(): string {
       // "input untuk catatan ini misal di kurangi panjangnya selebar No -
       // Nama Barang saja" — dulu colspan=8 membentang penuh No..Aksi).
       // td TANPA class `.td` — padding kiri/kanan
-      // (12px) datang dari `.table-compact td` (table-compact di cartGridHtml);
+      // (12px) datang dari `.table-compact td` (table-compact di cartKiriHtml);
       // tanpa itu preflight membuatnya 0px dan input menempel tepi.
       // Disimpan live lewat event `input` (tanpa paintCart, supaya fokus tidak
       // pindah saat kasir mengetik).
