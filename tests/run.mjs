@@ -63,7 +63,7 @@ const SUITE = [
   ['pos-qtykode-test.mjs', 26],
   ['e2e-topup-keranjang.mjs', 61],
   ['kategori-expiry-test.mjs', 14],
-  ['history-test.mjs', 26],
+  ['history-test.mjs', 27],
   ['laporan-test.mjs', 16],
   ['dashboard-test.mjs', 19],
   ['shift-test.mjs', 23],

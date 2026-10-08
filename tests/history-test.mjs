@@ -97,6 +97,12 @@ try {
     JSON.stringify(tb));
   ok('total = nominal + admin (aturan §domain topup)',
     tb === null || tb.total === tb.nominal + tb.admin, JSON.stringify(tb));
+  // sale_id (Opsi B hybrid): kolom lembut ke sales.id — boleh null (topup
+  // mandiri) tapi KALAU terisi harus string (uuid sale). Tidak divalidasi FK
+  // di server (baris topup ditulis sebelum sale tercipta).
+  ok('baris topup memuat sale_id (string atau null)',
+    tb === null || tb.sale_id === null || typeof tb.sale_id === 'string',
+    JSON.stringify(tb?.sale_id));
   const t0 = await ambil('/api/topups?date=2000-01-01');
   ok('tanggal tanpa transaksi (topup) -> [] dan total 0',
     t0.status === 200 && t0.body.data.length === 0 && t0.body.total === 0);
@@ -127,9 +133,19 @@ try {
     const menu = await page.locator('a[href="#/history"]').count();
     ok('menu sidebar "Riwayat transaksi" ada', menu === 1, `jumlah=${menu}`);
     const nBaris = await page.locator('#page tbody tr[data-trx]').count();
-    const harap = Math.min(dflt.body.total, 200) + Math.min(tp.body.total, 200);
-    ok(`baris linimasa = penjualan + topup hari ini (${harap})`, nBaris === harap,
-      `ada=${nBaris} harap=${harap}`);
+    // Ambil ulang data SEKARANG (bukan snapshot dflt/tp di atas — beberapa
+    // suite lain menulis DB terus-menerus, jadi angka lama bisa basi). Topup/
+    // tarik yang dibayar BERSAMA sebuah nota (sale_id cocok dengan salah satu
+    // sale hari ini) dirender sebagai SUB-BARIS di bawah induknya (pola
+    // note-di-bawah-produk), jadi TIDAK punya tr[data-trx] sendiri. Hanya
+    // topup mandiri (sale_id null / yatim) jadi baris linimasa sendiri.
+    const segarS = (await ambil(`/api/sales?date=${hariIni()}&limit=200`)).body;
+    const segarT = (await ambil(`/api/topups?date=${hariIni()}&limit=200`)).body;
+    const saleIds = new Set(segarS.data.map((r) => r.id));
+    const mandiri = segarT.data.filter((r) => !r.sale_id || !saleIds.has(r.sale_id)).length;
+    const harap = Math.min(segarS.total, 200) + Math.min(mandiri, 200);
+    ok(`baris linimasa = penjualan + topup mandiri (${harap})`, nBaris === harap,
+      `ada=${nBaris} harap=${harap} (topup=${segarT.total} mandiri=${mandiri})`);
     const ringkas = (await page.locator('#h-body .card .chip').allInnerTexts()).join(' ');
     ok('ringkasan seangka laporan (n penjualan & omzet)',
       ringkas.includes(`${rep.sales.n} penjualan`) && ringkas.includes('omzet'), ringkas);

@@ -176,8 +176,12 @@ export interface StrukItem {
    *  berubah). */
   note?: string;
 }
-/** Satu baris rincian: kiri label, kanan angka. `tebal` untuk TOTAL. */
-export interface StrukBaris { kiri: string; kanan: string; tebal?: boolean }
+/** Satu baris rincian: kiri label, kanan angka. `tebal` untuk TOTAL.
+ *  `besar` = baris ini dicetak DOUBLE-HEIGHT (GS ! 0x01) rata tengah
+ *  selebar kolom — bukan dua-kolom. Dipakai baris Nomor Token PLN supaya
+ *  angka ±20 digit terbaca penuh & besar (dua-kolom memotongnya ke
+ *  KOL_UANG=14). Lihat barisBesar() di struk()/strukA4(). */
+export interface StrukBaris { kiri: string; kanan: string; tebal?: boolean; besar?: boolean }
 
 export interface Struk {
   /** Nama toko (baris paling atas, tebal, rata tengah). */
@@ -243,6 +247,16 @@ export function struk(s: Struk): number[] {
   out.push(...teks(garis()), ...LF);
 
   for (const b of s.baris) {
+    // Baris `besar` (Nomor Token PLN): GS ! 0x01 = tinggi 2x lebar 1x, rata
+    // tengah, tebal — angka ±20 digit terbaca penuh (dua-kolom memotongnya ke
+    // KOL_UANG=14). Dibungkus SIZE(1,2)...SIZE(1,1) supaya baris sesudahnya
+    // kembali normal.
+    if (b.besar) {
+      out.push(...SIZE(1, 2), ...BOLD(true), ...ALIGN(1));
+      baris(tengah(potong(`${b.kiri} ${b.kanan}`.trim(), COLS)));
+      out.push(...ALIGN(0), ...BOLD(false), ...SIZE(1, 1));
+      continue;
+    }
     out.push(...BOLD(!!b.tebal));
     baris(duaKiriKanan(b.kiri, b.kanan));
     out.push(...BOLD(false));
@@ -300,6 +314,15 @@ export function strukA4(s: Struk): number[] {
   out.push(...teks(garisA4()), ...LF);
 
   for (const b of s.baris) {
+    // Baris `besar` (Nomor Token PLN) versi A4 — aturan sama dengan thermal:
+    // GS ! 0x01 tinggi 2x, rata tengah, tebal. Pemilik memilih double-height
+    // (bukan dobel lebar) untuk A4 juga.
+    if (b.besar) {
+      out.push(...SIZE(1, 2), ...BOLD(true), ...ALIGN(1));
+      baris(tengah(potong(`${b.kiri} ${b.kanan}`.trim(), COLS_A4), COLS_A4));
+      out.push(...ALIGN(0), ...BOLD(false), ...SIZE(1, 1));
+      continue;
+    }
     out.push(...BOLD(!!b.tebal));
     baris(duaKiriKananA4(b.kiri, b.kanan));
     out.push(...BOLD(false));

@@ -27,14 +27,24 @@
   --text-2xl: 1.25rem; /* 20px — hanya untuk aksen langka (mis. total besar bila dipakai) */
   --text-3xl: 1.5rem; /* 24px */
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --color-primary: #0087ff;
-  --color-primary-hover: #0070dd;
-  --color-primary-soft: #e6f3ff;
-  --color-canvas: #f4f6fa;
-  --color-sidebar: #101828;
-  --color-sidebar-hover: #1d2939;
-  --color-sidebar-active: #344054;
-  --color-sidebar-text: #98a2b3;
+  /* ---------- Palet restyle 2026-10-08 (arahan pemilik: "style lebih
+     modern, warna lebih hidup seperti KulaPOS") ----------
+     Biru primer diperdalam #0087ff -> #1d6df0: kontras teks putih 13px naik
+     dari ~3.1:1 (GAGAL AA) ke ~4.7:1 (lolos AA) — tombol biru kini sah
+     WCAG, dan tampilannya lebih "matang" tanpa kehilangan karakter biru
+     terang. Canvas/sedikit didinginkan, sidebar dinavy-kan, dan dua token
+     bayangan BARU ditambahkan supaya permukaan berlapis, bukan datar:
+     `shadow-card` (istirahat) vs `shadow-pop` (dropdown/melayang). */
+  --color-primary: #1d6df0;
+  --color-primary-hover: #1757c8;
+  --color-primary-soft: #e9f1ff;
+  --color-canvas: #f2f5fa;
+  --color-sidebar: #0b1220;
+  --color-sidebar-hover: #16213a;
+  --color-sidebar-active: #1d4ed8;
+  --color-sidebar-text: #93a3bd;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 12px 28px -18px rgb(15 23 42 / 0.22);
+  --shadow-pop: 0 2px 6px rgb(15 23 42 / 0.06), 0 18px 40px -22px rgb(15 23 42 / 0.3);
 }
 
 @font-face {
@@ -67,7 +77,11 @@
   }
   .sidebar {
     @apply fixed inset-y-0 left-0 z-50 flex w-64 -translate-x-full flex-col border-r border-transparent bg-sidebar text-sidebar-text transition-[width,transform] duration-300 ease-out lg:translate-x-0 dark:border-gray-700;
-    /* Dark mode: sidebar #101828 vs halaman #111827 nyaris sama -> butuh garis
+    /* Lapisan gradien halus (restyle 2026-10-08): sidebar polos satu warna
+       terasa "template" — gradasi navy atas->bawah memberi kedalaman tanpa
+       menambah warna baru di luar token (bg-sidebar tetap dasar/fallback). */
+    background-image: linear-gradient(180deg, var(--color-sidebar) 0%, #131d33 100%);
+    /* Dark mode #101828 vs halaman #111827 nyaris sama -> butuh garis
        pembatas. Di light mode border transparan (kontrasnya sudah jelas).
        border-box (preflight) membuat garis masuk ke dalam w-64, jadi
        lg:ml-64 di .main-col tetap pas tanpa menggeser layout. */
@@ -130,7 +144,7 @@
     @apply size-11 text-sm;
   }
   .user-dd {
-    @apply absolute right-0 top-full z-50 mt-2 w-60 origin-top-right rounded-2xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-800;
+    @apply absolute right-0 top-full z-50 mt-2 w-60 origin-top-right rounded-2xl border border-gray-200 bg-white p-1.5 shadow-pop dark:border-gray-700 dark:bg-gray-800;
   }
   .user-dd[hidden] {
     display: none;
@@ -183,8 +197,11 @@
   .nav-link {
     @apply mb-0.5 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors hover:bg-sidebar-hover hover:text-white;
   }
+  /* Item aktif = PIL BIRU pekat + glow halus (restyle 2026-10-08) — dulu
+     abu solid `bg-sidebar-active` yang nyaris tak terbedakan dari hover.
+     `shadow-primary/25` = cahaya senada, bukan bayangan hitam. */
   .nav-link.is-active {
-    @apply bg-sidebar-active text-white;
+    @apply bg-primary text-white shadow-md shadow-primary/30;
   }
   .nav-link svg {
     @apply size-4 shrink-0;
@@ -212,8 +229,11 @@
        !py-3 (±44px), #pos-bayar side panel !py-3.5, dan sejak putaran 10b
        footer modal bayar (#pos-pay + Batal) !min-h-[68px] !px-8
        !text-[24px] (dipasang di bukaBayar — modal lain tetap 34px).
-       Jangan ubah min-h di sini tanpa memeriksa keduanya. */
-    @apply inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold transition;
+       Jangan ubah min-h di sini tanpa memeriksa keduanya.
+       Restyle 2026-10-08: radius 8 -> 10px (sepadan dengan input) +
+       focus-visible ring supaya navigasi keyboard terlihat (setiap elemen
+       interaktif wajib hover + focus-visible). */
+    @apply inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1.5 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none;
   }
   .btn svg {
     @apply size-4;
@@ -226,11 +246,19 @@
     transform: scale(0.97);
     transition-duration: 90ms;
   }
+  /* Tombol primer: bayangan TINTED senada (bukan hitam) + hover naik 1px —
+     restyle 2026-10-08. `.transition` pada .btn sudah mencakup box-shadow &
+     transform jadi tidak perlu transisi tambahan. */
   .btn-primary {
-    @apply bg-primary text-white hover:bg-primary-hover;
+    @apply bg-primary text-white shadow-md shadow-primary/30 hover:-translate-y-px hover:bg-primary-hover hover:shadow-lg hover:shadow-primary/35;
   }
+  /* Tombol sekunder = "soft pill" abu (gaya KulaPOS/modern): dulu abu polos
+     ber-border 1px yang terasa seperti tabel. `border-transparent` 1px
+     SENGAJA dipertahankan supaya tinggi kotak IDENTIK dengan varian lain
+     (lihat catatan .btn.is-on — tanpa border setara tombol akan melompat
+     2px tiap ganti filter). */
   .btn-ghost {
-    @apply border border-gray-200 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700;
+    @apply border border-transparent bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 dark:bg-gray-700/60 dark:text-gray-200 dark:hover:bg-gray-700;
   }
   /* .btn-outline & .btn-sm (definisi BARU 2026-10-05, putaran 8b): dua class
      ini sudah lama DIPAKAI di halaman Sistem (kartu Backup: "#set-backup" +
@@ -252,14 +280,20 @@
   .btn.is-on {
     @apply border-primary bg-primary-soft text-primary dark:border-primary dark:bg-primary/15 dark:text-primary;
   }
+  /* Kartu = permukaan ISTIRAHAT aplikasi: garis tipis + `shadow-card`
+     (token baru restyle 2026-10-08 — lapis 2: sentuhan 1px + kabut lebar)
+     supaya kartu terangkat dari canvas, bukan sejajar datar. border/70
+     dipertahankan tipis karena beberapa kartu rapat bersebelahan (POS). */
   .card {
-    @apply rounded-2xl border border-gray-200 bg-white p-3 shadow-xs dark:border-gray-700 dark:bg-gray-800;
+    @apply rounded-2xl border border-gray-200/70 bg-white p-3 shadow-card dark:border-gray-700/70 dark:bg-gray-800;
   }
   .chip {
     /* py-1 (±26px), BUKAN py-0.5: chip dipakai sebagai TOMBOL di POS (metode
        bayar + nominal cepat), jadi tetap butuh badan yang bisa disentuh —
-       yang dikecilkan adalah teksnya (text-xs = 11px), bukan tingginya. */
-    @apply inline-flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300;
+       yang dikecilkan adalah teksnya (text-xs = 11px), bukan tingginya.
+       Restyle 2026-10-08: latar putih + hover hidup (chip non-klik statis
+       tetap aman — hover tidak merusak makna). */
+    @apply inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-600 transition hover:border-gray-300 hover:text-gray-900 dark:border-gray-700 dark:bg-transparent dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-white;
   }
   /* Ikon di dalam chip harus DIPEGANG ukurannya: `icon()` sengaja tidak
      menulis width/height (diatur CSS wadah — lihat komentar .strip-low svg),
@@ -371,11 +405,24 @@
   color: #fafafa;
 }
 
+/* Restyle 2026-10-08 — aksen teks primer DI DARK MODE. Token
+   `--color-primary` (#1d6df0) dipilih agar teks putih di atasnya lolos AA
+   di mode terang (4.7:1), tetapi sebagai TEKS di atas kartu gelap ia hanya
+   ±3.7:1. Mengganti token di scope dark tidak bisa menolong: bg-primary ikut
+   berubah sehingga putih-di-atas-biru jatuh ke 3.0:1. Solusinya menerangi
+   kelas `.text-primary` khusus dark (±6.9:1 di atas gray-800). Aturan ini
+   SENGAJA di luar @layer — unlayered menang atas @layer utilities. */
+[data-theme="dark"] .text-primary,
+[data-theme="dark"] .dark\:text-primary,
+[data-theme="dark"] .hover\:text-primary:hover {
+  color: #6aa5ff;
+}
+
 .swal2-container .sw-actions {
   @apply flex flex-row flex-wrap items-center justify-center gap-3;
 }
 .swal2-container .sw-btn {
-  @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2 text-sm font-semibold transition;
+  @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-[10px] border border-transparent px-4 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none;
 }
 /* Umpan balik tekan — sama dengan .btn:active, supaya rasanya seragam. */
 .swal2-container .sw-btn:active:not(:disabled) {
@@ -383,7 +430,7 @@
   transition-duration: 90ms;
 }
 .swal2-container .sw-btn-primary {
-  @apply bg-primary text-white hover:bg-primary-hover;
+  @apply bg-primary text-white shadow-md shadow-primary/30 hover:bg-primary-hover hover:shadow-lg hover:shadow-primary/35;
 }
 .swal2-container .sw-btn-danger {
   @apply bg-red-600 text-white hover:bg-red-700;
@@ -404,7 +451,7 @@
 /* ---------- Komponen tabel, form, modal, toast (halaman data) ---------- */
 @layer components {
   .card-flush {
-    @apply overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xs dark:border-gray-700 dark:bg-gray-800;
+    @apply overflow-hidden rounded-2xl border border-gray-200/70 bg-white shadow-card dark:border-gray-700/70 dark:bg-gray-800;
   }
   /* `relative` (audit compact 2026-10-04): elemen absolute di dalam tabel
      (mis. `.sr-only` di th kolom Rincian di Riwayat) punya containing block
@@ -572,8 +619,12 @@
   }
   .input {
     /* py-2.5 -> py-2 -> py-1.5: tinggi 42 -> 38 -> ±34px, sebaris dengan .btn
-       super-compact (2026-10-04). px-3 -> px-2.5. */
-    @apply w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/25 dark:border-gray-600 dark:bg-gray-900 dark:text-white;
+       super-compact (2026-10-04). px-3 -> px-2.5.
+       Restyle 2026-10-08: radius 10px (sepadan .btn), border lebih tipis
+       `gray-200` + hover `gray-300` (kotak isian tak lagi "tebal" saat
+       idle), dan focus ring 4px lebih lembut `primary/15` alih-alih
+       ring-2/25 yang terasa seperti garis kotak. */
+    @apply w-full rounded-[10px] border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 hover:border-gray-300 focus:border-primary focus:ring-4 focus:ring-primary/15 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:hover:border-gray-500;
   }
   .input-sm {
     /* py-1.25 (±31px): varian lebih pendek dari .input (33px) untuk toolbar
@@ -594,7 +645,7 @@
   /* Dropdown hasil pencarian (POS). Dipakai juga halaman lain yang butuh
      autocomplete: di dalam .search-wrap, jadi px-9 biar sejajar dengan input. */
   .suggest {
-    @apply absolute top-full right-0 left-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800;
+    @apply absolute top-full right-0 left-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-pop dark:border-gray-700 dark:bg-gray-800;
   }
   .suggest-item {
     @apply flex w-full cursor-pointer items-center gap-2 px-2.5 py-1 text-left transition;
@@ -678,7 +729,7 @@
   }
   .row-dd {
     position: fixed;
-    @apply z-50 w-52 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-800;
+    @apply z-50 w-52 rounded-xl border border-gray-200 bg-white p-1.5 shadow-pop dark:border-gray-700 dark:bg-gray-800;
   }
   .row-dd[hidden] {
     display: none;
@@ -779,7 +830,7 @@
      `overflow-hidden` + flex kolom di .modal adalah kuncinya; tanpa itu header
      dan footer ikut menyusut/bergeser mengikuti isi. */
   .modal {
-    @apply flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-gray-800;
+    @apply flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-pop dark:bg-gray-800;
   }
   /* Form produk butuh 3 kolom (modal / markup / harga). Selector digabung supaya
      spesifikitasnya Pasti mengalahkan .modal, bukan mengandalkan urutan CSS. */

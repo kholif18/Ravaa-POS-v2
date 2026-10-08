@@ -49,6 +49,10 @@ type TopupRow = {
   id: string; shift_id: number | null; created_at: string; kind: 'topup' | 'tarik';
   provider: string; nomor: string; token?: string; nominal: number; admin: number; total: number;
   pay_method: string; cashier: string;
+  /** id nota penjualan induk (Opsi B hybrid, 2026-10-08) — di-stamp client saat
+   *  bayar bersama produk. NULL / tanpa nota yang cocok = topup/tarik mandiri
+   *  (tampil baris sendiri di linimasa). */
+  sale_id?: string | null;
 };
 
 type ItemRow = {
@@ -68,13 +72,16 @@ type Ringkas = {
   topup: { kind: string; n: number; nominal: number; admin: number }[];
 };
 
-/** Baris linimasa hasil gabungan dua sumber (satu hari, maks 200 per sumber). */
+/** Baris linimasa hasil gabungan dua sumber (satu hari, maks 200 per sumber).
+ *  `sub` = baris topup/tarik yang dibayar BERSAMA nota ini (Opsi B hybrid) —
+ *  dirender sebagai sub-baris di bawah baris induk, pola note-di-bawah-produk. */
 type Baris = {
   key: string;                 // 'sale:<id>' | 'topup:<id>'
   created_at: string;
   jenis: 'penjualan' | 'topup' | 'tarik';
   s?: SaleRow;
   t?: TopupRow;
+  sub?: TopupRow[];
 };
 
 /* ---------- state ---------- */
@@ -186,9 +193,28 @@ function badge(jenis: Baris['jenis']): string {
 }
 
 function baris(): Baris[] {
-  const s: Baris[] = state.sales.map((x) => ({ key: `sale:${x.id}`, created_at: x.created_at, jenis: 'penjualan' as const, s: x }));
-  const t: Baris[] = state.topups.map((x) => ({
-    key: `topup:${x.id}`, created_at: x.created_at, jenis: x.kind === 'tarik' ? 'tarik' as const : 'topup' as const, t: x,
+  // Kelompokkan topup/tarik yang punya `sale_id` cocok dengan sebuah nota hari
+  // ini (Opsi B hybrid) — jadi sub-baris di bawah induknya, pola note-di-bawah-
+  // produk. Topup mandiri (sale_id null) atau yatim (sale_id tak ada induknya)
+  // tetap jadi baris linimasa sendiri.
+  const saleIds = new Set(state.sales.map((x) => x.id));
+  const subMap = new Map<string, TopupRow[]>();
+  const t: Baris[] = [];
+  for (const x of state.topups) {
+    if (x.sale_id && saleIds.has(x.sale_id)) {
+      const arr = subMap.get(x.sale_id) ?? [];
+      arr.push(x);
+      subMap.set(x.sale_id, arr);
+    } else {
+      t.push({
+        key: `topup:${x.id}`, created_at: x.created_at,
+        jenis: x.kind === 'tarik' ? 'tarik' as const : 'topup' as const, t: x,
+      });
+    }
+  }
+  const s: Baris[] = state.sales.map((x) => ({
+    key: `sale:${x.id}`, created_at: x.created_at, jenis: 'penjualan' as const, s: x,
+    ...(subMap.has(x.id) ? { sub: subMap.get(x.id) } : {}),
   }));
   // Kriteria sama dengan kedua endpoint: waktu terbaru dulu; saat detiknya sama
   // (banyak nota tercipta dalam satu detik) penjualan didahulukan supaya urutan
@@ -300,6 +326,35 @@ function detailTopup(t: TopupRow): string {
   </div>`;
 }
 
+/** Sub-baris topup/tarik yang dibayar bersama nota induk (Opsi B hybrid) —
+ *  pola note-di-bawah-produk di keranjang POS. TANPA `data-trx` (klik tidak
+ *  membuka/menutup baris induk). Angka kanan = kontribusi baris ke TOTAL yang
+ *  dibayar (topup: nominal+admin; tarik: admin saja — nominal uang keluar). */
+function subRowHtml(t: TopupRow): string {
+  const tarik = t.kind === 'tarik';
+  const badgeSub = tarik
+    ? `<span class="mr-1.5 rounded bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">Tarik</span>`
+    : `<span class="mr-1.5 rounded bg-emerald-50 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Topup</span>`;
+  const detail = [t.nomor, t.token ? `token ${t.token}` : ''].filter(Boolean).join(' · ');
+  return `
+      <tr class="topup-subrow">
+        <td class="td !py-1.5"></td>
+        <td class="td !py-1.5"></td>
+        <td class="td !py-1.5">
+          <div class="flex items-center justify-between gap-3 pl-6">
+            <div class="min-w-0">
+              <div class="text-sm text-gray-800 dark:text-gray-200">${badgeSub}${esc(layanan(t.provider))}${detail ? ` <span class="cell-sub">${esc(detail)}</span>` : ''}</div>
+              ${tarik ? '' : t.admin ? `<div class="cell-sub">admin ${rp(t.admin)} — topup, bukan stok</div>` : ''}
+            </div>
+            <span class="shrink-0 font-semibold tabular-nums text-gray-900 dark:text-white">${rp(tarik ? t.admin : t.nominal + t.admin)}</span>
+          </div>
+        </td>
+        <td class="td !py-1.5"></td>
+        <td class="td !py-1.5"></td>
+        <td class="td !py-1.5"></td>
+      </tr>`;
+}
+
 function renderTabel(): string {
   if (state.loading) {
     return `<div class="space-y-2">
@@ -329,22 +384,28 @@ function renderTabel(): string {
     .map((b) => {
       const terbuka = state.buka === b.key;
       const waktuCell = b.s ? jam(b.s.created_at) : jam(b.t!.created_at);
+      const total = b.s ? b.s.total : b.t!.total;
+      const metodeCell = b.s ? metode(b.s.pay_method) : metode(b.t!.pay_method);
+      // Hitung layanan yang dibayar bersama nota ini — ditandai di baris induk
+      // lewat sub-teks (bukan di kolom Total, yang = omzet penjualan saja).
+      const nSub = b.sub?.length ?? 0;
       const keterangan = b.s
         // Nota memakai nomor invoice (YYMMDD-NNNNNN) — id uuid hanya fallback
         // untuk baris lama tanpa nomor (revisi pemilik 2026-10-04).
         ? `<div class="cell-strong">${b.s.n_items} item · Nota ${esc(b.s.invoice_no ?? b.s.id.slice(0, 8))}</div>
-           <div class="cell-sub">Kasir ${esc(b.s.cashier)}${b.s.discount ? ` · diskon ${rp(b.s.discount)}` : ''}</div>`
+           <div class="cell-sub">Kasir ${esc(b.s.cashier)}${b.s.discount ? ` · diskon ${rp(b.s.discount)}` : ''}${
+             nSub ? ` · +${nSub} layanan` : ''
+           }</div>`
         : `<div class="cell-strong">${esc(layanan(b.t!.provider))}${b.t!.nomor ? ` · ${esc(b.t!.nomor)}` : ''}</div>
            <div class="cell-sub">Kasir ${esc(b.t!.cashier)}${
              b.t!.kind === 'topup' && b.t!.admin ? ` · admin ${rp(b.t!.admin)}` : ''
            }</div>`;
-      const total = b.s ? b.s.total : b.t!.total;
-      const metodeCell = b.s ? metode(b.s.pay_method) : metode(b.t!.pay_method);
       const isi = terbuka
         ? `<tr class="det-row"><td colspan="6" class="td !py-2">${
             b.s ? detailJual(b.s) : detailTopup(b.t!)
           }</td></tr>`
         : '';
+      const sub = (b.sub ?? []).map(subRowHtml).join('');
       return `
       <tr data-trx="${esc(b.key)}" class="cursor-pointer${terbuka ? ' bg-gray-50 dark:bg-gray-800/50' : ''}" aria-expanded="${terbuka}">
         <td class="td whitespace-nowrap tabular-nums">${esc(waktuCell)}</td>
@@ -354,6 +415,7 @@ function renderTabel(): string {
         <td class="td td-num font-semibold">${rp(total)}</td>
         <td class="td td-num"><span class="inline-flex ${terbuka ? 'rotate-180' : ''}">${icon('chevD')}</span></td>
       </tr>
+      ${sub}
       ${isi}`;
     })
     .join('');
@@ -390,7 +452,7 @@ function renderTabel(): string {
       state.totalSales + state.totalTopup > rows.length
         ? ` dari ${state.totalSales + state.totalTopup} transaksi hari itu`
         : ''
-    }. Klik baris untuk membuka rincian. Topup/tarik tidak masuk omzet — lihat halaman Laporan.
+    }. Klik baris untuk membuka rincian. Topup/tarik yang dibayar bersama nota tampil sebagai sub-barisnya; yang mandiri jadi baris sendiri. Topup/tarik tidak masuk omzet — lihat halaman Laporan.
   </p>`;
 }
 

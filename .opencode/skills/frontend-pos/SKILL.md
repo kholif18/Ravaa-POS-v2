@@ -12,12 +12,24 @@ panel topup/laporan, modal struk, atau styling apa pun.
 
 ## Design token (KUNCI — sistem vanilla ala shadcn/bag-ui, `styles.css` + `admin.css`)
 
-* Palet zinc (ganti total 2026-09-25, referensi bag-ui): bg `#fafafa`,
-  kartu `#fff`, garis `#e4e4e7`, teks `#18181b`, muted `#71717a`.
-  Primer biru `#2563eb` (aksen kasir, hover `#1d4ed8`), sukses `#16a34a`,
-  warning `#d97706`, danger `#dc2626`. Stok menipis: teks danger 11px semibold.
-  Dark `[data-theme="dark"]` (bg `#09090b`, kartu `#18181b`, garis `#27272a`).
-  Font `Inter` self-hosted (`public/fonts/`, offline).
+* Palet restyle **2026-10-08** (arahan pemilik *"style lebih modern, warna
+  lebih hidup seperti KulaPOS"* — daftar ini = nilai `@theme` `styles.css`
+  apa adanya; jangan menulis warna hex baru di template tanpa mengubah +
+  menyinkronkan token di sini): primer biru **`#1d6df0`** (dari `#0087ff` —
+  kontras putih 13px ~4.7:1 lolos AA, `#0087ff` lama hanya ~3.1:1 GAGAL),
+  hover **`#1757c8`**, primary-soft **`#e9f1ff`**, canvas **`#f2f5fa`**
+  (kartu putih `#fff`, garis `border-gray-200/70`), sidebar navy
+  **`#0b1220`** (gradien ke `#131d33`) + hover **`#16213a`** + aktif
+  **`#1d4ed8`** (pil biru solid ber-shadow) + teks **`#93a3bd`**, teks
+  `#18181b`/muted `#71717a` tidak berubah. Dua token bayangan BARU:
+  **`--shadow-card`** (kartu/tabel — `.card`, `.table-wrap`, `.modal`)
+  dan **`--shadow-pop`** (dropdown/toast/lapis melayang). Success
+  `#16a34a`, warning `#d97706`, danger `#dc2626` tidak berubah.
+  Dark `[data-theme="dark"]` (bg `#09090b`, kartu `#18181b`, garis
+  `#27272a`); **aksen teks primer di dark memakai override khusus**
+  `#6aa5ff` (di blok setelah swal — `--color-primary` #1d6df0 sebagai teks
+  di kartu gelap hanya ~3.7:1). Font `Inter` self-hosted (`public/fonts/`,
+  offline).
 * **Skala SUPER-COMPACT (permintaan pemilik "ala KulaPOS", 2026-10-04 — SEMUA
   halaman termasuk POS)**: seluruh tangga teks Tailwind diturunkan SATU tingkat
   di `@theme` `styles.css`: `--text-xs` **11px** (label, th tabel, badge, chip,

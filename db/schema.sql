@@ -176,7 +176,13 @@ CREATE TABLE IF NOT EXISTS topup_txns (
   admin       INTEGER NOT NULL DEFAULT 0, -- biaya admin (pendapatan)
   total       INTEGER NOT NULL,        -- nominal + admin (yang dibayar pelanggan)
   pay_method  TEXT NOT NULL DEFAULT 'tunai',
-  cashier     TEXT NOT NULL DEFAULT 'kasir'
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  -- Relasi LEMBUT ke sales.id (opsional): topup/tarik yang dibayar BERSAMA satu
+  -- nota penjualan (Opsi B hybrid, 2026-10-08) — di-stamp client sebelum POST
+  -- /api/sales. NULL = topup/tarik mandiri (tanpa nota produk). TANPA FK:
+  -- baris topup ditulis SEBELUM baris sales tercipta, jadi foreign key akan
+  -- gagal saat insert. Dipakai Riwayat mengelompokkan topup di bawah nota.
+  sale_id     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS stock_moves (

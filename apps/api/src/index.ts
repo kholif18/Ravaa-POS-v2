@@ -1370,15 +1370,20 @@ app.post('/api/topups', async (c) => {
     if (!body?.provider) return c.json({ error: 'provider wajib' }, 400);
     const nomor = String(body?.nomor ?? '');
     const token = String(body?.token ?? '');
+    // `sale_id` OPSIONAL (Opsi B hybrid, 2026-10-08): id nota penjualan yang
+    // dibayar BERSAMA topup/tarik ini. Client meng-stamp-nya sebelum POST
+    // /api/sales (id sale = uuid client, jadi sudah diketahui). NULL = topup/
+    // tarik mandiri. TANPA validasi FK — baris topup ditulis lebih dulu.
+    const saleId = body?.sale_id != null && body.sale_id !== '' ? String(body.sale_id) : null;
     const id = body.id ?? randomUUID();
     const dup = db.prepare('SELECT * FROM topup_txns WHERE id=?').get(id);
     if (dup) return c.json({ data: dup, duplicate: true });
     const total = nominal + admin; // yang dibayar pelanggan
     const row = db.prepare(
-      `INSERT INTO topup_txns (id, shift_id, kind, provider, nomor, token, nominal, admin, total, pay_method, cashier)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO topup_txns (id, shift_id, kind, provider, nomor, token, nominal, admin, total, pay_method, cashier, sale_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     ).get(id, body.shift_id ?? null, kind, String(body.provider).toUpperCase(), nomor, token,
-      nominal, admin, total, body.pay_method ?? 'tunai', body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir');
+      nominal, admin, total, body.pay_method ?? 'tunai', body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir', saleId);
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan topup' }, 400);

@@ -1179,7 +1179,7 @@ function infoBarHtml(): string {
                Shift); kula-07-pos-kasir.png taruh "Tutup Sesi Kas" di
                toolbar atas. -->
           <button type="button" id="pos-shift-tutup"
-            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-xs !text-red-600 !border-red-300 hover:!border-red-400 hover:!bg-red-50 dark:!border-red-500/50 dark:!text-red-400 dark:hover:!bg-red-500/10"
+            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-xs !bg-red-50 !border-transparent !text-red-600 hover:!bg-red-100 dark:!bg-red-500/10 dark:!text-red-400 dark:hover:!bg-red-500/20"
             title="Tutup shift kasir (hitung laci dulu)" aria-label="Tutup shift">
             ${icon('logout')}<span>Tutup shift</span>
           </button>
@@ -1221,7 +1221,7 @@ function infoBarHtml(): string {
                text-2xl lama (24px) — permintaan pemilik 2026-10-04 "custom
                ukuran font, besarkan lagi 2x lipat". Total belanja = angka
                terpenting di layar kasir. -->
-           <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums text-primary">${rp(totalBayar())}</div>
+           <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums tracking-tight text-primary">${rp(totalBayar())}</div>
         </div>
       </div>
     </div>`;
@@ -1814,7 +1814,7 @@ function barisStrukTopup(t: TopupLine): StrukBaris[] {
     { kiri: `${awal} ${j.ringkas}`, kanan: rp(t.nominal) },
     ...(t.admin > 0 ? [{ kiri: 'Biaya admin', kanan: rp(t.admin) }] : []),
     ...(t.nomor ? [{ kiri: j.nomorLabel, kanan: t.nomor }] : []),
-    ...(t.token ? [{ kiri: 'Token', kanan: t.token }] : []),
+    ...(t.token ? [{ kiri: 'Token', kanan: t.token, besar: true }] : []),
   ];
 }
 
@@ -3134,14 +3134,14 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
       <div>
         <div class="mb-1.5 text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Jenis topup</div>
         <div class="grid grid-cols-2 gap-2" id="ptk-jenis">
-          ${TOPUP_JENIS.map((j) => `<button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" data-ptk-jenis="${j.key}">${j.label}</button>`).join('')}
+          ${TOPUP_JENIS.map((j) => `<button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-sm" data-ptk-jenis="${j.key}">${j.label}</button>`).join('')}
         </div>
       </div>
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
       <div>
-        <div class="mb-1.5 text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tarik tunai (uang keluar)</div>
+        <div class="mb-1.5 text-center text-sm font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tarik tunai (uang keluar)</div>
         <div class="grid grid-cols-2 gap-2" id="ptk-jenis-tarik">
-          ${TARIK_JENIS.map((j) => `<button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-xs" data-ptk-jenis="${j.key}">${j.label}</button>`).join('')}
+          ${TARIK_JENIS.map((j) => `<button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-sm" data-ptk-jenis="${j.key}">${j.label}</button>`).join('')}
         </div>
       </div>
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
@@ -3168,7 +3168,7 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         <span id="ptk-total-label">Ditambah ke nota</span>
         <span id="ptk-total" class="shrink-0 tabular-nums">Rp0</span>
       </div>
-      <p class="text-center text-xs leading-snug text-gray-500 dark:text-gray-400">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
+      <p class="text-center text-sm leading-snug text-gray-500 dark:text-gray-400">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
     </div>`,
     onMount: (api) => {
       // Tombol footer = gaya TOMBOL SIDEBAR KANAN (Aksi cepat / Menu cepat:
@@ -3181,7 +3181,7 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
       // Footer modal bayar (#pos-pay 68px) TIDAK disentuh.
       const batalBtn = api.el.querySelector<HTMLElement>('.modal-footer [data-x]');
       for (const b of [api.ok, batalBtn]) {
-        b?.classList.add('!min-h-[32px]', '!px-2', '!py-1.5', 'text-xs');
+        b?.classList.add('!min-h-[32px]', '!px-2', '!py-1.5', 'text-sm');
       }
       api.ok.innerHTML = `${icon('check')}<span>Tambah</span>`;
       let jenis: TopupJenis = TOPUP_JENIS.some((j) => j.key === jenisAwal) || TARIK_JENIS.some((j) => j.key === jenisAwal)
@@ -3490,6 +3490,13 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     // keranjang/hold) sehingga menekan Bayar lagi setelah gagal mengirim id
     // yang sama — server membalas `duplicate:true` tanpa menggandakan
     // (idempotent, kontrak POST /api/topups).
+    // Relasi Riwayat (Opsi B, 2026-10-08): uuid nota di-generate SEKALI di
+    // sini, di-stamp sebagai `sale_id` ke tiap baris topup, lalu dipakai ulang
+    // sebagai `id` POST /api/sales di bawah — supaya Riwayat bisa
+    // mengelompokkan topup di bawah nota induknya (pola note di bawah produk).
+    // Kasih topup-saja (cart kosong) tetap menulis sale_id — tapi tidak ada
+    // baris sales yang cocok, jadi di Riwayat tetap tampil sendiri (aman).
+    const saleId = uuid();
     for (const t of cartTopup) {
       const keluar = isTarik(t);
       await apiPost<{ data: unknown; duplicate?: boolean }>('/api/topups', {
@@ -3503,6 +3510,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         pay_method: payMethod,
         shift_id: shift.id,
         cashier: getCashier(),
+        sale_id: saleId, // pengelompokan Riwayat — lihat catatan di atas
       });
     }
     // Snapshot SEBELUM apa pun direset — struk & modal resume tidak punya
@@ -3602,7 +3610,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
 
     tahap = 'penjualan';
     const res = await apiPost<{ data: { sale: { id: string; total: number; invoice_no?: string | null; customer_name?: string } ; duplicate: boolean } }>('/api/sales', {
-      id: uuid(),
+      id: saleId, // uuid yang sama di-stamp ke sale_id tiap baris topup di atas
       shift_id: shift.id,
       pay_method: payMethod,
       discount,
@@ -4248,16 +4256,8 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   // Pref cetak per device bisa saja diubah di panel Sistem sejak mount
   // terakhir — baca ulang supaya saklar scan bar & perilaku cetak ikut.
   autoPrint = getAutoPrint();
-  // Kasir tidak boleh bergantung pada halaman Manage: perangkat baru wajib punya
-  // cache produk. Tarik delta dari server (?since=maxVersion), lalu baca cache.
-  // Kalau gagal (offline) tetap jalan dengan cache terakhir.
-  try {
-    await syncMaster((since) => apiGet<{ data: Product[]; maxVersion: number }>(`/api/products?since=${since}`));
-  } catch {
-    /* offline: pakai cache yang ada */
-  }
-  products = await getCachedProducts();
-  if (!el.isConnected) return; // kasir sudah pindah halaman saat sinkron
+  // State yang TIDAK bergantung network — direset lebih awal supaya tidak
+  // ikut menunggu fetch (revisi 2026-10-08, lihat catatan Promise.all).
   results = [];
   // KERPERSISTEN (putaran 16, 2026-10-06 — permintaan pemilik: "produk yang
   // berada di keranjang jika kasir pindah ke halaman dashboard atau tidak
@@ -4273,17 +4273,53 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   if (!keranjangAda) discount = 0;
   cashIn = 0;
   busy = false;
-  await loadShift();
-  // Master pelanggan untuk info bar (revisi 2026-10-04). Gagal/ offline =
-  // daftar kosong -> select hanya placeholder, payload tanpa customer_id
-  // (client lama) tetap sah. Bawaan = "Pelanggan Umum".
+  // Jalankan SEMUA fetch independen SEKALIGUS (Promise.all) — critical path
+  // jadi maksimum antar-task, bukan JUMLAH seluruh roundtrip. Dulu mount
+  // berantai 3 request network serial (products → shifts/open → customers)
+  // + 2 baca IndexedDB sebelum paint() pertama; `renderPosShell()` hanya
+  // menghasilkan `<main id="page">` kosong, jadi layar POS blank selama
+  // rantai itu. Di localhost cepat (tiap request ~3–8 ms, total ~70 ms) tapi
+  // di device kasir asli (WiFi toko / ARM STB / HP) tiap roundtrip bisa
+  // 50–300 ms → 3 serial = 150–900 ms blank — pemilik 2026-10-08: "terasa
+  // lemot berpindah di halaman admin ke halaman POS". Dependency tetap
+  // aman: muatKeranjang() butuh `products`, validasi customerId butuh
+  // `customers` — keduanya baru dipakai SETELAH Promise.all.
+  // Kasir tidak boleh bergantung pada halaman Manage: perangkat baru wajib
+  // punya cache produk. Tarik delta dari server (?since=maxVersion), lalu
+  // baca cache. Kalau gagal (offline) tetap jalan dengan cache terakhir.
   customers = [];
-  try {
-    const r = await apiGet<{ data: Cust[] }>('/api/customers');
-    customers = r.data;
-  } catch {
-    customers = [];
-  }
+  await Promise.all([
+    (async () => {
+      try {
+        await syncMaster((since) => apiGet<{ data: Product[]; maxVersion: number }>(`/api/products?since=${since}`));
+      } catch {
+        /* offline: pakai cache yang ada */
+      }
+      products = await getCachedProducts();
+    })(),
+    loadShift(), // network; sudah catch sendiri -> shift=null saat gagal
+    (async () => {
+      // Master pelanggan untuk info bar (revisi 2026-10-04). Gagal/ offline =
+      // daftar kosong -> select hanya placeholder, payload tanpa customer_id
+      // (client lama) tetap sah. Bawaan = "Pelanggan Umum".
+      try {
+        const r = await apiGet<{ data: Cust[] }>('/api/customers');
+        customers = r.data;
+      } catch {
+        customers = [];
+      }
+    })(),
+    (async () => {
+      // Daftar transaksi tertahan (P5) dari IndexedDB per device. Gagal/IDB
+      // rusak = daftar kosong — fitur hold tetap bisa dipakai dari kosong.
+      try {
+        holds = await getHolds<Hold>();
+      } catch {
+        holds = [];
+      }
+    })(),
+  ]);
+  if (!el.isConnected) return; // kasir sudah pindah halaman saat sinkron
   if (!keranjangAda) muatKeranjang(); // localStorage kosong = no-op; terisi = ganti cart/discount/customerId
   // Pelanggan terpilih wajib ada di master terkini: id lama (kontak dihapus
   // sejak mount terakhir / kv lama) jatuh ke Pelanggan Umum — pola muatHold.
@@ -4292,14 +4328,6 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
     customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
   }
   if (cart.length) simpanKeranjang(); // sinkronkan localStorage dengan state tervalidasi di atas
-  // Daftar transaksi tertahan (P5) dari IndexedDB per device. Gagal/IDB
-  // rusak = daftar kosong — fitur hold tetap bisa dipakai dari kosong.
-  try {
-    holds = await getHolds<Hold>();
-  } catch {
-    holds = [];
-  }
-  if (!el.isConnected) return;
   bindPintasan(); // F2/Enter/Esc level document — didaftarkan sekali per mount
   mulaiJam();     // jam live info bar — dihentikan di unmountPosPage
   paint();

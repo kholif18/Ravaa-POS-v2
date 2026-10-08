@@ -1087,6 +1087,68 @@ pemilik (dari screenshot KulaPOS `kula-02-transaksi-pos.png`):
       bebas. Fix: **`heightAuto: false` di mixin `base` `ui/confirm.ts`**
       (satu-satunya pintu Swal repo). Verifikasi: y Bayar 744 = identik
       kondisi normal; **suite penuh 1011/1011 hijau**.
+- [x] **Restyle tema modern ala KulaPOS (arahan pemilik) — SELESAI
+      2026-10-08** — permintaan pemilik: *"paling tidak style-stylenya,
+      seperti bentuk card, teks, tombol buat proporsional lebih modern,
+      warna lebih hidup, seperti pada kula pos"*. Arah A (token+komponen)
+      dulu, tanpa mengubah layout/interaksi (skala teks super-compact,
+      tinggi `.btn` 34px / `.sw-btn` 40px, semua id POS tidak tersentuh
+      selain gaya `#pos-grand` + `tracking-tight` dan pil soft-red
+      `#pos-shift-tutup`). Yang berubah **hanya `styles.css`** (`@theme` +
+      `@layer components`) + 2 kelas di `pos.ts`: primer **#1d6df0**
+      (kontras putih 13px ~4.7:1 lolos AA — #0087ff lama ~3.1:1 GAGAL
+      WCAG), canvas #f2f5fa, sidebar navy #0b1220 gradien + nav aktif pil
+      biru #1d4ed8 ber-shadow, token bayangan BARU `--shadow-card`/
+      `--shadow-pop`, `.btn` radius 10 + focus ring + primary shadow/hover
+      terangkat, `.btn-ghost` soft pill, `.card`/`.chip`/`.input`/`.modal`
+      border halus + bayangan berlapis. Aksen teks primer dark = #6aa5ff
+      (override khusus — #1d6df0 di kartu gelap hanya ~3.7:1). Guard test
+      dipertahankan: `.sw-btn-danger` tetap solid merah (`satuan-test.mjs`),
+      skala teks & tinggi tombol tidak berubah. Verifikasi: screenshot
+      POS/modal bayar/dashboard/produk (Playwright) + **suite 1011/1011
+      hijau**. Daftar palet disinkronkan ke
+      `.opencode/skills/frontend-pos/SKILL.md` (aturan skill: dilarang
+      warna di luar token) + entri `styles.css` di peta file AGENTS.
+- [x] **Pindah admin → POS terasa lemot — FIX paralel mount 2026-10-08** —
+      laporan pemilik: *"terasa lemot berpindah di halaman admin ke halaman
+      POS"*. Akar masalah (bukan CSS/restyle — terukur probe Playwright):
+      `mountPosPage` menjalankan **3 roundtrip network SERIAL** (`products`
+      delta → `shifts/open` → `customers`) + 2 baca IndexedDB **sebelum**
+      `paint()` pertama; `renderPosShell()` hanya `<main id="page">` kosong,
+      jadi layar POS **blank** selama rantai itu. Di localhost tiap request
+      ~3–8 ms (total ~70 ms, tak terasa) tapi di device kasir asli (WiFi
+      toko / ARM STB / HP) tiap roundtrip 50–300 ms → **150–900 ms blank**.
+      Fix: keempat tugas independen (syncMaster+baca cache produk,
+      loadShift, customers, holds) dijalankan **`Promise.all`** — critical
+      path jadi maksimum antar-task, bukan jumlah; `muatKeranjang()` (butuh
+      `products`) & validasi `customerId` (butuh `customers`) tetap setelah
+      `Promise.all`. Simulasi latency 120 ms/request: **~180 ms** (=1×latency
+      + paint; masih serial akan ≥360 ms). Guard `!el.isConnected` dipertahankan.
+      **Suite 1011/1011 hijau.** Catatan di AGENTS §2 pos.ts (paragraf
+      "Mount paralel").
+- [x] **Riwayat: transaksi hibrida jadi 1 baris + token PLN struk double-height
+      — SELESAI 2026-10-08** — permintaan pemilik *"PR bisa 2 mode dalam 1
+      transaksi"* lanjutan tampilan. Dua bagian:
+      (a) **Riwayat gabung (relasi DB `sale_id`)** — pemilik memilih "ya b
+      relasi beneran" (bukan grouping heuristik). Kolom **`topup_txns.sale_id`
+      TEXT, tanpa FK** (ALTER in-place, backup `data.db.bak.sale-id` +
+      `PRAGMA wal_checkpoint(TRUNCATE)`): `pay()` men-generate `saleId` uuid
+      sekali, men-stamp ke tiap `POST /api/topups` DAN memakainya sebagai `id`
+      `POST /api/sales`. Halaman Riwayat (`history.ts`) mengelompokkan via
+      `Set` saleIds + `Map` subMap — topup/tarik dengan `sale_id` cocok jadi
+      **sub-baris di bawah induknya** (`subRowHtml()`, pola note-di-bawah-
+      produk; kolom Total baris utama = omzet penjualan saja, angka topup di
+      sub-barisnya + jejak `· +N layanan`); yang null/yatim tetap baris
+      mandiri. Tanpa FK disengaja (topup ditulis sebelum sale tercipta).
+      (b) **Token PLN muat utuh** — `StrukBaris.besar` flag → `GS ! 0x01`
+      (tinggi 2x, lebar 1x) + center + BOLD, full-width; berlaku struk
+      `thermal` (32 kolom) & `strukA4` (64 kolom). Memperbaiki bug nyata:
+      `duaKiriKanan` dulu memotong token ±20 digit ke kolom kanan 14 char.
+      Kontrak `POST /api/topups`/`GET /api/topups` kini memuat `sale_id?`
+      (opsional; null = mandiri). Update AGENTS §2/§3/§5 + `run.mjs`
+      history-test 26→27 (asesi baru: baris `sale_id` + row-count pakai
+      fetch segar — snapshot dflt/tp basi karena suite lain menulis DB).
+      **Suite 1012/1012 hijau.**
 - [ ] **Ganti satuan baris yang sudah ada di keranjang** (sisa gap analysis) —
       KulaPOS punya select Satuan di bar "Parameter Barang Aktif"; Ravaa
       memilih satuan saat menambah (key baris = `<id>:<unit>`), jadi ubah

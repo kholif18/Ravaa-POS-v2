@@ -43,7 +43,29 @@ apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id
                          + chip POS `a[data-notif-outbox]` di `#pos-notif`
                          (toggles `hidden` + teks `n transaksi antre offline`) —
                          supaya chip notif POS ikut hidup tiap antrean berubah
-                         tanpa menunggu repaint POS (revisi 2026-10-08).
+                          tanpa menunggu repaint POS (revisi 2026-10-08).
+apps/web/src/styles.css  SATU file token/gaya Tailwind v4 (`@theme` + `@layer
+                          components`) — seluruh halaman berbagi ini, tanpa
+                          CSS lain. **Restyle 2026-10-08** (arahan pemilik
+                          *"style lebih modern, warna lebih hidup seperti
+                          KulaPOS"* — kartu/teks/tombol proporsional):
+                          primer biru **#1d6df0** (dari #0087ff; kontras putih
+                          13px ~4.7:1 lolos AA — #0087ff lama hanya ~3.1:1
+                          GAGAL), hover #1757c8, primary-soft #e9f1ff, canvas
+                          #f2f5fa, sidebar navy #0b1220 (gradien ke #131d33)
+                          + nav aktif = pil biru #1d4ed8 ber-shadow; dua token
+                          bayangan BARU **--shadow-card** (kartu/tabel/modal)
+                          dan **--shadow-pop** (dropdown/toast/lapis melayang).
+                          `.btn` radius 10 + focus ring, `.btn-primary` shadow
+                          + hover terangkat, `.btn-ghost` soft pill,
+                          `.input` border halus + ring-primary 15% saat fokus,
+                          `.card`/`.chip`/`.modal` ikut bayangan berlapis.
+                          Aksen teks primer DI DARK = override khusus #6aa5ff
+                          (di blok setelah swal — #1d6df0 sebagai teks di kartu
+                          gelap hanya ~3.7:1). **Daftar palet ini = `@theme`
+                          apa adanya; sinkronkan `.opencode/skills/
+                          frontend-pos/SKILL.md` bila token berubah** (aturan
+                          skill: dilarang warna baru di luar token).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync)
                          + **kv `'holds'` transaksi tertahan POS** (`getHolds()`/
                          `saveHolds()` — per device, P5)
@@ -649,10 +671,31 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           M** (8 asersi, total 133): baseline kosong → isi
                           + reload → pulih (baris/total/diskon/toast) → nav
                           `#/dashboard`↔`#/pos` utuh → Bersihkan persisten;
-                          **section H/J kini `#pos-clear` dulu sebelum
-                          reload** (cart sengaja penuh di sana untuk uji sync
-                          master — tanpa clear, restore menggandakan qty dan
-                          barrier menolak dengan total membengkak).
+                           **section H/J kini `#pos-clear` dulu sebelum
+                           reload** (cart sengaja penuh di sana untuk uji sync
+                           master — tanpa clear, restore menggandakan qty dan
+                           barrier menolak dengan total membengkak).
+                           **Mount paralel (revisi 2026-10-08, "terasa lemot
+                           berpindah dari halaman admin ke POS")**:
+                           `mountPosPage` dulu menjalankan 3 roundtrip network
+                           **serial** (products → shifts/open → customers) + 2
+                           baca IndexedDB sebelum `paint()` pertama —
+                           `renderPosShell()` hanya `<main id="page">` kosong,
+                           jadi layar POS blank selama rantai itu. Di localhost
+                           cepat (~70 ms), tapi di device kasir asli (WiFi toko
+                           / ARM / HP) tiap roundtrip 50–300 ms → 150–900 ms
+                           blank. Kini keempat tugas itu (**syncMaster +
+                           baca cache produk, loadShift, customers, holds**)
+                           dijalankan `Promise.all` — critical path jadi
+                           **maksimum** antar-task, bukan jumlah. Dependency
+                           tetap aman: `muatKeranjang()` (butuh `products`) dan
+                           validasi `customerId` (butuh `customers`) dipanggil
+                           **setelah** `Promise.all`; state bebas-network
+                           (`results`, reset `discount`/`cashIn`/`busy`) di-reset
+                           di awal supaya tidak ikut menunggu fetch. Jangan
+                           mengembalikan ke berantai tanpa alasan kuat; kalau
+                           ada task baru yang butuh hasil task lain, tempatkan
+                           setelah `Promise.all`, jangan disisipkan di dalamnya.
                           **Opsi B hybrid — 2 mode dalam 1 transaksi (SELESAI
                           2026-10-07, permintaan pemilik *"PR bisa 2 mode
                           dalam 1 transaksi"* — contoh fotokopi + isi pulsa):**
@@ -765,10 +808,24 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          merah Hutang** + baris "Otomatis tercatat di halaman
                          Hutang — Nota …", dan **chip filter `#h-hutang`** di
                          kepala() menyaring linimasa jadi hanya baris
-                         berhutang (client-side lewat `state.hutangOnly`,
-                         tanpa reload — sengaja BUKAN elemen `[data-h]` yang
-                         ditangkap handler geser tanggal).
-apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
+                          berhutang (client-side lewat `state.hutangOnly`,
+                          tanpa reload — sengaja BUKAN elemen `[data-h]` yang
+                          ditangkap handler geser tanggal).
+                          **Transaksi hibrida jadi satu baris (2026-10-08,
+                          permintaan pemilik *"PR bisa 2 mode dalam 1
+                          transaksi"* — tampilan Riwayat)**: baris topup/tarik
+                          dengan `sale_id` cocok dengan salah satu sale hari
+                          itu dirender sebagai **sub-baris di bawah baris
+                          induknya** (`subRowHtml()`, pola catatan-note-di-
+                          bawah-produk; kolom Total baris utama = omzet
+                          penjualan saja, angka topup tampil di sub-barisnya
+                          sendiri + jejak `· +N layanan` di Keterangan). Yang
+                          `sale_id` null / yatim tetap baris linimasa mandiri
+                          seperti dulu. Kelompokkan via `Set` saleIds + `Map`
+                          subMap di `baris()`; `renderTabel()` sisipkan
+                          `<tr class="topup-subrow">` (tanpa `data-trx`) tepat
+                          setelah induknya.
+ apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
                           pemilik — 4 kartu (omzet/laba/HPP/diskon), rekap metode
                           bayar, topup & tarik, produk terlaris, stok menipis,
                           ekspor CSV. SELURUH angka dari GET /api/reports/daily
@@ -856,8 +913,23 @@ apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print
                          default :9100). Dipanggil dari halaman Label harga dan dari
                          pay()/submitTopup() POS. PENTING: `teks()` tidak
                          menambah baris baru — setiap baris struk HARUS diakhiri
-                          LF, kalau tidak seluruh struk menempel jadi satu baris.
-apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
+                         LF, kalau tidak seluruh struk menempel jadi satu baris.
+                         **Token PLN DOUBLE-HEIGHT (2026-10-08)**: `StrukBaris`
+                         punya flag opsional **`besar?: boolean`** — baris
+                         `besar` dirender `GS ! 0x01` (tinggi 2x, lebar 1x)
+                         + `ALIGN center` + BOLD, full-width rata tengah, lalu
+                         reset `ALIGN(0)`/`SIZE(1,1)` sebelum baris berikutnya.
+                         Dipakai **baris `Token`** di `barisStrukTopup()`
+                         (`pos.ts`) supaya nomor token ±20 digit MUAT UTUH
+                         (dulu `duaKiriKanan` memotongnya ke kolom kanan 14
+                         char = terpotong — bug nyata). Berlaku di struk
+                         `thermal` (32 kolom) DAN `strukA4` (64 kolom); baris
+                         `besar` di-`tengah()` ke lebar penuh masing-masing
+                         layout. `tests/escpos-test.ts` `teksDari` me-skip
+                         perintah GS (2 byte) sehingga byte SIZE tidak bocor
+                         ke asersi kolom; test struk lama tanpa baris `besar`
+                         tetap lolos.
+ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           `htmlInvoice(sale, items, toko, piutang?)` menyusun
                           HTML + CSS `@page A4 margin 16mm 14mm` (kop INVOICE +
                           nama/alamat/Phone/Email dari `store_*` + logo lingkaran
@@ -1447,7 +1519,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     ledger: `customer_debts` tidak punya FK/relasi ke `sales` (charge hanya
     di-note `Nota <invoice_no> — sisa bayar POS`).
   - Urutan `created_at DESC, rowid DESC` (yang terbaru di atas).
-* `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor?,token?,nominal>0,admin>=0,pay_method?,shift_id?,cashier?}`
+* `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor?,token?,nominal>0,admin>=0,pay_method?,shift_id?,cashier?,sale_id?}`
   - `provider` = **kode jenis layanan** (bukan brand). Nilai yang digunakan POS:
     `E-WALLET | PULSA | PLN-TOKEN | PLN-BILL` (kind=topup) dan `TARIK-EWALLET | TARIK-BANK` (kind=tarik).
     Kontrak API tidak berubah; kolom tetap TEXT non-kosong. Penambahan brand
@@ -1463,6 +1535,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     struk belanja** (baris `Token: <isi>`). Layanan lain mengirim `''`
     (default). `GET /api/topups` & `GET /api/sales`-style `SELECT *`
     otomatis mengembalikannya.
+  - **`sale_id` OPSIONAL (baru 2026-10-08, kolom `topup_txns.sale_id`)**:
+    relasi lembut dari baris topup ke `sales.id` nota yang menemaninya —
+    **dipakai halaman Riwayat** untuk menggabungkan transaksi hibrida jadi
+    SATU baris (topup/tarik yang punya `sale_id` cocok dirender sebagai
+    **sub-baris di bawah induknya**, pola note-di-bawah-produk; yang null /
+    yatim jadi baris linimasa sendiri). **Tanpa FK** (dibuat sengaja):
+    `pay()` mengirim topup DULU lalu sale, jadi saat INSERT topup baris
+    `sales` belum tentu ada. Client mengirim `null`/absen untuk topup mandiri
+    (dialog topup dari keranjang), atau uuid stabil yang sama dengan `id`
+    `POST /api/sales` berikutnya untuk hibrida. `GET /api/topups` ikut
+    mengembalikannya lewat `SELECT *`.
   - **Kontrak TIDAK berubah sejak Opsi B hybrid (2026-10-07, direvisi
     tarik 2026-10-08)**: POS juga memakai endpoint ini dari keranjang
     Penjualan — baris topup (`kind:'topup'`) maupun tarik (`kind:'tarik'`,
@@ -1478,6 +1561,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Baris memuat **`token`** (isi Nomor Token PLN; `''` untuk layanan lain).
     Riwayat menyembunyikan baris nomor bila `''` dan menampilkan baris
     `Token` pada rincian PLN token.
+  - Baris juga memuat **`sale_id`** (uuid sale yang menemani, atau null —
+    lihat `POST /api/topups`): halaman Riwayat memakainya untuk menentukan
+    topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
   -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock}}`
@@ -1585,7 +1671,26 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-06 (Topup/tarik — nomor opsional + token PLN):**
+  **Migrasi terakhir 2026-10-08 (Riwayat hibrida — relasi topup→sale):**
+  kolom **`topup_txns.sale_id`** (`TEXT`, **tanpa FK** — lihat kontrak
+  `POST /api/topups`): penanda lembut baris topup/tarik yang dibayar bersama
+  satu nota penjualan, dipakai halaman Riwayat menggabungkan transaksi hibrida
+  jadi satu baris (topup/tarik = sub-baris di bawah induknya). **ALTER
+  in-place di dev (bukan re-create)** — riwayat topup sudah berisi (backup
+  `data.db.bak.sale-id`, dibuat DENGAN `PRAGMA wal_checkpoint(TRUNCATE)`
+  dulu):
+  ```bash
+  sqlite3 apps/api/data/data.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+  cp apps/api/data/data.db apps/api/data/data.db.bak.sale-id
+  sqlite3 apps/api/data/data.db "ALTER TABLE topup_txns ADD COLUMN sale_id TEXT;"
+  ```
+  Setelah `index.ts` berubah, API via `tsx watch` restart sendiri; kalau DB
+  diganti file (bukan ALTER), proses API **wajib di-restart** (pkill pattern
+  `[w]atch`). Install yang TIDAK boleh di-recreate: jalankan SQL ALTER yang
+  sama. `db/schema.sql` sudah menulis kolom `sale_id` (tanpa FK, dengan
+  komentar). Baris lama bernama `sale_id` NULL → tetap baris mandiri di
+  Riwayat (perilaku lama dipertahankan).
+  **Migrasi sebelumnya 2026-10-06 (Topup/tarik — nomor opsional + token PLN):**
   kolom **`topup_txns.token`** (`TEXT NOT NULL DEFAULT ''`) + kontrak `nomor`
   jadi opsional. **ALTER in-place di dev (bukan re-create)** — riwayat topup
   sudah berisi (backup `data.db.bak.topup-token`, dibuat DENGAN
