@@ -8,6 +8,11 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <title>Ravaa POS</title>
   <link rel="stylesheet" href="/src/styles.css" />
+  <!-- pos.css = gaya KHUSUS halaman POS + modal miliknya (keputusan pemilik
+       2026-10-09 "buat css baru khusus untuk POS"). WAJIB SESUDAH styles.css
+       supaya aturan .pos-*/.ptk* menang atas definisi sepadan di styles.css
+       (sama-sama @layer components — urutan link yang menentukan). -->
+  <link rel="stylesheet" href="/src/pos.css" />
 </head>
 <body>
   <div id="app"></div>

@@ -354,8 +354,8 @@ function htmlResumePenjualan(o: {
   const pj = (n: number) => String(n).padStart(2, '0');
   const jamCetak = `${pj(d.getHours())}:${pj(d.getMinutes())}`;
   return `<div class="mx-auto w-full max-w-xs space-y-1.5 text-left text-sm text-gray-700 dark:text-gray-200">
-      <div class="text-center text-[11px] leading-snug text-gray-500 dark:text-gray-400">Transaksi tersimpan. Siap melayani pelanggan berikutnya.</div>
-      <div class="text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">No. ${esc(o.invoiceNo ?? '-')} · ${jamCetak}</div>
+      <div class="text-center text-sm leading-snug text-gray-500 dark:text-gray-400">Transaksi tersimpan. Siap melayani pelanggan berikutnya.</div>
+      <div class="text-center text-sm font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">No. ${esc(o.invoiceNo ?? '-')} · ${jamCetak}</div>
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
       ${baris.join('\n      ')}${tops ? `\n      ${tops}` : ''}
       <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
@@ -410,10 +410,14 @@ async function pilihCetakSelesai(
     // Kembalian 0 (bayar pas) tetap judul polos "Pembayaran berhasil".
     title:
       kembalian > 0
-        ? `<span class="block text-xs font-bold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Kembalian</span> <span class="block text-[48px] font-extrabold leading-tight text-gray-900 dark:text-white tabular-nums">${rp(kembalian)}</span>`
+        ? `<span class="block text-sm font-bold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Kembalian</span> <span class="block text-[48px] font-extrabold leading-tight text-gray-900 dark:text-white tabular-nums">${rp(kembalian)}</span>`
         : 'Pembayaran berhasil',
     html: htmlResumePenjualan({ ...resume, tot }),
-    icon: kembalian > 0 ? 'success' : 'question',
+    // Ikon SELALU `success` sejak 2026-10-09: dulu `kembalian > 0 ? 'success'
+    // : 'question'` — pembayaran bayar-pas (kembalian 0) menampilkan ikon
+    // TANDA TANYA untuk "Pembayaran berhasil" (bug visual dari screenshot
+    // pemilik; sukses = sukses, berapa pun kembaliannya).
+    icon: 'success',
     // Baris topup (Opsi B hybrid) = 1 struk gabungan hanya di THERMAL.
     // Invoice A4 masih menarik nota dari server (`GET /api/sales/:id` — topup
     // tidak ada di `sale_items`), jadi pilihan A4 disembunyikan saat ada
@@ -862,7 +866,7 @@ function shiftGateHtml(): string {
         <div>
           <label class="label" for="pos-kasir">Nama kasir</label>
           <input id="pos-kasir" class="input" type="text" value="${getCashier()}" autocomplete="off" />
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Tiap device wajib nama kasir berbeda + shift sendiri.
           </p>
         </div>
@@ -948,36 +952,21 @@ async function tutupShiftDariPos(): Promise<void> {
 
 /* ---------- layar keranjang ---------- */
 
-/** Strip peringatan stok menipis di layar kasir (keputusan user: POS saja).
- *
- *  Hitungannya DIAMBIL DARI CACHE LOKAL — aturan yang sama dengan tabel Produk
- *  (`track_stock && min_stock > 0 && stock <= min_stock`), bukan panggilan API
- *  tambahan, supaya layar kasir tidak pernah menunggu jaringan hanya untuk
- *  peringatan. `min_stock = 0` = tanpa ambang, jadi tidak ikut dihitung (kalau
- *  tidak, semua produk pasti "menipis" karena stok 0 <= 0). */
-function stripStokMenipis(): string {
-  const menipis = products.filter((p) => p.track_stock && p.min_stock > 0 && p.stock <= p.min_stock);
-  if (!menipis.length) return '';
-  const tiga = menipis.slice(0, 3).map((p) => `${esc(p.name)} (${p.stock})`).join(', ');
-  const sisa = menipis.length > 3 ? `, +${menipis.length - 3} lainnya` : '';
-  // Class `strip-low` WAJIB: `icon()` tidak mengeluarkan lebar/tinggi (diatur
-  // CSS wadahnya). Tanpa aturan `svg` di .strip-low, ikon segitiga meregang
-  // setinggi panel dan menutupi seluruh keranjang.
-  return `<a href="#/stock" class="strip-low flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20">
-      ${icon('alert')}
-      <span class="min-w-0 flex-1"><b>${menipis.length} produk stok menipis</b>: ${tiga}${sisa}</span>
-      <span class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">Buka Stok ${icon('chevR')}</span>
-    </a>`;
-}
-
-/** Strip peringatan kadaluarsa di layar kasir — teman `stripStokMenipis()`.
+/** Strip peringatan kadaluarsa di layar kasir.
  *
  *  Diambil dari cache lokal (produk + `expiry_date`, lihat `ui/expiry.ts`),
  *  tanpa panggilan API, supaya layar kasir tidak pernah menunggu jaringan
- *  untuk peringatan — persis alasan yang sama dengan strip stok menipis.
- *  `lewat` (tanggal sudah dilewati) tampil MERAH dan didahulukan karena
- *  barangnya tidak boleh terjual sama sekali; `dekat` (<= 30 hari) KUNING,
- *  daftarnya urut begitu juga. Tanpa tanggal = tidak ikut dihitung. */
+ *  untuk peringatan. `lewat` (tanggal sudah dilewati) tampil MERAH dan
+ *  didahulukan karena barangnya tidak boleh terjual sama sekali; `dekat`
+ *  (<= 30 hari) KUNING, daftarnya urut begitu juga. Tanpa tanggal = tidak
+ *  ikut dihitung.
+ *
+ *  CATATAN 2026-10-09: strip STOK MENIPIS (`stripStokMenipis()`) DIHAPUS —
+ *  permintaan pemilik "notifikasi ini hapus saja, karena sudah ada [chip]"
+ *  (chip kuning `n stok menipis · Nama (sisa)` di `#pos-notif` memuat info
+ *  yang sama + `title` daftar penuh + link `#/stock` yang sama). Strip
+ *  kadaluarsa DIPERTAHANKAN karena pemilik hanya menunjuk strip menipis.
+ *  Jangan mengembalikan strip menipis tanpa persetujuan pemilik. */
 function stripKadaluarsa(): string {
   const daftar = products
     .map((p) => ({ p, iso: p.expiry_date, s: statusExpiry(p.expiry_date) }))
@@ -996,9 +985,10 @@ function stripKadaluarsa(): string {
   const warna = adaLewat
     ? 'border-red-300 bg-red-50 text-red-800 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20'
     : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20';
-  // Class `strip-low` WAJIB: ikonnya diukur dari `.strip-low svg` (styles.css),
-  // sama seperti strip stok menipis.
-  return `<a href="#/products" class="strip-low flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold ${warna}">
+  // Class `strip-low` WAJIB: `icon()` tidak mengeluarkan lebar/tinggi
+  // (diatur CSS wadahnya `.strip-low svg` di styles.css). Tanpa itu ikon
+  // segitiga meregang setinggi panel dan menutupi seluruh keranjang.
+  return `<a href="#/products" class="strip-low flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold ${warna}">
       ${icon('alert')}
       <span class="min-w-0 flex-1">${kepala}: ${tiga}${sisa}</span>
       <span class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">Buka Produk ${icon('chevR')}</span>
@@ -1031,8 +1021,9 @@ function notifModeRow(): string {
  *
  *  **Informatif** (revisi pemilik 2026-10-08 *"buat agar lebih informatif"*):
  *  tiap chip memuat nama produk PERTAMA (stok/tanggalnya) di teks + `title`
- *  memuat daftar penuh. Rincian menipis/kadaluarsa tetap di strip
- *  `stripStokMenipis()`/`stripKadaluarsa()` di bawah scan bar; untuk **stok
+ *  memuat daftar penuh. Rincian kadaluarsa tetap di strip
+ *  `stripKadaluarsa()` di bawah scan bar; **strip MENIPIS dihapus
+ *  2026-10-09** (duplikat chip kuningnya — permintaan pemilik); untuk **stok
  *  habis TIDAK ada strip** — keputusan pemilik 2026-10-08 (strip merah yang
  *  sempat ditambah *"ini hapus saja karena sudah ada di atasnya di dalam
  *  card"*): chip + judulnya menampung info itu sendiri. Chip outbox SELALU
@@ -1094,7 +1085,7 @@ function segNotifPos(): void {
   if (n) n.innerHTML = notifChips();
   const s = host?.querySelector('#pos-strips');
   if (s) {
-    const isi = stripStokMenipis() + stripKadaluarsa();
+    const isi = stripKadaluarsa();
     s.innerHTML = isi;
     // Wadah kosong HARUS `hidden`: anak display:none bukan flex item, jadi
     // gap-2 induk tidak menyisakan baris kosong.
@@ -1144,13 +1135,9 @@ function infoBarHtml(): string {
     : `<option value="">Pelanggan Umum</option>`;
   // Info bar: kiri = tombol kembali + Waktu/Kasir/Shift/Tutup shift,
   // tengah = Pelanggan + F9, kanan = Total belanja. mode mobile = semua
-  // cell menumpuk 1 kolom.
-  const gridCls = mobileMode
-    ? 'grid gap-2'
-    : 'grid items-center gap-2 lg:grid-cols-3 lg:gap-4';
-  const batas = mobileMode
-    ? 'border-t border-gray-200 pt-2 dark:border-gray-700'
-    : 'border-t border-gray-200 pt-2 dark:border-gray-700 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0';
+  // cell menumpuk 1 kolom — grid 3 kolom sama rata + garis pemisah kini
+  // aturan CSS di pos.css (`.pos-ibar-grid` + `.is-stacked`), menggantikan
+  // interpolasi gridCls/batas inline (refactor 2026-10-09 pos.css).
   return `
     <div class="card info-bar !p-3">
       <!-- Tiga kolom SAMA RATA (permintaan pemilik 2026-10-04 putaran 9:
@@ -1164,8 +1151,8 @@ function infoBarHtml(): string {
            Kolom dipisah garis vertikal — border-l hanya >=lg (layar sempit
            kolom menumpuk, garis jadi noise). Kolom kanan = label+qty di
            KIRI, angka TOTAL di KANAN. -->
-      <div class="${gridCls}">
-        <div class="flex items-center gap-2 whitespace-nowrap text-xs text-gray-600 dark:text-gray-300">
+      <div class="pos-ibar-grid${mobileMode ? ' is-stacked' : ''}">
+        <div class="pos-cell flex items-center gap-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
           ${tombolKembaliHtml()}
           <div class="flex flex-col gap-y-0.5">
             <span class="flex items-center gap-1.5">${icon('clock')}<span class="font-semibold">Waktu:</span><span id="pos-jam" class="tabular-nums">${jamPos()}</span></span>
@@ -1179,13 +1166,13 @@ function infoBarHtml(): string {
                Shift); kula-07-pos-kasir.png taruh "Tutup Sesi Kas" di
                toolbar atas. -->
           <button type="button" id="pos-shift-tutup"
-            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-xs !bg-red-50 !border-transparent !text-red-600 hover:!bg-red-100 dark:!bg-red-500/10 dark:!text-red-400 dark:hover:!bg-red-500/20"
+            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-sm !bg-red-50 !border-transparent !text-red-600 hover:!bg-red-100 dark:!bg-red-500/10 dark:!text-red-400 dark:hover:!bg-red-500/20"
             title="Tutup shift kasir (hitung laci dulu)" aria-label="Tutup shift">
             ${icon('logout')}<span>Tutup shift</span>
           </button>
         </div>
         <!-- Kolom tengah = blok Pelanggan + tombol cari F9. -->
-        <div class="min-w-0 ${batas}">
+        <div class="pos-cell min-w-0">
           <!-- Select selebar form (permintaan pemilik 2026-10-04 — dulu
                dibatasi max-w-[520px]) + tombol CARI (putaran 7 2026-10-04,
                "tambahkan cari seperti cari produk F3"): layar cari penuh
@@ -1204,7 +1191,7 @@ function infoBarHtml(): string {
                  = openCariPelanggan() ala F3 produk (putaran 7). -->
             <div class="flex items-stretch gap-1.5">
               <select id="pos-customer" class="input input-sm min-w-0 flex-1">${pilih}</select>
-              <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-xs font-semibold tracking-wide">F9</span></button>
+              <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-sm font-semibold tracking-wide">F9</span></button>
             </div>
           </div>
         </div>
@@ -1212,10 +1199,10 @@ function infoBarHtml(): string {
              justify-between tetap menempelkan label+n item ke KIRI kolom dan
              angka #pos-grand ke KANAN — tanpa min-w yang dulu dipakai untuk
              memberi ruang pada track auto. -->
-        <div class="flex items-center justify-between gap-3 ${batas}">
+        <div class="pos-cell flex items-center justify-between gap-3">
           <div class="min-w-0 text-left">
-            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total belanja</div>
-            <div id="pos-owncount" class="text-xs text-gray-500 dark:text-gray-400">${keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item'}</div>
+            <div class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total belanja</div>
+            <div id="pos-owncount" class="text-sm text-gray-500 dark:text-gray-400">${keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item'}</div>
           </div>
           <!-- text-[48px] ukuran KUSTOM (Tailwind arbitrary value) = 2x lipat
                text-2xl lama (24px) — permintaan pemilik 2026-10-04 "custom
@@ -1229,8 +1216,8 @@ function infoBarHtml(): string {
 
 function cartHtml(): string {
   const scanBar = `
-      <div class="card !p-3">
-        <div class="flex flex-wrap items-center gap-2">
+      <div class="card pos-scanbar !p-3">
+        <div class="pos-scanrow">
           <div class="relative min-w-[220px] flex-1">
             <div class="search-wrap">
               ${icon('search')}
@@ -1258,7 +1245,7 @@ function cartHtml(): string {
              Pilihan mode Penjualan/Topup/Tarik DIHAPUS 2026-10-08 — semua
              layanan masuk keranjang lewat tombol Topup/Tarik di Aksi cepat
              (dialog), jadi tidak ada mode untuk dipilih. -->
-        <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+        <div class="pos-scanrow2">
           <span class="rounded border border-gray-200 px-2 py-1 dark:border-gray-700">
             ${switchHtml('pos-autoprint', autoPrint, 'Cetak struk otomatis')}
           </span>
@@ -1270,10 +1257,12 @@ function cartHtml(): string {
   // kolom KANAN = sidebar bayar setinggi penuh.
   const isiKiri = cartKiriHtml();
   // Wadah beraid `#pos-strips` supaya `segNotifPos()` bisa menyegarkan strip
-  // menipis/kadaluarsa tanpa `paint()` penuh. Wadah kosong = `hidden`.
-  const strips = stripStokMenipis() + stripKadaluarsa();
+  // kadaluarsa tanpa `paint()` penuh. Wadah kosong = `hidden`.
+  const strips = stripKadaluarsa();
   return `
-  <div class="flex h-full min-h-0 flex-col gap-2">
+  <!-- pos-scope = jangkar aturan teks POS di pos.css (.label/.th/.chip/.suggest-unit
+       naik ke text-sm — pemilik 2026-10-09 "text-xs terlalu kecil … di POS dulu"). -->
+  <div class="flex h-full min-h-0 flex-col gap-2 pos-scope">
     ${infoBarHtml()}
     <div class="${gridUtamaCls()}">
       <div class="flex min-h-0 flex-col gap-2">
@@ -1292,10 +1281,10 @@ function cartKiriHtml(): string {
   return `
       <div class="card-flush flex min-h-0 flex-1 flex-col overflow-hidden">
         <!-- Label keranjang di ATAS tabel (referensi KulaPOS: "Keranjang 2 item
-             ... Bersihkan [F5]" kanan-atas). -->
-        <div class="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+             ... Bersihkan [F5]" kanan-atas). Gaya = .pos-cartbar (pos.css). -->
+        <div class="pos-cartbar">
           <span id="pos-count">${keranjangTerisi() ? `${count()} item` : 'Keranjang kosong'}</span>
-          <button type="button" id="pos-clear" class="btn btn-ghost text-red-600 !min-h-[30px] !px-2.5 !py-1 text-xs" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${keranjangTerisi() ? '' : ' disabled'}>${icon('trash')}<span class="hidden sm:inline">Bersihkan</span>${kbd('F5')}</button>
+          <button type="button" id="pos-clear" class="btn btn-ghost text-red-600 !min-h-[30px] !px-2.5 !py-1 text-sm" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${keranjangTerisi() ? '' : ' disabled'}>${icon('trash')}<span class="hidden sm:inline">Bersihkan</span>${kbd('F5')}</button>
         </div>
         <div class="table-wrap table-scroll flex-1">
           <!-- "table-compact" = pola yang sama dengan halaman Produk & Stok
@@ -1334,7 +1323,7 @@ function cartKiriHtml(): string {
 function sidebarBayarHtml(): string {
   const bayarMati = !bisaBayar() || busy;
   return `
-      <div class="card flex min-h-0 flex-col gap-2.5 overflow-y-auto !p-3">
+      <div class="card pos-side">
         <!-- 1. Aksi cepat (permintaan pemilik 2026-10-04) — kini di POSISI
              ATAS kartu (permintaan pemilik 2026-10-06: "diskon item pindah
              ke bawah menu cepat di atas diskon"). Tahan/Pending = fitur
@@ -1350,33 +1339,33 @@ function sidebarBayarHtml(): string {
              saja yang ke scan). -->
         <div>
           <span class="label">Aksi cepat</span>
-          <div class="grid grid-cols-2 gap-2.5">
-            <button type="button" id="pos-hold" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${keranjangTerisi() && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
-            <button type="button" id="pos-hold-open" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
-            <button type="button" id="pos-qa-manual" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm">${icon('pencil')}<span>Item manual</span></button>
+          <div class="pos-side-grid">
+            <button type="button" id="pos-hold" class="btn btn-ghost pos-qa" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${keranjangTerisi() && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
+            <button type="button" id="pos-hold-open" class="btn btn-ghost pos-qa" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
+            <button type="button" id="pos-qa-manual" class="btn btn-ghost pos-qa">${icon('pencil')}<span>Item manual</span></button>
             <!-- Tambah LAYANAN ke keranjang (Opsi B hybrid, 2026-10-07;
                  direvisi 2026-10-08: topup DAN tarik tunai): baris layanan +
                  produk dibayar SEKALI, catatan terpisah di /api/topups
                  (nominal = mutasi modal, BUKAN omzet — AGENTS §1; nominal
                  tarik = uang keluar). -->
-            <button type="button" id="pos-qa-topup" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>Topup/Tarik</span></button>
-            <button type="button" id="pos-qa-disc" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm">Diskon${kbd('F6')}</button>
-            <a href="#/history" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
-            <button type="button" id="pos-reprint" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
+            <button type="button" id="pos-qa-topup" class="btn btn-ghost pos-qa" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>Topup/Tarik</span></button>
+            <button type="button" id="pos-qa-disc" class="btn btn-ghost pos-qa">Diskon${kbd('F6')}</button>
+            <a href="#/history" class="btn btn-ghost pos-qa" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
+            <button type="button" id="pos-reprint" class="btn btn-ghost pos-qa" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
           </div>
         </div>
-        <div class="border-t border-gray-100 dark:border-gray-700" role="separator"></div>
+        <div class="pos-side-sep" role="separator"></div>
         <!-- 2. Menu cepat (permintaan pemilik 2026-10-06: "tambahkan tombol
-             cepat ke produk dan stok juga") — anchor hash biasa, pola sama
-             dengan strip-low stok yang sudah ada (shell.ts parseRoute). -->
+             cepat ke produk dan stok juga") — anchor hash biasa
+             (shell.ts parseRoute). -->
         <div>
           <span class="label">Menu cepat</span>
-          <div class="grid grid-cols-2 gap-2.5">
-            <a href="#/products" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>
-            <a href="#/stock" class="btn btn-ghost !min-h-[32px] !px-2 !py-2.5 text-sm" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>
+          <div class="pos-side-grid">
+            <a href="#/products" class="btn btn-ghost pos-qa" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>
+            <a href="#/stock" class="btn btn-ghost pos-qa" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>
           </div>
         </div>
-        <div class="border-t border-gray-100 dark:border-gray-700" role="separator"></div>
+        <div class="pos-side-sep" role="separator"></div>
         <!-- 3. Diskon item — DIPINDAH dari paling atas ke sini (permintaan
              pemilik 2026-10-06, lihat catatan Aksi cepat di atas): persis
              DI ATAS input diskon transaksi. Tetap tersembunyi bila 0. Dua
@@ -1385,7 +1374,7 @@ function sidebarBayarHtml(): string {
              angka satu tempat). -->
         <div class="space-y-1">
           <div class="flex items-baseline justify-between" id="pos-disc-item-row" ${diskonBaris() ? '' : 'hidden'}>
-            <span class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Diskon item</span>
+            <span class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Diskon item</span>
             <span id="pos-disc-item" class="text-sm font-semibold text-red-600 dark:text-red-400">-${rp(diskonBaris())}</span>
           </div>
         </div>
@@ -1414,8 +1403,8 @@ function sidebarBayarHtml(): string {
              membayar tanpa form. Yang HANYA lewat form: uang lebih
              (kembalian), uang kurang (jadi HUTANG — wajib pelanggan terpilih
              selain "Pelanggan Umum"), dan metode pembayaran lain. -->
-        <div class="mt-auto flex flex-col gap-1.5">
-          <button type="button" id="pos-bayar" class="btn btn-primary w-full !py-3.5 text-sm"${bayarMati ? ' disabled' : ''}>${icon('check')}<span>Bayar</span>${kbd('F10')}</button>
+        <div class="pos-side-bayar">
+          <button type="button" id="pos-bayar" class="btn btn-primary pos-paybtn"${bayarMati ? ' disabled' : ''}>${icon('check')}<span>Bayar</span>${kbd('F10')}</button>
           <!-- Revisi putaran 8b/8c (2026-10-04): outline sempat dipakai lalu
                diminta pemilik "style hilang yang tombol warna hijaunya" —
                class btn-outline MEMANG tidak ada di styles.css (no-op, jadi
@@ -1423,8 +1412,8 @@ function sidebarBayarHtml(): string {
                hijau LEBIH GELAP (8c: "hover tombol F12 juga ubah ke hijau
                jangan biru, karena tombolnya warna hijau" — versi hover biru
                sempat dipakai 8b lalu dibatalkan). -->
-          <button type="button" id="pos-pay-pas" class="btn w-full !py-4 text-base font-semibold text-white bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-700/50 transition-all"${bayarMati ? ' disabled' : ''} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
-          <p class="text-center text-xs text-gray-500 dark:text-gray-400">${kbd('F10')} form bayar · ${kbd('F12')} bayar pas</p>
+          <button type="button" id="pos-pay-pas" class="btn pos-paypas"${bayarMati ? ' disabled' : ''} title="Uang diterima = total, langsung bayar tanpa buka form (F12)">Bayar pas${kbd('F12')}</button>
+          <p class="pos-side-hint">${kbd('F10')} form bayar · ${kbd('F12')} bayar pas</p>
         </div>
       </div>`;
 }
@@ -1538,34 +1527,34 @@ function formBayarHtml(): string {
   const sel = document.querySelector<HTMLSelectElement>('#pos-customer');
   const namaCust = sel?.selectedOptions[0]?.text.trim() || 'Pelanggan Umum';
   return `
-    <div class="grid grid-cols-1 sm:grid-cols-[5fr_7fr]">
+    <div class="pos-bayar-grid pos-scope">
       <div class="border-b border-gray-200 p-3 sm:border-b-0 sm:border-r dark:border-gray-700">
         <!-- Putaran 10c (2026-10-05): "total tagihan di besarkan setengahnya"
              -> text-3xl (24px) menjadi text-[36px] (+50%). -->
         <div class="mb-3 rounded-lg border-2 border-primary bg-white p-3 dark:bg-gray-800">
-          <div class="text-xs text-gray-500 dark:text-gray-400">Total tagihan</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400">Total tagihan</div>
           <div id="bayar-total" class="text-[36px] font-extrabold tabular-nums text-primary">${rp(tot)}</div>
         </div>
         <div class="mb-3 flex items-center gap-2.5">
           <span class="shrink-0 text-primary [&>svg]:size-7">${icon('users')}</span>
           <div class="min-w-0">
-            <div class="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pelanggan</div>
+            <div class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pelanggan</div>
             <div id="bayar-cust" class="truncate text-sm font-bold text-gray-900 dark:text-white">${esc(namaCust)}</div>
           </div>
         </div>
-        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Metode pembayaran</div>
-        <div class="grid grid-cols-2 gap-2">
+        <div class="mb-1.5 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Metode pembayaran</div>
+        <!-- 3 kartu SAMA LEBAR (fix 2026-10-09 dari screenshot pemilik: grid
+             2 kolom lama menyisakan Transfer sendirian di baris ke-2 = ukuran
+             berbeda dari Tunai/QRIS). Kelas pos-pay-card (pos.css) memegang
+             gaya dasar; daftar kelas aktif di bawah WAJIB sama persis dengan
+             paintFormBayar(). Label 20px tetap besar (referensi putaran 10b). -->
+        <div class="pos-pay-cards">
           ${PAY_METHODS.map((m) => {
             const aktif = payMethod === m.key;
-            // Putaran 10b (2026-10-05, "kurang besar … sekitar 2x lipat"):
-            // kartu metode jadi ~2x — layout KOLOM ala .btn-method-card v1
-            // (ikon atas, label bawah, center) supaya label besar muat di
-            // kolom sempit (horizontal @24px meluber 137px), border-2 ala v1,
-            // tinggi ±73px (baseline 34px), font 13px -> 24px.
-            return `<button type="button" data-pay="${m.key}" class="btn w-full flex-col items-center justify-center gap-1 !min-h-[68px] !px-2 !py-1.5 !text-[24px] [&>svg]:size-6 border-2 border-gray-200 bg-white text-gray-700 hover:border-primary dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200${aktif ? ' !border-primary bg-primary-soft !text-primary dark:bg-primary/15' : ''}">${icon(m.icon)}<span>${m.label}</span></button>`;
+            return `<button type="button" data-pay="${m.key}" class="btn pos-pay-card${aktif ? ' !border-primary bg-primary-soft !text-primary dark:bg-primary/15' : ''}">${icon(m.icon)}<span>${m.label}</span></button>`;
           }).join('')}
         </div>
-        <p class="mt-4 text-center text-xs text-gray-500 dark:text-gray-400">Tekan ${kbd('Enter')} atau ${kbd('F2')} untuk bayar · ${kbd('Esc')} untuk batal</p>
+        <p class="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">Tekan ${kbd('Enter')} atau ${kbd('F2')} untuk bayar · ${kbd('Esc')} untuk batal</p>
       </div>
       <div class="bg-gray-50 p-3 dark:bg-gray-800/40">
         <div id="bayar-tunai" class="space-y-3"${tunai ? '' : ' hidden'}>
@@ -1591,9 +1580,9 @@ function formBayarHtml(): string {
             ${QUICK_CASH.map((c) => `<button type="button" data-cash="${c}" class="chip justify-center !min-h-[44px] !px-4 !py-2 !text-[17px] ${cashIn > 0 && cashIn === c ? ' !border-primary !text-primary' : ''}">${rp(c)}</button>`).join('')}
           </div>
           <div class="rounded-lg border border-dashed border-gray-300 bg-white p-3 text-center dark:border-gray-600 dark:bg-gray-800">
-            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</div>
+            <div class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</div>
             <div id="pos-change" class="${kelasPosChange()}">${rp(change())}</div>
-            <p id="pos-change-ctx" class="text-xs font-medium ${teksKembalian() ? '' : 'hidden'} ${
+            <p id="pos-change-ctx" class="text-sm font-medium ${teksKembalian() ? '' : 'hidden'} ${
               cashIn > 0 && cashIn < tot ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
             }">${teksKembalian()}</p>
           </div>
@@ -1602,9 +1591,9 @@ function formBayarHtml(): string {
                ke hutang dengan catatan harus terpilih customer") — tanpa
                konfirmasi swal; pelanggan tidak memenuhi syarat = penolakan
                barrier, lihat cekHutangDiperbolehkan() + pay(). -->
-          <p class="text-xs text-gray-500 dark:text-gray-400">Uang kurang / uang 0 <b>otomatis</b> jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">Uang kurang / uang 0 <b>otomatis</b> jadi <b>hutang</b> — asal pelanggan terpilih bukan "Pelanggan Umum".</p>
         </div>
-        <p id="bayar-non-tunai" class="text-xs text-gray-500 dark:text-gray-400"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
+        <p id="bayar-non-tunai" class="text-sm text-gray-500 dark:text-gray-400"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
       </div>
     </div>`;
 }
@@ -1764,18 +1753,18 @@ const QUICK_NOMINAL = [10000, 20000, 50000, 100000, 200000, 500000];
  *  - pln-bill (tagihan): ID pelanggan/Nomor meter + nominal + admin (sudah
  *    sesuai — tidak diubah). */
 const TOPUP_JENIS: Jenis[] = [
-  { key: 'e-wallet', label: 'E-wallet', ringkas: 'E-wallet', hint: 'Isi saldo DANA/OVO/GoPay', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx', butuhNomor: false },
-  { key: 'pulsa', label: 'Pulsa', ringkas: 'Pulsa', hint: 'Paket data & nelpon', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx', butuhNomor: false },
-  { key: 'pln-token', label: 'Token PLN', ringkas: 'Token PLN', hint: 'Beli token listrik', nomorLabel: 'Nomor meter', nomorPh: 'Nomor meter', butuhToken: true },
-  { key: 'pln-bill', label: 'Tagihan PLN', ringkas: 'Tagihan PLN', hint: 'Bayar listrik', nomorLabel: 'ID pelanggan / meter', nomorPh: 'ID pelanggan' },
+  { key: 'e-wallet', label: 'E-wallet', ringkas: 'E-wallet', hint: 'Isi saldo DANA/OVO/GoPay', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx', butuhNomor: false, icon: 'wallet' },
+  { key: 'pulsa', label: 'Pulsa', ringkas: 'Pulsa', hint: 'Paket data & nelpon', nomorLabel: 'Nomor HP tujuan', nomorPh: '08xxxxxxxxxx', butuhNomor: false, icon: 'smartphone' },
+  { key: 'pln-token', label: 'Token PLN', ringkas: 'Token PLN', hint: 'Beli token listrik', nomorLabel: 'Nomor meter', nomorPh: 'Nomor meter', butuhToken: true, icon: 'zap' },
+  { key: 'pln-bill', label: 'Tagihan PLN', ringkas: 'Tagihan PLN', hint: 'Bayar listrik', nomorLabel: 'ID pelanggan / meter', nomorPh: 'ID pelanggan', icon: 'receipt' },
 ];
 
 /** Tarik tunai: uang keluar dari laci. Sumber dana bisa e-wallet (cash out) atau
  *  transfer rekening — bukan cuma bank. Keduanya tanpa nomor (pemilik: tarik
  *  tunai hanya nominal + admin). */
 const TARIK_JENIS: Jenis[] = [
-  { key: 'tarik-ewallet', label: 'Dari e-wallet', ringkas: 'e-wallet', hint: 'Cash out ke tunai', nomorLabel: 'Nomor HP pemilik e-wallet', nomorPh: '08xxxxxxxxxx', butuhNomor: false },
-  { key: 'tarik-bank', label: 'Dari rekening', ringkas: 'rekening', hint: 'Tarik ke tunai', nomorLabel: 'Nomor rekening', nomorPh: 'Nomor rekening', butuhNomor: false },
+  { key: 'tarik-ewallet', label: 'Dari e-wallet', ringkas: 'e-wallet', hint: 'Cash out ke tunai', nomorLabel: 'Nomor HP pemilik e-wallet', nomorPh: '08xxxxxxxxxx', butuhNomor: false, icon: 'sync' },
+  { key: 'tarik-bank', label: 'Dari rekening', ringkas: 'rekening', hint: 'Tarik ke tunai', nomorLabel: 'Nomor rekening', nomorPh: 'Nomor rekening', butuhNomor: false, icon: 'landmark' },
 ];
 
 /** `label` = judul di tile (cth. "Dari rekening"),
@@ -1787,6 +1776,10 @@ interface Jenis {
   hint: string;
   nomorLabel: string;
   nomorPh: string;
+  /** Ikon tile jenis di dialog topup (2026-10-09 — tile berikon ala
+   *  KulaPOS). Kunci ada di ui/icons.ts (wallet/smartphone/zap/receipt/
+   *  sync/landmark). */
+  icon: IconName;
   /** `false` = form TANPA input nomor (default: `true` = wajib diisi). */
   butuhNomor?: boolean;
   /** `true` = tampilkan input Nomor Token (PLN token) — ikut dicetak struk. */
@@ -1831,8 +1824,8 @@ function topupRowHtml(l: TopupLine): string {
     l.token ? `token ${esc(l.token)}` : '',
   ].filter(Boolean).join(' · ');
   const badge = keluar
-    ? '<span class="mr-1.5 rounded bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">Tarik</span>'
-    : '<span class="mr-1.5 rounded bg-emerald-50 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Topup</span>';
+    ? '<span class="mr-1.5 rounded bg-amber-50 px-1.5 py-0.5 align-middle text-sm font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">Tarik</span>'
+    : '<span class="mr-1.5 rounded bg-emerald-50 px-1.5 py-0.5 align-middle text-sm font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Topup</span>';
   return `<tr data-key="${l.key}" class="topup-row hover:bg-primary-soft dark:hover:bg-primary/15 transition-colors">
       <td class="td" colspan="8">
         <div class="flex items-center justify-between gap-3">
@@ -1891,7 +1884,7 @@ function cartRows(): string {
         : l.unit && l.baseUnit && l.unit !== l.baseUnit ? ` · jual per ${l.unit}` : '';
       return `<tr data-key="${l.key}" class="hover:bg-primary-soft dark:hover:bg-primary/15 transition-colors">
       <td class="td td-num text-center text-gray-500">${i + 1}</td>
-      <td class="td font-mono text-xs">${l.sku ? esc(l.sku) : '<span class="text-gray-400">—</span>'}</td>
+      <td class="td font-mono text-sm">${l.sku ? esc(l.sku) : '<span class="text-gray-400">—</span>'}</td>
       <td class="td">
         <div class="cell-strong">${esc(l.name)}</div>
         <div class="cell-sub">${l.product_id === null ? 'item manual' : l.track_stock ? '' : 'jasa'}${expBarisKeranjang(l.product_id)}</div>
@@ -1915,7 +1908,7 @@ function cartRows(): string {
           aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}" />
       </td>
       <td class="td td-num">
-        ${l.discount > 0 ? `<div class="text-xs text-gray-400 line-through tabular-nums">${rp(gross)}</div>` : ''}
+        ${l.discount > 0 ? `<div class="text-sm text-gray-400 line-through tabular-nums">${rp(gross)}</div>` : ''}
         <div class="font-semibold text-gray-900 tabular-nums dark:text-white">${rp(net)}</div>
       </td>
       <td class="td text-right"><button type="button" class="row-btn row-btn-danger" data-act="del" data-key="${l.key}" title="Hapus" aria-label="Hapus ${esc(l.name)}">${icon('trash')}</button></td>
@@ -2040,7 +2033,7 @@ function paintCart(): void {
     const pendek = cashIn > 0 && cashIn < totalBayar();
     ctx.textContent = t;
     ctx.className =
-      `text-xs font-medium ${pendek ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}` +
+      `text-sm font-medium ${pendek ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}` +
       (t ? '' : ' hidden');
   }
   // Baris "Diskon item" dirender sekali lalu ditampilkan/disembunyikan —
@@ -2468,10 +2461,10 @@ function bukaTertahan(): void {
       data-hold-row="${h.id}"${aktif ? ' aria-current="true"' : ''}>
       <div class="flex items-center justify-between gap-2">
         <span class="truncate text-sm font-bold">${esc(h.customerName)}</span>
-        <span class="shrink-0 text-xs font-bold tabular-nums${aktif ? ' text-white' : ' text-primary'}">${rp(hitungHold(h))}</span>
+        <span class="shrink-0 text-sm font-bold tabular-nums${aktif ? ' text-white' : ' text-primary'}">${rp(hitungHold(h))}</span>
       </div>
-      <div class="mt-0.5 text-xs${aktif ? ' text-white/90' : ' text-gray-500 dark:text-gray-400'}">${h.items.length + (h.topups ?? []).length} baris (${qty} Qty)</div>
-      <div class="text-[10px]${aktif ? ' text-white/75' : ' text-gray-400 dark:text-gray-500'}">${stempel(h)}</div>
+      <div class="mt-0.5 text-sm${aktif ? ' text-white/90' : ' text-gray-500 dark:text-gray-400'}">${h.items.length + (h.topups ?? []).length} baris (${qty} Qty)</div>
+      <div class="text-sm${aktif ? ' text-white/75' : ' text-gray-400 dark:text-gray-500'}">${stempel(h)}</div>
     </li>`;
   };
 
@@ -2500,7 +2493,7 @@ function bukaTertahan(): void {
       return `<li class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-700/40">
         <div class="min-w-0">
           <div class="truncate text-sm font-bold text-gray-900 dark:text-white">${i + 1}. ${esc(l.name)}</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400">${sub}</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400">${sub}</div>
         </div>
         <div class="shrink-0 text-sm font-bold tabular-nums text-primary">${rp(net)}</div>
       </li>`;
@@ -2520,7 +2513,7 @@ function bukaTertahan(): void {
       return `<li class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-700/40">
         <div class="min-w-0">
           <div class="truncate text-sm font-bold text-gray-900 dark:text-white">${h.items.length + i + 1}. ${esc(j.label)} ${rp(t.nominal)}</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400">${sub}</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400">${sub}</div>
         </div>
         <div class="shrink-0 text-sm font-bold tabular-nums text-primary">${rp(keluar ? t.admin : t.nominal + t.admin)}</div>
       </li>`;
@@ -2533,16 +2526,16 @@ function bukaTertahan(): void {
       <div class="p-4">
         <div class="mb-4 grid grid-cols-2 gap-4 border-b border-dashed border-gray-200 pb-4 dark:border-gray-700">
           <div>
-            <div class="mb-1 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Pelanggan</div>
+            <div class="mb-1 text-sm font-semibold uppercase text-gray-500 dark:text-gray-400">Pelanggan</div>
             <div class="text-sm font-bold text-gray-900 dark:text-white">${esc(h.customerName)}</div>
-            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">Kasir ${esc(h.kasir)}</div>
+            <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">Kasir ${esc(h.kasir)}</div>
           </div>
           <div>
-            <div class="mb-1 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Waktu simpan</div>
+            <div class="mb-1 text-sm font-semibold uppercase text-gray-500 dark:text-gray-400">Waktu simpan</div>
             <div class="text-sm font-bold text-gray-900 dark:text-white">${stempel(h)}</div>
           </div>
         </div>
-        <div class="mb-3 text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400">Daftar produk (${h.items.length + (h.topups ?? []).length} item)</div>
+        <div class="mb-3 text-sm font-semibold uppercase text-gray-500 dark:text-gray-400">Daftar produk (${h.items.length + (h.topups ?? []).length} item)</div>
         <ul class="flex flex-col gap-2">${produk}${tops}</ul>
         <div class="mt-4 rounded-lg bg-gray-100 p-4 dark:bg-gray-700/50">
           <div class="mb-2 flex justify-between">
@@ -2591,10 +2584,10 @@ function bukaTertahan(): void {
            border KANAN kolom kiri (v1: border-LEFT kolom daftar). Tiap kolom
            tinggi FIX 60vh (permintaan pemilik 2026-10-05: "tinggi fix, misal
            60% dari screen … buat scrollable") dan menggulir sendiri. -->
-      <div class="grid grid-cols-1 sm:grid-cols-[3fr_7fr]">
+      <div class="grid grid-cols-1 sm:grid-cols-[3fr_7fr] pos-scope">
         <div class="flex h-[60vh] min-h-0 flex-col border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-700">
           <!-- split-header ala v1: bar label uppercase kecil di atas daftar -->
-          <div class="shrink-0 border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-700/40 dark:text-gray-400">Daftar antrian (<span id="hold-antrian-count">${holds.length}</span>)</div>
+          <div class="shrink-0 border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-700/40 dark:text-gray-400">Daftar antrian (<span id="hold-antrian-count">${holds.length}</span>)</div>
           <ul id="hold-list" class="min-h-0 flex-1 overflow-y-auto pb-1">${holds.map((h) => baris(h, h.id === terpilih)).join('')}</ul>
         </div>
         <div class="h-[60vh] min-h-0">
@@ -2637,7 +2630,7 @@ function askNumber(title: string, label: string, value: number, step = 500): Pro
   return new Promise((resolve) => {
     const m = openModal({
       title,
-      body: `<div><label class="label" for="pos-ask">${label}</label>
+      body: `<div class="pos-scope"><label class="label" for="pos-ask">${label}</label>
         <input id="pos-ask" class="input" type="number" inputmode="numeric" min="0" step="${step}" value="${value || ''}" /></div>`,
       okLabel: 'Simpan',
       onMount: (api) => {
@@ -2831,13 +2824,13 @@ function openCariProduk(): void {
     wide: true,
     okLabel: 'Tambah',
     body: `
-      <div class="space-y-3">
+      <div class="space-y-3 pos-scope">
         <div class="search-wrap">${icon('search')}
           <input id="pc-q" class="input" type="search" autocomplete="off"
                  placeholder="Nama / SKU / barcode — ↑↓ pilih, Enter tambah" />
         </div>
-        <p class="text-xs text-gray-500 dark:text-gray-400">Shortcut: ${kbd('F3')}</p>
-        <p id="pc-info" class="text-xs text-gray-500 dark:text-gray-400"></p>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Shortcut: ${kbd('F3')}</p>
+        <p id="pc-info" class="text-sm text-gray-500 dark:text-gray-400"></p>
         <div id="pc-list" class="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 py-1 dark:border-gray-700"></div>
       </div>`,
     onMount: (api) => {
@@ -2889,7 +2882,7 @@ function barisCust(c: Cust, i: number, aktif: boolean): string {
       <span class="cell-strong block truncate">${esc(c.name)}</span>
       <span class="cell-sub block truncate">${bawah}${c.note ? ` · ${esc(c.note)}` : ''}</span>
     </span>
-    ${c.id === customerId ? '<span class="shrink-0 text-xs font-semibold text-primary">aktif</span>' : ''}
+    ${c.id === customerId ? '<span class="shrink-0 text-sm font-semibold text-primary">aktif</span>' : ''}
   </button>`;
 }
 
@@ -2933,13 +2926,13 @@ function openCariPelanggan(): void {
     wide: true,
     okLabel: 'Pilih',
     body: `
-      <div class="space-y-3">
+      <div class="space-y-3 pos-scope">
         <div class="search-wrap">${icon('search')}
           <input id="pcust-q" class="input" type="search" autocomplete="off"
                  placeholder="Nama / nomor HP / nomor urut / catatan — ↑↓ pilih, Enter pilih" />
         </div>
-        <p class="text-xs text-gray-500 dark:text-gray-400">Shortcut: ${kbd('F9')}</p>
-        <p id="pcust-info" class="text-xs text-gray-500 dark:text-gray-400"></p>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Shortcut: ${kbd('F9')}</p>
+        <p id="pcust-info" class="text-sm text-gray-500 dark:text-gray-400"></p>
         <div id="pcust-list" class="max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 py-1 dark:border-gray-700"></div>
       </div>`,
     onMount: (api) => {
@@ -3012,9 +3005,9 @@ function resultRow(p: Product, i: number): string {
         <span class="shrink-0 text-right">
           <span class="block text-sm font-semibold text-gray-900 dark:text-white">${rp(p.price)}</span>
           ${isLayanan(p)
-            ? '<span class="block text-[11px] text-primary">buka form layanan</span>'
+            ? '<span class="block text-sm text-primary">buka form layanan</span>'
             : p.price_dynamic
-              ? '<span class="block text-[11px] text-amber-600 dark:text-amber-400">harga khusus</span>'
+              ? '<span class="block text-sm text-amber-600 dark:text-amber-400">harga khusus</span>'
               : ''}
         </span>
       </button>
@@ -3026,7 +3019,7 @@ function paintResults(): void {
   const box = host?.querySelector('#pos-results');
   if (!box) return;
   if (!results.length) {
-    box.innerHTML = '<div class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400">Tidak ada produk yang cocok</div>';
+    box.innerHTML = '<div class="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400">Tidak ada produk yang cocok</div>';
     box.classList.remove('hidden');
     return;
   }
@@ -3048,11 +3041,11 @@ function moveActive(step: number): void {
 function openManualItem(): void {
   const m = openModal({
     title: 'Item manual (jasa / cetak)',
-    body: `<div class="space-y-3">
+    body: `<div class="space-y-3 pos-scope">
       <div><label class="label" for="pm-name">Nama</label><input id="pm-name" class="input" type="text" placeholder="mis. Jasa ketik 1 halaman" /></div>
       <div><label class="label" for="pm-price">Harga (Rp)</label><input id="pm-price" class="input" type="number" inputmode="numeric" min="0" step="500" value="" /></div>
       <div><label class="label" for="pm-qty">Qty</label><input id="pm-qty" class="input" type="number" inputmode="numeric" min="1" step="1" value="1" /></div>
-      <p class="text-xs text-gray-500 dark:text-gray-400">Item manual tidak mengurangi stok dan tidak muncul di Manage Produk.</p>
+      <p class="text-sm text-gray-500 dark:text-gray-400">Item manual tidak mengurangi stok dan tidak muncul di Manage Produk.</p>
     </div>`,
     okLabel: 'Tambah',
     onMount: (api) => {
@@ -3117,71 +3110,71 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
   openModal({
     title: 'Tambah topup / tarik tunai',
     okLabel: 'Tambah',
-    // Isi meniru BAHASA VISUAL modal resume (putaran 11): judul blok huruf
-    // besar terpusat, blok dipisah garis PUTUS-PUTUS, baris akhir label↔nilai
-    // (pola baris Total resume), petunjuk di pusat bawah — revisi pemilik
-    // 2026-10-08: "isi kontennya kurang proporsional, coba perhatikan modal
-    // resume".
-    // **Ukuran konten = ukuran STANDAR modal (pola modal Cari produk yang
-    // dipegang pemilik "menurut saya rapi")**: input polos `.input` (33px),
-    // tombol jenis = gaya TOMBOL SIDEBAR (`btn btn-ghost !min-h-[32px]
-    // !px-2 !py-1.5 text-xs`, radius `rounded-lg` — BUKAN chip `rounded-full`
-    // yang dikeluhkan "jangan full rounded"), lebar isi penuh seperti modal
-    // cari (wrapper `max-w-md` dibuang). Tombol footer mengikuti gaya
-    // sidebar juga — lihat onMount di bawah. ID/atribut lama TIDAK berubah —
-    // suite e2e-topup-keranjang & e2e-struk menempel padanya.
-    body: `<div class="space-y-3 text-sm text-gray-700 dark:text-gray-200">
+    // REDESAIN 2026-10-09 (keputusan pemilik: modal topup = prioritas 1 dari
+    // screenshot kondisi lama — "ok sesuai sekali dengan rekomendasimu"):
+    // gaya tile berikon ala KulaPOS. Susunan: grup tile (topup 4 / tarik 2,
+    // ikon + label, hint jenis jadi `title`) -> garis putus -> nomor/token
+    // (hidden sesuai jenis) -> Nominal | Admin (input 44px) -> petunjuk.
+    // **Total pindah ke HEADER modal** (kanan, sebelum tombol X) lewat
+    // onMount — angka `#ptk-total` selalu terlihat saat isi form, pola header
+    // total modal bayar KulaPOS. ID/atribut lama TIDAK berubah — suite
+    // e2e-topup-keranjang & e2e-struk menempel padanya (`#ptk-nomor-wrap`
+    // tetap toggle class `hidden`, tile aktif tetap dapat `!border-primary`).
+    body: `<div class="ptk pos-scope">
       <div>
-        <div class="mb-1.5 text-center text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Jenis topup</div>
-        <div class="grid grid-cols-2 gap-2" id="ptk-jenis">
-          ${TOPUP_JENIS.map((j) => `<button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-sm" data-ptk-jenis="${j.key}">${j.label}</button>`).join('')}
+        <div class="ptk-group-title">Jenis topup</div>
+        <div class="ptk-tiles ptk-tiles-topup" id="ptk-jenis">
+          ${TOPUP_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
         </div>
       </div>
-      <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
       <div>
-        <div class="mb-1.5 text-center text-sm font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tarik tunai (uang keluar)</div>
-        <div class="grid grid-cols-2 gap-2" id="ptk-jenis-tarik">
-          ${TARIK_JENIS.map((j) => `<button type="button" class="btn btn-ghost !min-h-[32px] !px-2 !py-1.5 text-sm" data-ptk-jenis="${j.key}">${j.label}</button>`).join('')}
+        <div class="ptk-group-title">Tarik tunai (uang keluar)</div>
+        <div class="ptk-tiles ptk-tiles-tarik" id="ptk-jenis-tarik">
+          ${TARIK_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
         </div>
       </div>
-      <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
-      <div id="ptk-nomor-wrap" class="hidden space-y-1">
+      <div class="ptk-div"></div>
+      <div id="ptk-nomor-wrap" class="hidden ptk-field">
         <label class="label" for="ptk-nomor" id="ptk-nomor-label">Nomor HP tujuan</label>
         <input id="ptk-nomor" class="input" type="text" value="" />
       </div>
-      <div id="ptk-token-wrap" class="hidden space-y-1">
+      <div id="ptk-token-wrap" class="hidden ptk-field">
         <label class="label" for="ptk-token">Nomor Token</label>
         <input id="ptk-token" class="input" type="text" inputmode="numeric" value="" />
       </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div class="space-y-1">
+      <div class="ptk-nums">
+        <div class="ptk-field">
           <label class="label" for="ptk-nominal">Nominal (Rp)</label>
           <input id="ptk-nominal" class="input" type="number" inputmode="numeric" min="0" step="1000" value="" />
         </div>
-        <div class="space-y-1">
+        <div class="ptk-field">
           <label class="label" for="ptk-admin">Biaya admin (Rp)</label>
           <input id="ptk-admin" class="input" type="number" inputmode="numeric" min="0" step="500" value="" />
         </div>
       </div>
-      <div class="border-t border-dashed border-gray-300 dark:border-gray-600"></div>
-      <div class="flex items-baseline justify-between gap-4 font-bold text-gray-900 dark:text-white">
-        <span id="ptk-total-label">Ditambah ke nota</span>
-        <span id="ptk-total" class="shrink-0 tabular-nums">Rp0</span>
+      <p class="ptk-hint">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
+      <!-- Kotak total: dipindah ke .modal-header di onMount (kanan atas). -->
+      <div class="ptk-totalbox" id="ptk-totalbox">
+        <div class="ptk-total-label" id="ptk-total-label">Ditambah ke nota</div>
+        <div class="ptk-total" id="ptk-total">Rp0</div>
       </div>
-      <p class="text-center text-sm leading-snug text-gray-500 dark:text-gray-400">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
     </div>`,
     onMount: (api) => {
-      // Tombol footer = gaya TOMBOL SIDEBAR KANAN (Aksi cepat / Menu cepat:
-      // `btn-ghost` border tipis utk Batal, `btn-primary` utk Tambah, badan
-      // `!min-h-[32px] !px-2 !py-1.5 text-xs` + ikon) — revisi pemilik
+      // Total -> header kanan (lihat komentar body di atas): selalu terlihat
+      // saat kasir mengetik nominal. `#ptk-totalbox` dibiarkan di body saat
+      // render supaya tidak ada elemen yang hilang bila selector gagal.
+      const totalBox = api.el.querySelector<HTMLElement>('#ptk-totalbox');
+      const header = api.el.querySelector('.modal-header');
+      if (totalBox && header) header.insertBefore(totalBox, header.querySelector('[data-x]'));
+      // Tombol footer mengikuti gaya TOMBOL SIDEBAR KANAN (revisi pemilik
       // 2026-10-08: "style tombol pada modal popup ganti seperti style di
-      // sidebar kanan dan kecilkan lagi tombolnya di modal topup".
-      // Ikon `check` meniru tombol Bayar sidebar; ukuran 32px/11px = persis
-      // ukuran tombol sidebar (kini di bawah input 40px — "kecilkan lagi").
-      // Footer modal bayar (#pos-pay 68px) TIDAK disentuh.
+      // sidebar kanan") — badan 40px = ukuran .pos-qa sidebar (2026-10-09,
+      // sidebar ikut naik 32 -> 40px supaya tombol lebih besar seragam;
+      // footer modal bayar #pos-pay 68px TIDAK disentuh). Ikon `check`
+      // meniru tombol Bayar sidebar.
       const batalBtn = api.el.querySelector<HTMLElement>('.modal-footer [data-x]');
       for (const b of [api.ok, batalBtn]) {
-        b?.classList.add('!min-h-[32px]', '!px-2', '!py-1.5', 'text-sm');
+        b?.classList.add('!min-h-[40px]', '!px-4', 'text-sm');
       }
       api.ok.innerHTML = `${icon('check')}<span>Tambah</span>`;
       let jenis: TopupJenis = TOPUP_JENIS.some((j) => j.key === jenisAwal) || TARIK_JENIS.some((j) => j.key === jenisAwal)
@@ -3220,8 +3213,13 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         for (const wrap of [wrapJenis, wrapTarik]) {
           wrap.querySelectorAll<HTMLElement>('[data-ptk-jenis]').forEach((b) => {
             const on = b.dataset.ptkJenis === jenis;
+            // Tile aktif: border+teks+latar primer muda (bg ditambah 2026-10-09
+            // saat redesain tile berikon — `!border-primary` DIPERTAHANKAN,
+            // tests/e2e-struk.mjs §tarik menempel ke class itu).
             b.classList.toggle('!border-primary', on);
             b.classList.toggle('!text-primary', on);
+            b.classList.toggle('bg-primary-soft', on);
+            b.classList.toggle('dark:bg-primary/15', on);
           });
         }
         const butuhNomor = j.butuhNomor !== false;

@@ -1,0 +1,211 @@
+/* Ravaa POS v2 — gaya KHUSUS halaman POS (#/pos) + modal miliknya.
+   File TERPISAH dari styles.css (keputusan pemilik 2026-10-09: "refactor total
+   halaman POS, buat css baru khusus untuk POS" — pola RPOS V1
+   `pos-system.css`). Di-link di index.html SESUDAH styles.css: kedua file sama-
+   sama @layer components, jadi urutan link yang menentukan pemenang tie-break.
+
+   ATURAN MAIN:
+   - Token = @theme styles.css (`var(--color-primary)` dsb). JANGAN definisi
+     warna/rahasia baru di file ini — palet tetap mengikuti SKILL frontend-pos.
+   - HANYA untuk markup ber-prefix `.pos-*` / `.ptk*` / `.pos-scope` di
+     pages/pos.ts. Halaman lain = styles.css (aturan "satu file gaya" untuk
+     seluruh app TETAP berlaku di luar POS — lihat AGENTS.md §2).
+   - Ukuran teks minimum di scope POS = `text-sm` (13px): permintaan pemilik
+     2026-10-09 "text-xs terlalu kecil, ganti text-sm — sementara di POS dulu".
+   - `@apply` HANYA berisi utility Tailwind (kebijakan repo), kecuali aturan
+     mentah eksplisit (mis. keyframe/properti non-utility).
+
+   Struktur (urut seperti tampilan halaman):
+     1. Scope .pos-scope   — rem komponen bersama yang ikut membesar di POS
+     2. Info bar           — .pos-ibar-grid (3 kolom sama rata / is-stacked)
+     3. Scan bar           — .pos-scanrow / .pos-scanrow2
+     4. Tabel keranjang    — .pos-cartbar (label baris atas)
+     5. Sidebar bayar      — .pos-side* / .pos-qa / tombol bayar
+     6. Modal topup/tarik  — .ptk* (tile berikon, total di header)
+     7. Modal form bayar   — .pos-bayar* (kartu metode 3 kolom)
+*/
+
+/* @reference = Tailwind v4: file CSS terpisah memakai @theme + utility dari
+   styles.css TANPA mengulang @import "tailwindcss" (yang akan menduplikasi
+   preflight). Tanpa baris ini build gagal "Cannot apply unknown utility
+   class" sebab tema didefinisikan di styles.css, bukan di sini. */
+@reference "./styles.css";
+
+@layer components {
+  /* ---------- 1. Scope POS ----------
+     Komponen bersama (styles.css) yang ukurannya naik HANYA di dalam POS.
+     Selector dua-kelas menang atas definisi asal tanpa !important.
+     Dijangkarkan dari root halaman (`pos-scope` di cartHtml) + tiap body
+     modal milik POS (topup, bayar, cari produk/pelanggan, item manual,
+     qty F4, pending — semuanya menambahkan kelas ini di template). */
+  .pos-scope .label {
+    /* .label asal = text-xs (11px) */
+    @apply text-sm;
+  }
+  .pos-scope .chip {
+    /* .chip asal = text-xs (11px) — chip notif/stok POS ikut membesar */
+    @apply text-sm;
+  }
+  .pos-scope .th {
+    /* .th asal = text-xs (11px) — header kolom tabel keranjang.
+       HATI-HATI: satuan-test.mjs menjaga th 11px di HALAMAN SATUAN —
+       halaman itu di luar .pos-scope jadi tidak ikut terpengaruh. */
+    @apply text-sm;
+  }
+  .pos-scope .suggest-unit {
+    /* chip satuan alternatif di dropdown scan — asal text-[11px] */
+    @apply text-sm;
+  }
+
+  /* ---------- 2. Info bar ----------
+     Grid 3 kolom SAMA RATA + garis pemisah — menggantikan interpolasi
+     gridCls/batas inline lama (infoBarHtml). Bila layar < lg ATAU `.is-stacked`
+     (toggle Mobile #pos-mobile) semua cell menumpuk + garis horizontal;
+     >= lg tanpa is-stacked: 3 kolom + garis vertikal antar kolom. */
+  .pos-ibar-grid {
+    @apply grid items-center gap-2;
+  }
+  .pos-ibar-grid > .pos-cell + .pos-cell {
+    @apply border-t border-gray-200 pt-2 dark:border-gray-700;
+  }
+  @media (min-width: 1024px) {
+    .pos-ibar-grid:not(.is-stacked) {
+      @apply grid-cols-3 gap-4;
+    }
+    .pos-ibar-grid:not(.is-stacked) > .pos-cell + .pos-cell {
+      @apply border-t-0 border-l border-gray-200 pl-4 pt-0 dark:border-gray-700;
+    }
+  }
+
+  /* ---------- 3. Scan bar ----------
+     Baris 1 = input scan + tombol Cari/Qty/Mobile; baris 2 = saklar cetak +
+     chip notif (dipisah garis atas). */
+  .pos-scanbar {
+    @apply !p-3;
+  }
+  .pos-scanrow {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .pos-scanrow2 {
+    @apply mt-3 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3 dark:border-gray-700;
+  }
+
+  /* ---------- 4. Tabel keranjang ----------
+     Label baris di ATAS tabel: "n item" kiri, tombol Bersihkan F5 kanan. */
+  .pos-cartbar {
+    @apply flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-2 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400;
+  }
+
+  /* ---------- 5. Sidebar bayar kanan ----------
+     Kartu = .card (styles.css) + pos-side untuk susunan dalam. Tombol aksi
+     memakai .btn .btn-ghost + .pos-qa (badan naik 32 -> 40px sejak 2026-10-09
+     — permintaan "tombol lebih besar"; sentuh target makin lega). */
+  .pos-side {
+    @apply flex min-h-0 flex-col gap-2.5 overflow-y-auto !p-3;
+  }
+  .pos-side-grid {
+    @apply grid grid-cols-2 gap-2.5;
+  }
+  .pos-qa {
+    @apply !min-h-[40px] !px-2 !py-2 text-sm;
+  }
+  .pos-side-sep {
+    @apply border-t border-gray-100 dark:border-gray-700;
+  }
+  .pos-side-bayar {
+    @apply mt-auto flex flex-col gap-1.5;
+  }
+  .pos-paybtn {
+    @apply w-full !py-3.5 text-sm;
+  }
+  /* Bayar pas F12 — GRADASI hijau (gaya dipindahkan utuh dari template;
+     hover hijau LEBIH GELAP, keputusan pemilik putaran 8c 2026-10-04). */
+  .pos-paypas {
+    @apply w-full !py-4 text-base font-semibold text-white bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md shadow-emerald-600/40 transition-all hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-700/50;
+  }
+  .pos-side-hint {
+    @apply text-center text-sm text-gray-500 dark:text-gray-400;
+  }
+
+  /* ---------- 6. Modal topup/tarik (.ptk) ----------
+     Redesain 2026-10-09 (pemilik memilih modal ini prioritas 1 dari
+     screenshot): tile berikon ala KulaPOS, input 44px, total di HEADER
+     (kanan — dipindah DOM di onMount, bukan posisi statis di sini). */
+  .ptk {
+    @apply space-y-3 text-sm text-gray-700 dark:text-gray-200;
+  }
+  .ptk-group-title {
+    @apply mb-2 text-sm font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400;
+  }
+  .ptk-tiles {
+    @apply grid gap-2;
+  }
+  /* Topup = 4 jenis (2 kolom di layar sempit, 4 kolom mulai sm). */
+  .ptk-tiles-topup {
+    @apply grid-cols-2 sm:grid-cols-4;
+  }
+  /* Tarik = 2 jenis — SELALU 2 kolom (4 kolom akan menyisakan 2 slot kosong). */
+  .ptk-tiles-tarik {
+    @apply grid-cols-2;
+  }
+  /* Tile jenis: kartu kolom (ikon atas + label) — kelas `btn` ikut ditulis
+     di template supaya dapat focus-ring + :active scale dari styles.css. */
+  .ptk-tile {
+    @apply !min-h-[64px] flex-col items-center justify-center gap-1 !rounded-xl border border-gray-200 bg-white px-2 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500 dark:hover:bg-gray-700/60;
+  }
+  .ptk-tile svg {
+    /* `icon()` tidak menulis width/height (kebijakan repo) — ukuran di sini.
+       20px > ukuran .btn svg (16px): tie-break specificitas sama, file ini
+       di-link setelah styles.css jadi yang menang. */
+    @apply size-5 shrink-0;
+  }
+  .ptk-div {
+    @apply border-t border-dashed border-gray-300 dark:border-gray-600;
+  }
+  .ptk-field {
+    @apply space-y-1;
+  }
+  .ptk-field .input {
+    /* Input 44px + 15px semibold (form standar 33px/13px dinilai kecil). */
+    @apply !min-h-[44px] !px-3 !text-[15px] font-semibold;
+  }
+  .ptk-nums {
+    @apply grid grid-cols-2 gap-3;
+  }
+  .ptk-hint {
+    @apply text-center text-sm leading-snug text-gray-500 dark:text-gray-400;
+  }
+  /* Kotak total — DOM-nya dipindahkan ke .modal-header (onMount) lalu
+     ditempel kanan sebelum tombol X. */
+  .ptk-totalbox {
+    @apply ml-auto shrink-0 text-right;
+  }
+  .ptk-total-label {
+    @apply text-sm font-semibold leading-tight text-gray-500 dark:text-gray-400;
+  }
+  .ptk-total {
+    @apply text-2xl font-extrabold leading-tight tabular-nums text-primary;
+  }
+
+  /* ---------- 7. Modal form bayar ----------
+     Kolom 5/7 -> 6/6 (2026-10-09): kartu metode kini 3 kolom sama lebar
+     (fix "kartu Transfer beda ukuran" dari screenshot pemilik) jadi kolom
+     kiri butuh ruang ekstra — kolom kanan (uang diterima 40px) tetap lega. */
+  .pos-bayar-grid {
+    @apply grid grid-cols-1 sm:grid-cols-[6fr_6fr];
+  }
+  .pos-pay-cards {
+    @apply grid grid-cols-3 gap-2;
+  }
+  /* Kartu metode: gaya dasar DI SINI (components layer) — state aktif di-
+     toggle paintFormBayar lewat utility (`!border-primary bg-primary-soft
+     dark:bg-primary/15 !text-primary`), dan utilities layer SELALU menang
+     atas components layer jadi pergantian metode tidak bisa meninggalkan
+     sisa kelas. Daftar kelas aktif = TETAP 4 seperti sebelum redesain. */
+  .pos-pay-card {
+    @apply w-full flex-col items-center justify-center gap-1 !min-h-[68px] !px-1 !py-1.5 !text-[20px] border-2 border-gray-200 bg-white text-gray-700 transition hover:border-primary dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200;
+  }
+  .pos-pay-card svg {
+    @apply size-6;
+  }
+}

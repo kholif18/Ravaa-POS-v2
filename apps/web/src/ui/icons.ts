@@ -6,7 +6,10 @@ export type IconName =
   | 'menu' | 'close' | 'search' | 'plus' | 'minus' | 'trash' | 'print' | 'sync'
   | 'clock' | 'users' | 'truck' | 'check' | 'alert' | 'info' | 'chevL' | 'chevR' | 'chevD'
   | 'moon' | 'sun' | 'receipt' | 'pencil' | 'filter' | 'download' | 'calendar' | 'logout' | 'wallet'
-  | 'upload' | 'copy' | 'more' | 'settings' | 'pause' | 'qr' | 'smartphone';
+  | 'upload' | 'copy' | 'more' | 'settings' | 'pause' | 'qr' | 'smartphone'
+  // zap (petir) + landmark (gedung bank) — tile jenis modal topup POS
+  // (2026-10-09: tile berikon ala KulaPOS; PLN token & tarik rekening).
+  | 'zap' | 'landmark';
 
 const P: Record<IconName, string> = {
   dashboard: '<rect width="7" height="9" x="3" y="3" rx="1" /> <rect width="7" height="5" x="14" y="3" rx="1" /> <rect width="7" height="9" x="14" y="12" rx="1" /> <rect width="7" height="5" x="3" y="16" rx="1" />',
@@ -54,6 +57,10 @@ const P: Record<IconName, string> = {
   qr: '<rect width="5" height="5" x="3" y="3" rx="1" /> <rect width="5" height="5" x="16" y="3" rx="1" /> <rect width="5" height="5" x="3" y="16" rx="1" /> <path d="M21 16h-3a2 2 0 0 0-2 2v3" /> <path d="M21 21v.01" /> <path d="M12 7v3a2 2 0 0 1-2 2H7" /> <path d="M3 12h.01" /> <path d="M12 3h.01" /> <path d="M12 16v.01" /> <path d="M16 12h1" /> <path d="M21 12v.01" /> <path d="M12 21v-1" />',
   // Layout mobile (Tahap 5, 2026-10-06) — gaya lucide "smartphone".
   smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2" /> <path d="M12 18h.01" />',
+  // zap (kilat) — tile "Token PLN" di modal topup POS (lucide zap klasik).
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />',
+  // landmark — tile "Dari rekening" (tarik tunai) di modal topup POS.
+  landmark: '<line x1="3" x2="21" y1="22" y2="22" /> <line x1="6" x2="6" y1="18" y2="11" /> <line x1="10" x2="10" y1="18" y2="11" /> <line x1="14" x2="14" y1="18" y2="11" /> <line x1="18" x2="18" y1="18" y2="11" /> <polygon points="12 2 20 7 4 7" />',
 };
 
 export function icon(name: IconName): string {

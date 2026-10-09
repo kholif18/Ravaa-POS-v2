@@ -44,9 +44,10 @@ apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id
                          (toggles `hidden` + teks `n transaksi antre offline`) —
                          supaya chip notif POS ikut hidup tiap antrean berubah
                           tanpa menunggu repaint POS (revisi 2026-10-08).
-apps/web/src/styles.css  SATU file token/gaya Tailwind v4 (`@theme` + `@layer
-                          components`) — seluruh halaman berbagi ini, tanpa
-                          CSS lain. **Restyle 2026-10-08** (arahan pemilik
+apps/web/src/styles.css  Token + gaya BERSAMA Tailwind v4 (`@theme` + `@layer
+                          components`) seluruh halaman (SATU sumber token;
+                          pendamping khusus POS ada di `pos.css` di bawah).
+                          **Restyle 2026-10-08** (arahan pemilik
                           *"style lebih modern, warna lebih hidup seperti
                           KulaPOS"* — kartu/teks/tombol proporsional):
                           primer biru **#1d6df0** (dari #0087ff; kontras putih
@@ -66,6 +67,29 @@ apps/web/src/styles.css  SATU file token/gaya Tailwind v4 (`@theme` + `@layer
                           apa adanya; sinkronkan `.opencode/skills/
                           frontend-pos/SKILL.md` bila token berubah** (aturan
                           skill: dilarang warna baru di luar token).
+apps/web/src/pos.css    File gaya KHUSUS POS (baru 2026-10-09 — keputusan
+                          pemilik "refactor total halaman POS, buat css baru
+                          khusus untuk POS", pola RPOS V1 `pos-system.css`).
+                          SELURUH aturan `.pos-*`/`.ptk*`/`.pos-scope` halaman
+                          `#/pos` + modal miliknya: info bar `.pos-ibar-grid`
+                          (3 kolom sama rata / `.is-stacked` 1 kolom untuk
+                          toggle Mobile, garis pemisah di CSS bukan interpolasi
+                          inline), scan bar, `.pos-cartbar`, sidebar `.pos-side`
+                          (tombol aksi `.pos-qa` 40px), modal topup `.ptk*`
+                          (tile berikon 64px, input 44px/15px, `.ptk-totalbox`
+                          dipindah ke header di `onMount`), form bayar
+                          `.pos-bayar-grid` 6/6 + `.pos-pay-cards` 3 kolom
+                          sama lebar. Di-link di `index.html` SETELAH
+                          styles.css (tie-break komponen = urutan link);
+                          memakai `@theme` styles.css lewat `@reference
+                          "./styles.css"` (WAJIB — tanpanya build gagal
+                          "Cannot apply unknown utility class"). **Token tetap
+                          milik styles.css — file ini DILARANG warna/token
+                          baru, `@apply` utility saja.** Teks minimum POS =
+                          `text-sm` (13px via `.pos-scope .label/.chip/.th/
+                          .suggest-unit`; keputusan pemilik 2026-10-09
+                          "text-xs terlalu kecil, sementara di POS dulu") —
+                          halaman lain tetap 11px.
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync)
                          + **kv `'holds'` transaksi tertahan POS** (`getHolds()`/
                          `saveHolds()` — per device, P5)
@@ -174,8 +198,12 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           bila `getPrintPause()`). **Informatif**: tiap chip
                           memuat nama produk PERTAMA (stok/tanggalnya) +
                           `title` daftar penuh (esc sekali). Rincian
-                          menipis/kadaluarsa tetap di strip di bawah scan
-                          bar; **strip STOK HABIS sengaja TIDAK ada** —
+                          kadaluarsa tetap di strip di bawah scan bar
+                          (`stripKadaluarsa()`); **strip MENIPIS dihapus
+                          2026-10-09** — permintaan pemilik "notifikasi ini
+                          hapus saja, karena sudah ada [chip]" (duplikat chip
+                          kuningnya; jangan kembalikan tanpa persetujuan);
+                          **strip STOK HABIS sengaja TIDAK ada** —
                           keputusan pemilik 2026-10-08 (strip merah sempat
                           ditambah lalu *"ini hapus saja karena sudah ada
                           di atasnya di dalam card"*), chip + judulnya

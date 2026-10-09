@@ -172,13 +172,22 @@ panel topup/laporan, modal struk, atau styling apa pun.
 * Tailwind CSS v4 DISETUJUI user 2026-09-25 (alasan: kecepatan bangun kulit;
   hanya CSS build-time via `@tailwindcss/vite`, offline-safe, tanpa CDN).
   Tetap DILARANG: framework JS (React/Vue/Svelte/Electron), chart lib,
-  font-icon lib, CSS lain. Komponen custom via `@layer components` di
-  `styles.css` — dilarang deklarasi mentah (`justify-content:` dsb) di dalam
-  `@apply` (build gagal); dilarang duplikat rule.
+  font-icon lib. File CSS = DUA: `styles.css` (token `@theme` + komponen
+  bersama `@layer components`) + `pos.css` KHUSUS POS (2026-10-09, pola
+  RPOS V1 `pos-system.css` — SELURUH aturan `.pos-*`/`.ptk*`/`.pos-scope`;
+  di-link SETELAH styles.css; `@reference "./styles.css"` WAJIB supaya
+  `@apply` mengenal token, tanpa itu build gagal "unknown utility").
+  Komponen custom via `@layer components` — dilarang deklarasi mentah
+  (`justify-content:` dsb) di dalam `@apply` (build gagal); dilarang
+  duplikat rule. `pos.css` DILARANG warna/token baru (palet tetap milik
+  `styles.css`), `@apply` utility saja — sinkronkan AGENTS.md §2 bila
+  aturan cakupan ini berubah.
 * DILARANG warna/ukuran baru di luar token tanpa update `styles.css` + daftar di sini.
 * DILARANG teks <11px di mana pun. Info penting (total, kembalian, angka stok
   di tabel) minimal **13px** (`text-sm` + bold bila perlu); 11px (`text-xs`)
-  hanya untuk label/badge/hint/sub-teks.
+  hanya untuk label/badge/hint/sub-teks — KECUALI halaman POS: minimum
+  **13px di semua teks** (keputusan pemilik 2026-10-09 "text-xs terlalu
+  kecil, sementara di POS dulu", lewat `.pos-scope` di `pos.css`).
 * DILARANG dialog `confirm()`/`prompt()` baru selain yang sudah ada
   (harga dinamis, modal shift, nama kasir) — ajukan pola inline dulu.
 * KONFIRMASI WAJIB lewat SweetAlert2 (`apps/web/src/ui/confirm.ts`), bukan `confirm()`.
