@@ -187,25 +187,203 @@
     @apply text-2xl font-extrabold leading-tight tabular-nums text-primary;
   }
 
-  /* ---------- 7. Modal form bayar ----------
-     Kolom 5/7 -> 6/6 (2026-10-09): kartu metode kini 3 kolom sama lebar
-     (fix "kartu Transfer beda ukuran" dari screenshot pemilik) jadi kolom
-     kiri butuh ruang ekstra — kolom kanan (uang diterima 40px) tetap lega. */
-  .pos-bayar-grid {
-    @apply grid grid-cols-1 sm:grid-cols-[6fr_6fr];
+  /* ---------- 7. Modal form bayar — mockup "Modern Blue Payment Checkout"
+     (2026-10-10, file referensi pemilik): band biru full-bleed + 2 kolom
+     kartu + strip trust. Biru band = gradien DUA nilai token @theme
+     (primary → hover), BUKAN warna baru; ikon lingkaran = putih 20%. */
+  .pos-bayar {
+    @apply space-y-3;
   }
-  .pos-pay-cards {
+  /* Band = pengganti modal-header bawaan (disembunyikan baris di bawah;
+     X band memakai data-x yang di-bind modal.ts ke SELURUH overlay).
+     Bleed -mx/-mt menetralkan padding .modal-body (px-2.5/py-2); sudut
+     atas diklip radius modal (overflow-hidden). */
+  .modal:has(.pos-bayar-band) .modal-header {
+    display: none;
+  }
+  .pos-bayar-band {
+    @apply -mx-2.5 -mt-2 flex items-center gap-3 bg-linear-to-r from-primary to-[#1757c8] px-5 py-4 text-white;
+  }
+  .pos-bayar-band-ikon {
+    @apply flex size-16 shrink-0 items-center justify-center rounded-full bg-white/20;
+  }
+  .pos-bayar-band-ikon svg {
+    @apply size-8;
+  }
+  .pos-bayar-band-judul {
+    @apply block text-2xl font-bold leading-tight;
+  }
+  .pos-bayar-band-cust {
+    @apply mt-0.5 flex items-center gap-1.5 text-sm text-white/85;
+  }
+  .pos-bayar-band-cust svg {
+    @apply size-4 shrink-0;
+  }
+  .pos-bayar-band-cust span:last-child {
+    @apply truncate font-medium;
+  }
+  .pos-bayar-band-total {
+    @apply ml-auto shrink-0 text-right;
+  }
+  .pos-bayar-band-total #bayar-total {
+    @apply block text-[40px] font-extrabold leading-none tabular-nums;
+  }
+  .pos-bayar-band-total > span:last-child {
+    @apply mt-1 block text-sm text-white/80;
+  }
+  .pos-bayar-band-x {
+    @apply shrink-0 rounded-full p-2 text-white/80 transition hover:bg-white/15 hover:text-white;
+  }
+  .pos-bayar-band-x svg {
+    @apply size-5;
+  }
+  /* Dua kolom kartu (1 kolom di <sm = fallback HP). */
+  .pos-bayar-grid2 {
+    @apply grid grid-cols-1 gap-3 sm:grid-cols-2;
+  }
+  .pos-bayar-kartu {
+    @apply space-y-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800;
+  }
+.pos-bayar-kanan {
+    /* 48px antar blok — ruang ekstra besar agar setiap komponen terasa lega. */
+    @apply space-y-12;
+  }
+  .pos-bayar-judul {
+    @apply text-[17px] font-bold text-gray-900 dark:text-white;
+  }
+  .pos-bayar-sub2 {
+    @apply mt-0.5 block text-sm text-gray-500 dark:text-gray-400;
+  }
+  .pos-bayar-judulrow {
+    @apply flex items-center gap-1.5 text-[15px] font-bold text-gray-900 dark:text-white;
+  }
+  .pos-bayar-judulrow svg {
+    @apply size-5 shrink-0 text-primary;
+  }
+  .pos-bayar-ops {
+    @apply font-normal text-gray-500 dark:text-gray-400;
+  }
+  /* 3 opsi sebaris; aktif = BIRU SOLID + badge cek (toggle paintFormBayar:
+     3 utility + .cek — daftar SAMA dengan render awal). */
+  .pos-pay-3col {
     @apply grid grid-cols-3 gap-2;
   }
-  /* Kartu metode: gaya dasar DI SINI (components layer) — state aktif di-
-     toggle paintFormBayar lewat utility (`!border-primary bg-primary-soft
-     dark:bg-primary/15 !text-primary`), dan utilities layer SELALU menang
-     atas components layer jadi pergantian metode tidak bisa meninggalkan
-     sisa kelas. Daftar kelas aktif = TETAP 4 seperti sebelum redesain. */
-  .pos-pay-card {
-    @apply w-full flex-col items-center justify-center gap-1 !min-h-[68px] !px-1 !py-1.5 !text-[20px] border-2 border-gray-200 bg-white text-gray-700 transition hover:border-primary dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200;
+  .pos-pay-pick {
+    @apply relative flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border-2 border-gray-200 bg-white px-1 py-2 text-sm font-semibold text-gray-700 transition hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200;
   }
-  .pos-pay-card svg {
-    @apply size-6;
+  .pos-pay-pick svg {
+    @apply size-6 shrink-0;
+  }
+  .pos-pay-pick .cek {
+    @apply absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-white/25;
+  }
+  .pos-pay-pick .cek svg {
+    @apply size-3;
+  }
+  /* Kotak info per metode (teks #bayar-info diganti paintFormBayar). */
+  .pos-bayar-info {
+    @apply flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2.5 text-sm leading-snug text-sky-900 dark:bg-sky-500/10 dark:text-sky-200;
+  }
+  .pos-bayar-info > svg {
+    @apply mt-0.5 size-5 shrink-0 text-sky-600 dark:text-sky-400;
+  }
+  .pos-bayar-note {
+    @apply resize-y;
+  }
+  .pos-bayar-count {
+    @apply mt-1 text-right text-sm tabular-nums text-gray-400 dark:text-gray-500;
+  }
+  /* Kartu total kanan (ikon koin + angka 32px). */
+  .pos-bayar-totalkartu {
+    @apply flex items-center gap-3;
+  }
+  .pos-bayar-koin {
+    @apply flex size-14 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary;
+  }
+  .pos-bayar-koin svg {
+    @apply size-7;
+  }
+  .pos-bayar-totalkartu #bayar-total-2 {
+    @apply block text-[32px] font-extrabold leading-tight tabular-nums text-gray-900 dark:text-white;
+  }
+  /* Blok tunai = tumpukan judul → input → judul → pills → ledger → hint. */
+  .pos-bayar-tunai {
+    /* 48px — spasi ekstra besar agar setiap komponen terasa lega. */
+    @apply space-y-12;
+  }
+  .pos-bayar-cashwrap {
+    @apply relative mt-1;
+  }
+  /* Pills nominal (fully rounded ala mockup); aktif = 2 utility yang
+     di-toggle paintCart() pada [data-cash] (pola lama, tak berubah). */
+  .pos-bayar-pills {
+    @apply grid grid-cols-2 gap-2;
+  }
+  .pos-bayar-pill {
+    @apply rounded-full border border-gray-300 bg-white px-3 py-2.5 text-center text-[15px] font-semibold text-gray-700 transition hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200;
+  }
+  /* Ledger KEMBALIAN (di DALAM alur tunai; hidden ikut #bayar-tunai-ledger
+     di paintFormBayar). BG hidup via 4 utility (toggle paintCart + render
+     awal): merah saat kurang, hijau saat ada kembalian. */
+  .pos-bayar-change {
+    @apply rounded-lg border border-dashed border-gray-300 bg-white p-3 text-center dark:border-gray-600 dark:bg-gray-800;
+  }
+  .pos-bayar-hint {
+    @apply text-center text-sm text-gray-500 dark:text-gray-400;
+  }
+  /* Trust "aman & tercatat" — DI FOOTER sebelah tombol Batal/Bayar
+     (2026-10-10, permintaan pemilik; dipindah dari strip body via prepend
+     di onMount bukaBayar). `mr-auto` menempelkannya ke KIRI footer,
+     tombol tetap kanan. truncate = layar sempit tak mendesak tombol. */
+  .pos-bayar-trust {
+    @apply mr-auto flex min-w-0 items-center gap-2 text-left;
+  }
+  .pos-bayar-trust > svg {
+    @apply size-8 shrink-0 text-emerald-500;
+  }
+  .pos-bayar-trust > span > b {
+    @apply block truncate text-[13px] font-bold text-gray-900 dark:text-white;
+  }
+  .pos-bayar-trust > span > span {
+    @apply block truncate text-xs text-gray-500 dark:text-gray-400;
+  }
+
+  /* ---------- 8. Resume pasca-bayar ala STRUK THERMAL ----------
+     (2026-10-10, permintaan pemilik). Kertas struk = PUTIH paksa + mono
+     13px (kertas fisik memang putih — dark: variant SENGAJA tidak ada;
+     dark mode UI tidak ikut ke kertas). Lebar 300px ≈ proporsi 58mm.
+     Dipakai htmlResumePenjualan() di modal resume (choiceDialog). */
+  .struk-muka {
+    @apply mx-auto w-full max-w-[300px] space-y-1.5 rounded-lg bg-white p-4 font-mono text-[13px] leading-snug text-gray-900 shadow-inner;
+  }
+  .struk-muka .struk-tengah {
+    @apply text-center;
+  }
+  .struk-muka .struk-tebal {
+    @apply font-bold uppercase tracking-wide;
+  }
+  .struk-muka .struk-redup {
+    @apply text-gray-500;
+  }
+  .struk-muka .struk-garis {
+    @apply border-t border-dashed border-gray-400;
+  }
+  .struk-muka .struk-baris {
+    @apply flex items-baseline justify-between gap-2;
+  }
+  .struk-muka .struk-baris > span:last-child {
+    @apply shrink-0 tabular-nums;
+  }
+  .struk-muka .struk-baris > span:first-child {
+    @apply min-w-0 break-words;
+  }
+  .struk-muka .struk-indent {
+    @apply pl-3;
+  }
+  .struk-muka .struk-total {
+    @apply text-base font-bold;
+  }
+  .struk-muka .struk-merah {
+    @apply font-bold text-red-700;
   }
 }
