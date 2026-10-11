@@ -10,6 +10,104 @@
 
 import { apiGet } from './api';
 
+/** Dokumen laporan generik (menu Laporan ala Aronium, 2026-10-11): satu
+ *  builder untuk semua menu — judul + periode + tabel + ringkasan. `baris`
+ *  = sel SELALU string (pemanggil memformat Rp/tanggal dulu); `ringkas` =
+ *  pasangan [label, nilai] di kotak kanan. */
+export interface DokLaporan {
+  judul: string;
+  periode: string;
+  meta: [string, string][];
+  kolom: { label: string; kanan?: boolean; tengah?: boolean }[];
+  baris: string[][];
+  ringkas: [string, string][];
+  catatan?: string;
+}
+
+export function htmlLaporan(d: DokLaporan, toko: Toko): string {
+  const cls = (k: { kanan?: boolean; tengah?: boolean }) => (k.kanan ? ' class="r"' : k.tengah ? ' class="c"' : '');
+  // Sel angka (ribuan + desimal Aronium) rata kanan otomatis: pemanggil
+  // mengirim string polos, jadi deteksi digit saja — tanpa menebak kolom.
+  const sel = (v: string, kanan: boolean) =>
+    `<td${kanan || /[\d.,]/.test(v.replace(/[^0-9.,]/g, '')) && /[0-9]/.test(v) ? ' class="r"' : ''}>${esc(v)}</td>`;
+  return `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>${esc(d.judul)} — ${esc(d.periode)}</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45; }
+  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
+  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .alamat { margin-top: 4px; max-width: 60%; }
+  .logo { width: 66px; height: 66px; border-radius: 50%; background: #4a90d9; color: #fff;
+          font-size: 40px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
+  .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
+  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
+  .rincian .baris { display: flex; }
+  .rincian .baris .lbl { width: 118px; }
+  table.items { width: 100%; border-collapse: collapse; }
+  table.items th { font-size: 10px; padding: 5px 6px; border-top: 1px solid #444;
+                   border-bottom: 1px solid #444; text-align: left; }
+  table.items th.r, table.items td.r { text-align: right; }
+  table.items th.c, table.items td.c { text-align: center; }
+  table.items td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
+  .ringkas { width: 55%; margin-left: auto; margin-top: 14px; }
+  .kotak { display: flex; justify-content: space-between; border: 1px solid #444; padding: 5px 9px; margin-bottom: 7px; }
+  .kotak .lbl { font-weight: 700; }
+  .catat { margin-top: 10px; font-size: 10px; color: #555; }
+  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+</style>
+</head>
+<body>
+  <div class="kop">
+    <div>
+      <div class="judul">${esc(d.judul)}</div>
+      <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
+      ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
+    </div>
+    <div class="logo" aria-hidden="true">R</div>
+  </div>
+  <hr>
+  <div class="meta">
+    <div>
+      <div class="ttl">Periode</div>
+      <div>${esc(d.periode)}</div>
+    </div>
+    <div class="rincian">
+      ${d.meta.map(([k, v]) => `<div class="baris"><span class="lbl">${esc(k)}:</span><span>${esc(v)}</span></div>`).join('')}
+    </div>
+  </div>
+  <table class="items">
+    <thead><tr>${d.kolom.map((k) => `<th${cls(k)}>${esc(k.label)}</th>`).join('')}</tr></thead>
+    <tbody>${d.baris.map((r) => `<tr>${r.map((v, i) => sel(v, !!d.kolom[i]?.kanan)).join('')}</tr>`).join('')}</tbody>
+  </table>
+  ${d.ringkas.length ? `<div class="ringkas">${d.ringkas.map(([k, v]) => `<div class="kotak"><span class="lbl">${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>` : ''}
+  ${d.catatan ? `<div class="catat">${esc(d.catatan)}</div>` : ''}
+  <div class="foot">Dicetak dari Ravaa POS</div>
+  <script>
+    window.addEventListener('load', function () { window.print(); });
+  </script>
+</body>
+</html>`;
+}
+
+/** Buka tab dokumen laporan dan cetak (window.print() — simpan sebagai PDF
+ *  dari dialog browser). Kop diambil dari server; popup diblokir = Error
+ *  (pemanggil toast saja, pola cetakInvoice). */
+export async function cetakLaporan(dok: DokLaporan): Promise<void> {
+  const set = await apiGet<{ data: Toko }>('/api/settings');
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak laporan');
+  w.document.open();
+  w.document.write(htmlLaporan(dok, set.data));
+  w.document.close();
+}
+
 /** Baris sale_items dari GET /api/sales/:id (kolom yang relevan utk invoice). */
 export interface ItemNota {
   name: string; qty: number; price: number; amount: number;

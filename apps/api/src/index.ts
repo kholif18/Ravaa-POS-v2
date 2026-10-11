@@ -2306,35 +2306,40 @@ app.get('/api/backup/:nama', (c) => {
 });
 
 // ---------- laporan harian ----------
-app.get('/api/reports/daily', (c) => {
-  const date = c.req.query('date') ?? new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+/** Satu sumber agregat laporan (daily + summary range, 2026-10-11): bentuk
+ *  kembaliannya IDENTIK — bedanya hanya jendela tanggal (`=` sehari vs
+ *  `BETWEEN` rentang). `piutang` = hutang TERBENTUK (CASE sisa_hutang persis
+ *  GET /api/sales) + TERBAYAR (ledger payment) — butir credit Z-report. */
+function laporanRentang(dari: string, sampai: string) {
+  const dl = (kol: string) => `date(${kol}) BETWEEN date(?) AND date(?)`;
+  const ps: [string, string] = [dari, sampai];
   const sales = db.prepare(
     `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS omzet, COALESCE(SUM(discount),0) AS diskon
-     FROM sales WHERE date(created_at)=date(?)`,
-  ).get(date) as { n: number; omzet: number; diskon: number };
+     FROM sales WHERE ${dl('created_at')}`,
+  ).get(...ps) as { n: number; omzet: number; diskon: number };
   // `diskon` = diskon transaksi + diskon PER BARIS. Tanpa penjumlahan ini angka
   // diskon menyembunyikan potongan per baris padahal omzet sudah menguranginya,
   // lalu `subtotal - total` di layar laporan tidak pernah cocok dengan angka ini.
   sales.diskon += (db.prepare(
     `SELECT COALESCE(SUM(si.discount),0) AS d
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
-      WHERE date(s.created_at) = date(?)`,
-  ).get(date) as { d: number }).d;
+      WHERE ${dl('s.created_at')}`,
+  ).get(...ps) as { d: number }).d;
   const byMethod = db.prepare(
     `SELECT pay_method, COUNT(*) AS n, COALESCE(SUM(total),0) AS total
-     FROM sales WHERE date(created_at)=date(?) GROUP BY pay_method`,
-  ).all(date);
+     FROM sales WHERE ${dl('created_at')} GROUP BY pay_method`,
+  ).all(...ps);
   const topup = db.prepare(
     `SELECT kind, COUNT(*) AS n, COALESCE(SUM(nominal),0) AS nominal, COALESCE(SUM(admin),0) AS admin
-     FROM topup_txns WHERE date(created_at)=date(?) GROUP BY kind`,
-  ).all(date);
+     FROM topup_txns WHERE ${dl('created_at')} GROUP BY kind`,
+  ).all(...ps);
   // Dikelompokkan per (name, unit) — tanpa `unit`, penjualan "2 pack" dan
   // "3 btl" produk sama jadi satu baris qty=5 campur satuan.
   const topItems = db.prepare(
     `SELECT si.name, si.unit, SUM(si.qty) AS qty, SUM(si.amount) AS amount
      FROM sale_items si JOIN sales s ON s.id=si.sale_id
-     WHERE date(s.created_at)=date(?) GROUP BY si.name, si.unit ORDER BY amount DESC LIMIT 10`,
-  ).all(date);
+     WHERE ${dl('s.created_at')} GROUP BY si.name, si.unit ORDER BY amount DESC LIMIT 10`,
+  ).all(...ps);
   const lowStock = db.prepare(
     `SELECT p.sku, p.name, p.stock, p.min_stock FROM products p
      JOIN categories c ON c.id=p.category_id
@@ -2345,32 +2350,132 @@ app.get('/api/reports/daily', (c) => {
   const hpp = Math.round((db.prepare(
     `SELECT COALESCE(SUM(si.qty * si.cost), 0) AS hpp
      FROM sale_items si JOIN sales s ON s.id = si.sale_id
-     WHERE date(s.created_at) = date(?)`,
-  ).get(date) as { hpp: number }).hpp);
+     WHERE ${dl('s.created_at')}`,
+  ).get(...ps) as { hpp: number }).hpp);
   // laba = omzet SETELAH diskon - HPP. Jasa/cetak punya cost 0, jadi seluruh
   // penjualannya dihitung sebagai laba (tidak ada biaya persediaan yang dilacak).
   const laba = (sales as { omzet: number }).omzet - hpp;
-  // Pengeluaran kas hari itu (Tahap 1, 2026-10-11) — dilaporkan TERPISAH,
+  // Pengeluaran kas (Tahap 1, 2026-10-11) — dilaporkan TERPISAH,
   // tidak menggerus laba (laba = laba kotor dagang, definisi lama tetap).
   const expense = db.prepare(
     `SELECT COUNT(*) AS n, COALESCE(SUM(jumlah),0) AS total
-     FROM expenses WHERE date(created_at)=date(?)`,
-  ).get(date) as { n: number; total: number };
-  // Retur hari itu (Tahap 2, 2026-10-11) — dilaporkan TERPISAH + dipakai kartu
+     FROM expenses WHERE ${dl('created_at')}`,
+  ).get(...ps) as { n: number; total: number };
+  // Retur (Tahap 2, 2026-10-11) — dilaporkan TERPISAH + dipakai kartu
   // "Omzet bersih" (keputusan (c) hybrid: kotor + retur + bersih). Total =
   // uang kembali (SUM returns.total), bukan qty.
   const retur = db.prepare(
     `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
-     FROM returns WHERE date(created_at)=date(?)`,
-  ).get(date) as { n: number; total: number };
-  // Pembelian yang DITERIMA hari itu (Tahap 3, 2026-10-11) — dihitung dari
+     FROM returns WHERE ${dl('created_at')}`,
+  ).get(...ps) as { n: number; total: number };
+  // Pembelian yang DITERIMA (Tahap 3, 2026-10-11) — dihitung dari
   // tanggal terima (`received_at`, bukan tanggal PO) karena itulah hari
   // barang (dan kas) bergerak. Total = nilai nota yang diterima.
   const purchase = db.prepare(
     `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
-     FROM purchases WHERE status = 'received' AND date(received_at)=date(?)`,
-  ).get(date) as { n: number; total: number };
-  return c.json({ data: { date, sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase } });
+     FROM purchases WHERE status = 'received' AND ${dl('received_at')}`,
+  ).get(...ps) as { n: number; total: number };
+  // Piutang (butir credit Z-report Aronium): TERBENTUK = porsi tunai tak
+  // masuk laci (CASE persis penanda sisa_hutang); TERBAYAR = payment ledger.
+  const piutangBaru = (db.prepare(
+    `SELECT COALESCE(SUM(CASE WHEN pay_method='tunai' AND total > cash_in
+       AND customer_id IS NOT NULL AND customer_name <> 'Pelanggan Umum'
+      THEN total - cash_in ELSE 0 END),0) AS t
+     FROM sales WHERE ${dl('created_at')}`,
+  ).get(...ps) as { t: number }).t;
+  const piutangBayar = (db.prepare(
+    `SELECT COALESCE(SUM(amount),0) AS t FROM customer_debts
+     WHERE type = 'payment' AND ${dl('created_at')}`,
+  ).get(...ps) as { t: number }).t;
+  return {
+    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase,
+    piutang: { baru: piutangBaru, bayar: piutangBayar },
+  };
+}
+
+/** Validasi rentang tanggal YYYY-MM-DD (pola round-trip bacaHari): keduanya
+ *  valid, dari <= sampai, dan maksimal 366 hari (anti-abu query setahun). */
+function bacaRentang(query: (k: string) => string | undefined):
+  | { ok: true; dari: string; sampai: string }
+  | { ok: false; error: string } {
+  const hariIni = new Date().toISOString().slice(0, 10);
+  const dari = query('from') ?? query('date') ?? hariIni;
+  const sampai = query('to') ?? query('date') ?? hariIni;
+  for (const h of [dari, sampai]) {
+    const d = new Date(`${h}T00:00:00Z`);
+    if (!RE_TGL.test(h) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== h) {
+      return { ok: false, error: 'from/to harus format YYYY-MM-DD' };
+    }
+  }
+  if (dari > sampai) return { ok: false, error: 'from tidak boleh sesudah to' };
+  const beda = (new Date(`${sampai}T00:00:00Z`).getTime() - new Date(`${dari}T00:00:00Z`).getTime()) / 86400000;
+  if (beda > 366) return { ok: false, error: 'rentang maksimal 366 hari' };
+  return { ok: true, dari, sampai };
+}
+
+app.get('/api/reports/daily', (c) => {
+  const date = c.req.query('date') ?? new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  return c.json({ data: { date, ...laporanRentang(date, date) } });
+});
+
+/** Rekap rentang tanggal (menu laporan ala Aronium, 2026-10-11): bentuk
+ *  SAMA dengan daily, jendela `from..to` inklusif. `lowStock` snapshot kini
+ *  (bukan per tanggal — stok adalah keadaan sekarang). */
+app.get('/api/reports/summary', (c) => {
+  const r = bacaRentang((k) => c.req.query(k));
+  if (!r.ok) return c.json({ error: r.error }, 400);
+  return c.json({ data: { from: r.dari, to: r.sampai, ...laporanRentang(r.dari, r.sampai) } });
+});
+
+/** Penjualan per kasir dalam rentang (menu Kasir): n + omzet + diskon
+ *  (transaksi + per baris, rumus konsisten dengan sales.diskon). */
+app.get('/api/reports/cashiers', (c) => {
+  const r = bacaRentang((k) => c.req.query(k));
+  if (!r.ok) return c.json({ error: r.error }, 400);
+  const dl = `date(s.created_at) BETWEEN date(?) AND date(?)`;
+  const rows = db.prepare(
+    `SELECT s.cashier, COUNT(*) AS n, COALESCE(SUM(s.total),0) AS omzet,
+            COALESCE(SUM(s.discount),0) +
+            COALESCE((SELECT SUM(si.discount) FROM sale_items si
+                       JOIN sales s2 ON s2.id = si.sale_id
+                      WHERE s2.cashier = s.cashier
+                        AND date(s2.created_at) BETWEEN date(?) AND date(?)),0) AS diskon
+       FROM sales s WHERE ${dl} GROUP BY s.cashier ORDER BY omzet DESC`,
+  ).all(r.dari, r.sampai, r.dari, r.sampai) as
+    { cashier: string; n: number; omzet: number; diskon: number }[];
+  const total = rows.reduce(
+    (a, x) => ({ n: a.n + x.n, omzet: a.omzet + x.omzet, diskon: a.diskon + x.diskon }),
+    { n: 0, omzet: 0, diskon: 0 },
+  );
+  return c.json({ data: { from: r.dari, to: r.sampai, rows, total } });
+});
+
+/** Produk dalam rentang (menu Produk): per (nama, satuan) qty + omzet + HPP.
+ *  Laba = amount − hpp dihitung klien dari dua angka server (tampilan saja,
+ *  preseden Omzet bersih). `q` multi-kata pola customers; limit 50/200. */
+app.get('/api/reports/products', (c) => {
+  const r = bacaRentang((k) => c.req.query(k));
+  if (!r.ok) return c.json({ error: r.error }, 400);
+  const q = (c.req.query('q') ?? '').trim();
+  const kata = q.split(/\s+/).filter(Boolean);
+  const conds = kata.map(() => 'lower(si.name) LIKE ?');
+  const params: unknown[] = [];
+  for (const k of kata) params.push(`%${k.toLowerCase()}%`);
+  const qcari = conds.length ? `AND ${conds.join(' AND ')}` : '';
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  const dl = `date(s.created_at) BETWEEN date(?) AND date(?)`;
+  const rows = db.prepare(
+    `SELECT si.name, si.unit, SUM(si.qty) AS qty, SUM(si.amount) AS amount,
+            COALESCE(SUM(si.qty * si.cost),0) AS hpp
+       FROM sale_items si JOIN sales s ON s.id = si.sale_id
+      WHERE ${dl} ${qcari} GROUP BY si.name, si.unit ORDER BY amount DESC LIMIT ? OFFSET ?`,
+  ).all(r.dari, r.sampai, ...params, limit, offset);
+  const total = db.prepare(
+    `SELECT COUNT(*) AS n FROM (SELECT 1 FROM sale_items si JOIN sales s ON s.id = si.sale_id
+      WHERE ${dl} ${qcari} GROUP BY si.name, si.unit)`,
+  ).get(r.dari, r.sampai, ...params) as { n: number };
+  return c.json({ data: { from: r.dari, to: r.sampai, rows, total: total.n } });
 });
 
 const port = Number(process.env.PORT ?? 3001);

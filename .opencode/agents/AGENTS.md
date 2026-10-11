@@ -864,15 +864,18 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          (`sale_id` + shift TERBUKA KINI, bukan shift nota
                          asal) — riwayat nota lama tidak diubah, catatan baru
                          masuk `#/returns`.
- apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
-                          pemilik — 7 kartu (omzet/retur/bersih/laba/HPP/
-                          diskon/pengeluaran — hybrid keputusan (c): kotor +
-                          retur terpisah + bersih = omzet−retur dihitung klien
-                          dari dua angka server, preseden `nonTunai` di
-                          shift-tutup.ts), rekap metode bayar, topup & tarik,
-                          produk terlaris, stok menipis, ekspor CSV (ikut baris
-                          Retur + Omzet bersih). SELURUH agregat dari GET
-                          /api/reports/daily apa adanya.
+ apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan ala Aronium,
+                          2026-10-11): chip menu Harian | Kasir | Produk |
+                          Piutang | Stok + filter tanggal (satu/rentang) + cari
+                          produk. Harian = tampilan lama (DOM dipertahankan).
+                          Tiap menu: CSV sendiri + tombol Cetak/PDF lewat
+                          `cetakLaporan()` (popup + window.print, simpan PDF
+                          dari browser — builder generik `DokLaporan` di
+                          invoice.ts: judul + periode + tabel + ringkasan).
+                          Piutang = kartu Terbentuk/Terbayar/Sisa live (link
+                          Hutang); Stok = reorder (saran = min−stok, link Buat
+                          PO — TANPA grup supplier, menyusul bila ada mapping
+                          produk→supplier).
  apps/web/src/pages/returns.ts  Halaman #/returns (Tahap 2, 2026-10-11):
                           linimasa retur per hari (toolbar tanggal pola
                           expenses.ts) + kartu uang kembali + tabel (klik baris
@@ -1766,7 +1769,19 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
-  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total}}}`
+  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
+  - Bentuk dihitung SATU fungsi `laporanRentang(dari,sampai)` (2026-10-11) —
+    daily = rentang 1 hari. `piutang` = hutang TERBENTUK (CASE sisa_hutang) +
+    TERBAYAR (ledger payment), butir credit Z-report.
+* `GET /api/reports/summary?from=&to=` -> `{data:{from,to,...sama dengan daily}}`
+  (menu laporan ala Aronium, 2026-10-11). Validasi: format YYYY-MM-DD
+  round-trip, `from<=to`, maks 366 hari (selain itu 400). `lowStock` snapshot
+  kini (stok = keadaan sekarang, bukan per tanggal).
+* `GET /api/reports/cashiers?from=&to=` -> `{data:{from,to,rows:[{cashier,n,omzet,diskon}],total}}`
+  (menu Kasir; diskon = transaksi + per baris, konsisten sales.diskon).
+* `GET /api/reports/products?from=&to=&q=&limit=` -> `{data:{from,to,rows:[{name,unit,qty,amount,hpp}],total}}`
+  (menu Produk; `q` multi-kata nama, limit 50/200; laba = amount−hpp dihitung
+  klien untuk tampilan, preseden Omzet bersih).
   - `hpp = ROUND(SUM(sale_items.qty * sale_items.cost))` untuk penjualan hari itu.
   - `laba = sales.omzet - hpp` (omzet sudah **setelah** semua diskon).
   - `expense` (Tahap 1, 2026-10-11) = COUNT + SUM `expenses` hari itu —
