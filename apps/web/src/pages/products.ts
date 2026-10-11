@@ -869,7 +869,7 @@ function productForm(
         <p class="hint" id="f-track-hint"></p>
 
         <p class="form-sec">Harga</p>
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div class="field-sm">
             <label class="label" for="f-cost">Harga beli (Rp)</label>
             <input id="f-cost" class="input input-sm" inputmode="numeric" value="${d?.cost ?? 0}" />
@@ -882,7 +882,12 @@ function productForm(
             <label class="label" for="f-price">Harga jual (Rp) *</label>
             <input id="f-price" class="input input-sm" inputmode="numeric" value="${d?.price ?? 0}" />
           </div>
+          <div class="field-sm">
+            <label class="label" for="f-grosir">Harga grosir (Rp)</label>
+            <input id="f-grosir" class="input input-sm" inputmode="numeric" value="${d?.price_grosir ?? 0}" />
+          </div>
         </div>
+        <p class="hint">Harga grosir dipakai POS bila pelanggan tier grosir dipilih — 0 = ikut harga jual. Pack/dus tanpa harga eksplisit ikut harga tier × factor.</p>
         ${mode === 'edit' && d && d.track_stock ? `
         <p class="-mt-1 text-xs text-gray-500 dark:text-gray-400">
           Modal rata-rata: <b class="text-gray-700 dark:text-gray-200">${rp(d.avg_cost)}</b>
@@ -1293,6 +1298,11 @@ function productForm(
         if (unitList.some((u) => u.unit === base)) {
           toast(`Satuan dasar (${base}) tidak perlu diulang`, 'warning'); return;
         }
+        // --- harga grosir: tolak sebelum mengirim ---------------------------
+        const grosirInput = el.querySelector('#f-grosir') as HTMLInputElement;
+        if (!Number.isFinite(num('f-grosir')) || num('f-grosir') < 0) {
+          toast('Harga grosir harus angka >= 0', 'warning'); grosirInput.focus(); return;
+        }
         // --- diskon & kadaluarsa: tolak sebelum mengirim ---------------------
         const tipeDisc = discType.value === 'pct' ? 'pct' : 'rp';
         const nilaiDisc = tipeDisc === 'pct' ? dec('f-disc') : num('f-disc');
@@ -1321,6 +1331,7 @@ function productForm(
             category_slug: catSel.value,
             unit: val('f-unit') || 'pcs',
             price: num('f-price'),
+            price_grosir: num('f-grosir'),
             cost: num('f-cost'),
             markup: dec('f-markup'),
             price_dynamic: dyn.checked ? 1 : 0,
@@ -1883,7 +1894,7 @@ function bind(): void {
 function payloadToggleAktif(p: Product, isActive: 0 | 1) {
   return {
     sku: p.sku, name: p.name, category_slug: p.category_slug, barcode: p.barcode,
-    unit: p.unit, price: p.price, cost: p.cost, markup: p.markup,
+    unit: p.unit, price: p.price, price_grosir: p.price_grosir ?? 0, cost: p.cost, markup: p.markup,
     price_dynamic: p.price_dynamic, stock: p.stock, min_stock: p.min_stock,
     is_active: isActive,
     // Diskon & kadaluarsa ikut dikirim karena server me-reset field yang absen

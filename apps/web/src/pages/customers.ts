@@ -18,6 +18,8 @@ type Customer = {
   /** No. customer otomatis dari server (`CUS-000001`); '' = baris lama
    *  yang nomornya belum pernah diisi (diisi server saat disimpan ulang). */
   code: string;
+  /** Tier harga (`ecer` bawaan | `grosir`) — POS memakai price_grosir bila grosir. */
+  tier: string;
   name: string;
   phone: string;
   address: string;
@@ -26,7 +28,7 @@ type Customer = {
   updated_at: string;
 };
 
-type EditCustomer = { id: number | null; name: string; phone: string; address: string; note: string; code: string };
+type EditCustomer = { id: number | null; name: string; phone: string; address: string; note: string; code: string; tier: string };
 
 const state = {
   items: [] as Customer[],
@@ -105,7 +107,7 @@ function renderTable(): string {
         <td class="td tabular-nums">${state.offset + i + 1}</td>
         <td class="td">
           <div class="cell-strong">${esc(u.name)}</div>
-          <div class="cell-sub">${u.code ? `<span class="font-mono">${esc(u.code)}</span> · ` : ''}${esc(u.phone || 'tanpa no. HP')}</div>
+          <div class="cell-sub">${u.code ? `<span class="font-mono">${esc(u.code)}</span> · ` : ''}${esc(u.phone || 'tanpa no. HP')}${u.tier === 'grosir' ? ' · <span class="font-semibold text-primary">Grosir</span>' : ''}</div>
         </td>
         <td class="td">${u.address ? esc(u.address) : '<span class="text-gray-400">—</span>'}</td>
         <td class="td">${u.note ? esc(u.note) : '<span class="text-gray-400">—</span>'}</td>
@@ -161,9 +163,18 @@ function customerForm(c: EditCustomer): void {
     title: isNew ? 'Tambah Pelanggan' : `Ubah Pelanggan: ${c.name}`,
     okLabel: isNew ? 'Tambah' : 'Simpan',
     body: `
-      <div class="field">
-        <label class="label" for="c-code">No. customer</label>
-        <div class="rounded border border-gray-200 bg-gray-50 px-2 py-2 dark:border-gray-700 dark:bg-gray-800">${nomor(c.code)}</div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="field">
+          <label class="label" for="c-code">No. customer</label>
+          <div class="rounded border border-gray-200 bg-gray-50 px-2 py-2 dark:border-gray-700 dark:bg-gray-800">${nomor(c.code)}</div>
+        </div>
+        <div class="field">
+          <label class="label" for="c-tier">Tier harga</label>
+          <select id="c-tier" class="input">
+            <option value="ecer"${(c.tier ?? 'ecer') === 'ecer' ? ' selected' : ''}>Ecer — harga jual biasa</option>
+            <option value="grosir"${c.tier === 'grosir' ? ' selected' : ''}>Grosir — harga grosir produk</option>
+          </select>
+        </div>
       </div>
       <div class="field">
         <label class="label" for="c-name">Nama pelanggan *</label>
@@ -196,6 +207,7 @@ function customerForm(c: EditCustomer): void {
             phone: (el.querySelector('#c-phone') as HTMLInputElement).value.trim(),
             address: (el.querySelector('#c-address') as HTMLInputElement).value.trim(),
             note: (el.querySelector('#c-note') as HTMLInputElement).value.trim(),
+            tier: (el.querySelector('#c-tier') as HTMLSelectElement).value === 'grosir' ? 'grosir' : 'ecer',
           });
           close(); // modal tidak menutup sendiri (lihat ui/modal.ts)
           toast(isNew ? `Pelanggan "${n}" ditambahkan` : `Pelanggan "${n}" disimpan`, 'success');
@@ -224,7 +236,7 @@ function bindRows(): void {
     b.addEventListener('click', () => {
       const id = Number(b.dataset.custEdit);
       const c = state.items.find((x) => x.id === id);
-      if (c) customerForm({ id: c.id, name: c.name, phone: c.phone, address: c.address, note: c.note, code: c.code });
+      if (c) customerForm({ id: c.id, name: c.name, phone: c.phone, address: c.address, note: c.note, code: c.code, tier: c.tier ?? 'ecer' });
     }),
   );
   host!.querySelectorAll<HTMLElement>('[data-cust-del]').forEach((b) =>
@@ -278,7 +290,7 @@ export async function mountCustomersPage(el: HTMLElement): Promise<void> {
   el.innerHTML = renderPage();
   paint();
   el.querySelector('#cust-new')?.addEventListener('click', () =>
-    customerForm({ id: null, name: '', phone: '', address: '', note: '', code: '' }),
+    customerForm({ id: null, name: '', phone: '', address: '', note: '', code: '', tier: 'ecer' }),
   );
   // Debounce 250ms (pola halaman lain) — Enter mempercepat.
   el.querySelector<HTMLInputElement>('#cust-q')?.addEventListener('input', (ev) => {

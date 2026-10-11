@@ -1107,7 +1107,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `SUM(charge) - SUM(payment)` selalu dihitung ulang saat dibaca — angka
     tersimpan akan selisih begitu salah satu baris mutasi diedit/dihapus.
     `charge` = pelanggan berhutang (beli belum bayar), `payment` = pembayaran.
-  - `GET /api/customers?q=&limit=&offset=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
+  - `GET /api/customers?q=&limit=&offset=` -> `{data:[{id,code,tier,name,phone,address,note,created_at,updated_at}], total}`
     - `q` opsional, multi-kata (SEMUA kata harus cocok di `name`/`phone`/`note`,
       pola search produk — tidak harus di field atau urutan yang sama).
     - Urutan `name COLLATE NOCASE, id`; `limit` default 50 maks 200,
@@ -1129,7 +1129,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `''` tampil sebagai `—` dan diisi server saat pertama disimpan ulang.
       Kolom `supplier_no` **DICABUT 2026-10-11** (perintah pemilik — pindah ke
       master `suppliers` di bawah).
-  - `POST /api/customers` `{id?,name,phone?,address?,note?}` -> 201 baru / 200 update
+  - `POST /api/customers` `{id?,name,phone?,address?,note?,tier?}` -> 201 baru / 200 update
+    - **`tier` (`ecer`|`grosir`, 2026-10-11)**: tak dikirim = pertahankan lama
+      (update) / `ecer` (insert); selain dua itu → 400. POS memakai
+      `price_grosir` bila pelanggan terpilih grosir (chip "Grosir" di info
+      bar); baris lama tak di-reprice, baris baru ikut tier.
     - `id` dikirim = update (404 bila tak ada), tanpa id = insert baru.
       **Sengaja TIDAK upsert by phone** — dua orang bisa berbagi nomor
       (keluarga/karyawan toko), nomor bukan kunci identitas.
@@ -1293,7 +1297,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Client WAJIB menghapus SKU nonaktif dari cache (`removeProductBySku`).
     Untuk produk **dihapus** (tombstone) tidak perlu dipanggil manual:
     `syncMaster()` sudah membuangnya saat menerima `deleted_at` terisi.
-* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?,image?,discount_type?,discount?,expiry_date?,use_note?}` (upsert by sku, version++)
+* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,price_grosir?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?,image?,discount_type?,discount?,expiry_date?,use_note?}` (upsert by sku, version++)
+  - **`price_grosir` (tier pelanggan, 2026-10-11)**: harga per satuan dasar
+    untuk pelanggan tier `grosir` (lihat `customers.tier`). 0 = ikut ecer.
+    Field BIASA (ikut reset, wajib di `payloadToggleAktif()` + form);
+    impor CSV tanpa kolom ini dipertahankan (bendera
+    `pertahankanTidakDikirim`); validasi `>= 0` → 400. Pack/dus: eksplisit
+    menang; NULL ikut `price_grosir × factor` bila grosir. POS: key baris ikut
+    harga bila ≠ ecer standar (anti-gabung ecer+grosir, pola dinamis).
   - `sku` **opsional**: kosong berarti server menomori sendiri `PRD00001`,
     `PRD00002`, ... (`PRD` + 5 digit, sejak 2026-09-28 — sebelumnya diturunkan
     dari nama). Nomor = **MAX** SKU `PRD[0-9]+` di DB + 1, **BUKAN COUNT**:

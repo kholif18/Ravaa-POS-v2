@@ -191,9 +191,22 @@ let qtyNext = 1;
 // tanpa kontak (payload tanpa customer_id — client lama/offline tetap sah).
 // `phone`/`note` = bahan cari di layar Cari pelanggan (openCariPelanggan) —
 // filter lokal multi-kata pola sama dengan `?q=` API.
-type Cust = { id: number; code: string; name: string; phone?: string; note?: string };
+type Cust = { id: number; code: string; name: string; phone?: string; note?: string; tier?: string };
 let customers: Cust[] = [];
 let customerId: number | null = null;
+/** Pelanggan terpilih tier grosir? Harga grosir (products.price_grosir)
+ *  dipakai saat produk masuk keranjang — 2026-10-11. */
+const pelangganGrosir = (): boolean =>
+  customerId !== null && (customers.find((c) => c.id === customerId)?.tier ?? 'ecer') === 'grosir';
+/** Harga dasar ecer/grosir satu produk (sebelum resolusi satuan). */
+const hargaDasar = (p: Product, grosir: boolean): number =>
+  grosir && (p.price_grosir ?? 0) > 0 ? p.price_grosir : p.price;
+/** Paint chip "Grosir" di info bar (tanpa repaint — dipanggil tiap titik
+ *  ganti pelanggan; baris lama TIDAK di-reprice, hanya baris baru). */
+function paintTier(): void {
+  const el = host?.querySelector('#pos-tier');
+  if (el) el.classList.toggle('hidden', !pelangganGrosir());
+}
 /** Jam live di info bar — interval dijalankan sekali per mount, dihentikan di
  *  unmountPosPage (kalau tidak, interval menumpuk tiap pindah halaman). */
 let jamTimer: ReturnType<typeof setInterval> | null = null;
@@ -707,9 +720,11 @@ function bacaQtyKode(v: string): { qty: number; q: string } | null {
 }
 
 /** Resolusi satuan jual → `{unit, factor, price}` FINAL untuk satu baris.
- *  Satuan dasar / kosong → `{p.unit, 1, p.price}`; alternatif dari
- *  `product_units`: `price` eksplisit bila diisi, ikut `products.price × factor`
+ *  Satuan dasar / kosong → `{p.unit, 1, hargaDasar}`; alternatif dari
+ *  `product_units`: `price` eksplisit bila diisi, ikut `hargaDasar × factor`
  *  bila NULL (aturan kontrak GET /api/products `units[]`).
+ *  `grosir` = pelanggan terpilih tier grosir + price_grosir > 0 (2026-10-11):
+ *  pack/dus eksplisit tetap menang; yang NULL ikut `price_grosir × factor`.
  *  Satuan tak dikenal jatuh ke dasar (pola addProduct lama — jangan dilempar
  *  error di sini; server tetap penjaga terakhir saat bayar).
  *  SATU sumber kebenaran untuk addProduct, gantiSatuan, dan muatKeranjang
@@ -717,13 +732,25 @@ function bacaQtyKode(v: string): { qty: number; q: string } | null {
 function resolusiSatuan(
   p: Product,
   unitSlug?: string,
+  grosir = false,
 ): { unit: string; factor: number; price: number } {
+  const dasar = hargaDasar(p, grosir);
   const ru = unitSlug && unitSlug !== p.unit
     ? (p.units ?? []).find((u) => u.unit === unitSlug)
     : undefined;
   return ru
-    ? { unit: ru.unit, factor: ru.factor, price: ru.price ?? Math.round(p.price * ru.factor) }
-    : { unit: p.unit, factor: 1, price: p.price };
+    ? { unit: ru.unit, factor: ru.factor, price: ru.price ?? Math.round(dasar * ru.factor) }
+    : { unit: p.unit, factor: 1, price: dasar };
+}
+
+/** Key baris keranjang. Aturan 2026-10-06 (dinamis) + 2026-10-11 (tier):
+ *  harga ikut di key BILA berbeda dari harga ecer standar — scan ulang
+ *  dengan harga berbeda = baris BARU (jangan gabung ecer+grosir satu baris),
+ *  harga sama = qty bertambah. Produk dinamis selalu bawa harga di key. */
+function kunciBaris(p: Product, unit: string, price: number): string {
+  if (p.price_dynamic) return `${p.id}:${unit}:${price}`;
+  const standar = resolusiSatuan(p, unit, false).price;
+  return price !== standar ? `${p.id}:${unit}:${price}` : `${p.id}:${unit}`;
 }
 
 /** Daftar pilihan select satuan per baris: dasar + alternatif (bila kosong
@@ -737,10 +764,9 @@ function daftarSatuan(p: Product): { unit: string; factor: number; price: number
 
 function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1): void {
   // Key menyertakan satuan: 2 pcs dan 2 pack adalah baris BERBEDA, bukan penambahan.
-  // Produk harga khusus (price_dynamic) key-nya ikut memuat HARGA beli baris
-  // ini — scan ulang dengan harga berbeda = baris BARU; harga sama = qty
-  // bertambah (keputusan pemilik 2026-10-06).
-  const key = p.price_dynamic ? `${p.id}:${unit}:${price}` : `${p.id}:${unit}`;
+  // Harga ikut di key bila dinamis (2026-10-06) atau tier grosir (2026-10-11)
+  // — lihat kunciBaris: ecer+grosir produk sama = DUA baris.
+  const key = kunciBaris(p, unit, price);
   // Prefill diskon permanen produk: '%'-nya dihitung ke rupiah per baris, jadi
   // kasir melihat angka jadi (bukan tebak-tebakan) dan tetap bisa mengubahnya.
   const prefill = p.discount > 0
@@ -830,21 +856,21 @@ function setHarga(key: string, nilai: number): void {
  *  Keputusan FINAL pemilik: select/dropdown satuan PER BARIS; **qty ANGKA SAMA
  *  pindah satuan** (5 pcs → 5 pack); **diskon baris DI-RESET** (total uang
  *  berubah — diskon lama tidak relevan); harga diambil ulang dari
- *  `product_units` lewat `resolusiSatuan` (server tetap mengunci harga non-
- *  dinamis saat bayar). Re-key `<id>:<unit>` (+ `:<harga>` bila price_dynamic)
- *  — bila baris lain sudah memakai key itu, kuantitas DIGABUNG (aturan scan
- *  yang sama, lihat setHarga). */
+ *  `product_units` lewat `resolusiSatuan` tier-aware (server tetap mengunci
+ *  harga non-dinamis saat bayar). Re-key via kunciBaris (harga ikut bila
+ *  dinamis ATAU tier grosir) — bila baris lain sudah memakai key itu,
+ *  kuantitas DIGABUNG (aturan scan yang sama, lihat setHarga). */
 function gantiSatuan(key: string, unitSlug: string): void {
   const line = cart.find((l) => l.key === key);
   if (!line || line.product_id === null || !unitSlug || unitSlug === line.unit) return;
   const p = products.find((x) => x.id === line.product_id);
   if (!p) return;
-  const res = resolusiSatuan(p, unitSlug);
+  const res = resolusiSatuan(p, unitSlug, pelangganGrosir());
   // Satuan tak ada di master baris ini (cache basi) — resolusiSatuan jatuh ke
   // satuan dasar; kalau dasar pun bukan pilihan yang diklik, abaikan.
   if (res.unit !== unitSlug) return;
   const qty = line.qty; // angka qty TETAP — hanya satuan & harga yang berganti
-  const keyBaru = p.price_dynamic ? `${p.id}:${res.unit}:${res.price}` : `${p.id}:${res.unit}`;
+  const keyBaru = kunciBaris(p, res.unit, res.price);
   if (keyBaru !== line.key) {
     const tabrakan = cart.find((l) => l.key === keyBaru);
     if (tabrakan) {
@@ -1223,7 +1249,10 @@ function infoBarHtml(): string {
                kata, ↑↓ sorot, Enter pilih), buat pelanggan yang daftarnya
                sudah panjang (master kontak + hutang). -->
           <div class="w-full">
-            <label class="label" for="pos-customer">Pelanggan</label>
+            <!-- Chip tier grosir (2026-10-11): tampil bila pelanggan terpilih
+                 tier-nya grosir — penanda harga grosir aktif di keranjang.
+                 Di-toggle paintTier() (tanpa repaint) tiap ganti pelanggan. -->
+            <label class="label" for="pos-customer">Pelanggan <span id="pos-tier" class="chip !border-primary !text-primary${pelangganGrosir() ? '' : ' hidden'}">Grosir</span></label>
             <!-- Revisi putaran 8b (2026-10-04): "tombol dan dropdown customer
                  tidak inline" — tombol KEMBALI sebaris dengan select (dulu
                  sempat dipindah ke baris label di atas). Bentuknya kini
@@ -2070,6 +2099,7 @@ function paint(): void {
     const v = (e.target as HTMLSelectElement).value;
     customerId = v ? Number(v) : null;
     simpanKeranjang(); // ganti pelanggan tanpa repaint — tulis eksplisit
+    paintTier(); // baris lama TIDAK di-reprice (sudah disepakati); baris baru ikut tier
   });
   host.querySelector('#pos-mobile')?.addEventListener('click', () => {
     mobileMode = !mobileMode;
@@ -2288,6 +2318,11 @@ function simpanKeranjang(): void {
 function muatKeranjang(): boolean {
   const s = getKeranjang<SimpananKeranjang>();
   if (!s?.items?.length && !(s?.topups?.length)) return false;
+  // Pelanggan diset DULU sebelum loop restore — harga tier (grosir/ecer)
+  // dihitung per baris via pelangganGrosir(), jadi tanpa ini baris grosir
+  // pulih sebagai ecer (bug: pack 30000 → 36000). Validasi id terhadap master
+  // tetap di mountPosPage setelahnya (lihat komentar kepala fungsi).
+  customerId = s.customerId ?? null;
   const byId = new Map(products.map((p) => [p.id, p]));
   const items: CartLine[] = [];
   let dibuang = 0;
@@ -2315,19 +2350,17 @@ function muatKeranjang(): boolean {
         l.key = k;
       } else {
         // Harga non-dinamis disamakan ke cache master — TAPI memakai harga
-        // SATUAN BARIS (resolusiSatuan), bukan `p.price` dasar: baris "2 pack"
-        // yang dipulihkan jangan jatuh ke harga per pcs (tampilan subtotal
-        // salah walau server menghitung ulang saat bayar). Factor juga ikut
-        // disinkronkan kalau master product_units berubah.
-        const r = resolusiSatuan(p, l.unit);
+        // SATUAN BARIS tier-aware (resolusiSatuan + tier pelanggan tersimpan),
+        // bukan `p.price` dasar: baris "2 pack" yang dipulihkan jangan jatuh
+        // ke harga per pcs, dan baris grosir jangan jatuh ke harga ecer
+        // (2026-10-11). Factor ikut disinkronkan kalau master berubah.
+        // Re-key via kunciBaris + gabung bila kembar (pola dobel di atas).
+        const r = resolusiSatuan(p, l.unit, pelangganGrosir());
         l.price = r.price;
         l.factor = r.factor;
-        if (r.unit !== l.unit) {
-          // Satuan baris sudah tidak dijual lagi di master (units berubah di
-          // server) — jatuh ke satuan dasar + re-key; kalau key sudah ada,
-          // gabung kuantitas (pola dobel di atas).
-          l.unit = r.unit;
-          const k2 = `${p.id}:${r.unit}`;
+        l.unit = r.unit;
+        const k2 = kunciBaris(p, r.unit, r.price);
+        if (k2 !== l.key) {
           const dobel2 = items.find((x) => x.key === k2);
           if (dobel2) {
             dobel2.qty += l.qty;
@@ -2370,7 +2403,8 @@ function muatKeranjang(): boolean {
     });
   }
   discount = Math.max(0, Math.round(s.discount || 0));
-  customerId = s.customerId ?? null;
+  // customerId sudah diset di awal fungsi (sebelum loop restore tier) — tidak
+  // diulang di sini supaya satu sumber.
   for (const l of cart) {
     const m = /^manual:(\d+)$/.exec(l.key);
     if (m) manualSeq = Math.max(manualSeq, Number(m[1]));
@@ -2429,6 +2463,7 @@ async function tahanKeranjang(): Promise<void> {
   const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
   if (sel) sel.value = customerId === null ? '' : String(customerId);
   simpanKeranjang(); // sinkronkan pelanggan bawaan (isi kosong sudah ditulis bersihkanKeranjang)
+  paintTier(); // kembali ecer — chip ikut padam
   paintAktif();
   toast(`Transaksi ditahan — ${holds.length} tertahan`, 'info');
 }
@@ -2476,6 +2511,7 @@ async function muatHold(h: Hold): Promise<void> {
     : customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
   const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
   if (sel) sel.value = customerId === null ? '' : String(customerId);
+  paintTier(); // hold bisa milik tier berbeda — chip ikut
   // Item manual hold memakai key `manual:<n>` — dorong seq melampaui angka
   // tertinggi supaya item manual BERIKUTNYA tidak menabrak key lama. Baris
   // topup (`topup:<n>`) didorong dari key yang sama di sini.
@@ -2799,8 +2835,9 @@ function addProduct(p: Product, unitSlug?: string, qtyOverride?: number): void {
     return;
   }
   // Satuan + harga final lewat helper bersama (resolusiSatuan) — jalur yang
-  // SAMA dipakai gantiSatuan & muatKeranjang.
-  const { unit, factor, price: hargaTampil } = resolusiSatuan(p, unitSlug);
+  // SAMA dipakai gantiSatuan & muatKeranjang. Tier grosir pelanggan terpilih
+  // ikut di sini (2026-10-11): scan saat pelanggan grosir = harga grosir.
+  const { unit, factor, price: hargaTampil } = resolusiSatuan(p, unitSlug, pelangganGrosir());
 
   addLine(p, hargaTampil, qtyPakai(), unit, factor);
   paintCart();
@@ -3059,6 +3096,7 @@ function openCariPelanggan(): void {
         const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
         if (sel) sel.value = String(c.id);
         simpanKeranjang(); // pilihan pelanggan tanpa repaint — tulis eksplisit
+        paintTier();
         api.close();
         focusScan(); // pola addProduct: kembali ke kolom scan utk transaksi
       };
@@ -3716,6 +3754,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       const selCustTop = host?.querySelector<HTMLSelectElement>('#pos-customer');
       if (selCustTop) selCustTop.value = customerId === null ? '' : String(customerId);
       simpanKeranjang();
+      paintTier();
       const discTop = host?.querySelector<HTMLInputElement>('#pos-discount');
       if (discTop) discTop.value = '';
       const cashTop = document.querySelector<HTMLInputElement>('#pos-cash');
@@ -3888,6 +3927,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     const selCust = host?.querySelector<HTMLSelectElement>('#pos-customer');
     if (selCust) selCust.value = customerId === null ? '' : String(customerId);
     simpanKeranjang(); // penjualan sukses = keranjang kosong di localStorage (reload berikutnya tidak memulihkan nota ini)
+    paintTier();
     toast(
       `Terjual ${res.data.sale.invoice_no ?? res.data.sale.id.slice(0, 8)} · ${rp(res.data.sale.total)}` +
         (tagihTopup > 0 ? ` · topup ${rp(tagihTopup)}` : '') +

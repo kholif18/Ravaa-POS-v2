@@ -36,6 +36,9 @@ const ALIAS: Record<string, string> = {
   barcode: 'barcode', 'bar code': 'barcode', 'kode barcode': 'barcode',
   satuan: 'unit', unit: 'unit',
   harga: 'price', 'harga jual': 'price', price: 'price',
+  // Harga grosir (tier pelanggan, 2026-10-11): kolom OPSIONAL — kosong/absen
+  // = tak dikirim = dipertahankan server (bendera pertahankanTidakDikirim).
+  'harga grosir': 'price_grosir', 'wholesale price': 'price_grosir', 'price grosir': 'price_grosir',
   modal: 'cost', 'harga beli': 'cost', cost: 'cost',
   markup: 'markup', margin: 'markup', 'persen margin': 'markup',
   stok: 'stock', stock: 'stock', qty: 'stock', jumlah: 'stock',
@@ -221,7 +224,7 @@ export interface MapOpts {
   adaSku: (sku: string) => boolean;
 }
 
-const KOLOM_ANGKA = ['price', 'cost', 'markup', 'stock', 'min_stock', 'price_dynamic'] as const;
+const KOLOM_ANGKA = ['price', 'cost', 'markup', 'stock', 'min_stock', 'price_dynamic', 'price_grosir'] as const;
 
 /** Peta baris mentah jadi payload API + status per baris.
  *  Kategori & satuan dicocokkan berdasarkan SLUG ATAU NAMA (case-insensitive):

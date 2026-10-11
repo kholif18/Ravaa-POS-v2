@@ -209,6 +209,12 @@ app.post('/api/customers', async (c) => {
     const id = body?.id === undefined || body?.id === null || body?.id === '' ? null : Number(body.id);
     if (id !== null && !Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
     const codeBaru = nomorUrut('customers', 'code', 'CUS-');
+    // Tier harga (2026-10-11): tak dikirim = pertahankan lama (update) /
+    // 'ecer' (insert); dikirim selain ecer|grosir = 400.
+    const tierRaw = body?.tier;
+    if (tierRaw !== undefined && tierRaw !== 'ecer' && tierRaw !== 'grosir') {
+      return c.json({ error: "tier harus 'ecer'|'grosir'" }, 400);
+    }
     if (id !== null) {
       const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(id) as { id: number } | undefined;
       if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
@@ -219,18 +225,19 @@ app.post('/api/customers', async (c) => {
         .prepare(
           `UPDATE customers SET name = ?, phone = ?, address = ?, note = ?,
              code = CASE WHEN code = '' THEN ? ELSE code END,
+             tier = COALESCE(?, tier),
              updated_at = datetime('now')
            WHERE id = ? RETURNING *`,
         )
-        .get(name, phone, address, note, codeBaru, id);
+        .get(name, phone, address, note, codeBaru, tierRaw ?? null, id);
       return c.json({ data: row }, 200);
     }
     const row = db
       .prepare(
-        `INSERT INTO customers (code, name, phone, address, note)
-         VALUES (?, ?, ?, ?, ?) RETURNING *`,
+        `INSERT INTO customers (code, tier, name, phone, address, note)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
       )
-      .get(codeBaru, name, phone, address, note);
+      .get(codeBaru, tierRaw ?? 'ecer', name, phone, address, note);
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pelanggan' }, 400);
@@ -650,7 +657,8 @@ function simpanSatuanJual(productId: number, baseUnit: string, rows: unknown[]):
 const upsertProduct = db.transaction((
   input: {
     sku?: string; name: string; category_slug: string;
-    barcode?: string | null; unit?: string; price?: number; cost?: number; markup?: number;
+    barcode?: string | null; unit?: string; price?: number; price_grosir?: number;
+    cost?: number; markup?: number;
     price_dynamic?: number; stock?: number; min_stock?: number; is_active?: number;
     units?: unknown[];
     image?: string | null; discount_type?: string; discount?: number; expiry_date?: string | null;
@@ -683,6 +691,12 @@ const upsertProduct = db.transaction((
   if (!satu) throw new Error(`satuan tidak dikenal: ${unit} — buat dulu di halaman Satuan`);
   const barcode = amb(input.barcode ?? undefined, 'barcode', null);
   const price = amb(input.price, 'price', 0);
+  // Harga grosir (tier pelanggan, 2026-10-11): field BIASA — ikut aturan
+  // reset (tidak dikirim = 0 = ikut ecer), jadi wajib dibawa payload
+  // form & payloadToggleAktif. Impor CSV tanpa kolom ini dipertahankan
+  // lewat bendera pertahankanTidakDikirim (pola kolom lain).
+  const priceGrosir = amb(input.price_grosir, 'price_grosir', 0);
+  if (!Number.isFinite(priceGrosir) || priceGrosir < 0) throw new Error('price_grosir harus angka >= 0');
   const priceDynamic = amb(input.price_dynamic, 'price_dynamic', 0);
   const cost = amb(input.cost, 'cost', 0);
   const markup = amb(input.markup, 'markup', 0);
@@ -743,12 +757,12 @@ const upsertProduct = db.transaction((
   let pid: number;
   if (!existing) {
     const info = db.prepare(
-      `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_dynamic, cost, markup, stock, min_stock,
+      `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_grosir, price_dynamic, cost, markup, stock, min_stock,
                              image, discount_type, discount, expiry_date, use_note, is_active, updated_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
          COALESCE((SELECT MAX(version) FROM products), 0) + 1)`,
     ).run(cat.id, sku, barcode, input.name, unit,
-      price, priceDynamic, cost, markup, stock, minStock,
+      price, priceGrosir, priceDynamic, cost, markup, stock, minStock,
       image, discountType, discount, expiry, useNote, isActive);
     pid = Number(info.lastInsertRowid);
   } else {
@@ -763,14 +777,14 @@ const upsertProduct = db.transaction((
     // "produk ini ada (lagi)". version tetap naik supaya delta sync membangkitkan
     // barisnya kembali di semua device (dipertegas di tests bagian E).
     db.prepare(
-      `UPDATE products SET category_id=?, barcode=?, name=?, unit=?, price=?, price_dynamic=?,
+      `UPDATE products SET category_id=?, barcode=?, name=?, unit=?, price=?, price_grosir=?, price_dynamic=?,
          cost=?, markup=?, stock=?, min_stock=?, image=?, discount_type=?, discount=?, expiry_date=?,
          use_note=?, is_active=?, deleted_at=NULL,
          updated_at=datetime('now'),
          version=(SELECT COALESCE(MAX(version),0)+1 FROM products)
        WHERE id=?`,
     ).run(cat.id, barcode, input.name, unit,
-      price, priceDynamic, cost, markup, stock, minStock,
+      price, priceGrosir, priceDynamic, cost, markup, stock, minStock,
       image, discountType, discount, expiry, useNote, isActive, pid);
   }
   // units === undefined -> biarkan apa adanya; array (termasuk []) -> ganti semua.

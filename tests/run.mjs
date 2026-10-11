@@ -75,6 +75,7 @@ const SUITE = [
   ['retur-test.mjs', 31],
   ['purchase-test.mjs', 34],
   ['pager-test.mjs', 19],
+  ['tier-harga-test.mjs', 16],
   ['harga-dinamis-test.mjs', 18],
   ['pos-notif-test.mjs', 6],
 ];

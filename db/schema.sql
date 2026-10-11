@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS products (
   name          TEXT NOT NULL,
   unit          TEXT NOT NULL DEFAULT 'pcs' REFERENCES units(slug), -- satuan untuk struk
   price         INTEGER NOT NULL DEFAULT 0,     -- rupiah; harga jual. 0 = harga dinamis (diisi saat jual)
+  -- Harga GROSIR per satuan dasar (2026-10-11, tier pelanggan): dipakai POS
+  -- bila pelanggan terpilih tier-nya `grosir` (lihat customers.tier). 0 =
+  -- ikut harga ecer (tanpa tier) — tanpa beban isi bila tak dipakai.
+  -- Pack/dus: eksplisit di product_units bila diisi, ikut
+  -- `price_grosir × factor` bila NULL (aturan sama dengan ecer).
+  price_grosir  INTEGER NOT NULL DEFAULT 0,
   price_dynamic INTEGER NOT NULL DEFAULT 0,     -- 1 = kasir boleh ubah harga sebelum transaksi
   cost          INTEGER NOT NULL DEFAULT 0,     -- harga beli / modal (diisi manual di form, dasar markup)
   -- Modal RATA-RATA TERTIMBANG hasil restock, bukan harga beli terakhir:
@@ -316,6 +322,9 @@ CREATE TABLE IF NOT EXISTS customers (
   -- untuk no customer. Kosong = baris lama; server mengisinya saat pertama
   -- kali baris disimpan ulang.
   code        TEXT NOT NULL DEFAULT '',
+  -- Tier harga (2026-10-11): `ecer` (bawaan) | `grosir` (POS memakai
+  -- products.price_grosir saat pelanggan ini dipilih di header kasir).
+  tier        TEXT NOT NULL DEFAULT 'ecer' CHECK (tier IN ('ecer', 'grosir')),
   name        TEXT NOT NULL,
   phone       TEXT NOT NULL DEFAULT '',
   address     TEXT NOT NULL DEFAULT '',

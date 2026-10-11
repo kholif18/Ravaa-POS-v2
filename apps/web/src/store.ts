@@ -5,6 +5,9 @@ export type Product = {
   id: number; category_id: number; sku: string; barcode: string | null;
   name: string; unit: string;
   price: number; price_dynamic: number; cost: number; markup: number;
+  /** Harga grosir per satuan dasar (tier pelanggan, 2026-10-11). 0/absen =
+   *  ikut harga ecer — cache lama dinormalisasi ke 0 saat dibaca (di bawah). */
+  price_grosir: number;
   /** Modal rata-rata tertimbang dari restock (HPP). Bukan `cost` — lihat schema.sql. */
   avg_cost: number;
   stock: number; min_stock: number; is_active: number;
@@ -89,6 +92,7 @@ export async function getCachedProducts(): Promise<Product[]> {
     discount: p.discount ?? 0,
     expiry_date: p.expiry_date ?? null,
     use_note: p.use_note ?? 0,
+    price_grosir: p.price_grosir ?? 0,
   }));
 }
 export async function getMaxVersion(): Promise<number> {
