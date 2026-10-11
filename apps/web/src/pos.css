@@ -237,16 +237,17 @@
   .pos-bayar-band-x svg {
     @apply size-5;
   }
-  /* Dua kolom kartu (1 kolom di <sm = fallback HP). */
+  /* Dua kolom kartu — tinggi sejajar (items-stretch default grid). */
   .pos-bayar-grid2 {
-    @apply grid grid-cols-1 gap-3 sm:grid-cols-2;
+    @apply grid grid-cols-1 gap-5 sm:grid-cols-2;
   }
+  /* Kartu kiri & kanan: h-full agar dua kolom sama tinggi. */
   .pos-bayar-kartu {
-    @apply space-y-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800;
+    @apply h-full space-y-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800;
   }
-.pos-bayar-kanan {
-    /* 48px antar blok — ruang ekstra besar agar setiap komponen terasa lega. */
-    @apply space-y-12;
+  /* Kanan: satu kartu tunai langsung tanpa wrapper tambahan. */
+  .pos-bayar-kanan {
+    @apply h-full;
   }
   .pos-bayar-judul {
     @apply text-[17px] font-bold text-gray-900 dark:text-white;
@@ -293,23 +294,10 @@
   .pos-bayar-count {
     @apply mt-1 text-right text-sm tabular-nums text-gray-400 dark:text-gray-500;
   }
-  /* Kartu total kanan (ikon koin + angka 32px). */
-  .pos-bayar-totalkartu {
-    @apply flex items-center gap-3;
-  }
-  .pos-bayar-koin {
-    @apply flex size-14 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary;
-  }
-  .pos-bayar-koin svg {
-    @apply size-7;
-  }
-  .pos-bayar-totalkartu #bayar-total-2 {
-    @apply block text-[32px] font-extrabold leading-tight tabular-nums text-gray-900 dark:text-white;
-  }
   /* Blok tunai = tumpukan judul → input → judul → pills → ledger → hint. */
   .pos-bayar-tunai {
-    /* 48px — spasi ekstra besar agar setiap komponen terasa lega. */
-    @apply space-y-12;
+    /* 24px — spasi cukup agar komponen terstruktur, bukan megah. */
+    @apply space-y-6;
   }
   .pos-bayar-cashwrap {
     @apply relative mt-1;
@@ -320,7 +308,7 @@
     @apply grid grid-cols-2 gap-2;
   }
   .pos-bayar-pill {
-    @apply rounded-full border border-gray-300 bg-white px-3 py-2.5 text-center text-[15px] font-semibold text-gray-700 transition hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200;
+    @apply rounded-full border border-gray-300 bg-white px-3 py-2 text-center text-sm font-semibold text-gray-700 transition hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200;
   }
   /* Ledger KEMBALIAN (di DALAM alur tunai; hidden ikut #bayar-tunai-ledger
      di paintFormBayar). BG hidup via 4 utility (toggle paintCart + render
@@ -371,11 +359,13 @@
   .struk-muka .struk-baris {
     @apply flex items-baseline justify-between gap-2;
   }
+  /* Produk/nama RATA KIRI, nominal RATA KANAN — eksplisit dua-duanya supaya
+     tidak ikut alignment lain bila struktur dipakai ulang. */
   .struk-muka .struk-baris > span:last-child {
-    @apply shrink-0 tabular-nums;
+    @apply shrink-0 text-right tabular-nums;
   }
   .struk-muka .struk-baris > span:first-child {
-    @apply min-w-0 break-words;
+    @apply min-w-0 text-left break-words;
   }
   .struk-muka .struk-indent {
     @apply pl-3;

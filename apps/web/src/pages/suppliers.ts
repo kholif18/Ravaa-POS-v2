@@ -1,10 +1,12 @@
-// Halaman Pelanggan (#/customers, baru 2026-10-04): master kontak pembeli —
-// nama, HP, catatan. Sumber angka/hutang BUKAN di sini: sisa piutang dihitung
-// server di halaman Hutang (#/debts, ledger customer_debts).
+// Halaman Supplier (#/suppliers, baru 2026-10-11): master pemasok barang
+// kulakan — nama, HP, alamat, catatan. Lahir dari pencabutan
+// `customers.supplier_no` (perintah pemilik: no. supplier tidak pantas di
+// modal customer) — nomor `SUP-000001` kini menjadi `code` master ini.
 //
-// Server: GET /api/customers?q= (multi-kata), POST /api/customers (tanpa id =
-// baru, id = update), DELETE /api/customers/:id (400 bila masih ada catatan
-// hutang — pesannya menyuruh menghapus catatan di halaman Hutang dulu).
+// Server: GET /api/suppliers?q= (multi-kata), POST /api/suppliers (tanpa id =
+// baru, id = update), DELETE /api/suppliers/:id (langsung — belum ada tabel
+// yang mereferensinya; Tahap 3 Pembelian wajib menambah guard 400 seperti
+// hapus pelanggan berhutang). Dipakai Tahap 3 sebagai pilihan pemasok.
 
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
@@ -12,9 +14,9 @@ import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 
-type Customer = {
+type Supplier = {
   id: number;
-  /** No. customer otomatis dari server (`CUS-000001`); '' = baris lama
+  /** No. supplier otomatis dari server (`SUP-000001`); '' = baris lama
    *  yang nomornya belum pernah diisi (diisi server saat disimpan ulang). */
   code: string;
   name: string;
@@ -25,10 +27,10 @@ type Customer = {
   updated_at: string;
 };
 
-type EditCustomer = { id: number | null; name: string; phone: string; address: string; note: string; code: string };
+type EditSupplier = { id: number | null; name: string; phone: string; address: string; note: string; code: string };
 
 const state = {
-  items: [] as Customer[],
+  items: [] as Supplier[],
   total: 0,
   q: '',
   loading: true,
@@ -56,22 +58,22 @@ function renderPage(): string {
     <div class="card">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pelanggan</h2>
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Supplier</h2>
           <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-            Kontak pembeli (nama, HP, catatan). Hutang mereka dicatat di halaman Hutang.
+            Pemasok barang kulakan (nama, HP, alamat, catatan). Dipakai untuk Pembelian (Tahap 3).
           </p>
         </div>
-        <button type="button" id="cust-new" class="btn btn-primary">${icon('plus')}<span>Tambah Pelanggan</span></button>
+        <button type="button" id="sup-new" class="btn btn-primary">${icon('plus')}<span>Tambah Supplier</span></button>
       </div>
       <div class="mt-3 flex items-center gap-2">
         <div class="relative w-full max-w-sm">
           <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
-          <input id="cust-q" class="input pl-9" type="search" placeholder="Cari nama / HP / catatan…" autocomplete="off" />
+          <input id="sup-q" class="input pl-9" type="search" placeholder="Cari nama / HP / catatan…" autocomplete="off" />
         </div>
       </div>
     </div>
 
-    <div id="cust-body"></div>
+    <div id="sup-body"></div>
   </div>`;
 }
 
@@ -81,13 +83,13 @@ function renderTable(): string {
   }
   if (state.error) {
     return `<div class="card">
-      <div class="empty">${icon('alert')}<span>Gagal memuat pelanggan: ${esc(state.error)}</span></div>
+      <div class="empty">${icon('alert')}<span>Gagal memuat supplier: ${esc(state.error)}</span></div>
     </div>`;
   }
   if (state.items.length === 0) {
     return `<div class="card">
-      <div class="empty">${icon('users')}
-        <span>${state.q ? `Tidak ada pelanggan yang cocok dengan “${esc(state.q)}”.` : 'Belum ada pelanggan. Tambahkan dulu — dibutuhkan untuk mencatat hutang.'}</span>
+      <div class="empty">${icon('truck')}
+        <span>${state.q ? `Tidak ada supplier yang cocok dengan “${esc(state.q)}”.` : 'Belum ada supplier. Tambahkan dulu — dibutuhkan untuk Pembelian.'}</span>
       </div>
     </div>`;
   }
@@ -104,8 +106,8 @@ function renderTable(): string {
         <td class="td">${u.note ? esc(u.note) : '<span class="text-gray-400">—</span>'}</td>
         <td class="td">
           <div class="flex items-center justify-end gap-1">
-            <button type="button" data-cust-edit="${u.id}" class="row-btn" title="Ubah pelanggan" aria-label="Ubah ${esc(u.name)}">${icon('pencil')}</button>
-            <button type="button" data-cust-del="${u.id}" class="row-btn row-btn-danger" title="Hapus pelanggan" aria-label="Hapus ${esc(u.name)}">${icon('trash')}</button>
+            <button type="button" data-sup-edit="${u.id}" class="row-btn" title="Ubah supplier" aria-label="Ubah ${esc(u.name)}">${icon('pencil')}</button>
+            <button type="button" data-sup-del="${u.id}" class="row-btn row-btn-danger" title="Hapus supplier" aria-label="Hapus ${esc(u.name)}">${icon('trash')}</button>
           </div>
         </td>
       </tr>`,
@@ -118,7 +120,7 @@ function renderTable(): string {
       <table class="table">
         <thead>
           <tr>
-            <th class="th">Pelanggan</th>
+            <th class="th">Supplier</th>
             <th class="th">Alamat</th>
             <th class="th">Catatan</th>
             <th class="th text-right">Aksi</th>
@@ -129,68 +131,66 @@ function renderTable(): string {
     </div>
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-    Menampilkan ${state.items.length} dari ${state.total} pelanggan.
-    No. customer di-assign otomatis server (urut, tidak berubah setelah terbit).
-    Pelanggan yang masih punya catatan hutang tidak bisa dihapus.
+    Menampilkan ${state.items.length} dari ${state.total} supplier.
+    No. supplier di-assign otomatis server (urut, tidak berubah setelah terbit).
   </p>`;
 }
 
 function paint(): void {
-  const body = host?.querySelector('#cust-body');
+  const body = host?.querySelector('#sup-body');
   if (body) body.innerHTML = renderTable();
   bindRows();
 }
 
 /* ---------- FORM ---------- */
 
-function customerForm(c: EditCustomer): void {
+function supplierForm(c: EditSupplier): void {
   const isNew = c.id === null;
-  // Nomor urut DI-ASSIGN SERVER (CUS-) — form hanya menampilkannya.
+  // Nomor urut DI-ASSIGN SERVER (SUP-) — form hanya menampilkannya.
   // Baris baru belum punya nomor sampai disimpan (server mengisi saat INSERT).
-  // No. supplier DICABUT 2026-10-11 (pindah ke halaman Supplier).
   const nomor = (v: string) => (v ? `<span class="font-mono text-sm">${esc(v)}</span>` : '<span class="text-gray-400">otomatis saat disimpan</span>');
   openModal({
-    title: isNew ? 'Tambah Pelanggan' : `Ubah Pelanggan: ${c.name}`,
+    title: isNew ? 'Tambah Supplier' : `Ubah Supplier: ${c.name}`,
     okLabel: isNew ? 'Tambah' : 'Simpan',
     body: `
       <div class="field">
-        <label class="label" for="c-code">No. customer</label>
+        <label class="label" for="s-code">No. supplier</label>
         <div class="rounded border border-gray-200 bg-gray-50 px-2 py-2 dark:border-gray-700 dark:bg-gray-800">${nomor(c.code)}</div>
       </div>
       <div class="field">
-        <label class="label" for="c-name">Nama pelanggan *</label>
-        <input id="c-name" class="input" value="${esc(c.name)}" placeholder="cth: Budi Santoso" />
+        <label class="label" for="s-name">Nama supplier *</label>
+        <input id="s-name" class="input" value="${esc(c.name)}" placeholder="cth: Distributor Jaya Abadi" />
       </div>
       <div class="grid gap-3 sm:grid-cols-2">
         <div class="field">
-          <label class="label" for="c-phone">No. HP</label>
-          <input id="c-phone" class="input" value="${esc(c.phone)}" placeholder="cth: 081234567890" inputmode="tel" />
+          <label class="label" for="s-phone">No. HP / Telepon</label>
+          <input id="s-phone" class="input" value="${esc(c.phone)}" placeholder="cth: 081234567890" inputmode="tel" />
         </div>
         <div class="field">
-          <label class="label" for="c-address">Alamat</label>
-          <input id="c-address" class="input" value="${esc(c.address)}" placeholder="cth: Jl. Merpati No. 7" />
+          <label class="label" for="s-address">Alamat</label>
+          <input id="s-address" class="input" value="${esc(c.address)}" placeholder="cth: Jl. Merpati No. 7" />
         </div>
       </div>
       <div class="field">
-        <label class="label" for="c-note">Catatan</label>
-        <input id="c-note" class="input" value="${esc(c.note)}" placeholder="cth: langganan warung sebelah" />
+        <label class="label" for="s-note">Catatan</label>
+        <input id="s-note" class="input" value="${esc(c.note)}" placeholder="cth: kirim tiap Senin pagi" />
       </div>`,
     onMount: ({ el, ok, close }) => {
-      const name = el.querySelector('#c-name') as HTMLInputElement;
+      const name = el.querySelector('#s-name') as HTMLInputElement;
       name.focus();
       ok.addEventListener('click', async () => {
         const n = name.value.trim();
-        if (!n) { toast('Nama pelanggan wajib diisi', 'warning'); name.focus(); return; }
+        if (!n) { toast('Nama supplier wajib diisi', 'warning'); name.focus(); return; }
         try {
-          await apiPost('/api/customers', {
+          await apiPost('/api/suppliers', {
             ...(c.id === null ? {} : { id: c.id }),
             name: n,
-            phone: (el.querySelector('#c-phone') as HTMLInputElement).value.trim(),
-            address: (el.querySelector('#c-address') as HTMLInputElement).value.trim(),
-            note: (el.querySelector('#c-note') as HTMLInputElement).value.trim(),
+            phone: (el.querySelector('#s-phone') as HTMLInputElement).value.trim(),
+            address: (el.querySelector('#s-address') as HTMLInputElement).value.trim(),
+            note: (el.querySelector('#s-note') as HTMLInputElement).value.trim(),
           });
           close(); // modal tidak menutup sendiri (lihat ui/modal.ts)
-          toast(isNew ? `Pelanggan "${n}" ditambahkan` : `Pelanggan "${n}" disimpan`, 'success');
+          toast(isNew ? `Supplier "${n}" ditambahkan` : `Supplier "${n}" disimpan`, 'success');
           await load();
         } catch (e) {
           toast(`Gagal: ${errMsg(e)}`, 'error');
@@ -203,32 +203,31 @@ function customerForm(c: EditCustomer): void {
 /* ---------- AKSI ---------- */
 
 function bindRows(): void {
-  host!.querySelectorAll<HTMLElement>('[data-cust-edit]').forEach((b) =>
+  host!.querySelectorAll<HTMLElement>('[data-sup-edit]').forEach((b) =>
     b.addEventListener('click', () => {
-      const id = Number(b.dataset.custEdit);
+      const id = Number(b.dataset.supEdit);
       const c = state.items.find((x) => x.id === id);
-      if (c) customerForm({ id: c.id, name: c.name, phone: c.phone, address: c.address, note: c.note, code: c.code });
+      if (c) supplierForm({ id: c.id, name: c.name, phone: c.phone, address: c.address, note: c.note, code: c.code });
     }),
   );
-  host!.querySelectorAll<HTMLElement>('[data-cust-del]').forEach((b) =>
+  host!.querySelectorAll<HTMLElement>('[data-sup-del]').forEach((b) =>
     b.addEventListener('click', async () => {
-      const id = Number(b.dataset.custDel);
+      const id = Number(b.dataset.supDel);
       const c = state.items.find((x) => x.id === id);
       if (!c) return;
       const yes = await confirmDialog({
-        title: `Hapus pelanggan "${c.name}"?`,
-        message: 'Pelanggan tanpa riwayat hutang akan dihapus permanen.',
+        title: `Hapus supplier "${c.name}"?`,
+        message: 'Supplier akan dihapus permanen.',
         okLabel: 'Hapus',
         cancelLabel: 'Batal, jangan dihapus',
         danger: true,
       });
       if (!yes) return;
       try {
-        await apiDelete(`/api/customers/${id}`);
-        toast(`Pelanggan "${c.name}" dihapus`, 'success');
+        await apiDelete(`/api/suppliers/${id}`);
+        toast(`Supplier "${c.name}" dihapus`, 'success');
         await load();
       } catch (e) {
-        // 400 = masih punya catatan hutang — pesan server sudah menunjuk halaman Hutang.
         toast(`Gagal hapus: ${errMsg(e)}`, 'error');
       }
     }),
@@ -240,8 +239,8 @@ async function load(): Promise<void> {
   state.error = '';
   paint();
   try {
-    const r = await apiGet<{ data: Customer[]; total: number }>(
-      `/api/customers${state.q ? `?q=${encodeURIComponent(state.q)}` : ''}`,
+    const r = await apiGet<{ data: Supplier[]; total: number }>(
+      `/api/suppliers${state.q ? `?q=${encodeURIComponent(state.q)}` : ''}`,
     );
     state.items = r.data;
     state.total = r.total;
@@ -254,15 +253,15 @@ async function load(): Promise<void> {
 
 /* ---------- ENTRY ---------- */
 
-export async function mountCustomersPage(el: HTMLElement): Promise<void> {
+export async function mountSuppliersPage(el: HTMLElement): Promise<void> {
   host = el;
   el.innerHTML = renderPage();
   paint();
-  el.querySelector('#cust-new')?.addEventListener('click', () =>
-    customerForm({ id: null, name: '', phone: '', address: '', note: '', code: '' }),
+  el.querySelector('#sup-new')?.addEventListener('click', () =>
+    supplierForm({ id: null, name: '', phone: '', address: '', note: '', code: '' }),
   );
   // Debounce 250ms (pola halaman lain) — Enter mempercepat.
-  el.querySelector<HTMLInputElement>('#cust-q')?.addEventListener('input', (ev) => {
+  el.querySelector<HTMLInputElement>('#sup-q')?.addEventListener('input', (ev) => {
     const v = (ev.target as HTMLInputElement).value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
@@ -270,7 +269,7 @@ export async function mountCustomersPage(el: HTMLElement): Promise<void> {
       void load();
     }, 250);
   });
-  el.querySelector<HTMLInputElement>('#cust-q')?.addEventListener('keydown', (ev) => {
+  el.querySelector<HTMLInputElement>('#sup-q')?.addEventListener('keydown', (ev) => {
     if ((ev as KeyboardEvent).key === 'Enter') {
       clearTimeout(searchTimer);
       state.q = (ev.target as HTMLInputElement).value.trim();

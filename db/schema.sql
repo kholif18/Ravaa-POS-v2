@@ -127,7 +127,14 @@ CREATE TABLE IF NOT EXISTS sales (
   -- data customer walau kontaknya kelak diubah/dihapus (pola snapshot yang
   -- sama dengan sale_items.name & sale_items.cost).
   customer_id   INTEGER REFERENCES customers(id),
-  customer_name TEXT NOT NULL DEFAULT ''
+  customer_name TEXT NOT NULL DEFAULT '',
+  -- Catatan TRANSAKSI (2026-10-10, permintaan pemilik "tambahkan catatan di
+  -- setiap transaksi"): teks bebas per nota dari kolom "Catatan transaksi" di
+  -- modal bayar POS (bukan per baris seperti sale_items.note). Di-TRIM +
+  -- divalidasi server (maks 200 karakter, sama seperti catatan baris).
+  -- Tahap 1 = simpan + baca ulang (struk/history); cetak di kaki struk =
+  -- tahap 2 (menyusul bila pemilik minta).
+  note          TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -212,14 +219,15 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- Pelanggan & hutang (piutang toko) — baru 2026-10-04, halaman #/customers & #/debts.
 -- Pelanggan = master kontak terpisah dari data kasir (karyawan) di tabel shifts.
+-- Kolom `supplier_no` DICABUT 2026-10-11 (perintah pemilik: no. supplier
+-- tidak pantas di modal customer) — pindah ke master `suppliers` di bawah
+-- dengan penomorannya sendiri (`SUP-000001`).
 CREATE TABLE IF NOT EXISTS customers (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   -- Nomor urut OTOMATIS dari server (revisi pemilik 2026-10-04): `CUS-000001`
-  -- untuk no customer, `SUP-000001` untuk no supplier (master supplier belum
-  -- ada — disimpan di kontak dulu, halaman Supplier menyusul). Kosong = baris
-  -- lama; server mengisinya saat pertama kali baris disimpan ulang.
+  -- untuk no customer. Kosong = baris lama; server mengisinya saat pertama
+  -- kali baris disimpan ulang.
   code        TEXT NOT NULL DEFAULT '',
-  supplier_no TEXT NOT NULL DEFAULT '',
   name        TEXT NOT NULL,
   phone       TEXT NOT NULL DEFAULT '',
   address     TEXT NOT NULL DEFAULT '',
@@ -227,6 +235,48 @@ CREATE TABLE IF NOT EXISTS customers (
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Supplier (pemasok barang kulakan) — baru 2026-10-11, halaman #/suppliers.
+-- Lahir dari pencabutan `customers.supplier_no`: nomor `SUP-000001` yang dulu
+-- menempel di tiap kontak kini menjadi `code` master ini. Dipakai Tahap 3
+-- Pembelian sebagai pilihan pemasok (kolom `purchases.supplier_id` menyusul).
+CREATE TABLE IF NOT EXISTS suppliers (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Nomor urut OTOMATIS dari server (`SUP-000001`), pola sama dengan
+  -- `customers.code`: diambil dari baris terbesar (MAX, bukan COUNT) supaya
+  -- celah nomor tidak dipakai ulang; tidak pernah berubah setelah terbit.
+  code        TEXT NOT NULL DEFAULT '',
+  name        TEXT NOT NULL,
+  phone       TEXT NOT NULL DEFAULT '',
+  address     TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Pengeluaran kas operasional (Tahap 1, 2026-10-11, halaman #/expenses):
+-- belanja plastik, bensin, listrik, dsb. Uang TUNAI yang keluar dari laci,
+-- jadi mengurangi `kasSeharusnya()` di shift-tutup.ts (agregat `expense_total`
+-- di GET /api/shifts) dan tampil di laporan harian (`expense` di
+-- GET /api/reports/daily). TIDAK menyentuh `products.version` (bukan mutasi
+-- stok) dan tidak masuk HPP/laba (laba = omzet − HPP, definisi lama tetap).
+CREATE TABLE IF NOT EXISTS expenses (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Kategori bebas (Tahap 1 tanpa master kategori: 'Listrik', 'Plastik',
+  -- 'Bensin', ...). Master kategori menyusul bila daftar sudah stabil.
+  kategori    TEXT NOT NULL,
+  jumlah      INTEGER NOT NULL CHECK (jumlah > 0),  -- rupiah bulat, wajib > 0
+  note        TEXT NOT NULL DEFAULT '',             -- maks 200 char (aturan
+                                                    -- catatan, divalidasi server)
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  -- Shift yang menanggung (opsional): NULL = di luar shift (mis. bayar
+  -- listrik pagi sebelum buka). Hanya yang terikat shift yang mengurangi
+  -- laci shift itu — yang NULL tetap tercatat + masuk laporan harian.
+  shift_id    INTEGER REFERENCES shifts(id)
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_tanggal ON expenses(created_at);
+CREATE INDEX IF NOT EXISTS idx_expenses_shift ON expenses(shift_id);
 
 -- Ledger hutang per pelanggan — SATU tabel mutasi dua arah, bukan saldo tersimpan.
 -- type 'charge'  = pelanggan berhutang (beli belum bayar)

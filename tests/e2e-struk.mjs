@@ -468,24 +468,46 @@ try {
     await page.locator('[data-cash]').count());
   ok('chip nominal cepat tampil (4 pecahan: 20rb-200rb)', await page.locator('[data-cash]').count() === 4,
     await page.locator('[data-cash]').count());
-  // Putaran 10 (2026-10-05): layout modal bayar dua panel ala Ravaa POS v1 —
-  // kiri = Total tagihan + Pelanggan + kartu metode, kanan = uang diterima.
-  const layoutBayar = await page.evaluate(() => {
-    const wrap = document.querySelector('.modal-body > div');
-    const kolom = wrap ? [...wrap.children] : [];
-    const idx = (sel) => kolom.findIndex((c) => c.querySelector(sel));
+  // Layout mockup "Modern Blue Payment Checkout" (2026-10-10, file
+  // referensi pemilik): band biru (ganti modal-header) + 2 kolom kartu +
+  // strip trust; footer kanan px-10. Kontrak: band ada + header bawaan
+  // disembunyikan, total band = total kartu kanan, total→uang→kembalian
+  // BERURUTAN, 3 opsi + badge cek pada yang aktif, info + note + count,
+  // ledger tanpa teks duplikat.
+  const alurBayar = await page.evaluate(() => {
+    const t = document.querySelector('#bayar-total');
+    const c = document.querySelector('#pos-cash');
+    const k = document.querySelector('#pos-change');
+    const ikut = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const teksLedger = document.querySelector('#bayar-tunai-ledger')?.innerText || '';
+    const kaki = document.querySelector('#pos-pay');
     return {
-      kolom: kolom.length,
-      totalDiKiri: idx('#bayar-total'),
-      uangDiKanan: idx('#pos-cash'),
+      urut: ikut(t, c) && ikut(c, k),
+      band: !!document.querySelector('.pos-bayar-band'),
+      headerSembunyi: (() => { const h = document.querySelector('.modal:has(.pos-bayar-band) .modal-header'); return !!h && getComputedStyle(h).display === 'none'; })(),
+      duaKolom: (document.querySelector('.pos-bayar-grid2')?.children.length ?? 0) === 2,
+      opsi: document.querySelectorAll('.pos-pay-3col [data-pay]').length,
+      cekAktif: document.querySelectorAll('.pos-pay-3col [data-pay] .cek:not(.hidden)').length,
       kartuMetode: document.querySelectorAll('[data-pay]').length,
+      chip: document.querySelectorAll('[data-cash]').length,
       pelanggan: !!document.querySelector('#bayar-cust'),
+      info: !!document.querySelector('#bayar-info'),
+      catatan: !!document.querySelector('textarea#bayar-note') && !!document.querySelector('#bayar-note-count'),
+      trust: !!document.querySelector('.modal-footer .pos-bayar-trust'),
+      footerRamping: kaki ? Math.round(parseFloat(getComputedStyle(kaki).minHeight)) === 52 : false,
+      ledger: !document.querySelector('#bayar-echo-cash') && !document.querySelector('#bayar-echo-sisa'),
+      tanpaDuplikat: !teksLedger.includes('Total tagihan') && !teksLedger.includes('Sisa kurang')
+        && !teksLedger.includes('Uang diterima'),
+      tanpaGridLama: !document.querySelector('.pos-bayar-grid') && !document.querySelector('.pos-bayar-main'),
     };
   });
-  ok('modal bayar 2 panel ala v1 (total+metode kiri, uang diterima kanan)',
-    layoutBayar.kolom === 2 && layoutBayar.totalDiKiri === 0 && layoutBayar.uangDiKanan === 1
-      && layoutBayar.kartuMetode === 3 && layoutBayar.pelanggan,
-    JSON.stringify(layoutBayar));
+  ok('modal bayar mockup blue (band + kartu + trust, tanpa duplikat)',
+    alurBayar.urut && alurBayar.band && alurBayar.headerSembunyi
+      && alurBayar.duaKolom && alurBayar.opsi === 3 && alurBayar.cekAktif === 1
+      && alurBayar.kartuMetode === 3 && alurBayar.chip === 4 && alurBayar.pelanggan
+      && alurBayar.info && alurBayar.catatan && alurBayar.trust && alurBayar.footerRamping
+      && alurBayar.ledger && alurBayar.tanpaDuplikat && alurBayar.tanpaGridLama,
+    JSON.stringify(alurBayar));
   // Putaran 10d (2026-10-05, pemilik): form uang diterima JANGAN langsung
   // terisi "uang pas" — tujuannya memasukkan uang KURANG / LEBIH, jadi
   // default 0 (kosong). Auto-isi P1 dihapus; auto-focus tetap (dicek di
@@ -537,7 +559,9 @@ try {
 
   // Pecahan dulu: Rp100.000 -> kembalian 96.000 (total 4.000).
   await page.click('[data-cash="100000"]');
-  ok('klik pecahan mengisi uang diterima', (await page.inputValue('#pos-cash')) === '100000',
+  // Format ribuan live (2026-10-10): kolom menampilkan "100.000" bertitik,
+  // state tetap 100000 (kembalian di bawah membuktikannya).
+  ok('klik pecahan mengisi uang diterima (tampil bertitik)', (await page.inputValue('#pos-cash')) === '100.000',
     await page.inputValue('#pos-cash'));
   // Putaran 10: chip membalikkan fokus ke kolom uang supaya Enter = bayar
   // (kecepatan transaksi — sebelumnya fokus tertinggal di chip).
@@ -550,7 +574,7 @@ try {
   // F12 #pos-pay-pas) — ganti pecahan baru 20.000; uang persis total kini
   // lewat ketik manual.
   await page.click('[data-cash="20000"]');
-  ok('chip 20.000 mengisi persis uang diterima', (await page.inputValue('#pos-cash')) === '20000',
+  ok('chip 20.000 mengisi persis uang diterima (tampil bertitik)', (await page.inputValue('#pos-cash')) === '20.000',
     await page.inputValue('#pos-cash'));
   ok('chip 20.000 tersorot sebagai pilihan aktif',
     (await page.locator('[data-cash="20000"]').getAttribute('class') || '').includes('!border-primary'));

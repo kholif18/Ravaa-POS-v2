@@ -38,6 +38,9 @@ type Laporan = {
   topup: TopupBaris[];
   topItems: TopItem[];
   lowStock: LowStock[];
+  /** Pengeluaran kas hari itu (Tahap 1, 2026-10-11) — opsional supaya halaman
+   *  tetap jalan melawan server lama yang belum mengirimkannya. */
+  expense?: { n: number; total: number };
 };
 
 /* ---------- state ---------- */
@@ -101,21 +104,27 @@ function toolbar(): string {
 }
 
 function ringkasan(l: Laporan): string {
+  const exp = l.expense ?? { n: 0, total: 0 };
   const kartu = [
     { label: 'Omzet', nilai: rp(l.sales.omzet), sub: `${l.sales.n} transaksi (setelah diskon)` },
     { label: 'Laba', nilai: rp(l.laba), sub: 'omzet − HPP', tone: l.laba < 0 ? 'danger' : '' },
     { label: 'HPP', nilai: rp(l.hpp), sub: 'modal rata-rata tertimbang' },
     { label: 'Diskon', nilai: rp(l.sales.diskon), sub: 'transaksi + per baris' },
+    // Pengeluaran kas (Tahap 1) — dilaporkan TERPISAH, tidak menggerus laba
+    // (laba = laba kotor dagang). Link ke halaman catatnya.
+    { label: 'Pengeluaran', nilai: rp(exp.total), sub: `${exp.n} catatan · kas keluar`, link: '#/expenses' },
   ];
-  return `<div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
+  return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
     ${kartu
       .map((k) => {
         const warna = k.tone === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white';
-        return `<div class="card">
+        const isi = `
           <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${k.label}</p>
           <p class="mt-1 text-sm font-semibold tabular-nums ${warna}">${esc(k.nilai)}</p>
-          <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${esc(k.sub)}</p>
-        </div>`;
+          <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${esc(k.sub)}</p>`;
+        return 'link' in k && k.link
+          ? `<a href="${k.link}" class="card transition hover:border-primary">${isi}</a>`
+          : `<div class="card">${isi}</div>`;
       })
       .join('')}
   </div>`;
@@ -257,7 +266,8 @@ function stokMenipis(l: Laporan): string {
 function isi(): string {
   if (state.loading) {
     return `<div class="space-y-3">
-      <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
@@ -329,6 +339,7 @@ function eksporCSV(): void {
     ['Diskon', l.sales.diskon],
     ['HPP', l.hpp],
     ['Laba', l.laba],
+    ['Pengeluaran', (l.expense ?? { n: 0, total: 0 }).total],
     [],
     ['Metode bayar'],
     ['Metode', 'Transaksi', 'Total'],

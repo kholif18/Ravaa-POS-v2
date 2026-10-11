@@ -8,8 +8,11 @@
 //   1. Topup = pelanggan bayar tunai -> laci NAIK (nominal + admin).
 //   2. Tarik tunai JANGAN mengurangi laci — cukup dicatat.
 //   3. QRIS/transfer TETAP masuk hitungan laci (bukan dana rekening terpisah).
+//   4. Pengeluaran tunai (Tahap 1, 2026-10-11) -> laci TURUN (hanya yang
+//      terikat shift_id ini; yang di luar shift tidak ikut hitungan laci).
 // Jadi:
-//   kas seharusnya = modal_awal + penjualan (SEMUA metode) + topup (nominal+admin)
+//   kas seharusnya = modal_awal + penjualan (SEMUA metode)
+//                    + topup (nominal+admin) − pengeluaran (shift ini)
 //   selisih        = modal_akhir − kas seharusnya
 // Rumusnya ada di DUA fungsi kecil di bawah (kasSeharusnya/hitungSelisih) —
 // bila keputusan berubah, ubah di situ, jangan menyebar ke tempat lain.
@@ -20,7 +23,7 @@ import { toast } from '../ui/toast';
 import { rp } from '../escpos';
 
 /** Baris `GET /api/shifts` (kontrak lengkap dengan agregat subquery —
- *  n_sales, omzet, tunai/qris/transfer, topup/tarik). */
+ *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran). */
 export type ShiftRow = {
   id: number; opened_at: string; closed_at: string | null;
   modal_awal: number; modal_akhir: number | null; cashier: string; status: string;
@@ -28,6 +31,7 @@ export type ShiftRow = {
   n_topup: number;
   topup_nominal: number; topup_admin: number;
   tarik_nominal: number; tarik_admin: number;
+  n_expense: number; expense_total: number;
 };
 
 function errMsg(e: unknown): string {
@@ -36,11 +40,12 @@ function errMsg(e: unknown): string {
 }
 
 /** Kas yang SEHARUSNYA ada di laci menurut keputusan pemilik 2026-10-01
- *  (lihat komentar kepala file): modal awal + penjualan semua metode +
- *  topup (nominal + admin, dua angka dipisah di tampilan tapi keduanya
- *  masuk laci). Tarik tunai sengaja TIDAK ikut. */
+ *  (lihat komentar kepala file) + Tahap 1 pengeluaran (2026-10-11): modal
+ *  awal + penjualan semua metode + topup (nominal + admin, dua angka dipisah
+ *  di tampilan tapi keduanya masuk laci) − pengeluaran shift ini. Tarik
+ *  tunai sengaja TIDAK ikut. */
 export function kasSeharusnya(s: ShiftRow): number {
-  return s.modal_awal + s.omzet + s.topup_nominal + s.topup_admin;
+  return s.modal_awal + s.omzet + s.topup_nominal + s.topup_admin - (s.expense_total ?? 0);
 }
 
 /** Selisih kas = kas fisik − kas seharusnya (rumus di satu tempat). */
@@ -74,6 +79,7 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tarik tunai — dicatat saja, di luar hitungan</div>
         ${baris('Nominal', s.tarik_nominal)}
         ${baris('Admin', s.tarik_admin)}
+        ${s.n_expense > 0 || s.expense_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pengeluaran — mengurangi laci</div>${baris(`Kas keluar (${s.n_expense} catatan)`, s.expense_total)}` : ''}
         <div class="mt-2 flex justify-between gap-2 border-t border-gray-200 pt-2 dark:border-gray-700">
           <span class="font-medium text-gray-900 dark:text-white">Kas seharusnya di laci</span>
           <b id="sh-harus" class="tabular-nums text-gray-900 dark:text-white">${rp(kasHarus)}</b>
@@ -89,8 +95,9 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
       </p>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
         Kas seharusnya = modal awal + penjualan (semua metode) + topup
-        (nominal + admin), sesuai keputusan pemilik 2026-10-01. Tarik tunai
-        tidak mengurangi laci — hanya dicatat sebagai info.
+        (nominal + admin) − pengeluaran shift ini, sesuai keputusan pemilik
+        2026-10-01 + Tahap 1 (2026-10-11). Tarik tunai tidak mengurangi laci
+        — hanya dicatat sebagai info.
       </p>`,
     onMount: ({ el, ok, close }) => {
       const akhir = el.querySelector('#sh-akhir') as HTMLInputElement;

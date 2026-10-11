@@ -122,39 +122,35 @@ panel topup/laporan, modal struk, atau styling apa pun.
    dialog konfirmasi).
 9. Bayar terbagi dua permukaan (permintaan pemilik 2026-10-04, putaran 5-6):
    **side panel** = `#pos-bayar` (buka form, F10) dan **`#pos-pay-pas` "Bayar
-   pas" tepat DI BAWAHNYA** (gaya akhir **gradasi hijau + shadow + hover hijau
-   lebih gelap** `bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md
-   shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700`,
-   `!py-4`, F12 — hover SENADA warna tombol, permintaan 8c "hover tombol F12
-   juga ubah ke hijau jangan biru, karena tombolnya warna hijau"; bayar tunai
+    pas" tepat DI BAWAHNYA** (gaya akhir **gradasi hijau + shadow + hover hijau
+    lebih gelap** `bg-linear-to-r from-emerald-500 to-emerald-600 shadow-md
+    shadow-emerald-600/40 hover:from-emerald-600 hover:to-emerald-700`,
+    `!py-4`, F12 — hover SENADA warna tombol, permintaan 8c "hover tombol F12
+    juga ubah ke hijau jangan biru, karena tombolnya warna hijau"; bayar tunai
     persis total SEKALI ketuk tanpa modal); **modal form bayar** =
-   `formBayarHtml()` — **putaran 10 (2026-10-05): layout 2 panel ala
-   Ravaa POS v1** (referensi `payment-modal.blade.php`, flex 5/7 → grid
-   `sm:grid-cols-[5fr_7fr]`, modal `wide` 768px): kolom KIRI = kartu Total
-   tagihan border-2 primer `#bayar-total` + kotak pelanggan `#bayar-cust`
-   (ikon users) + **kartu metode `data-pay`** gaya `.btn-method-card`
-   (ikon wallet/qr/sync, aktif = `!border-primary bg-primary-soft
-   !text-primary dark:bg-primary/15`; jangan ubah daftar kelas ini di satu
-   tempat saja — `paintFormBayar()` harus toggle persis sama) + petunjuk
-   pintasan; kolom KANAN `bg-gray-50` = input besar `#pos-cash` (`text-2xl`
-   prefix Rp + tombol × `#bayar-clear`), chip `data-cash` grid 2 kolom,
-   kotak KEMBALIAN putus-putus (`#pos-change` kelas dari `kelasPosChange()`,
-   satu sumber dengan `paintCart()`) + `#pos-change-ctx`, petunjuk hutang;
-   OK footer = `#pos-pay`; metode non-tunai = `#bayar-non-tunai` (toggle
-   `hidden`, jangan render ulang HTML). **Putaran 10b (2026-10-05): semua
-   tombol + kolom uang dalam modal ~2x** (permintaan pemilik) — kartu
-   metode 78px/24px **layout kolom ikon-atas-label-bawah** (horizontal
-   @24px tidak muat di kolom 137px), chip 51px/22px, `#pos-cash` 91px/font
-   40px + prefix Rp 24px + `!pr-[76px]` (angka tak tertimpa × 56px), footer
-   via `classList` di `bukaBayar` (modal lain normal). **Putaran 10c
-   (2026-10-05)**: chip "Uang pas" DIHAPUS dari modal (F12 `#pos-pay-pas`
-   sudah mengurusi uang persis total → `QUICK_CASH` = 20k/50k/100k/200k),
-   chip uang KEMBALI ukuran normal 1x, `#pos-change` font **40px =
-   seukuran `#pos-cash`** (kelasPosChange), `#bayar-total` **36px** (+50%).
-   **Putaran 10d (2026-10-05)**: chip pecahan **44px/17px** (diperbesar dari
-   25/11 — "tombol nominalnya terlalu kecil") + **auto-isi uang pas DIHAPUS**
-   — `bukaBayar()` reset `cashIn=0`, kolom uang **default kosong** (tujuan:
-   isi uang kurang/lebih), fokus `#pos-cash` tetap.
+    `formBayarHtml()` — **layout mockup "Modern Blue Payment Checkout"
+    (2026-10-10, file referensi pemilik)**: **band biru full-bleed**
+    (modal-header bawaan disembunyikan `.modal:has(.pos-bayar-band)`
+    di `pos.css`; X band = `data-x` yang di-bind `modal.ts` ke seluruh
+    overlay) — ikon wallet lingkaran + "Bayar Tagihan" + pelanggan
+    `#bayar-cust` + `#bayar-total` 40px putih + "Total yang harus dibayar"
+    + **2 kolom kartu** `.pos-bayar-grid2` (1 kolom di <sm/HP) — kiri:
+    judul + subtitle + **3 opsi sebaris** `.pos-pay-pick` (aktif = BIRU
+    SOLID `!bg-primary !text-white !border-primary` + badge `.cek` —
+    `paintFormBayar()` toggle 3 kelas + `.cek` + teks `#bayar-info`
+    per metode) + kotak info + **textarea** `#bayar-note` rows=3
+    (Enter = baris baru, bukan bayar — `modal.ts` hanya OK dari INPUT) +
+    counter `#bayar-note-count` n/200; kanan: kartu total (`coins` +
+    `#bayar-total-2`, disinkron `paintCart()`) + `#bayar-tunai` (judul
+    berikon + `#pos-cash` **text/32px format ribuan live** + × +
+    pills `data-cash` rounded-full + ledger `#bayar-tunai-ledger`
+    TANPA duplikat **BG hidup** + hint hutang) + `#bayar-non-tunai` —
+    spasi kanan 20px (2x revisi "menempel"); **trust di FOOTER**
+    (prepend `onMount`, `mr-auto` = kiri, tombol kanan) — tombol aksi
+    tetap footer bawaan
+    (`#pos-pay` **52px/18px/px-10**, okLabel HTML wallet+panah; Batal
+    polos). Test layout = kontrak mockup (band+header-sembunyi+
+    total-sama+cek+info+note+trust; jumlah `ok()` tetap).
    **Jebakan**: kelas arbitrary yang MENEMPEL `${` tanpa spasi TIDAK
    di-generate scanner
    Tailwind v4 — selalu spasi sebelum interpolasi template literal.

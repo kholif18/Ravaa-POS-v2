@@ -78,8 +78,12 @@ apps/web/src/pos.css    File gaya KHUSUS POS (baru 2026-10-09 — keputusan
                           (tombol aksi `.pos-qa` 40px), modal topup `.ptk*`
                           (tile berikon 64px, input 44px/15px, `.ptk-totalbox`
                           dipindah ke header di `onMount`), form bayar
-                          `.pos-bayar-grid` 6/6 + `.pos-pay-cards` 3 kolom
-                          sama lebar. Di-link di `index.html` SETELAH
+                          wide `.pos-bayar` (mockup "Modern Blue Payment
+                          Checkout" 2026-10-10: band biru full-bleed +
+                          2 kolom kartu + strip trust; opsi solid+cek,
+                          textarea catatan+count, pills, ledger BG hidup,
+                          footer kanan px-10, resume `.struk-muka`)
+                          + `.pos-pay-cards` 3 kolom sama lebar. Di-link di `index.html` SETELAH
                           styles.css (tie-break komponen = urutan link);
                           memakai `@theme` styles.css lewat `@reference
                           "./styles.css"` (WAJIB — tanpanya build gagal
@@ -1079,16 +1083,16 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `SUM(charge) - SUM(payment)` selalu dihitung ulang saat dibaca — angka
     tersimpan akan selisih begitu salah satu baris mutasi diedit/dihapus.
     `charge` = pelanggan berhutang (beli belum bayar), `payment` = pembayaran.
-  - `GET /api/customers?q=` -> `{data:[{id,code,supplier_no,name,phone,address,note,created_at,updated_at}], total}`
+  - `GET /api/customers?q=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
     - `q` opsional, multi-kata (SEMUA kata harus cocok di `name`/`phone`/`note`,
       pola search produk — tidak harus di field atau urutan yang sama).
     - Urutan `name COLLATE NOCASE, id`; `total` = jumlah baris TANPA filter
       (dipakai footer halaman).
-    - **`code` / `supplier_no` / `address` (revisi pemilik 2026-10-04)**:
-      `code` = no customer auto (`CUS-000001`), `supplier_no` = no supplier
-      auto (`SUP-000001` — master supplier belum ada, nomor disimpan di kontak
-      dulu), `address` = alamat pelanggan. Baris lama bernomor `''` tampil
-      sebagai `—` dan diisi server saat pertama disimpan ulang.
+    - **`code` / `address` (revisi pemilik 2026-10-04)**: `code` = no customer
+      auto (`CUS-000001`), `address` = alamat pelanggan. Baris lama bernomor
+      `''` tampil sebagai `—` dan diisi server saat pertama disimpan ulang.
+      Kolom `supplier_no` **DICABUT 2026-10-11** (perintah pemilik — pindah ke
+      master `suppliers` di bawah).
   - `POST /api/customers` `{id?,name,phone?,address?,note?}` -> 201 baru / 200 update
     - `id` dikirim = update (404 bila tak ada), tanpa id = insert baru.
       **Sengaja TIDAK upsert by phone** — dua orang bisa berbagi nomor
@@ -1096,8 +1100,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     - `name` wajib non-kosong (trim) -> 400 `"nama pelanggan wajib diisi"`.
     - `phone`/`address`/`note` teks bebas (default `''`); `updated_at` di-set
       ulang saat update. `id` harus integer bila dikirim -> selain itu 400.
-    - **Nomor urut OTOMATIS di server** (`nomorUrutPelanggan`): `code` ->
-      `CUS-<6 digit>`, `supplier_no` -> `SUP-<6 digit>`, di-assign saat INSERT;
+    - **Nomor urut OTOMATIS di server** (`nomorUrut(tabel,kolom,pref)`,
+      digeneralisasi 2026-10-11 — dulu `nomorUrutPelanggan` khusus customers):
+      `code` -> `CUS-<6 digit>`, di-assign saat INSERT;
       saat UPDATE hanya baris yang masih `''` yang diisi — **nomor TIDAK
       pernah berubah** setelah terbit. Urutan = baris terbesar lewat
       `CAST(substr(code,5))` + pola `LIKE 'CUS-%'` (BUKAN COUNT: celah nomor
@@ -1111,6 +1116,36 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       TIDAK ada cascade hapus — baris `customer_debts` dirujuk `sale_items` masa
       depan dan wajib utuh selama masih ada.
     - 404 tak ada / sudah dihapus; 400 bila `:id` bukan integer.
+  - **Supplier (master pemasok, baru 2026-10-11, halaman `#/suppliers`)** —
+    lahir dari pencabutan `customers.supplier_no`: nomor `SUP-000001` kini
+    menjadi `code` master ini. Dipakai Tahap 3 Pembelian sebagai pilihan
+    pemasok. Read-only terhadap `products.version`.
+    - `GET /api/suppliers?q=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
+      (`q` multi-kata name/phone/note, urutan `name COLLATE NOCASE, id`,
+      `total` tanpa filter — pola persis `GET /api/customers`).
+    - `POST /api/suppliers` `{id?,name,phone?,address?,note?}` -> 201/200
+      (validasi & penomoran `SUP-<6 digit>` via `nomorUrut` persis customers;
+      **sengaja TIDAK upsert by phone**, alasan sama).
+    - `DELETE /api/suppliers/:id` -> `{data:{id,deleted:true}}` — hapus
+      LANGSUNG (belum ada tabel yang mereferensinya; Tahap 3 **wajib**
+      menambah guard 400 seperti hapus pelanggan berhutang).
+  - **Pengeluaran kas (Tahap 1, 2026-10-11, halaman `#/expenses`)** — kas
+    TUNAI keluar operasional. Bukan mutasi stok (tidak menyentuh
+    `products.version`) dan bukan HPP (laba = omzet − HPP, definisi tetap).
+    - `GET /api/expenses?date=&limit=&offset=` ->
+      `{data:[{id,created_at,kategori,jumlah,note,cashier,shift_id}], total, jumlah}`
+      (filter tanggal + limit/offset via helper `bacaHari`, pola
+      `GET /api/sales`; `jumlah` = SUM hari itu untuk kartu halaman).
+    - `POST /api/expenses` `{kategori,jumlah>0 bulat,note?≤200,cashier?,shift_id?}`
+      -> 201. `kategori` wajib non-kosong; `shift_id` opsional — NULL = di
+      luar shift (tetap tercatat + masuk laporan, tak kurangi laci mana
+      pun); bila dikirim harus shift yang ada (400 `"shift tidak dikenal"`).
+    - `DELETE /api/expenses/:id` (koreksi salah ketik, pola
+      `DELETE /api/customer-debts/:id` — tanpa cek saldo).
+    - Laci: yang terikat `shift_id` mengurangi expected-cash
+      (`n_expense`/`expense_total` di `GET /api/shifts` → `kasSeharusnya()`
+      di `shift-tutup.ts`); rekap harian di `GET /api/reports/daily`
+      (`expense:{n,total}`, dilaporkan TERPISAH — tidak menggerus laba).
   - `GET /api/customer-debts?status=open|semua` -> `{data:[{customer_id,name,phone,charge,bayar,sisa,terakhir}], total}`
     - **Ringkasan saldo per pelanggan** (tabel utama halaman `#/debts`).
       Read-only.
@@ -1402,6 +1437,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     saja), `tarik_nominal` / `tarik_admin` (SUM kind=`tarik` saja).
     `topup`/`tarik` terpisah dua kolom karena aturan domain: **jangan satukan
     nominal+admin jadi satu angka di laporan**.
+    `n_expense` (COUNT) / `expense_total` (SUM `jumlah`, Tahap 1 2026-10-11) —
+    hanya yang `shift_id`-nya cocok (yang NULL = di luar shift, tak kurangi
+    laci mana pun).
   - Agregat dihitung **all-time** (bukan per hari), sehingga penjualan offline
     yang masuk lewat outbox ikut terhitung begitu tersimpan dengan `shift_id`.
   - **Rumus selisih tutup shift = expected-cash (keputusan pemilik
@@ -1412,9 +1450,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     3. Penjualan **semua metode** (tunai/qris/transfer) masuk hitungan laci
        — keputusan #3, kebalikan dari asumsi awal yang memisahkan dana
        rekening; rincian per metode wajib ditampilkan.
-    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin`
+    4. Pengeluaran (Tahap 1, 2026-10-11): laci **TURUN** `expense_total`
+       (hanya yang terikat shift ini).
+    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin − expense_total`
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
-    `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shifts.ts`)
+    `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shift-tutup.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
 * `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?,customer_id?}`
   - **`invoice_no` (baru 2026-10-03, direvisi 2026-10-04, fitur Invoice A4)**:
@@ -1498,6 +1538,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     memang hanya dirender untuk produk yang menyala, tapi payload item manual
     / outbox lama tidak boleh ditolak karena alasan kosmetik); `''`/absen =
     tanpa catatan.
+  - **`note` TINGKAT TRANSAKSI (kolom `sales.note`, sejak 2026-10-10)**:
+    teks bebas 0-200 karakter per NOTA dari kolom "Catatan transaksi" di
+    modal bayar POS (`#bayar-note`, payment-scoped, ikut outbox offline).
+    DI-TRIM + snapshot seperti `customer_name`; `> 200` -> 400 `"catatan
+    transaksi terlalu panjang (maks 200 karakter)"`; absen/`''` = tanpa
+    catatan (payload lama sah). `GET /api/sales` & `:id` mengembalikannya
+    via `s.*`. Tahap 1 = simpan + gema resume; cetak kaki struk = tahap 2.
+    Migrasi: kolom BARU (install lama = ALTER manual, lihat §5).
 * `GET /api/sales/:id` -> `{data:{sale,items}}` (isi lengkap satu nota)
   - `sale` memuat **`invoice_no`** (`YYMMDD-NNNNNN`, urut harian) sejak
     2026-10-03 — diambil client oleh `cetakInvoice()` untuk dicetak di kop
@@ -1594,9 +1642,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
-  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock}}`
+  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total}}}`
   - `hpp = ROUND(SUM(sale_items.qty * sale_items.cost))` untuk penjualan hari itu.
   - `laba = sales.omzet - hpp` (omzet sudah **setelah** semua diskon).
+  - `expense` (Tahap 1, 2026-10-11) = COUNT + SUM `expenses` hari itu —
+    dilaporkan TERPISAH di kartu ke-5 (tidak menggerus laba).
   - `sales.diskon` = **TOTAL diskon hari itu** = `SUM(sales.discount)` (transaksi)
     + `SUM(sale_items.discount)` (per baris). Tanpa penjumlahan ini angka diskon
     akan menyembunyikan diskon per baris padahal omzet sudah menguranginya —

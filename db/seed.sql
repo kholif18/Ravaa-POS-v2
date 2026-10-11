@@ -86,10 +86,11 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('store_email', 'ravaastudio@
 
 -- Pelanggan bawaan POS (revisi pemilik 2026-10-04): dipilih OTOMATIS di header
 -- kasir untuk transaksi umum, dan menjadi isi "Bill to" invoice A4. Nomor urut
--- CUS-/SUP- di-assign server (lihat POST /api/customers) — seed menanam
--- nomor pertama supaya instalasi PERTAMA langsung punya kontak default.
+-- CUS- di-assign server (lihat POST /api/customers) — seed menanam nomor
+-- pertama supaya instalasi PERTAMA langsung punya kontak default.
 -- WHERE NOT EXISTS (bukan INSERT OR IGNORE): kolom `code` sengaja tanpa
 -- UNIQUE (baris lama bernomor kosong), jadi penjaga keunikan ada di sini.
-INSERT INTO customers (code, supplier_no, name, phone, address, note)
-SELECT 'CUS-000001', 'SUP-000001', 'Pelanggan Umum', '', '', 'Pelanggan bawaan POS — pilihan otomatis header kasir'
+-- Kolom `supplier_no` DICABUT 2026-10-11 (pindah ke master `suppliers`).
+INSERT INTO customers (code, name, phone, address, note)
+SELECT 'CUS-000001', 'Pelanggan Umum', '', '', 'Pelanggan bawaan POS — pilihan otomatis header kasir'
 WHERE NOT EXISTS (SELECT 1 FROM customers WHERE code = 'CUS-000001');

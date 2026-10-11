@@ -238,8 +238,8 @@ export function struk(s: Struk): number[] {
       const qty = `${it.qty}${it.unit ? ` ${it.unit}` : ''} x `;
       // nama = COLS - KOL_UANG - 1 (satu spasi pemisah) -> tepat 32 kolom.
       // Sebelumnya salah hitung jadi 33, kolom terakhir meluber ke baris berikutnya.
-      const nama = potong(qty + it.name, COLS - KOL_UANG - 1);
-      baris(kanan(nama, COLS - KOL_UANG - 1) + ' ' + kanan(rp(it.qty * it.price), KOL_UANG));
+       const nama = potong(qty + it.name, COLS - KOL_UANG - 1);
+       baris(potong(nama, COLS - KOL_UANG - 1) + ' ' + kanan(rp(it.qty * it.price), KOL_UANG));
       // Catatan baris (mis. "ukuran 1 x 3 meter") — indent "  - " di bawah item.
       if (it.note?.trim()) out.push(...byteCatatan(it.note, COLS), ...LF);
     }
@@ -305,8 +305,10 @@ export function strukA4(s: Struk): number[] {
     out.push(...teks(garisA4()), ...LF);
     for (const it of s.items) {
       const qty = `${it.qty}${it.unit ? ` ${it.unit}` : ''} x `;
+      // Nama produk RATA KIRI, nominal RATA KANAN (aturan sama dengan thermal:
+      // `kanan(nama)` lama menggeser "1 × Jasa Ketik" ke tepi kanan).
       const nama = potong(qty + it.name, COLS_A4 - KOL_UANG - 1);
-      baris(kanan(nama, COLS_A4 - KOL_UANG - 1) + ' ' + kanan(rp(it.qty * it.price), KOL_UANG));
+      baris(potong(nama, COLS_A4 - KOL_UANG - 1) + ' ' + kanan(rp(it.qty * it.price), KOL_UANG));
       // Aturan sama dengan struk thermal: indent "  - ", dipotong ke 64 kolom.
       if (it.note?.trim()) out.push(...byteCatatan(it.note, COLS_A4), ...LF);
     }

@@ -1,7 +1,7 @@
 import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'history' | 'customers' | 'debts' | 'reports' | 'shifts' | 'settings';
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'customers' | 'debts' | 'reports' | 'expenses' | 'shifts' | 'settings';
 export type Route = 'pos' | AdminRoute;
 
 interface NavItem {
@@ -12,21 +12,46 @@ interface NavItem {
 
 export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
   {
-    group: 'Menu',
+    group: 'Utama',
+    items: [{ route: 'dashboard', label: 'Dashboard', icon: 'dashboard' }],
+  },
+  {
+    // Alur uang masuk: lihat transaksi -> kelola pelanggan -> piutang.
+    // Slot Retur (#/returns) masuk posisi kedua grup ini saat fiturnya dibangun.
+    group: 'Penjualan',
     items: [
-      { route: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-      { route: 'products', label: 'Produk', icon: 'products' },
-      // Label harga punya layar sendiri (kiri alat, kanan pratinjau) sejak
-      // 2026-09-29 — dulu ia cuma dialog dari toolbar Produk.
-      { route: 'labels', label: 'Label harga', icon: 'print' },
-      { route: 'satuan', label: 'Satuan', icon: 'categories' },
-      { route: 'stock', label: 'Stok', icon: 'stock' },
       // Linimasa penjualan + topup/tarik per hari (baru 2026-09-30).
       { route: 'history', label: 'Riwayat transaksi', icon: 'receipt' },
       // Pelanggan & piutang (baru 2026-10-04): master kontak + ledger hutang.
       { route: 'customers', label: 'Pelanggan', icon: 'users' },
       { route: 'debts', label: 'Hutang', icon: 'wallet' },
+    ],
+  },
+  {
+    // Alur barang: master produk -> stok operasional -> pemasok -> pendukung
+    // (satuan, label). Slot Pembelian (#/purchases) masuk setelah Supplier
+    // saat Tahap 3 dibangun.
+    group: 'Barang',
+    items: [
+      { route: 'products', label: 'Produk', icon: 'products' },
+      { route: 'stock', label: 'Stok', icon: 'stock' },
+      // Master pemasok (baru 2026-10-11): pindahan `customers.supplier_no` —
+      // dipakai Tahap 3 Pembelian sebagai pilihan pemasok.
+      { route: 'suppliers', label: 'Supplier', icon: 'truck' },
+      { route: 'satuan', label: 'Satuan', icon: 'categories' },
+      // Label harga punya layar sendiri (kiri alat, kanan pratinjau) sejak
+      // 2026-09-29 — dulu ia cuma dialog dari toolbar Produk.
+      { route: 'labels', label: 'Label harga', icon: 'print' },
+    ],
+  },
+  {
+    // Uang & pertanggungjawaban: laporan -> pengeluaran -> shift.
+    group: 'Keuangan',
+    items: [
       { route: 'reports', label: 'Laporan', icon: 'reports' },
+      // Kas keluar operasional (Tahap 1, 2026-10-11): mengurangi laci bila
+      // terikat shift (lihat kasSeharusnya di shift-tutup.ts).
+      { route: 'expenses', label: 'Pengeluaran', icon: 'coins' },
       { route: 'shifts', label: 'Shift Kasir', icon: 'shifts' },
     ],
   },
@@ -45,26 +70,30 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   labels: 'Label harga',
   satuan: 'Satuan',
   stock: 'Stok',
+  suppliers: 'Supplier',
   history: 'Riwayat transaksi',
   customers: 'Pelanggan',
   debts: 'Hutang',
   reports: 'Laporan',
+  expenses: 'Pengeluaran',
   shifts: 'Shift Kasir',
   settings: 'Pengaturan',
 };
 
 /** Breadcrumb: grup nav -> halaman. Ditampilkan menyatu dengan judul di header. */
 export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
-  dashboard: ['Menu', 'Dashboard'],
-  products: ['Menu', 'Produk'],
-  labels: ['Menu', 'Label harga'],
-  satuan: ['Menu', 'Satuan'],
-  stock: ['Menu', 'Stok'],
-  history: ['Menu', 'Riwayat transaksi'],
-  customers: ['Menu', 'Pelanggan'],
-  debts: ['Menu', 'Hutang'],
-  reports: ['Menu', 'Laporan'],
-  shifts: ['Menu', 'Shift Kasir'],
+  dashboard: ['Utama', 'Dashboard'],
+  products: ['Barang', 'Produk'],
+  labels: ['Barang', 'Label harga'],
+  satuan: ['Barang', 'Satuan'],
+  stock: ['Barang', 'Stok'],
+  suppliers: ['Barang', 'Supplier'],
+  history: ['Penjualan', 'Riwayat transaksi'],
+  customers: ['Penjualan', 'Pelanggan'],
+  debts: ['Penjualan', 'Hutang'],
+  reports: ['Keuangan', 'Laporan'],
+  expenses: ['Keuangan', 'Pengeluaran'],
+  shifts: ['Keuangan', 'Shift Kasir'],
   settings: ['Sistem', 'Pengaturan'],
 };
 
@@ -75,10 +104,12 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   labels: 'Cetak label harga 32 kolom — alat di kiri, pratinjau label di kanan.',
   satuan: 'Master satuan untuk struk; form produk memilih dari daftar ini.',
   stock: 'Pantau stok menipis dan riwayat restock.',
+  suppliers: 'Pemasok barang kulakan — dipakai untuk Pembelian (Tahap 3).',
   history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
   customers: 'Kontak pembeli — dipakai untuk mencatat hutang di halaman Hutang.',
   debts: 'Buku piutang: catat siapa berhutang dan pembayarannya.',
   reports: 'Omzet, laba, HPP, rekap metode bayar, produk terlaris, dan stok menipis.',
+  expenses: 'Kas keluar operasional — mengurangi laci bila terikat shift.',
   shifts: 'Riwayat shift + buka/tutup shift dengan modal awal & modal akhir.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
 };

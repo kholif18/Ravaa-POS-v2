@@ -172,19 +172,20 @@ app.get('/api/customers', (c) => {
 // Tambah / ubah pelanggan. `id` dikirim = update (200), tanpa id = baru (201).
 // Sengaja TIDAK upsert by phone: dua orang bisa berbagi nomor (keluarga/toko).
 //
-// Nomor urut OTOMATIS (revisi pemilik 2026-10-04): `CUS-000001` = no customer,
-// `SUP-000001` = no supplier (master supplier belum ada — nomornya disimpan di
-// kontak dulu, halaman Supplier menyusul). Diambil dari baris terbesar lewat
-// CAST (pola invoice_no): BUKAN COUNT, jadi celah nomor tidak pernah dipakai
-// ulang. Baris lama yang masih kosong diisi saat pertama disimpan ulang.
-// `pref` SUDAH termasuk tanda '-' — posisi substr/slice dihitung dari panjang
-// prefiks penuh ('CUS-' = 4 -> substr posisi 5 / slice(4) = angkanya saja).
-// Tanpa dash di pref, CAST membaca '-000001' -> -1 untuk semua baris dan nomor
-// selalu kembali ke 000002 (bug yang sempat membuat nomor dobel).
-function nomorUrutPelanggan(kolom: 'code' | 'supplier_no', pref: 'CUS-' | 'SUP-'): string {
+// Nomor urut OTOMATIS (revisi pemilik 2026-10-04): `CUS-000001` = no customer.
+// Diambil dari baris terbesar lewat CAST (pola invoice_no): BUKAN COUNT, jadi
+// celah nomor tidak pernah dipakai ulang. Baris lama yang masih kosong diisi
+// saat pertama disimpan ulang. `pref` SUDAH termasuk tanda '-' — posisi
+// substr/slice dihitung dari panjang prefiks penuh ('CUS-' = 4 -> substr
+// posisi 5 / slice(4) = angkanya saja). Tanpa dash di pref, CAST membaca
+// '-000001' -> -1 untuk semua baris dan nomor selalu kembali ke 000002 (bug
+// yang sempat membuat nomor dobel).
+// 2026-10-11: fungsi digeneralisasi (dulu `nomorUrutPelanggan` khusus
+// customers) — dipakai juga oleh master suppliers (`SUP-000001`).
+function nomorUrut(tabel: 'customers' | 'suppliers', kolom: 'code', pref: 'CUS-' | 'SUP-'): string {
   const last = db
     .prepare(
-      `SELECT ${kolom} AS n FROM customers
+      `SELECT ${kolom} AS n FROM ${tabel}
         WHERE ${kolom} LIKE ? || '%'
         ORDER BY CAST(substr(${kolom}, ?) AS INTEGER) DESC LIMIT 1`,
     )
@@ -203,30 +204,29 @@ app.post('/api/customers', async (c) => {
     if (!name) return c.json({ error: 'nama pelanggan wajib diisi' }, 400);
     const id = body?.id === undefined || body?.id === null || body?.id === '' ? null : Number(body.id);
     if (id !== null && !Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
-    const codeBaru = nomorUrutPelanggan('code', 'CUS-');
-    const supBaru = nomorUrutPelanggan('supplier_no', 'SUP-');
+    const codeBaru = nomorUrut('customers', 'code', 'CUS-');
     if (id !== null) {
       const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(id) as { id: number } | undefined;
       if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
       // Nomor lama DIPERTAHANKAN; hanya baris yang belum bernomor (dibuat sebelum
       // fitur ini) yang diisi sekarang — nomor tidak boleh berubah begitu terbit.
+      // Kolom `supplier_no` DICABUT 2026-10-11 (pindah ke master suppliers).
       const row = db
         .prepare(
           `UPDATE customers SET name = ?, phone = ?, address = ?, note = ?,
              code = CASE WHEN code = '' THEN ? ELSE code END,
-             supplier_no = CASE WHEN supplier_no = '' THEN ? ELSE supplier_no END,
              updated_at = datetime('now')
            WHERE id = ? RETURNING *`,
         )
-        .get(name, phone, address, note, codeBaru, supBaru, id);
+        .get(name, phone, address, note, codeBaru, id);
       return c.json({ data: row }, 200);
     }
     const row = db
       .prepare(
-        `INSERT INTO customers (code, supplier_no, name, phone, address, note)
-         VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+        `INSERT INTO customers (code, name, phone, address, note)
+         VALUES (?, ?, ?, ?, ?) RETURNING *`,
       )
-      .get(codeBaru, supBaru, name, phone, address, note);
+      .get(codeBaru, name, phone, address, note);
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pelanggan' }, 400);
@@ -248,6 +248,76 @@ app.delete('/api/customers/:id', (c) => {
     );
   }
   db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+  return c.json({ data: { id, deleted: true } });
+});
+
+// ---------- master supplier ----------
+// Lahir 2026-10-11 dari pencabutan `customers.supplier_no` (perintah pemilik:
+// no. supplier tidak pantas di modal customer). Pola CRUD + cari multi-kata +
+// penomoran OTOMATIS persis master customers (`SUP-000001` via nomorUrut).
+// Dipakai Tahap 3 Pembelian sebagai pilihan pemasok. Hapus = langsung (belum
+// ada tabel yang mereferensinya; Tahap 3 wajib menambah guard 400 seperti
+// hapus pelanggan berhutang / produk yang pernah terjual).
+app.get('/api/suppliers', (c) => {
+  const q = (c.req.query('q') ?? '').trim();
+  const kata = q.split(/\s+/).filter(Boolean);
+  const conds = kata.map(() => "(lower(s.name) LIKE ? OR s.phone LIKE ? OR lower(s.note) LIKE ?)");
+  const params: unknown[] = [];
+  for (const k of kata) {
+    const like = `%${k.toLowerCase()}%`;
+    params.push(like, `%${k}%`, like);
+  }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const rows = db
+    .prepare(`SELECT s.* FROM suppliers s ${where} ORDER BY s.name COLLATE NOCASE, s.id`)
+    .all(...params);
+  const total = (db.prepare('SELECT COUNT(*) AS n FROM suppliers').get() as { n: number }).n;
+  return c.json({ data: rows, total });
+});
+
+app.post('/api/suppliers', async (c) => {
+  try {
+    const body = await c.req.json();
+    const name = String(body?.name ?? '').trim();
+    const phone = String(body?.phone ?? '').trim();
+    const address = String(body?.address ?? '').trim();
+    const note = String(body?.note ?? '').trim();
+    if (!name) return c.json({ error: 'nama supplier wajib diisi' }, 400);
+    const id = body?.id === undefined || body?.id === null || body?.id === '' ? null : Number(body.id);
+    if (id !== null && !Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+    const codeBaru = nomorUrut('suppliers', 'code', 'SUP-');
+    if (id !== null) {
+      const ada = db.prepare('SELECT id FROM suppliers WHERE id = ?').get(id) as { id: number } | undefined;
+      if (!ada) return c.json({ error: 'supplier tidak ada' }, 404);
+      const row = db
+        .prepare(
+          `UPDATE suppliers SET name = ?, phone = ?, address = ?, note = ?,
+             code = CASE WHEN code = '' THEN ? ELSE code END,
+             updated_at = datetime('now')
+           WHERE id = ? RETURNING *`,
+        )
+        .get(name, phone, address, note, codeBaru, id);
+      return c.json({ data: row }, 200);
+    }
+    const row = db
+      .prepare(
+        `INSERT INTO suppliers (code, name, phone, address, note)
+         VALUES (?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(codeBaru, name, phone, address, note);
+    return c.json({ data: row }, 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan supplier' }, 400);
+  }
+});
+
+app.delete('/api/suppliers/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const ada = db.prepare('SELECT id FROM suppliers WHERE id = ?').get(id) as { id: number } | undefined;
+  if (!ada) return c.json({ error: 'supplier tidak ada' }, 404);
+  // Belum ada guard referensi (purchases Tahap 3 belum ada) — hapus langsung.
+  db.prepare('DELETE FROM suppliers WHERE id = ?').run(id);
   return c.json({ data: { id, deleted: true } });
 });
 
@@ -1019,7 +1089,13 @@ app.get('/api/shifts', (c) => {
             (SELECT COALESCE(SUM(t.nominal),0) FROM topup_txns t
               WHERE t.shift_id = s.id AND t.kind='tarik') AS tarik_nominal,
             (SELECT COALESCE(SUM(t.admin),0) FROM topup_txns t
-              WHERE t.shift_id = s.id AND t.kind='tarik') AS tarik_admin
+              WHERE t.shift_id = s.id AND t.kind='tarik') AS tarik_admin,
+            -- Pengeluaran tunai (Tahap 1, 2026-10-11): kas KELUAR dari laci —
+            -- mengurangi expected-cash di kasSeharusnya() (shift-tutup.ts).
+            -- Hanya yang terikat shift_id ini; yang NULL (di luar shift)
+            -- tetap tercatat + masuk laporan harian, bukan hitungan laci.
+            (SELECT COUNT(*) FROM expenses e WHERE e.shift_id = s.id) AS n_expense,
+            (SELECT COALESCE(SUM(e.jumlah),0) FROM expenses e WHERE e.shift_id = s.id) AS expense_total
        FROM shifts s
        ${klausul}
       ORDER BY s.id DESC
@@ -1065,6 +1141,10 @@ const insertSale = db.transaction((sale: {
   // Pelanggan terpilih di header POS (revisi pemilik 2026-10-04); absen/null =
   // transaksi tanpa kontak (invoice jatuh ke "Pelanggan Umum" di client).
   customer_id?: number | null;
+  // Catatan TRANSAKSI per nota (2026-10-10, kolom "Catatan transaksi" modal
+  // bayar) — beda dengan items[].note (per baris). Opsional seperti
+  // customer_id: absen/'' = tanpa catatan, payload lama tetap sah.
+  note?: string;
   items: { product_id?: number; name?: string; qty: number; price?: number; unit?: string; discount?: number; note?: string }[];
 }) => {
   const dup = db.prepare('SELECT * FROM sales WHERE id = ?').get(sale.id);
@@ -1085,6 +1165,15 @@ const insertSale = db.transaction((sale: {
     if (!cust) throw new Error(`pelanggan tidak dikenal: ${cid}`);
     customerId = cust.id;
     customerName = cust.name;
+  }
+
+  // Catatan TRANSAKSI per nota (2026-10-10, kolom "Catatan transaksi" modal
+  // bayar): di-TRIM + snapshot seperti customer_name — dibaca ulang Riwayat/
+  // struk apa adanya. Batas 200 SAMA dengan catatan baris (satu aturan
+  // panjang catatan di API). Absen/'' = tanpa catatan.
+  const saleNote = String(sale.note ?? '').trim();
+  if (saleNote.length > 200) {
+    throw new Error('catatan transaksi terlalu panjang (maks 200 karakter)');
   }
 
   // Dibaca sekali per penjualan, langsung dari DB: aturan stok tidak boleh
@@ -1229,9 +1318,9 @@ const insertSale = db.transaction((sale: {
   const urut = lastInv ? Number(lastInv.invoice_no.slice(7)) + 1 : 1;
   const invoiceNo = `${ymd}-${String(urut).padStart(6, '0')}`;
   const row = db.prepare(
-    `INSERT INTO sales (id, shift_id, invoice_no, pay_method, subtotal, discount, total, cash_in, change, cashier, customer_id, customer_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-  ).get(sale.id, sale.shift_id, invoiceNo, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier, customerId, customerName);
+    `INSERT INTO sales (id, shift_id, invoice_no, pay_method, subtotal, discount, total, cash_in, change, cashier, customer_id, customer_name, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+  ).get(sale.id, sale.shift_id, invoiceNo, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier, customerId, customerName, saleNote);
   const insItem = db.prepare(
     `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, discount, cost, unit, note)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1264,6 +1353,8 @@ app.post('/api/sales', async (c) => {
       // OPSIONAL: client lama / outbox yang belum ter-update boleh tidak
       // mengirim — transaksi tanpa kontak tetap sah (customer_id NULL).
       customer_id: body.customer_id ?? null,
+      // Catatan transaksi per nota (2026-10-10) — opsional, '' = tanpa.
+      note: body.note ?? '',
       items: body.items,
     });
     const items = lines ?? db.prepare('SELECT * FROM sale_items WHERE sale_id=?').all((row as { id: string }).id);
@@ -1412,6 +1503,69 @@ app.get('/api/topups/suggest-admin', (c) => {
   const nominal = Number(c.req.query('nominal') ?? 0);
   const admin = nominal <= 0 ? 0 : nominal < 50000 ? 3000 : nominal < 200000 ? 5000 : 7000;
   return c.json({ data: { nominal, admin } });
+});
+
+// ---------- pengeluaran kas (Tahap 1, 2026-10-11) ----------
+// Kas TUNAI keluar untuk operasional (plastik, bensin, listrik, ...).
+// Bukan mutasi stok (tidak menyentuh products.version) dan bukan HPP — tapi
+// mengurangi laci: agregat `expense_total` dibaca rumus kasSeharusnya() di
+// shift-tutup.ts, dan rekap hariannya tampil di GET /api/reports/daily.
+// `shift_id` OPSIONAL (pola customer_id di sales): NULL = di luar shift —
+// tetap tercatat + masuk laporan harian, hanya tidak mengurangi laci shift
+// mana pun. Daftar memakai helper bacaHari (filter tanggal + limit/offset
+// round-trip, pola GET /api/sales).
+app.get('/api/expenses', (c) => {
+  const h = bacaHari((k) => c.req.query(k));
+  if (!h.ok) return c.json({ error: h.error }, 400);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM expenses WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT * FROM expenses WHERE date(created_at)=date(?) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+  ).all(h.hari, h.limit, h.offset);
+  const jumlahHari = (db.prepare(`SELECT COALESCE(SUM(jumlah),0) AS t FROM expenses WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { t: number }).t;
+  return c.json({ data, total, jumlah: jumlahHari });
+});
+
+app.post('/api/expenses', async (c) => {
+  try {
+    const body = await c.req.json();
+    const kategori = String(body?.kategori ?? '').trim();
+    const note = String(body?.note ?? '').trim();
+    const jumlah = Number(body?.jumlah ?? 0);
+    if (!kategori) return c.json({ error: 'kategori pengeluaran wajib diisi' }, 400);
+    if (!Number.isInteger(jumlah) || jumlah <= 0) return c.json({ error: 'jumlah harus rupiah bulat > 0' }, 400);
+    if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    // shift_id opsional; bila dikirim harus shift yang benar-benar ada.
+    const rawShift = body?.shift_id;
+    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
+    if (shiftId !== null) {
+      if (!Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
+      const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(shiftId) as { id: number } | undefined;
+      if (!ada) return c.json({ error: 'shift tidak dikenal' }, 400);
+    }
+    const row = db
+      .prepare(
+        `INSERT INTO expenses (kategori, jumlah, note, cashier, shift_id)
+         VALUES (?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(kategori, jumlah, note, String(body?.cashier ?? '').trim() || 'kasir', shiftId);
+    return c.json({ data: row }, 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengeluaran' }, 400);
+  }
+});
+
+// Hapus catatan salah ketik (pola DELETE /api/customer-debts/:id — sengaja
+// tanpa cek saldo: menghapus pengeluaran memperbesar kas, itu memang maksud
+// koreksi).
+app.delete('/api/expenses/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const ada = db.prepare('SELECT id FROM expenses WHERE id = ?').get(id) as { id: number } | undefined;
+  if (!ada) return c.json({ error: 'pengeluaran tidak ada' }, 404);
+  db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+  return c.json({ data: { id, deleted: true } });
 });
 
 // ---------- Pengaturan toko ----------
@@ -1700,7 +1854,13 @@ app.get('/api/reports/daily', (c) => {
   // laba = omzet SETELAH diskon - HPP. Jasa/cetak punya cost 0, jadi seluruh
   // penjualannya dihitung sebagai laba (tidak ada biaya persediaan yang dilacak).
   const laba = (sales as { omzet: number }).omzet - hpp;
-  return c.json({ data: { date, sales, hpp, laba, byMethod, topup, topItems, lowStock } });
+  // Pengeluaran kas hari itu (Tahap 1, 2026-10-11) — dilaporkan TERPISAH,
+  // tidak menggerus laba (laba = laba kotor dagang, definisi lama tetap).
+  const expense = db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(jumlah),0) AS total
+     FROM expenses WHERE date(created_at)=date(?)`,
+  ).get(date) as { n: number; total: number };
+  return c.json({ data: { date, sales, hpp, laba, byMethod, topup, topItems, lowStock, expense } });
 });
 
 const port = Number(process.env.PORT ?? 3001);
