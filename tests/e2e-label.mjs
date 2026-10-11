@@ -11,6 +11,7 @@ const ARTIFAK = path0.join(path0.dirname(fileURLToPath(import.meta.url)), 'artif
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { pasangToken } from './bantuan-uji.mjs';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 // Print-agent dijalankan TERPISAH pada :9101 dengan PRINTER_PATH ke file tiruan.
@@ -45,6 +46,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
 // Harus sebelum skrip aplikasi jalan: urlAgent() membaca kunci ini saat mencetak.
 // printpause='0': bawaan aplikasi JEDA cetak — agent khusus :9101 menulis ke
 // file tiruan (aman), jadi pause dimatikan supaya alur print teruji utuh.

@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, unlinkSync } from 'node:fs';
+  import { pasangToken } from './bantuan-uji.mjs';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
@@ -46,10 +47,12 @@ try {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
-  const page = await ctx.newPage();
+const page = await ctx.newPage();
+await pasangToken(page);
   const errs = [];
   page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });
+  page.on('response', (r) => { if (r.status() === 401) console.log('  [401]', r.url()); });
   let prod = null, prod2 = null;
   try {
     console.log('=== A. Form Tambah: kotak foto hidup ===');

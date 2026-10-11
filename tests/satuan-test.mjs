@@ -3,6 +3,7 @@ import { chromium } from 'playwright-core';
 import { execSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pasangToken } from './bantuan-uji.mjs';
 
 let pass = 0, fail = 0;
 const chk = (name, ok, info = '') => {
@@ -20,6 +21,7 @@ sql("DELETE FROM products WHERE name LIKE 'Kertas Test %'");
 
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(p);
 const err = [];
 p.on('pageerror', (e) => err.push(String(e).slice(0, 120)));
 const api = (path) => p.evaluate((u) => fetch(u).then((r) => r.json()), path);

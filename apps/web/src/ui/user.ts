@@ -1,12 +1,12 @@
-// Menu user (avatar + dropdown): nama kasir, edit profil, keluar.
+// Menu user (avatar + dropdown): nama kasir, profil, keluar.
 // Modul ini SENGAJA tidak meng-import shell.ts (reverse juga avoided) supaya
 // tidak ada circular import. Perubahan disiarkan lewat CustomEvent
 // ('ravaa:user' / 'ravaa:theme') dan shell.ts yang mengecat ulang header.
 //
-// CATATAN JUJUR: repo ini BELUM punya auth/session server. "Nama kasir" hanya
-// disimpan di localStorage perangkat ini (ravaa.cashier) dan dipakai untuk
-// shift + laporan. Jadi "Keluar" = lepas dari perangkat (hapus nama lokal),
-// bukan mengakhiri session server. Jangan menyebutnya login/logout sungguhan.
+// Login 2026-10-11: sesi token server (lihat ui/auth.ts). "Nama kasir"
+// mengikuti display name AKUN (diisi saat masuk) dan dipakai untuk shift +
+// laporan — profil TIDAK lagi mengubah nama (akan memutus kepemilikan shift).
+// "Keluar" = hapus sesi server + token lokal, kembali ke halaman Login.
 
 import { openModal } from './modal';
 import { confirmDialog } from './confirm';
@@ -67,7 +67,9 @@ export function setToko(name: string): void {
   }
 }
 
-/** Modal pengaturan akun: nama kasir (profil) + nama toko (kepala struk) + tema. */
+/** Modal pengaturan akun: info akun (read-only) + nama toko + tema + ganti sandi.
+ *  Nama kasir mengikuti AKUN dan tidak bisa diubah di sini (mengubahnya akan
+ *  memutus kepemilikan shift — nama diganti lewat halaman Pengguna). */
 export function openProfileModal(): void {
   const name = getCashier();
   const toko = getToko();
@@ -80,18 +82,11 @@ export function openProfileModal(): void {
       <div class="flex items-center gap-2 rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
         <span class="avatar avatar-lg" id="pf-avatar">${esc(initials(name))}</span>
         <div class="min-w-0">
-          <p class="text-sm font-semibold text-gray-900 dark:text-white">Profil kasir</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">Tersimpan di perangkat ini saja.</p>
+          <p class="text-sm font-semibold text-gray-900 dark:text-white">${esc(name)}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Nama kasir = nama akun (diubah di halaman Pengguna).</p>
         </div>
       </div>
       <div class="field mt-4">
-        <label class="label" for="pf-name">Nama kasir</label>
-        <input id="pf-name" class="input" maxlength="24" value="${esc(name)}" placeholder="cth: Budi" />
-        <span class="text-xs text-gray-500 dark:text-gray-400" id="pf-hint">
-          Dipakai untuk shift, laporan harian, dan struk. Berbeda per device.
-        </span>
-      </div>
-      <div class="field">
         <label class="label" for="pf-toko">Nama toko (kepala struk)</label>
         <input id="pf-toko" class="input" maxlength="32" value="${esc(toko)}" placeholder="cth: Toko Maju Jaya" />
         <span class="text-xs text-gray-500 dark:text-gray-400">
@@ -105,29 +100,18 @@ export function openProfileModal(): void {
           <option value="dark" ${theme === 'dark' ? 'selected' : ''}>Gelap</option>
         </select>
       </div>
-      <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-        Belum ada akun/password di aplikasi ini — nama kasir hanya penanda perangkat,
-        bukan login.
-      </p>`,
+      <button type="button" id="pf-sandi" class="btn btn-ghost w-full justify-center">Ganti sandi</button>`,
     onMount: ({ el, ok, close }) => {
-      const nameEl = el.querySelector('#pf-name') as HTMLInputElement;
-      const avatarEl = el.querySelector('#pf-avatar') as HTMLElement;
       const themeEl = el.querySelector('#pf-theme') as HTMLSelectElement;
       const tokoEl = el.querySelector('#pf-toko') as HTMLInputElement;
-
-      nameEl.addEventListener('input', () => {
-        avatarEl.textContent = initials(nameEl.value);
+      tokoEl.focus();
+      tokoEl.select();
+      el.querySelector('#pf-sandi')?.addEventListener('click', () => {
+        close();
+        location.hash = '#/ubah-sandi';
       });
-      nameEl.focus();
-      nameEl.select();
 
       ok.addEventListener('click', () => {
-        const v = nameEl.value.trim();
-        if (!v) {
-          toast('Nama kasir tidak boleh kosong', 'warning');
-          return;
-        }
-        setCashier(v);
         setToko(tokoEl.value.trim() || 'RAVA POS');
         // Tema ikut diterapkan seketika supaya langsung terlihat hasilnya.
         const t = themeEl.value === 'dark' ? 'dark' : 'light';
@@ -145,24 +129,25 @@ export function openProfileModal(): void {
   });
 }
 
-/** Keluar dari perangkat: hapus nama kasir lokal, kembali ke layar kasir. */
+/** Keluar: hapus sesi server + token lokal, kembali ke halaman Login. */
 export async function logout(): Promise<void> {
-  const name = getCashier();
   const yes = await confirmDialog({
-    title: `Keluar dari "${name}"?`,
+    title: `Keluar dari "${getCashier()}"?`,
     message:
-      'Nama kasir di perangkat ini akan dihapus. Keranjang yang belum dibayar akan hilang.',
+      'Sesi di server diputus dan perangkat ini kembali ke halaman Login. Keranjang yang belum dibayar akan hilang.',
     okLabel: 'Ya, keluar',
     cancelLabel: 'Batal, jangan keluar',
     danger: true,
   });
   if (!yes) return;
+  const { keluar } = await import('./auth');
+  await keluar();
   try {
     localStorage.removeItem(KEY);
   } catch {
     /* abaikan */
   }
   document.dispatchEvent(new CustomEvent('ravaa:user'));
-  toast('Sesi kasir di perangkat ini dihapus', 'success');
-  location.hash = '#/pos';
+  toast('Sudah keluar — sampai jumpa', 'success');
+  location.hash = '#/login';
 }

@@ -13,6 +13,7 @@
 // 1 -> 0) lalu DIPULIHKAN ke angka semula di finally — stok akhir suite ini
 // sama dengan stok awal.
 import { chromium } from 'playwright-core';
+import { pasangToken } from './bantuan-uji.mjs';
 
 const WEB = 'http://localhost:5656';
 const API = 'http://localhost:3001';
@@ -44,6 +45,7 @@ await ctx.addInitScript(() => {
   Object.defineProperty(navigator, 'onLine', { get: () => false });
 });
 const p = await ctx.newPage();
+await pasangToken(p);
 const errs = [];
 p.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
 

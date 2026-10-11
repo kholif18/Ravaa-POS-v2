@@ -7,6 +7,7 @@
 // Jalankan: node history-test.mjs   (butuh API :3001 + vite :5656 hidup)
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
+  import { pasangToken } from './bantuan-uji.mjs';
 
 const WEB = 'http://localhost:5656';
 const API = 'http://localhost:3001';
@@ -113,7 +114,8 @@ try {
     headless: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
   // printpause='0' + route **/print di-mock: TEST TIDAK BOLEH mengirim kertas
   // fisik (dulu klik [Thermal] di sini menulis struk asli ke /dev/usb/lp0 tiap
   // `npm test` — itulah biang kertas terbuang; keputusan pemilik 2026-10-06:

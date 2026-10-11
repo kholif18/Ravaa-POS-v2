@@ -80,6 +80,7 @@ const SUITE = [
   ['laporan-menu-test.mjs', 16],
   ['harga-dinamis-test.mjs', 18],
   ['pos-notif-test.mjs', 6],
+  ['login-test.mjs', 26],
 ];
 
 let total = 0;
@@ -98,6 +99,16 @@ async function siapkan() {
   } catch { /* dibawah */ }
   if (!sehat) {
     console.log('GAGAL     API tidak terjangkau di :3001 — jalankan `npm run dev:api` dulu');
+    process.exit(1);
+  }
+  // Login sekali untuk seluruh run (login 2026-10-11: API wajib token).
+  // Token diwariskan ke suite anak via env; tiap suite juga bisa login
+  // sendiri lewat tests/bantuan-uji.mjs bila dijalankan satuan.
+  const { tokenUji } = await import('./bantuan-uji.mjs');
+  try {
+    process.env.RAVAA_UJI_TOKEN = tokenUji();
+  } catch (e) {
+    console.log(`GAGAL     ${e instanceof Error ? e.message : e}`);
     process.exit(1);
   }
   const buka = async () => {

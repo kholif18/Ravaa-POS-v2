@@ -5,6 +5,7 @@ import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
+  import { pasangToken } from './bantuan-uji.mjs';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
@@ -23,7 +24,8 @@ const NAMA_CUST = `UjiRekap Hutang ${TS}`;
 
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e).slice(0, 150)));
   page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 150)); });

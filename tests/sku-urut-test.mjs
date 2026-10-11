@@ -30,10 +30,11 @@ const hapusArtefak = () => {
   sql("DELETE FROM stock_moves WHERE product_id IN (SELECT id FROM products WHERE name LIKE 'Uji SKU Urut%')");
   sql("DELETE FROM products WHERE name LIKE 'Uji SKU Urut%'");
 };
+import { authHeaders } from './bantuan-uji.mjs';
 const post = async (path, body) => {
   const r = await fetch(API + path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
   return { status: r.status, data: (await r.json())?.data };
@@ -87,7 +88,7 @@ const r5 = await post('/api/products', {
   name: 'Uji SKU Urut Lima', category_slug: 'atk', unit: 'pcs', price: 1000,
 });
 const sku5 = r5.data?.sku ?? '';
-const del = await fetch(`${API}/api/products/${r5.data?.id}`, { method: 'DELETE' });
+const del = await fetch(`${API}/api/products/${r5.data?.id}`, { method: 'DELETE', headers: { ...authHeaders() } });
 chk('produk di-soft-delete (tombstone)', del.status === 200, `status ${del.status}`);
 chk('tombstone memang tertulis', sql(
   `SELECT COUNT(*) FROM products WHERE sku='${sku5}' AND deleted_at IS NOT NULL`) === '1', sku5);

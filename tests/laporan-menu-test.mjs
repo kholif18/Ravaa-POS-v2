@@ -1,6 +1,7 @@
 // Katalog laporan ala Aronium (2026-10-11): menu Harian/Kasir/Produk/Piutang/
 // Stok + summary range + cashiers + products + piutang + cetak/PDF/CSV.
 import { chromium } from 'playwright-core';
+import { pasangToken } from './bantuan-uji.mjs';
 
 let pass = 0, fail = 0;
 const chk = (name, ok, info = '') => {
@@ -11,6 +12,7 @@ const hariIni = () => new Date().toISOString().slice(0, 10);
 
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(p);
 const err = [];
 p.on('pageerror', (e) => err.push(String(e).slice(0, 120)));
 const api = (path) => p.evaluate((u) => fetch(u).then((r) => r.json()), path);

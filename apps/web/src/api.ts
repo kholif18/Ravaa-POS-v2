@@ -2,6 +2,7 @@
 // ID uuid dibuat di client -> POST ulang aman (server idempotent).
 
 import { toast } from './ui/toast';
+import { tokenAuth } from './ui/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
@@ -15,10 +16,17 @@ export class HttpError extends Error {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
+  // Token sesi ikut di SEMUA request app (termasuk flush outbox — header
+  // dibaca saat kirim, jadi antrean offline tetap sah setelah login ulang).
+  const token = tokenAuth();
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
-      headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
     });
   } catch (e) {
     throw new HttpError(e instanceof Error ? e.message : 'jaringan terputus', 0);

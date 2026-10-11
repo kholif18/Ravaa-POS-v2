@@ -16,6 +16,7 @@ import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
+  import { pasangToken } from './bantuan-uji.mjs';
 
 const WEB = 'http://localhost:5656';
 const API = 'http://localhost:3001';
@@ -178,7 +179,8 @@ try {
     headless: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
   const errs = [];
   page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });

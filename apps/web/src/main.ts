@@ -13,11 +13,15 @@ import { mountExpensesPage } from './pages/expenses';
 import { mountDebtsPage } from './pages/debts';
 import { mountShiftsPage } from './pages/shifts';
 import { mountSettingsPage } from './pages/settings';
+import { mountUsersPage } from './pages/users';
+import { renderLoginPage } from './pages/login';
+import { renderUbahSandiPage } from './pages/ubah-sandi';
 import { mountStockPage, unmountStockPage } from './pages/stock';
 import {
   applySidebarState,
   applyTheme,
   bindShell,
+  bolehBuka,
   getTheme,
   isAdminRoute,
   parseRoute,
@@ -26,6 +30,8 @@ import {
 } from './ui/shell';
 import { updateOutboxBadge } from './api';
 import { getCashier } from './ui/user';
+import { profilSaya, ruteBawaan } from './ui/auth';
+import { toast } from './ui/toast';
 
 const app = document.getElementById('app');
 if (!app) throw new Error('#app tidak ditemukan');
@@ -34,11 +40,44 @@ if (!app) throw new Error('#app tidak ditemukan');
 // supaya hasil simpan di modal Profil langsung tercermin di header.
 const cashier = getCashier;
 
-/* ---------- Router ---------- */
+/* ---------- Router (berpenjaga login 2026-10-11) ---------- */
 
-function render(): void {
+function renderBare(judul: string, gambar: (el: HTMLElement) => void): void {
+  document.title = `${judul} — Ravaa POS`;
+  app!.innerHTML = `<div class="flex h-full flex-col"><main class="page" id="page" tabindex="-1"></main></div>`;
+  gambar(app!.querySelector('#page')!);
+}
+
+async function render(): Promise<void> {
   const route = parseRoute(location.hash);
-  app!.innerHTML = isAdminRoute(route) ? renderShell(route, cashier()) : renderPosShell();
+  if (route === 'login') {
+    renderBare('Masuk', renderLoginPage);
+    return;
+  }
+  const saya = await profilSaya();
+  if (!saya) {
+    // Tanpa sesi: paksa ke Login (kecuali sudah di sana — hindari loop hash).
+    if (location.hash !== '#/login') location.hash = '#/login';
+    else renderBare('Masuk', renderLoginPage);
+    return;
+  }
+  if (saya.wajib && route !== 'ubah-sandi') {
+    if (location.hash !== '#/ubah-sandi') location.hash = '#/ubah-sandi';
+    else renderBare('Ganti sandi', renderUbahSandiPage);
+    return;
+  }
+  if (route === 'ubah-sandi') {
+    renderBare('Ganti sandi', renderUbahSandiPage);
+    return;
+  }
+  if (!bolehBuka(route, saya.akun.role)) {
+    // Kasir nyasar ke halaman pemilik (ketik hash manual): kembalikan ke
+    // bawaan perannya SEKALI (hash berubah -> render ulang yang sah).
+    toast('Halaman ini khusus pemilik', 'warning');
+    location.hash = ruteBawaan(saya.akun.role);
+    return;
+  }
+  app!.innerHTML = isAdminRoute(route) ? renderShell(route, cashier(), saya.akun.role) : renderPosShell();
   bindShell();
   updateOutboxBadge();
   const page = document.getElementById('page');
@@ -100,6 +139,9 @@ function render(): void {
   } else if (route === 'settings') {
     // Pengaturan: baca-tulis GET/POST /api/settings -> di-mount.
     void mountSettingsPage(page);
+  } else if (route === 'users') {
+    // Pengguna: akun kasir & pemilik (khusus pemilik, dijaga guard + nav).
+    void mountUsersPage(page);
   }
   // Tidak ada cabang else: parseRoute hanya menghasilkan 'pos' atau salah satu
   // AdminRoute, dan semuanya sudah di-mount di atas.
@@ -109,8 +151,8 @@ function boot(): void {
   applyTheme(getTheme());
   applySidebarState();
   if (!location.hash) location.hash = '#/dashboard';
-  render();
-  window.addEventListener('hashchange', render);
+  void render();
+  window.addEventListener('hashchange', () => void render());
 }
 
 boot();

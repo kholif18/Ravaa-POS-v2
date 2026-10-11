@@ -1,19 +1,30 @@
 import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
+import { akunTersimpan, type Peran } from './auth';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings';
-export type Route = 'pos' | AdminRoute;
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings' | 'users';
+// login & ubah-sandi dirender TANPA shell (layar penuh) — bukan admin.
+export type Route = 'pos' | 'login' | 'ubah-sandi' | AdminRoute;
 
 interface NavItem {
   route: AdminRoute;
   label: string;
   icon: IconName;
+  /** Peran yang boleh MELIHAT + MEMBUKA menu ini (login 2026-10-11).
+   *  Kasir: POS + Riwayat + Retur + Pelanggan + Hutang + Stok + Shift
+   *  (shift sendiri); sisanya khusus pemilik (uang keluar, harga modal,
+   *  omzet/laba, aturan, akun). Server menegakkan hal yang sama — nav ini
+   *  hanya cermin agar kasir tak mengklik jalan buntu. */
+  roles: Peran[];
 }
+
+const SEMUA: Peran[] = ['pemilik', 'kasir'];
+const MILIK: Peran[] = ['pemilik'];
 
 export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
   {
     group: 'Utama',
-    items: [{ route: 'dashboard', label: 'Dashboard', icon: 'dashboard' }],
+    items: [{ route: 'dashboard', label: 'Dashboard', icon: 'dashboard', roles: MILIK }],
   },
   {
     // Alur uang masuk: lihat transaksi -> retur (uang keluar) -> kelola
@@ -21,12 +32,12 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     group: 'Penjualan',
     items: [
       // Linimasa penjualan + topup/tarik per hari (baru 2026-09-30).
-      { route: 'history', label: 'Riwayat transaksi', icon: 'receipt' },
+      { route: 'history', label: 'Riwayat transaksi', icon: 'receipt', roles: SEMUA },
       // Retur penjualan (Tahap 2, 2026-10-11): barang kembali + uang kembali.
-      { route: 'returns', label: 'Retur', icon: 'sync' },
+      { route: 'returns', label: 'Retur', icon: 'sync', roles: SEMUA },
       // Pelanggan & piutang (baru 2026-10-04): master kontak + ledger hutang.
-      { route: 'customers', label: 'Pelanggan', icon: 'users' },
-      { route: 'debts', label: 'Hutang', icon: 'wallet' },
+      { route: 'customers', label: 'Pelanggan', icon: 'users', roles: SEMUA },
+      { route: 'debts', label: 'Hutang', icon: 'wallet', roles: SEMUA },
     ],
   },
   {
@@ -34,28 +45,28 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     // pendukung (satuan, label).
     group: 'Barang',
     items: [
-      { route: 'products', label: 'Produk', icon: 'products' },
-      { route: 'stock', label: 'Stok', icon: 'stock' },
+      { route: 'products', label: 'Produk', icon: 'products', roles: MILIK },
+      { route: 'stock', label: 'Stok', icon: 'stock', roles: SEMUA },
       // Master pemasok (baru 2026-10-11): pindahan `customers.supplier_no` —
       // dipakai Pembelian sebagai pilihan pemasok.
-      { route: 'suppliers', label: 'Supplier', icon: 'truck' },
+      { route: 'suppliers', label: 'Supplier', icon: 'truck', roles: MILIK },
       // Nota kulakan PO (Tahap 3, 2026-10-11): order -> terima -> bayar.
-      { route: 'purchases', label: 'Pembelian', icon: 'download' },
-      { route: 'satuan', label: 'Satuan', icon: 'categories' },
+      { route: 'purchases', label: 'Pembelian', icon: 'download', roles: MILIK },
+      { route: 'satuan', label: 'Satuan', icon: 'categories', roles: MILIK },
       // Label harga punya layar sendiri (kiri alat, kanan pratinjau) sejak
       // 2026-09-29 — dulu ia cuma dialog dari toolbar Produk.
-      { route: 'labels', label: 'Label harga', icon: 'print' },
+      { route: 'labels', label: 'Label harga', icon: 'print', roles: MILIK },
     ],
   },
   {
     // Uang & pertanggungjawaban: laporan -> pengeluaran -> shift.
     group: 'Keuangan',
     items: [
-      { route: 'reports', label: 'Laporan', icon: 'reports' },
+      { route: 'reports', label: 'Laporan', icon: 'reports', roles: MILIK },
       // Kas keluar operasional (Tahap 1, 2026-10-11): mengurangi laci bila
       // terikat shift (lihat kasSeharusnya di shift-tutup.ts).
-      { route: 'expenses', label: 'Pengeluaran', icon: 'coins' },
-      { route: 'shifts', label: 'Shift Kasir', icon: 'shifts' },
+      { route: 'expenses', label: 'Pengeluaran', icon: 'coins', roles: MILIK },
+      { route: 'shifts', label: 'Shift Kasir', icon: 'shifts', roles: SEMUA },
     ],
   },
   {
@@ -63,7 +74,11 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     // BEDA dari data di atas — isinya aturan server yang berlaku untuk semua
     // device, bukan catatan per kasir.
     group: 'Sistem',
-    items: [{ route: 'settings', label: 'Pengaturan', icon: 'settings' }],
+    items: [
+      { route: 'settings', label: 'Pengaturan', icon: 'settings', roles: MILIK },
+      // Akun & peran (login 2026-10-11): khusus pemilik.
+      { route: 'users', label: 'Pengguna', icon: 'shieldCheck', roles: MILIK },
+    ],
   },
 ];
 
@@ -83,6 +98,7 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   expenses: 'Pengeluaran',
   shifts: 'Shift Kasir',
   settings: 'Pengaturan',
+  users: 'Pengguna',
 };
 
 /** Breadcrumb: grup nav -> halaman. Ditampilkan menyatu dengan judul di header. */
@@ -102,6 +118,7 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   expenses: ['Keuangan', 'Pengeluaran'],
   shifts: ['Keuangan', 'Shift Kasir'],
   settings: ['Sistem', 'Pengaturan'],
+  users: ['Sistem', 'Pengguna'],
 };
 
 /** Subjudul per halaman (dipindah dari dalam body ke header). */
@@ -121,6 +138,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   expenses: 'Kas keluar operasional — mengurangi laci bila terikat shift.',
   shifts: 'Riwayat shift + buka/tutup shift dengan modal awal & modal akhir.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
+  users: 'Akun kasir & pemilik: tambah, atur peran, reset sandi, nonaktifkan.',
 };
 
 /** Rute yang tampil TANPA header sama sekali (keputusan pemilik 2026-10-03):
@@ -137,12 +155,25 @@ const ADMIN_ROUTES = new Set<string>(ADMIN_NAV.flatMap((g) => g.items.map((i) =>
 export function parseRoute(hash: string): Route {
   const slug = hash.replace(/^#\/?/, '').split('?')[0] ?? '';
   if (slug === 'pos' || slug === 'kasir') return 'pos';
+  if (slug === 'login') return 'login';
+  if (slug === 'ubah-sandi') return 'ubah-sandi';
   if (ADMIN_ROUTES.has(slug)) return slug as AdminRoute;
   return 'pos';
 }
 
 export function isAdminRoute(route: Route): route is AdminRoute {
-  return route !== 'pos';
+  return route !== 'pos' && route !== 'login' && route !== 'ubah-sandi';
+}
+
+/** Bolehkah peran ini membuka rute? POS/login/ubah-sandi selalu boleh
+ *  (dijaga terpisah); halaman admin ikut `roles` item nav-nya. */
+export function bolehBuka(route: Route, peran: Peran): boolean {
+  if (route === 'pos' || route === 'login' || route === 'ubah-sandi') return true;
+  for (const g of ADMIN_NAV) {
+    const item = g.items.find((i) => i.route === route);
+    if (item) return item.roles.includes(peran);
+  }
+  return false;
 }
 
 /* ---------- Tema ---------- */
@@ -191,13 +222,15 @@ export function applySidebarState(): void {
 
 /* ---------- Render shell ---------- */
 
-function navHtml(active: AdminRoute): string {
-  return ADMIN_NAV.map(
-    (group) => `
+function navHtml(active: AdminRoute, peran: Peran): string {
+  return ADMIN_NAV.map((group) => {
+    const items = group.items.filter((i) => i.roles.includes(peran));
+    if (!items.length) return '';
+    return `
       <div class="mb-6">
         <p class="nav-title">${group.group}</p>
         <ul>
-          ${group.items
+          ${items
             .map(
               (item) => `
             <li>
@@ -208,8 +241,8 @@ function navHtml(active: AdminRoute): string {
             )
             .join('')}
         </ul>
-      </div>`,
-  ).join('');
+      </div>`;
+  }).join('');
 }
 
 function iconBtn(id: string, name: IconName, label: string): string {
@@ -233,13 +266,15 @@ function titleBlock(active: AdminRoute): string {
     </div>`;
 }
 
-/** Menu user paling kanan: avatar + nama, dropdown profil & keluar. */
-function userMenu(name: string): string {
+/** Menu user paling kanan: avatar + nama + lencana peran, dropdown profil & keluar. */
+function userMenu(name: string, peran: Peran): string {
+  const peranLabel = peran === 'pemilik' ? 'Pemilik' : 'Kasir';
   return `
     <div class="user-wrap" id="user-wrap">
       <button type="button" id="user-btn" class="user-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Menu akun ${name}" title="Akun">
         <span class="avatar" id="user-avatar">${initials(name)}</span>
         <span class="user-name" id="user-name">${name}</span>
+        <span class="badge-dyn" id="user-role">${peranLabel}</span>
         ${icon('chevD')}
       </button>
       <div class="user-dd" id="user-dd" role="menu" hidden>
@@ -247,7 +282,7 @@ function userMenu(name: string): string {
           <span class="avatar avatar-lg" id="dd-avatar">${initials(name)}</span>
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-gray-900 dark:text-white" id="dd-name">${name}</p>
-            <p class="text-xs text-gray-500 dark:text-gray-400">Kasir aktif</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400" id="dd-role">${peranLabel} aktif</p>
           </div>
         </div>
         <div class="dd-sep"></div>
@@ -262,7 +297,7 @@ function userMenu(name: string): string {
     </div>`;
 }
 
-export function renderShell(active: AdminRoute, cashier: string): string {
+export function renderShell(active: AdminRoute, cashier: string, peran: Peran): string {
   const tanpaHeader = TANPA_HEADER.includes(active);
   return `
   <div class="app-layout">
@@ -272,7 +307,7 @@ export function renderShell(active: AdminRoute, cashier: string): string {
         <span class="brand-name truncate text-sm font-semibold text-white">Ravaa POS</span>
       </div>
       <div class="nav-scroll">
-        ${navHtml(active)}
+        ${navHtml(active, peran)}
       </div>
       <div class="sidebar-foot">
         <a href="#/pos" class="btn btn-primary w-full" title="Buka kasir fullscreen">
@@ -290,7 +325,7 @@ export function renderShell(active: AdminRoute, cashier: string): string {
         <div class="flex shrink-0 items-center gap-2">
           <span class="chip hidden lg:inline-flex" id="outbox-badge" title="Status sinkronisasi">online</span>
           ${iconBtn('theme-toggle', getTheme() === 'dark' ? 'sun' : 'moon', 'Ganti tema')}
-          ${userMenu(cashier)}
+          ${userMenu(cashier, peran)}
         </div>
       </header>`}
       <main class="page" id="page" tabindex="-1"></main>
@@ -325,10 +360,11 @@ function paintThemeToggle(): void {
   btn.setAttribute('aria-label', btn.title);
 }
 
-/** Cat ulang avatar + nama tanpa render ulang shell (state halaman terjaga). */
+/** Cat ulang avatar + nama + peran tanpa render ulang shell (state halaman terjaga). */
 function paintUserMenu(): void {
   const name = getCashier();
   const ini = initials(name);
+  const peran = akunTersimpan()?.akun.role === 'pemilik' ? 'Pemilik' : 'Kasir';
   const set = (id: string, text: string) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
@@ -337,6 +373,8 @@ function paintUserMenu(): void {
   set('dd-avatar', ini);
   set('user-name', name);
   set('dd-name', name);
+  set('user-role', peran);
+  set('dd-role', `${peran} aktif`);
   document.getElementById('user-btn')?.setAttribute('aria-label', `Menu akun ${name}`);
 }
 

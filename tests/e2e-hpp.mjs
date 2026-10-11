@@ -7,6 +7,7 @@
 import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
 import path0 from 'node:path';
+import { pasangToken } from './bantuan-uji.mjs';
 const ARTIFAK = path0.join(path0.dirname(fileURLToPath(import.meta.url)), 'artifacts');
 
 let lolos = 0, gagal = 0;
@@ -34,6 +35,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
 const errs = [];
 page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });

@@ -10,6 +10,7 @@ import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
+  import { pasangToken } from './bantuan-uji.mjs';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
@@ -135,7 +136,8 @@ try {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-  const page = await ctx.newPage();
+const page = await ctx.newPage();
+await pasangToken(page);
   const errs = [];
   page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });

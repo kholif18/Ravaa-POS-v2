@@ -1424,6 +1424,33 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Urutan `created_at DESC, id DESC` (yang terbaru di atas).
   - Data sudah ada sejak awal (`stock_moves` diisi oleh sale/restock/opname) —
     endpoint ini hanya MEMBUKANYA, bukan memodifikasi riwayat.
+* **Login & peran (2026-10-11)** — tabel `users` + `sessions` (db/schema.sql):
+  2 role `pemilik` (semua) | `kasir` (POS + Riwayat + Retur + Pelanggan + Hutang
+  + Stok + Shift-sendiri). Hash scrypt node:crypto `salt:hash` (db.ts
+  hashPassword/verifyPassword, tanpa dep). Token acak 32 byte di header
+  `Authorization: Bearer`, kedaluwarsa 30 hari.
+  - **Middleware global `/api/*`**: tanpa token = 401; `must_change=1` mengunci
+    SEMUA kecuali `/api/users/password` + `/api/logout` + `/api/me` (403).
+    SATU-SATUNYA pengecualian token: `GET /api/products/:id/image` (dimuat
+    lewat tag `<img>` yang tak bisa membawa header; thumbnail, bukan data
+    sensitif). Print-agent ikut mengizinkan header `authorization` di CORS.
+  - `POST /api/login` `{username,password}` -> `{data:{token,user,must_change}}}`;
+    username tak ada & sandi salah = PESAN SAMA (401, anti-enumerasi); akun
+    nonaktif = 403. `POST /api/logout` (idempotent), `GET /api/me`.
+  - `GET/POST/DELETE /api/users` (+`POST /api/users/:id/password`) — SEMUA
+    `hanyaPemilik` (28 rute dilindungi: master uang/modal/laporan/aturan —
+    daftar di index.ts). Update parsial: username TAK bisa diganti; guard 400:
+    ubah peran/nonaktifkan diri sendiri, turunkan/nonaktifkan/hapus pemilik
+    aktif terakhir. Reset sandi = must_change 1 + semua sesi target diputus.
+    Ganti sandi sendiri (`/api/users/password`) = verifikasi sandi lama,
+    membersihkan must_change. Seed: `pemilik`/`admin123` (name `kasir`,
+    must_change 1) HANYA bila tabel kosong.
+  - Frontend: `ui/auth.ts` (token localStorage, profilSaya() dengan fallback
+    offline ke simpanan terakhir), rute `#/login` & `#/ubah-sandi` (render
+    tanpa shell), guard `bolehBuka()` per peran (nav difilter `roles` di
+    ADMIN_NAV; kasir nyasar = toast + alih ke `#/pos`), api.ts menyuntikkan
+    header Bearer ke semua request (termasuk flush outbox), `Pengguna` page
+    khusus pemilik, logout = hapus sesi server + token.
 * `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false,
   store_name:"",store_address:"",store_phone:"",store_email:""}}`
   (selalu ada — dua baris boolean default di-seed `db/seed.sql` lewat `INSERT OR

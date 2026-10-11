@@ -9,6 +9,7 @@
 // Suite INI MENULIS database (1 penjualan + 2 topup tiap run, pola sama
 // dengan e2e-struk) — stok produk yang dijual dikembalikan persis di finally.
 import { chromium } from 'playwright-core';
+import { pasangToken } from './bantuan-uji.mjs';
 
 const API = 'http://localhost:3001';
 const WEB = 'http://localhost:5656';
@@ -32,6 +33,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
 // printpause='0': bawaan aplikasi JEDA cetak (pemilik 2026-10-06) — suite ini
 // memverifikasi payload struk gabungan, jadi izin kirim harus nyala. Request
 // /print tetap DISELA supaya tidak menembak printer sungguhan.

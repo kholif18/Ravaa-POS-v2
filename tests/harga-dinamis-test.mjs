@@ -11,6 +11,7 @@
 //      sale_items.price (dynamic = harga dari client; non-dinamis dikunci server).
 // Jalankan: node tests/harga-dinamis-test.mjs   (API :3001 + vite :5656 hidup)
 import { chromium } from 'playwright-core';
+import { pasangToken } from './bantuan-uji.mjs';
 
 let lolos = 0, gagal = 0;
 const ok = (n, cond, info = '') => {
@@ -58,6 +59,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
 const errs = [];
 page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });

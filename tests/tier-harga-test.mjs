@@ -15,7 +15,9 @@ const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
+import { pasangToken, tokenUji } from './bantuan-uji.mjs';
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(p);
 const err = [];
 p.on('pageerror', (e) => err.push(String(e).slice(0, 120)));
 const api = (path) => p.evaluate((u) => fetch(u).then((r) => r.json()), path);
@@ -93,7 +95,7 @@ chk('tidak ada pageerror', err.length === 0, err.join(' ~ '));
 // Bersihkan DULU (masih butuh browser untuk post), baru tutup browser:
 // customer uji hapus; produk uji nonaktif by sku (upsert by sku — field `id`
 // diabaikan server, pola purchase-test).
-execSync(`curl -s -m 10 -X DELETE localhost:3001/api/customers/${custId} >/dev/null`);
+execSync(`curl -s -m 10 -X DELETE localhost:3001/api/customers/${custId} -H "Authorization: Bearer ${tokenUji()}" >/dev/null`);
 await post('/api/products', { sku: prodSku, name: NP, category_slug: 'atk', price: 3000, price_grosir: 2500, unit: 'pcs', is_active: 0 });
 sql(`DELETE FROM products WHERE name LIKE 'UjiTier Neg%';`);
 await b.close();

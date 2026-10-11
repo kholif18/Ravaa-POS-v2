@@ -8,6 +8,7 @@
 // Request /print DISELA di Playwright supaya TIDAK menembak printer sungguhan
 // (/dev/usb/lp0 ada dan user ada di grup lp).
 import { chromium } from 'playwright-core';
+import { pasangToken } from './bantuan-uji.mjs';
 
 let lolos = 0, gagal = 0;
 const ok = (n, c, info = '') => {
@@ -49,6 +50,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
 // printpause='0': bawaan aplikasi JEDA cetak — suite ini memverifikasi payload
 // via route **/print (mock, tak menyentuh :9100), jadi pause dimatikan dulu.
 await page.addInitScript(() => {

@@ -390,3 +390,28 @@ CREATE TABLE IF NOT EXISTS customer_debts (
 );
 CREATE INDEX IF NOT EXISTS idx_customer_debts_customer
   ON customer_debts(customer_id, created_at, id);
+
+-- Akun & peran (login, 2026-10-11): 2 role, `pemilik` (semua) dan `kasir`
+-- (POS + Riwayat + Stok + Pelanggan + Hutang + Retur + shift sendiri).
+-- password_hash format `saltHex:hashHex` (scrypt node:crypto bawaan, tanpa
+-- dep baru — lihat hashPassword()/verifyPassword() di apps/api/src/db.ts).
+-- must_change=1 = wajib ganti sandi saat login pertama (akun seed + reset
+-- pemilik). Sessions: token acak 32 byte, kedaluwarsa 30 hari; logout =
+-- hapus baris. Display `name` dipakai sebagai nama kasir di shift/laporan.
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('pemilik', 'kasir')),
+  is_active     INTEGER NOT NULL DEFAULT 1,
+  must_change   INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token       TEXT PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);

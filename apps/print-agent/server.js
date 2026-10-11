@@ -53,7 +53,10 @@ function send(port, req, res) {
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  // `authorization` ikut diizinkan (login 2026-10-11): fetch cetak dari browser
+  // kini membawa header Bearer (disuntik ui/auth) → preflight OPTIONS menanyakan
+  // header itu; tanpa ini health/print gagal CORS.
+  res.setHeader('Access-Control-Allow-Headers', 'content-type, authorization');
   res.setHeader('content-type', 'application/json');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   if (req.method === 'GET' && req.url === '/health') {

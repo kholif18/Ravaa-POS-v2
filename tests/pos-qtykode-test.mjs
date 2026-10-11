@@ -7,6 +7,7 @@
 // Tulis (6000), PRD00001 Pulpen Hitam (3000). Tanpa penjualan — keranjang hanya
 // diisi di klien lalu dibersihkan, jadi suite ini TIDAK menulis database.
 import { chromium } from 'playwright-core';
+import { pasangToken } from './bantuan-uji.mjs';
 
 const WEB = 'http://localhost:5656';
 const OK = 'ok', GAGAL = 'gagal';
@@ -33,6 +34,7 @@ const browser = await chromium.launch({
   executablePath: '/usr/bin/google-chrome-stable', headless: true,
 });
 const p = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(p);
 const errs = [];
 const dialogs = [];
 p.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));

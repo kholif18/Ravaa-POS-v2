@@ -3,6 +3,7 @@
 // (/dev/usb/lp0 ada dan user tergabung di grup lp — menulisnya akan membuang
 // kertas nyata). Yang diuji adalah bytes yang benar-benar dikirim browser.
 import { chromium } from 'playwright-core';
+import { pasangToken } from './bantuan-uji.mjs';
 
 let lolos = 0, gagal = 0;
 const ok = (n, c, info = '') => {
@@ -34,6 +35,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await pasangToken(page);
 // Invoice A4 memanggil window.print() di popup (htmlInvoice). Stub di SEMUA
 // page (context-wide) supaya popup tidak buntu di headless — alur cetaknya
 // tetap teruji: fetch nota + render HTML + popup terbuka.
