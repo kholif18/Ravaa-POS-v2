@@ -160,12 +160,16 @@ app.get('/api/customers', (c) => {
     params.push(like, `%${k}%`, like);
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  // Paginasi (2026-10-11): limit default 50 maks 200 (pola shifts/sales);
+  // `total` = baris COCOK filter (tanpa limit) — footer "A–B dari N".
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
   const rows = db
     .prepare(
-      `SELECT c.* FROM customers c ${where} ORDER BY c.name COLLATE NOCASE, c.id`,
+      `SELECT c.* FROM customers c ${where} ORDER BY c.name COLLATE NOCASE, c.id LIMIT ? OFFSET ?`,
     )
-    .all(...params);
-  const total = (db.prepare('SELECT COUNT(*) AS n FROM customers').get() as { n: number }).n;
+    .all(...params, limit, offset);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM customers c ${where}`).get(...params) as { n: number }).n;
   return c.json({ data: rows, total });
 });
 
@@ -268,10 +272,14 @@ app.get('/api/suppliers', (c) => {
     params.push(like, `%${k}%`, like);
   }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  // Paginasi (2026-10-11): limit default 50 maks 200 (pola shifts/sales);
+  // `total` = baris COCOK filter (tanpa limit) — footer "A–B dari N".
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
   const rows = db
-    .prepare(`SELECT s.* FROM suppliers s ${where} ORDER BY s.name COLLATE NOCASE, s.id`)
-    .all(...params);
-  const total = (db.prepare('SELECT COUNT(*) AS n FROM suppliers').get() as { n: number }).n;
+    .prepare(`SELECT s.* FROM suppliers s ${where} ORDER BY s.name COLLATE NOCASE, s.id LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM suppliers s ${where}`).get(...params) as { n: number }).n;
   return c.json({ data: rows, total });
 });
 
@@ -316,7 +324,15 @@ app.delete('/api/suppliers/:id', (c) => {
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const ada = db.prepare('SELECT id FROM suppliers WHERE id = ?').get(id) as { id: number } | undefined;
   if (!ada) return c.json({ error: 'supplier tidak ada' }, 404);
-  // Belum ada guard referensi (purchases Tahap 3 belum ada) — hapus langsung.
+  // Guard Tahap 3: supplier yang pernah dipakai PO tidak bisa dihapus
+  // (riwayat kulakan harus utuh — pola hapus pelanggan berhutang).
+  const n = db.prepare('SELECT COUNT(*) AS n FROM purchases WHERE supplier_id = ?').get(id) as { n: number };
+  if (n.n > 0) {
+    return c.json(
+      { error: `supplier ini sudah dipakai ${n.n} nota pembelian — hapus/batalkan notanya dulu di halaman Pembelian` },
+      400,
+    );
+  }
   db.prepare('DELETE FROM suppliers WHERE id = ?').run(id);
   return c.json({ data: { id, deleted: true } });
 });
@@ -330,6 +346,25 @@ app.get('/api/customer-debts', (c) => {
     return c.json({ error: `status harus open|semua (dapat: ${status})` }, 400);
   }
   const having = status === 'semua' ? '' : 'HAVING sisa > 0';
+  // Paginasi (2026-10-11): `total` TETAP jumlah uang (kartu piutang) — jangan
+  // dipakai untuk hitung halaman; pakai `count` (= jumlah pelanggan).
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  const dasar = `FROM customers c
+         JOIN customer_debts d ON d.customer_id = c.id
+        GROUP BY c.id
+       ${having}`;
+  // Subquery WAJIB memuat agregat `sisa` — HAVING merujuk alias itu, dan
+  // SELECT tanpa agregat membuat SQLite 500 "no such column: sisa" (bug nyata
+  // yang hanya muncul saat status=open, karena status=semua tanpa HAVING).
+  const count = (db.prepare(
+    `SELECT COUNT(*) AS n FROM (
+       SELECT SUM(CASE WHEN d2.type = 'charge' THEN d2.amount ELSE -d2.amount END) AS sisa
+         FROM customers c2 JOIN customer_debts d2 ON d2.customer_id = c2.id
+        GROUP BY c2.id
+       ${status === 'semua' ? '' : 'HAVING sisa > 0'}
+     )`,
+  ).get() as { n: number }).n;
   const rows = db
     .prepare(
       `SELECT c.id AS customer_id, c.name, c.phone,
@@ -338,15 +373,23 @@ app.get('/api/customer-debts', (c) => {
               COALESCE(SUM(CASE WHEN d.type = 'charge'  THEN d.amount
                                 ELSE -d.amount END), 0) AS sisa,
               MAX(d.created_at) AS terakhir
-         FROM customers c
-         JOIN customer_debts d ON d.customer_id = c.id
-        GROUP BY c.id
-       ${having}
-        ORDER BY sisa DESC, terakhir DESC, c.id`,
+       ${dasar}
+        ORDER BY sisa DESC, terakhir DESC, c.id
+        LIMIT ? OFFSET ?`,
     )
-    .all() as { customer_id: number; name: string; phone: string; charge: number; bayar: number; sisa: number; terakhir: string | null }[];
-  const totalSisa = rows.reduce((s, r) => s + r.sisa, 0);
-  return c.json({ data: rows, total: totalSisa });
+    .all(limit, offset) as { customer_id: number; name: string; phone: string; charge: number; bayar: number; sisa: number; terakhir: string | null }[];
+  // totalSisa = SEMUA baris cocok (tanpa limit) — kartu tidak boleh susut
+  // saat kasir pindah halaman. Ditulis eksplisit (tanpa sulap replace
+  // alias) supaya tiap tabel terikat ke aliasnya sendiri.
+  const totalSisa = (db.prepare(
+    `SELECT COALESCE(SUM(sisa), 0) AS t FROM (
+       SELECT SUM(CASE WHEN d2.type = 'charge' THEN d2.amount ELSE -d2.amount END) AS sisa
+         FROM customers c2 JOIN customer_debts d2 ON d2.customer_id = c2.id
+        GROUP BY c2.id
+       ${status === 'semua' ? '' : 'HAVING sisa > 0'}
+     )`,
+  ).get() as { t: number }).t;
+  return c.json({ data: rows, total: totalSisa, count });
 });
 
 // Rincian ledger satu pelanggan: baris mutasi + saldo berjalan per baris.
@@ -1100,7 +1143,13 @@ app.get('/api/shifts', (c) => {
             -- mengurangi expected-cash di kasSeharusnya() (keputusan pemilik
             -- (a)). Hanya yang terikat shift_id ini.
             (SELECT COUNT(*) FROM returns r WHERE r.shift_id = s.id) AS n_retur,
-            (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.shift_id = s.id) AS retur_total
+            (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.shift_id = s.id) AS retur_total,
+            -- Pembelian tunai (Tahap 3, 2026-10-11): kas KELUAR sebesar yang
+            -- DIBAYAR (terbayar, bukan total — sisa hutang tak gerakkan kas).
+            -- Hanya nota received yang terikat shift ini; cicilan susulan ikut
+            -- shift PO-nya (satu PO satu laci, lihat POST /:id/pay).
+            (SELECT COUNT(*) FROM purchases p WHERE p.shift_id = s.id AND p.status = 'received') AS n_purchase,
+            (SELECT COALESCE(SUM(p.terbayar),0) FROM purchases p WHERE p.shift_id = s.id AND p.status = 'received') AS purchase_total
        FROM shifts s
        ${klausul}
       ORDER BY s.id DESC
@@ -1775,6 +1824,203 @@ app.delete('/api/returns/:id', (c) => {
   }
 });
 
+// ---------- pembelian / kulakan (Tahap 3, 2026-10-11) ----------
+// Alur: order (catatan pesanan, tanpa stok/kas) -> receive (stok masuk +
+// kas keluar sebesar terbayar) -> pay (cicil sisa hutang, bila ada).
+// Keputusan pemilik (b): bawaan TUNAI penuh (terbayar=total saat receive);
+// kolom hutang (total−terbayar) hanya bila suatu saat terjadi.
+// SEMUA mutasi stok/kas dalam SATU db.transaction per aksi (pola retur).
+// Kas keluar = `terbayar`, diatribusikan ke shift_id PO ini (bukan shift
+// saat bayar susulan — satu PO satu laci penanggung, sederhana & auditabel).
+type PoItemIn = { product_id?: number; qty?: number; harga_beli?: number };
+const ambilPo = (id: number) => db.prepare('SELECT * FROM purchases WHERE id = ?').get(id) as
+  | { id: number; status: string; total: number; terbayar: number; shift_id: number | null }
+  | undefined;
+
+// Kulakan HANYA barang fisik (track_stock=1, pola restock/retur): jasa tidak
+// punya stok untuk ditambah. Validasi dipakai order (awal) & receive (ulang,
+// karena produk bisa berubah/dihapus di antaranya).
+function cekProdukKulakan(pid: number, i: number): { id: number; name: string } {
+  const p = db.prepare(
+    `SELECT p.id, p.name, c.track_stock FROM products p
+       JOIN categories c ON c.id = p.category_id WHERE p.id = ?`,
+  ).get(pid) as { id: number; name: string; track_stock: number } | undefined;
+  if (!p) throw new Error(`baris ${i + 1}: produk tidak dikenal`);
+  if (!p.track_stock) throw new Error(`baris ${i + 1}: ${p.name} bukan barang fisik (jasa tidak bisa dikulak)`);
+  return p;
+}
+
+// Buat PO (status order): validasi item + hitung total, TANPA sentuhan stok.
+app.post('/api/purchases', async (c) => {
+  try {
+    const body = await c.req.json();
+    const rawItems = body?.items;
+    if (!Array.isArray(rawItems) || !rawItems.length) return c.json({ error: 'items wajib array non-kosong' }, 400);
+    if (rawItems.length > 200) return c.json({ error: 'maks 200 baris per nota' }, 400);
+    const note = String(body?.note ?? '').trim();
+    if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    const rawSup = body?.supplier_id;
+    const supplierId = rawSup === undefined || rawSup === null || rawSup === '' ? null : Number(rawSup);
+    let supplierName = '';
+    if (supplierId !== null) {
+      if (!Number.isInteger(supplierId)) return c.json({ error: 'supplier_id harus integer' }, 400);
+      const sup = db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get(supplierId) as { id: number; name: string } | undefined;
+      if (!sup) return c.json({ error: 'supplier tidak dikenal' }, 404);
+      supplierName = sup.name;
+    }
+    const baris: { product_id: number; name: string; qty: number; harga_beli: number; amount: number }[] = [];
+    (rawItems as PoItemIn[]).forEach((it, i) => {
+      const pid = Number(it?.product_id);
+      const qty = Number(it?.qty ?? 0);
+      const harga = Number(it?.harga_beli ?? NaN);
+      if (!Number.isInteger(pid)) throw new Error(`baris ${i + 1}: product_id harus integer`);
+      if (!Number.isFinite(qty) || qty <= 0) throw new Error(`baris ${i + 1}: qty harus > 0`);
+      if (!Number.isFinite(harga) || harga < 0) throw new Error(`baris ${i + 1}: harga_beli wajib dikirim (>= 0)`);
+      const p = cekProdukKulakan(pid, i);
+      const hb = Math.round(harga);
+      baris.push({ product_id: pid, name: p.name, qty, harga_beli: hb, amount: Math.round(qty * hb) });
+    });
+    const total = baris.reduce((s, b) => s + b.amount, 0);
+    if (total <= 0) return c.json({ error: 'total nota harus > 0' }, 400);
+    const po = db.transaction(() => {
+      const row = db.prepare(
+        `INSERT INTO purchases (supplier_id, supplier_name, status, total, terbayar, cashier, note)
+         VALUES (?, ?, 'order', ?, 0, ?, ?) RETURNING *`,
+      ).get(supplierId, supplierName, total, String(body?.cashier ?? '').trim() || 'kasir', note);
+      const ins = db.prepare(
+        `INSERT INTO purchase_items (purchase_id, product_id, name, qty, harga_beli, amount)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (const b of baris) ins.run((row as { id: number }).id, b.product_id, b.name, b.qty, b.harga_beli, b.amount);
+      return row;
+    })();
+    const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all((po as { id: number }).id);
+    return c.json({ data: { purchase: po, items } }, 201);
+  } catch (e) {
+    const pesan = e instanceof Error ? e.message : 'gagal simpan pembelian';
+    return c.json({ error: pesan }, /tidak dikenal/.test(pesan) ? 404 : 400);
+  }
+});
+
+// Terima barang: status order -> received + stok masuk per item (RUMUS SAMA
+// PERSIS dengan restock: avg tertimbang + version++ + stock_moves 'beli') +
+// terbayar bawaan = total (tunai penuh; kirim `dibayar` lebih kecil bila
+// hutang — sisa = total − terbayar).
+app.post('/api/purchases/:id/receive', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const rawShift = body?.shift_id;
+    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
+    if (shiftId !== null && !Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
+    const rawBayar = body?.dibayar;
+    const out = db.transaction(() => {
+      const po = ambilPo(id);
+      if (!po) throw new Error('pembelian tidak ada');
+      if (po.status !== 'order') throw new Error(`hanya PO order yang bisa diterima (status: ${po.status})`);
+      if (shiftId !== null) {
+        const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(shiftId) as { id: number } | undefined;
+        if (!ada) throw new Error('shift tidak dikenal');
+      }
+      const dibayar = rawBayar === undefined || rawBayar === null || rawBayar === '' ? po.total : Number(rawBayar);
+      if (!Number.isInteger(dibayar) || dibayar < 0 || dibayar > po.total) {
+        throw new Error(`dibayar harus bulat 0..${po.total}`);
+      }
+      const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id) as
+        { product_id: number; qty: number; harga_beli: number }[];
+      const cashier = String(body?.cashier ?? '').trim() || 'kasir';
+      items.forEach((it, i) => {
+        cekProdukKulakan(it.product_id, i);
+        const p = db.prepare('SELECT stock, avg_cost FROM products WHERE id = ?').get(it.product_id) as
+          { stock: number; avg_cost: number };
+        const avgBaru = Math.round((p.stock * p.avg_cost + it.qty * it.harga_beli) / (p.stock + it.qty));
+        db.prepare(
+          `UPDATE products SET stock = stock + ?, avg_cost = ?, updated_at = datetime('now'),
+             version = (SELECT COALESCE(MAX(version),0) + 1 FROM products)
+           WHERE id = ?`,
+        ).run(it.qty, avgBaru, it.product_id);
+        db.prepare(`INSERT INTO stock_moves (product_id, qty, reason, ref_id, unit_cost, cashier) VALUES (?, ?, 'beli', ?, ?, ?)`)
+          .run(it.product_id, it.qty, `PO-${id}`, Math.round(it.harga_beli), cashier);
+      });
+      return db.prepare(
+        `UPDATE purchases SET status = 'received', shift_id = ?, terbayar = ?,
+           received_at = datetime('now'), cashier = ? WHERE id = ? RETURNING *`,
+      ).get(shiftId, dibayar, cashier, id);
+    })();
+    return c.json({ data: out });
+  } catch (e) {
+    const pesan = e instanceof Error ? e.message : 'gagal terima barang';
+    return c.json({ error: pesan }, /tidak ada/.test(pesan) ? 404 : 400);
+  }
+});
+
+// Bayar sisa hutang supplier (cicil): terbayar += amount, maks = total.
+// Kas keluar susulan diatribusikan ke shift_id PO ini (satu PO satu laci).
+app.post('/api/purchases/:id/pay', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  try {
+    const body = await c.req.json();
+    const amount = Number(body?.amount ?? 0);
+    if (!Number.isInteger(amount) || amount <= 0) return c.json({ error: 'amount harus rupiah bulat > 0' }, 400);
+    const row = db.transaction(() => {
+      const po = ambilPo(id);
+      if (!po) throw new Error('pembelian tidak ada');
+      if (po.status !== 'received') throw new Error(`hanya nota received yang bisa dibayar (status: ${po.status})`);
+      if (po.terbayar + amount > po.total) throw new Error(`melebihi sisa hutang (sisa ${po.total - po.terbayar})`);
+      return db.prepare(`UPDATE purchases SET terbayar = terbayar + ? WHERE id = ? RETURNING *`).get(amount, id);
+    })();
+    return c.json({ data: row });
+  } catch (e) {
+    const pesan = e instanceof Error ? e.message : 'gagal bayar supplier';
+    return c.json({ error: pesan }, /tidak ada/.test(pesan) ? 404 : 400);
+  }
+});
+
+// Batalkan PO (hanya status order — yang received sudah masuk stok; koreksi
+// stok lewat opname, koreksi kas lewat pengeluaran).
+app.post('/api/purchases/:id/cancel', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const po = ambilPo(id);
+  if (!po) return c.json({ error: 'pembelian tidak ada' }, 404);
+  if (po.status !== 'order') return c.json({ error: `hanya PO order yang bisa dibatalkan (status: ${po.status})` }, 400);
+  const row = db.prepare(`UPDATE purchases SET status = 'cancel' WHERE id = ? RETURNING *`).get(id);
+  return c.json({ data: row });
+});
+
+// Daftar pembelian: filter status (default semua) + limit/offset (pola
+// GET /api/shifts). Urutan id DESC (nota terbaru di atas). `sisa` computed
+// (total − terbayar) — prinsip ledger: saldo tak disimpan (pola debts).
+app.get('/api/purchases', (c) => {
+  const status = c.req.query('status') ?? 'semua';
+  if (!['semua', 'order', 'received', 'cancel'].includes(status)) {
+    return c.json({ error: 'status harus order|received|cancel|semua' }, 400);
+  }
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  const klausul = status === 'semua' ? '' : 'WHERE p.status = ?';
+  const params: unknown[] = status === 'semua' ? [] : [status];
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM purchases p ${klausul}`).get(...params) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT p.*, p.total - p.terbayar AS sisa,
+            (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS n_items
+       FROM purchases p ${klausul} ORDER BY p.id DESC LIMIT ? OFFSET ?`,
+  ).all(...params, limit, offset);
+  return c.json({ data, total });
+});
+
+// Isi lengkap satu nota pembelian.
+app.get('/api/purchases/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const purchase = db.prepare(`SELECT *, total - terbayar AS sisa FROM purchases WHERE id = ?`).get(id);
+  if (!purchase) return c.json({ error: 'pembelian tidak ada' }, 404);
+  const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id);
+  return c.json({ data: { purchase, items } });
+});
+
 // ---------- Pengaturan toko ----------
 // Tabel key/value supaya menambah opsi baru tidak butuh migrasi kolom.
 // Nilai disimpan sebagai teks '0'/'1' — angka boolean dilewatkan lewat JSON
@@ -2074,7 +2320,14 @@ app.get('/api/reports/daily', (c) => {
     `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
      FROM returns WHERE date(created_at)=date(?)`,
   ).get(date) as { n: number; total: number };
-  return c.json({ data: { date, sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur } });
+  // Pembelian yang DITERIMA hari itu (Tahap 3, 2026-10-11) — dihitung dari
+  // tanggal terima (`received_at`, bukan tanggal PO) karena itulah hari
+  // barang (dan kas) bergerak. Total = nilai nota yang diterima.
+  const purchase = db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
+     FROM purchases WHERE status = 'received' AND date(received_at)=date(?)`,
+  ).get(date) as { n: number; total: number };
+  return c.json({ data: { date, sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase } });
 });
 
 const port = Number(process.env.PORT ?? 3001);

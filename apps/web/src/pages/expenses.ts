@@ -12,6 +12,7 @@
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
+import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { getCashier } from '../ui/user';
@@ -33,6 +34,9 @@ const state = {
   items: [] as Expense[],
   total: 0,
   jumlah: 0,
+  // Paginasi (2026-10-11): RESET ke 0 setiap tanggal berubah.
+  offset: 0,
+  limit: PAGE_SIZE,
   loading: true,
   error: '',
   /** Shift terbuka kasir ini (null = di luar shift). Diambil sekali saat
@@ -129,6 +133,7 @@ function renderTable(): string {
         <tbody>${rows}</tbody>
       </table>
     </div>
+    ${pagerHtml(state.offset, state.limit, state.total)}
   </div>`;
 }
 
@@ -200,6 +205,15 @@ function expenseForm(): void {
 /* ---------- AKSI ---------- */
 
 function bindRows(): void {
+  bindPager(host!, (o) => {
+    state.offset = o;
+    void load();
+  });
+  bindPagerLimit(host!, (v) => {
+    state.limit = v;
+    state.offset = 0;
+    void load();
+  });
   host!.querySelectorAll<HTMLElement>('[data-exp-del]').forEach((b) =>
     b.addEventListener('click', async () => {
       const id = Number(b.dataset.expDel);
@@ -230,7 +244,7 @@ async function load(): Promise<void> {
   paint();
   try {
     const r = await apiGet<{ data: Expense[]; total: number; jumlah: number }>(
-      `/api/expenses?date=${encodeURIComponent(state.date)}`,
+      `/api/expenses?date=${encodeURIComponent(state.date)}&limit=${state.limit}&offset=${state.offset}`,
     );
     state.items = r.data;
     state.total = r.total;
@@ -257,23 +271,26 @@ async function loadShift(): Promise<void> {
 
 /* ---------- ENTRY ---------- */
 
+/** Ganti tanggal + RESET offset pager (satu-satunya jalan ganti hari —
+ *  dipakai 6 titik di bawah supaya tak ada yang lupa me-reset). */
+function setDate(v: string): void {
+  state.date = v;
+  state.offset = 0;
+  mountExpensesPageRefresh();
+}
+
 export async function mountExpensesPage(el: HTMLElement): Promise<void> {
   host = el;
   state.date = hariIni();
+  state.offset = 0;
   el.innerHTML = renderPage();
   paint();
   el.querySelector('#exp-new')?.addEventListener('click', () => expenseForm());
-  el.querySelector('#exp-prev')?.addEventListener('click', () => {
-    state.date = geser(state.date, -1);
-    mountExpensesPageRefresh();
-  });
-  el.querySelector('#exp-next')?.addEventListener('click', () => {
-    state.date = geser(state.date, 1);
-    mountExpensesPageRefresh();
-  });
+  el.querySelector('#exp-prev')?.addEventListener('click', () => setDate(geser(state.date, -1)));
+  el.querySelector('#exp-next')?.addEventListener('click', () => setDate(geser(state.date, 1)));
   el.querySelector<HTMLInputElement>('#exp-date')?.addEventListener('change', (ev) => {
     const v = (ev.target as HTMLInputElement).value;
-    if (v) { state.date = v; mountExpensesPageRefresh(); }
+    if (v) setDate(v);
   });
   await loadShift();
   await load();
@@ -285,17 +302,11 @@ function mountExpensesPageRefresh(): void {
   host.innerHTML = renderPage();
   paint();
   host.querySelector('#exp-new')?.addEventListener('click', () => expenseForm());
-  host.querySelector('#exp-prev')?.addEventListener('click', () => {
-    state.date = geser(state.date, -1);
-    mountExpensesPageRefresh();
-  });
-  host.querySelector('#exp-next')?.addEventListener('click', () => {
-    state.date = geser(state.date, 1);
-    mountExpensesPageRefresh();
-  });
+  host.querySelector('#exp-prev')?.addEventListener('click', () => setDate(geser(state.date, -1)));
+  host.querySelector('#exp-next')?.addEventListener('click', () => setDate(geser(state.date, 1)));
   host.querySelector<HTMLInputElement>('#exp-date')?.addEventListener('change', (ev) => {
     const v = (ev.target as HTMLInputElement).value;
-    if (v) { state.date = v; mountExpensesPageRefresh(); }
+    if (v) setDate(v);
   });
   void load();
 }

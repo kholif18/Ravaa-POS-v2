@@ -13,6 +13,7 @@
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
+import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { getCashier } from '../ui/user';
@@ -43,6 +44,9 @@ const state = {
   items: [] as Retur[],
   total: 0,
   jumlah: 0,
+  // Paginasi (2026-10-11): RESET ke 0 setiap tanggal berubah.
+  offset: 0,
+  limit: PAGE_SIZE,
   loading: true,
   error: '',
   shiftId: null as number | null,
@@ -133,6 +137,7 @@ function renderTable(): string {
         <tbody>${rows}</tbody>
       </table>
     </div>
+    ${pagerHtml(state.offset, state.limit, state.total)}
   </div>`;
 }
 
@@ -317,6 +322,15 @@ function dialogManual(): void {
 /* ---------- AKSI ---------- */
 
 function bindRows(): void {
+  bindPager(host!, (o) => {
+    state.offset = o;
+    void load();
+  });
+  bindPagerLimit(host!, (v) => {
+    state.limit = v;
+    state.offset = 0;
+    void load();
+  });
   host!.querySelectorAll<HTMLElement>('[data-ret-buka]').forEach((tr) =>
     tr.addEventListener('click', () => void bukaRincian(Number(tr.dataset.retBuka))),
   );
@@ -328,7 +342,7 @@ async function load(): Promise<void> {
   paint();
   try {
     const r = await apiGet<{ data: Retur[]; total: number; jumlah: number }>(
-      `/api/returns?date=${encodeURIComponent(state.date)}`,
+      `/api/returns?date=${encodeURIComponent(state.date)}&limit=${state.limit}&offset=${state.offset}`,
     );
     state.items = r.data;
     state.total = r.total;
@@ -353,23 +367,26 @@ async function loadShift(): Promise<void> {
 
 /* ---------- ENTRY ---------- */
 
+/** Ganti tanggal + RESET offset pager (satu-satunya jalan ganti hari —
+ *  dipakai 6 titik di bawah supaya tak ada yang lupa me-reset). */
+function setDate(v: string): void {
+  state.date = v;
+  state.offset = 0;
+  refresh();
+}
+
 export async function mountReturnsPage(el: HTMLElement): Promise<void> {
   host = el;
   state.date = hariIni();
+  state.offset = 0;
   el.innerHTML = renderPage();
   paint();
   el.querySelector('#ret-new')?.addEventListener('click', () => dialogManual());
-  el.querySelector('#ret-prev')?.addEventListener('click', () => {
-    state.date = geser(state.date, -1);
-    refresh();
-  });
-  el.querySelector('#ret-next')?.addEventListener('click', () => {
-    state.date = geser(state.date, 1);
-    refresh();
-  });
+  el.querySelector('#ret-prev')?.addEventListener('click', () => setDate(geser(state.date, -1)));
+  el.querySelector('#ret-next')?.addEventListener('click', () => setDate(geser(state.date, 1)));
   el.querySelector<HTMLInputElement>('#ret-date')?.addEventListener('change', (ev) => {
     const v = (ev.target as HTMLInputElement).value;
-    if (v) { state.date = v; refresh(); }
+    if (v) setDate(v);
   });
   await loadShift();
   await load();
@@ -381,17 +398,11 @@ function refresh(): void {
   host.innerHTML = renderPage();
   paint();
   host.querySelector('#ret-new')?.addEventListener('click', () => dialogManual());
-  host.querySelector('#ret-prev')?.addEventListener('click', () => {
-    state.date = geser(state.date, -1);
-    refresh();
-  });
-  host.querySelector('#ret-next')?.addEventListener('click', () => {
-    state.date = geser(state.date, 1);
-    refresh();
-  });
+  host.querySelector('#ret-prev')?.addEventListener('click', () => setDate(geser(state.date, -1)));
+  host.querySelector('#ret-next')?.addEventListener('click', () => setDate(geser(state.date, 1)));
   host.querySelector<HTMLInputElement>('#ret-date')?.addEventListener('change', (ev) => {
     const v = (ev.target as HTMLInputElement).value;
-    if (v) { state.date = v; refresh(); }
+    if (v) setDate(v);
   });
   void load();
 }

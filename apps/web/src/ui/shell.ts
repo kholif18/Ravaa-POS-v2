@@ -1,7 +1,7 @@
 import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'shifts' | 'settings';
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings';
 export type Route = 'pos' | AdminRoute;
 
 interface NavItem {
@@ -30,16 +30,17 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     ],
   },
   {
-    // Alur barang: master produk -> stok operasional -> pemasok -> pendukung
-    // (satuan, label). Slot Pembelian (#/purchases) masuk setelah Supplier
-    // saat Tahap 3 dibangun.
+    // Alur barang: master produk -> stok operasional -> pemasok -> kulakan ->
+    // pendukung (satuan, label).
     group: 'Barang',
     items: [
       { route: 'products', label: 'Produk', icon: 'products' },
       { route: 'stock', label: 'Stok', icon: 'stock' },
       // Master pemasok (baru 2026-10-11): pindahan `customers.supplier_no` —
-      // dipakai Tahap 3 Pembelian sebagai pilihan pemasok.
+      // dipakai Pembelian sebagai pilihan pemasok.
       { route: 'suppliers', label: 'Supplier', icon: 'truck' },
+      // Nota kulakan PO (Tahap 3, 2026-10-11): order -> terima -> bayar.
+      { route: 'purchases', label: 'Pembelian', icon: 'download' },
       { route: 'satuan', label: 'Satuan', icon: 'categories' },
       // Label harga punya layar sendiri (kiri alat, kanan pratinjau) sejak
       // 2026-09-29 — dulu ia cuma dialog dari toolbar Produk.
@@ -73,6 +74,7 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   satuan: 'Satuan',
   stock: 'Stok',
   suppliers: 'Supplier',
+  purchases: 'Pembelian',
   history: 'Riwayat transaksi',
   returns: 'Retur',
   customers: 'Pelanggan',
@@ -91,6 +93,7 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   satuan: ['Barang', 'Satuan'],
   stock: ['Barang', 'Stok'],
   suppliers: ['Barang', 'Supplier'],
+  purchases: ['Barang', 'Pembelian'],
   history: ['Penjualan', 'Riwayat transaksi'],
   returns: ['Penjualan', 'Retur'],
   customers: ['Penjualan', 'Pelanggan'],
@@ -109,6 +112,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   satuan: 'Master satuan untuk struk; form produk memilih dari daftar ini.',
   stock: 'Pantau stok menipis dan riwayat restock.',
   suppliers: 'Pemasok barang kulakan — dipakai untuk Pembelian (Tahap 3).',
+  purchases: 'Nota kulakan PO: order, terima (stok masuk), bayar — tunai penuh bawaan.',
   history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
   returns: 'Barang kembali + uang kembali ke pelanggan — mengurangi laci bila terikat shift.',
   customers: 'Kontak pembeli — dipakai untuk mencatat hutang di halaman Hutang.',

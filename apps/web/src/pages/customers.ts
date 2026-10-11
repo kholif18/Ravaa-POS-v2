@@ -11,6 +11,7 @@ import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
+import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 
 type Customer = {
   id: number;
@@ -31,6 +32,11 @@ const state = {
   items: [] as Customer[],
   total: 0,
   q: '',
+  // Paginasi (2026-10-11): offset halaman; limit = PAGE_SIZE (ui/pager.ts).
+  // RESET ke 0 setiap kata kunci berubah — kalau tidak, halaman 3 hasil cari
+  // baru yang cuma 1 halaman menampilkan tabel kosong.
+  offset: 0,
+  limit: PAGE_SIZE,
   loading: true,
   error: '',
 };
@@ -94,8 +100,9 @@ function renderTable(): string {
 
   const rows = state.items
     .map(
-      (u) => `
+      (u, i) => `
       <tr data-row="${u.id}">
+        <td class="td tabular-nums">${state.offset + i + 1}</td>
         <td class="td">
           <div class="cell-strong">${esc(u.name)}</div>
           <div class="cell-sub">${u.code ? `<span class="font-mono">${esc(u.code)}</span> · ` : ''}${esc(u.phone || 'tanpa no. HP')}</div>
@@ -118,6 +125,7 @@ function renderTable(): string {
       <table class="table">
         <thead>
           <tr>
+            <th class="th">No</th>
             <th class="th">Pelanggan</th>
             <th class="th">Alamat</th>
             <th class="th">Catatan</th>
@@ -127,9 +135,9 @@ function renderTable(): string {
         <tbody>${rows}</tbody>
       </table>
     </div>
+    ${pagerHtml(state.offset, state.limit, state.total)}
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-    Menampilkan ${state.items.length} dari ${state.total} pelanggan.
     No. customer di-assign otomatis server (urut, tidak berubah setelah terbit).
     Pelanggan yang masih punya catatan hutang tidak bisa dihapus.
   </p>`;
@@ -203,6 +211,15 @@ function customerForm(c: EditCustomer): void {
 /* ---------- AKSI ---------- */
 
 function bindRows(): void {
+  bindPager(host!, (o) => {
+    state.offset = o;
+    void load();
+  });
+  bindPagerLimit(host!, (v) => {
+    state.limit = v;
+    state.offset = 0;
+    void load();
+  });
   host!.querySelectorAll<HTMLElement>('[data-cust-edit]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = Number(b.dataset.custEdit);
@@ -240,9 +257,11 @@ async function load(): Promise<void> {
   state.error = '';
   paint();
   try {
-    const r = await apiGet<{ data: Customer[]; total: number }>(
-      `/api/customers${state.q ? `?q=${encodeURIComponent(state.q)}` : ''}`,
-    );
+    const p = new URLSearchParams();
+    if (state.q) p.set('q', state.q);
+    p.set('limit', String(state.limit));
+    p.set('offset', String(state.offset));
+    const r = await apiGet<{ data: Customer[]; total: number }>(`/api/customers?${p}`);
     state.items = r.data;
     state.total = r.total;
   } catch (e) {
@@ -267,6 +286,7 @@ export async function mountCustomersPage(el: HTMLElement): Promise<void> {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       state.q = v.trim();
+      state.offset = 0;
       void load();
     }, 250);
   });
@@ -274,6 +294,7 @@ export async function mountCustomersPage(el: HTMLElement): Promise<void> {
     if ((ev as KeyboardEvent).key === 'Enter') {
       clearTimeout(searchTimer);
       state.q = (ev.target as HTMLInputElement).value.trim();
+      state.offset = 0;
       void load();
     }
   });

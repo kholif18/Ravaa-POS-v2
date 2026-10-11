@@ -16,6 +16,7 @@
 // penjualan tetap utuh, stok kembali + uang keluar tercatat di #/returns.
 
 import { apiGet, apiPost, HttpError } from '../api';
+import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { icon } from '../ui/icons';
 import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
@@ -88,10 +89,20 @@ type Baris = {
 
 /* ---------- state ---------- */
 
-const LIMIT = 200; // batas atas per sumber (limit API maks juga 200)
+// Pager linimasa (2026-10-11, perintah pemilik: semua tabel pakai nomor
+// halaman, bukan muat-bertahap/infinite-scroll): fetch kedua sumber penuh
+// (MAKS/sumber) SEKALI per tanggal, lalu potong per halaman di klien.
+// Sub-baris hybrid menempel induknya — tak dihitung baris halaman sendiri.
+// Kasus >MAKS/sumber: pesan kelebihan + pager menjangkau yang termuat.
+const MAKS = 200; // batas fetch per sumber (limit API maks juga 200)
 
 const state = {
   date: hariIni(),
+  hal: 1, // halaman aktif (1-based); RESET ke 1 setiap tanggal/filter/limit berubah
+  limit: PAGE_SIZE,
+  // Tiket anti-race: ganti tanggal cepat = dua load paralel; yang tiba duluan
+  // (tanggal lama) tidak boleh menimpa hasil yang tiba belakangan.
+  tiket: 0,
   sales: [] as SaleRow[],
   topups: [] as TopupRow[],
   totalSales: 0,
@@ -463,7 +474,15 @@ function renderTabel(): string {
     </div>`;
   }
 
-  const html = rows
+  // Pager bernomor di atas induk termuat (sub-baris menempel induknya).
+  // Clamp lokal (tanpa tulis balik): filter hutang bisa menyusutkan daftar di
+  // bawah nomor halaman aktif — halaman di luar jangkauan jatuh ke terakhir.
+  const totalHal = Math.max(1, Math.ceil(rows.length / state.limit));
+  const hal = Math.min(Math.max(1, state.hal), totalHal);
+  const off = (hal - 1) * state.limit;
+  const potong = rows.slice(off, off + state.limit);
+
+  const html = potong
     .map((b) => {
       const terbuka = state.buka === b.key;
       const waktuCell = b.s ? jam(b.s.created_at) : jam(b.t!.created_at);
@@ -503,13 +522,14 @@ function renderTabel(): string {
     })
     .join('');
 
-  const kelebihan =
-    state.totalSales > state.sales.length || state.totalTopup > state.topups.length
-      ? `<p class="mt-2 text-xs text-amber-700 dark:text-amber-400">
-           Hari ini melebihi ${LIMIT} transaksi per jenis — menampilkan ${LIMIT} terbaru.
-           Persempit lewat laporan bila butuh semua.
-         </p>`
-      : '';
+  const terpotongServer =
+    state.totalSales > state.sales.length || state.totalTopup > state.topups.length;
+  const kelebihan = terpotongServer
+    ? `<p class="mt-2 text-xs text-amber-700 dark:text-amber-400">
+         Hari ini melebihi ${MAKS} transaksi per jenis — pager menjangkau ${MAKS} terbaru per jenis.
+         Persempit lewat laporan bila butuh semua.
+       </p>`
+    : '';
 
   return `
   <div class="card-flush">
@@ -528,14 +548,11 @@ function renderTabel(): string {
         <tbody>${html}</tbody>
       </table>
     </div>
+    ${pagerHtml(off, state.limit, rows.length)}
   </div>
   ${kelebihan}
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-    ${rows.length} baris ditampilkan${state.hutangOnly ? ' · disaring hanya transaksi hutang' : ''}${
-      state.totalSales + state.totalTopup > rows.length
-        ? ` dari ${state.totalSales + state.totalTopup} transaksi hari itu`
-        : ''
-    }. Klik baris untuk membuka rincian. Topup/tarik yang dibayar bersama nota tampil sebagai sub-barisnya; yang mandiri jadi baris sendiri. Topup/tarik tidak masuk omzet — lihat halaman Laporan.
+    ${state.hutangOnly ? 'Disaring hanya transaksi hutang. ' : ''}Klik baris untuk membuka rincian. Topup/tarik yang dibayar bersama nota tampil sebagai sub-barisnya; yang mandiri jadi baris sendiri. Topup/tarik tidak masuk omzet — lihat halaman Laporan.
   </p>`;
 }
 
@@ -557,6 +574,7 @@ function bind(): void {
     state.date = /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : hariIni();
     state.buka = '';
     state.det = null;
+    state.hal = 1;
     void load();
   });
   root.querySelectorAll<HTMLElement>('[data-h]').forEach((b) =>
@@ -564,6 +582,7 @@ function bind(): void {
       state.date = geser(state.date, b.dataset.h === 'prev' ? -1 : 1);
       state.buka = '';
       state.det = null;
+      state.hal = 1;
       void load();
     }),
   );
@@ -571,7 +590,20 @@ function bind(): void {
     state.date = hariIni();
     state.buka = '';
     state.det = null;
+    state.hal = 1;
     void load();
+  });
+  // Pager bernomor: pindah halaman TANPA reload (data sudah termuat penuh).
+  // Baris terbuka (state.buka) dipertahankan — paint() me-render ulang tapi
+  // kunci buka + cache detail ikut.
+  bindPager(root, (o) => {
+    state.hal = Math.floor(o / state.limit) + 1;
+    paint();
+  });
+  bindPagerLimit(root, (v) => {
+    state.limit = v;
+    state.hal = 1;
+    paint();
   });
   // Filter hutang saja (putaran 13) — murni client-side di atas data yang
   // sudah termuat, jadi tanpa reload. Bukan elemen [data-h] supaya tidak
@@ -580,6 +612,7 @@ function bind(): void {
     state.hutangOnly = !state.hutangOnly;
     state.buka = '';
     state.det = null;
+    state.hal = 1;
     paint();
   });
   root.querySelectorAll<HTMLElement>('[data-trx]').forEach((tr) =>
@@ -722,16 +755,18 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
 /* ---------- muat ---------- */
 
 async function load(): Promise<void> {
+  const tiket = ++state.tiket;
   state.loading = true;
   state.error = '';
   paint();
   try {
-    const q = `date=${encodeURIComponent(state.date)}&limit=${LIMIT}`;
+    const q = `date=${encodeURIComponent(state.date)}&limit=${MAKS}`;
     const [s, t, r] = await Promise.all([
       apiGet<{ data: SaleRow[]; total: number }>(`/api/sales?${q}`),
       apiGet<{ data: TopupRow[]; total: number }>(`/api/topups?${q}`),
       apiGet<{ data: Ringkas }>(`/api/reports/daily?date=${encodeURIComponent(state.date)}`),
     ]);
+    if (tiket !== state.tiket) return; // basi: ada load lebih baru berjalan
     state.sales = s.data;
     state.totalSales = s.total;
     state.topups = t.data;

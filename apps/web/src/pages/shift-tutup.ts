@@ -12,9 +12,13 @@
 //      terikat shift_id ini; yang di luar shift tidak ikut hitungan laci).
 //   5. Retur tunai (Tahap 2, 2026-10-11, keputusan pemilik (a)) -> laci TURUN
 //      (uang kembali ke pelanggan; hanya yang terikat shift ini).
+//   6. Pembelian tunai (Tahap 3, 2026-10-11, keputusan pemilik (b)) -> laci
+//      TURUN sebesar yang DIBAYAR (bukan total nota — sisa hutang supplier
+//      tak gerakkan kas); hanya nota received yang terikat shift ini.
 // Jadi:
 //   kas seharusnya = modal_awal + penjualan (SEMUA metode)
-//                    + topup (nominal+admin) − pengeluaran − retur (shift ini)
+//                    + topup (nominal+admin) − pengeluaran − retur
+//                    − pembelian (terbayar, shift ini)
 //   selisih        = modal_akhir − kas seharusnya
 // Rumusnya ada di DUA fungsi kecil di bawah (kasSeharusnya/hitungSelisih) —
 // bila keputusan berubah, ubah di situ, jangan menyebar ke tempat lain.
@@ -35,6 +39,7 @@ export type ShiftRow = {
   tarik_nominal: number; tarik_admin: number;
   n_expense: number; expense_total: number;
   n_retur: number; retur_total: number;
+  n_purchase: number; purchase_total: number;
 };
 
 function errMsg(e: unknown): string {
@@ -43,13 +48,13 @@ function errMsg(e: unknown): string {
 }
 
 /** Kas yang SEHARUSNYA ada di laci menurut keputusan pemilik 2026-10-01
- *  (lihat komentar kepala file) + Tahap 1 pengeluaran & Tahap 2 retur
- *  (2026-10-11): modal awal + penjualan semua metode + topup (nominal +
- *  admin, dua angka dipisah di tampilan tapi keduanya masuk laci) −
- *  pengeluaran − retur (shift ini). Tarik tunai sengaja TIDAK ikut. */
+ *  (lihat komentar kepala file) + Tahap 1–3 (2026-10-11): modal awal +
+ *  penjualan semua metode + topup (nominal + admin, dua angka dipisah di
+ *  tampilan tapi keduanya masuk laci) − pengeluaran − retur − pembelian
+ *  (terbayar, shift ini). Tarik tunai sengaja TIDAK ikut. */
 export function kasSeharusnya(s: ShiftRow): number {
   return s.modal_awal + s.omzet + s.topup_nominal + s.topup_admin
-    - (s.expense_total ?? 0) - (s.retur_total ?? 0);
+    - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
 }
 
 /** Selisih kas = kas fisik − kas seharusnya (rumus di satu tempat). */
@@ -85,6 +90,7 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         ${baris('Admin', s.tarik_admin)}
         ${s.n_expense > 0 || s.expense_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pengeluaran — mengurangi laci</div>${baris(`Kas keluar (${s.n_expense} catatan)`, s.expense_total)}` : ''}
         ${s.n_retur > 0 || s.retur_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Retur — uang kembali, mengurangi laci</div>${baris(`Kembali ke pelanggan (${s.n_retur} retur)`, s.retur_total)}` : ''}
+        ${s.n_purchase > 0 || s.purchase_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pembelian — kulakan tunai, mengurangi laci</div>${baris(`Bayar supplier (${s.n_purchase} nota)`, s.purchase_total)}` : ''}
         <div class="mt-2 flex justify-between gap-2 border-t border-gray-200 pt-2 dark:border-gray-700">
           <span class="font-medium text-gray-900 dark:text-white">Kas seharusnya di laci</span>
           <b id="sh-harus" class="tabular-nums text-gray-900 dark:text-white">${rp(kasHarus)}</b>
@@ -100,9 +106,9 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
       </p>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
         Kas seharusnya = modal awal + penjualan (semua metode) + topup
-        (nominal + admin) − pengeluaran − retur shift ini, sesuai keputusan
-        pemilik 2026-10-01 + Tahap 1–2 (2026-10-11). Tarik tunai tidak
-        mengurangi laci — hanya dicatat sebagai info.
+        (nominal + admin) − pengeluaran − retur − pembelian (terbayar) shift
+        ini, sesuai keputusan pemilik 2026-10-01 + Tahap 1–3 (2026-10-11).
+        Tarik tunai tidak mengurangi laci — hanya dicatat sebagai info.
       </p>`,
     onMount: ({ el, ok, close }) => {
       const akhir = el.querySelector('#sh-akhir') as HTMLInputElement;

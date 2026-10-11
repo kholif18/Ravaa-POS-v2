@@ -44,6 +44,9 @@ type Laporan = {
   /** Retur hari itu (Tahap 2, 2026-10-11) — total = uang kembali. Opsional
    *  dengan alasan yang sama. Dipakai kartu Retur + Omzet bersih (hybrid). */
   retur?: { n: number; total: number };
+  /** Pembelian yang DITERIMA hari itu (Tahap 3, 2026-10-11) — total = nilai
+   *  nota diterima. Opsional, alasan sama. */
+  purchase?: { n: number; total: number };
 };
 
 /* ---------- state ---------- */
@@ -109,6 +112,7 @@ function toolbar(): string {
 function ringkasan(l: Laporan): string {
   const exp = l.expense ?? { n: 0, total: 0 };
   const ret = l.retur ?? { n: 0, total: 0 };
+  const po = l.purchase ?? { n: 0, total: 0 };
   // Hybrid keputusan (c): Omzet KOTOR + Retur terpisah + Omzet bersih.
   // Bersih = omzet − retur, dihitung di klien dari dua angka server (preseden:
   // `nonTunai = omzet − tunai` di shift-tutup.ts) — agregatnya tetap server.
@@ -122,6 +126,8 @@ function ringkasan(l: Laporan): string {
     // Pengeluaran kas (Tahap 1) — dilaporkan TERPISAH, tidak menggerus laba
     // (laba = laba kotor dagang). Link ke halaman catatnya.
     { label: 'Pengeluaran', nilai: rp(exp.total), sub: `${exp.n} catatan · kas keluar`, link: '#/expenses' },
+    // Pembelian diterima (Tahap 3) — nilai kulakan masuk hari itu.
+    { label: 'Pembelian', nilai: rp(po.total), sub: `${po.n} nota diterima`, link: '#/purchases' },
   ];
   return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
     ${kartu
@@ -283,6 +289,7 @@ function isi(): string {
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
+        <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
       </div>
       <div class="card"><div class="skel h-6 w-56"></div></div>
     </div>`;
@@ -353,6 +360,7 @@ function eksporCSV(): void {
     ['Retur', (l.retur ?? { n: 0, total: 0 }).total],
     ['Omzet bersih', l.sales.omzet - (l.retur ?? { n: 0, total: 0 }).total],
     ['Pengeluaran', (l.expense ?? { n: 0, total: 0 }).total],
+    ['Pembelian diterima', (l.purchase ?? { n: 0, total: 0 }).total],
     [],
     ['Metode bayar'],
     ['Metode', 'Transaksi', 'Total'],

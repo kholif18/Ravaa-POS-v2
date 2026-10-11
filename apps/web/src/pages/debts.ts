@@ -13,6 +13,7 @@
 // (kontrak POST /api/sales tidak berubah).
 
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { rp } from '../escpos';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
@@ -53,7 +54,13 @@ type Customer = { id: number; name: string; phone: string; note: string };
 const state = {
   rows: [] as Ringkasan[],
   total: 0,
+  // `count` = jumlah pelanggan (untuk pager); `total` TETAP jumlah uang
+  // (kartu piutang) — kontrak server, jangan dipakai hitung halaman.
+  count: 0,
   status: 'open' as 'open' | 'semua',
+  limit: PAGE_SIZE,
+  // Paginasi (2026-10-11): RESET ke 0 setiap toggle status.
+  offset: 0,
   loading: true,
   error: '',
 };
@@ -173,6 +180,7 @@ function renderTable(): string {
         <tbody>${rows}</tbody>
       </table>
     </div>
+    ${pagerHtml(state.offset, state.limit, state.count)}
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
     Saldo dihitung ulang dari mutasi (hutang &minus; bayar), bukan angka tersimpan.
@@ -616,6 +624,15 @@ async function catatForm(jenis: 'charge' | 'payment', prefill?: PrefillBayar): P
 /* ---------- AKSI ---------- */
 
 function bindRows(): void {
+  bindPager(host!, (o) => {
+    state.offset = o;
+    void load();
+  });
+  bindPagerLimit(host!, (v) => {
+    state.limit = v;
+    state.offset = 0;
+    void load();
+  });
   host!.querySelectorAll<HTMLElement>('[data-rincian]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = Number(b.dataset.rincian);
@@ -639,11 +656,12 @@ async function load(): Promise<void> {
   state.error = '';
   paint();
   try {
-    const r = await apiGet<{ data: Ringkasan[]; total: number }>(
-      `/api/customer-debts?status=${state.status}`,
+    const r = await apiGet<{ data: Ringkasan[]; total: number; count: number }>(
+      `/api/customer-debts?status=${state.status}&limit=${state.limit}&offset=${state.offset}`,
     );
     state.rows = r.data;
     state.total = r.total;
+    state.count = r.count ?? r.data.length;
   } catch (e) {
     state.error = errMsg(e);
   }
@@ -663,6 +681,7 @@ export async function mountDebtsPage(el: HTMLElement): Promise<void> {
       const s = b.dataset.status === 'semua' ? 'semua' : 'open';
       if (s === state.status) return;
       state.status = s;
+      state.offset = 0;
       void load();
     }),
   );

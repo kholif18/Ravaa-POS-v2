@@ -453,6 +453,12 @@
   .card-flush {
     @apply overflow-hidden rounded-2xl border border-gray-200/70 bg-white shadow-card dark:border-gray-700/70 dark:bg-gray-800;
   }
+  /* Kaki tabel (pager): MENEMPEL di dalam .card-flush, bergaris atas —
+     bukan konten melayang di bawah kartu. Sudut bawah ikut terklip
+     overflow-hidden kartu. */
+  .table-foot {
+    @apply flex flex-wrap items-center justify-between gap-2 border-t border-gray-200/70 bg-gray-50/60 px-3 py-2 dark:border-gray-700/70 dark:bg-white/5;
+  }
   /* `relative` (audit compact 2026-10-04): elemen absolute di dalam tabel
      (mis. `.sr-only` di th kolom Rincian di Riwayat) punya containing block
      ICB bila tidak ada ancestor positioned — overflow-x-auto TIDAK memotong

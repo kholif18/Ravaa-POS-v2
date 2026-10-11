@@ -19,6 +19,7 @@
 // `dialogTutupShift(s, () => load())`; jangan menduplikasi dialognya.
 
 import { apiGet, apiPost, HttpError } from '../api';
+import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { icon } from '../ui/icons';
 import { toast } from '../ui/toast';
 import { openModal } from '../ui/modal';
@@ -37,6 +38,9 @@ const state = {
   filter: 'semua' as Filter,
   rows: [] as ShiftRow[],
   total: 0,
+  // Paginasi (2026-10-11): RESET ke 0 setiap filter berubah.
+  offset: 0,
+  limit: PAGE_SIZE,
   loading: true,
   error: '',
 };
@@ -143,9 +147,9 @@ function tabel(): string {
         </tbody>
       </table>
     </div>
+    ${pagerHtml(state.offset, state.limit, state.total)}
   </div>
   <p class="text-xs text-gray-500 dark:text-gray-400">
-    Menampilkan ${state.rows.length} dari ${state.total} shift (maks 200 per muat).
     Penjualan & topup dihitung dari baris yang terikat shift ini — penjualan
     offline ikut terhitung setelah tersinkron. Topup/tarik di luar omzet,
     tapi topup (nominal + admin) ikut hitungan "kas seharusnya" di dialog
@@ -179,9 +183,19 @@ function bind(): void {
   root.querySelectorAll<HTMLElement>('[data-f]').forEach((b) =>
     b.addEventListener('click', () => {
       state.filter = b.dataset.f as Filter;
+      state.offset = 0;
       void load();
     }),
   );
+  bindPager(root, (o) => {
+    state.offset = o;
+    void load();
+  });
+  bindPagerLimit(root, (v) => {
+    state.limit = v;
+    state.offset = 0;
+    void load();
+  });
   root.querySelector('#sh-reload')?.addEventListener('click', () => void load());
   root.querySelector('#sh-open')?.addEventListener('click', () => dialogBuka());
   root.querySelectorAll<HTMLElement>('[data-tutup]').forEach((b) =>
@@ -245,7 +259,7 @@ async function load(): Promise<void> {
   paint();
   try {
     const j = await apiGet<{ data: ShiftRow[]; total: number }>(
-      `/api/shifts?status=${state.filter}&limit=200`,
+      `/api/shifts?status=${state.filter}&limit=${state.limit}&offset=${state.offset}`,
     );
     state.rows = j.data;
     state.total = j.total;

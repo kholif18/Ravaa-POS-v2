@@ -879,6 +879,13 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           = rincian + tombol Batalkan) + dialog retur manual
                           (cari produk server-side, baris qty/harga prefill) —
                           retur DARI nota lewat tombol di Riwayat, bukan di sini.
+ apps/web/src/pages/purchases.ts  Halaman #/purchases (Tahap 3, 2026-10-11):
+                          nota PO kulakan — filter status (Semua/Order/
+                          Diterima/Batal) + tabel (badge Order/Lunas/Hutang/
+                          Batal, klik = rincian) + dialog buat PO (supplier
+                          select + cari produk + qty/harga per baris) + dialog
+                          Terima (`dibayar` prefill total) + dialog Bayar sisa
+                          + Batalkan (order saja).
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
 apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
@@ -1100,11 +1107,23 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `SUM(charge) - SUM(payment)` selalu dihitung ulang saat dibaca — angka
     tersimpan akan selisih begitu salah satu baris mutasi diedit/dihapus.
     `charge` = pelanggan berhutang (beli belum bayar), `payment` = pembayaran.
-  - `GET /api/customers?q=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
+  - `GET /api/customers?q=&limit=&offset=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
     - `q` opsional, multi-kata (SEMUA kata harus cocok di `name`/`phone`/`note`,
       pola search produk — tidak harus di field atau urutan yang sama).
-    - Urutan `name COLLATE NOCASE, id`; `total` = jumlah baris TANPA filter
-      (dipakai footer halaman).
+    - Urutan `name COLLATE NOCASE, id`; `limit` default 50 maks 200,
+      `offset` default 0 (pola shifts/sales, 2026-10-11); `total` = baris
+      COCOK filter (tanpa limit) — footer "A–B dari N".
+    - **Pager UI (2026-10-11, pola acuan halaman lain)** — footer tabel
+      konvensional (bukan infinite-scroll): komponen bersama `ui/pager.ts`
+      (`PAGE_SIZE=20` bawaan, `PAGE_CHOICES=[10,20,50,100]`): kiri = info
+      "Hal X dari Y · A–B dari N" + select "Tampil N" (`bindPagerLimit`),
+      kanan = nomor halaman (`‹ 1 … 4 5 6 … 20 ›`, `bindPager`, halaman aktif
+      `aria-current` + disabled). Dipakai customers, suppliers, debts, shifts,
+      purchases, returns, expenses, history (client-side: fetch penuh
+      MAKS/sumber sekali per tanggal lalu potong 20 induk/halaman — sub-baris
+      hybrid menempel induknya; Produk & Stok = infinite scroll, tetap jangan
+      disamakan; Satuan = tanpa pager, master 14 baris).
+      RESET offset=0 setiap filter/cari/tanggal/status/limit berubah.
     - **`code` / `address` (revisi pemilik 2026-10-04)**: `code` = no customer
       auto (`CUS-000001`), `address` = alamat pelanggan. Baris lama bernomor
       `''` tampil sebagai `—` dan diisi server saat pertama disimpan ulang.
@@ -1137,9 +1156,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     lahir dari pencabutan `customers.supplier_no`: nomor `SUP-000001` kini
     menjadi `code` master ini. Dipakai Tahap 3 Pembelian sebagai pilihan
     pemasok. Read-only terhadap `products.version`.
-    - `GET /api/suppliers?q=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
+    - `GET /api/suppliers?q=&limit=&offset=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
       (`q` multi-kata name/phone/note, urutan `name COLLATE NOCASE, id`,
-      `total` tanpa filter — pola persis `GET /api/customers`).
+      `limit`/`offset` + `total` cocok-filter — pola persis
+      `GET /api/customers`, termasuk pager UI).
     - `POST /api/suppliers` `{id?,name,phone?,address?,note?}` -> 201/200
       (validasi & penomoran `SUP-<6 digit>` via `nomorUrut` persis customers;
       **sengaja TIDAK upsert by phone**, alasan sama).
@@ -1169,6 +1189,32 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       (`n_retur`/`retur_total` di `GET /api/shifts` → `kasSeharusnya()`);
       rekap harian `GET /api/reports/daily` (`retur:{n,total}` — kartu Retur +
       Omzet bersih hybrid, tidak menggerus laba).
+  - **Pembelian / kulakan (Tahap 3, 2026-10-11, halaman `#/purchases`)** —
+    nota PO: order → receive → pay/cancel. Satu `db.transaction` per aksi.
+    - `POST /api/purchases` `{supplier_id?,items:[{product_id,qty>0,harga_beli>=0}],note?≤200,cashier?}`
+      -> 201 `{data:{purchase,status:'order',terbayar:0},items}}`. Supplier
+      harus ada bila dikirim (404, nama di-snapshot); item HANYA barang fisik
+      (`track_stock=1`, 400 untuk jasa — pola restock); total = Σ; TANPA stok.
+    - `POST /api/purchases/:id/receive` `{shift_id?,dibayar?=total,cashier?}`
+      -> 200. Hanya dari `order` (400 bila `received`/`cancel`); per item rumus
+      **sama persis** restock (`avg_cost` tertimbang + `stock+=qty` +
+      `version++` + `stock_moves reason='beli'`, `unit_cost=harga_beli`,
+      `ref_id='PO-<id>'`); `dibayar` bulat 0..total (default = total = tunai
+      penuh; kurang = sisa hutang — keputusan pemilik (b)); `shift_id` harus
+      ada bila dikirim (400); produk yang hilang di tengah jalan → 400.
+    - `POST /api/purchases/:id/pay` `{amount>0}` -> 200 (`terbayar+=amount`,
+      maks total — 400 `"melebihi sisa hutang..."`); hanya `received`.
+      Kas susulan diatribusikan ke `shift_id` PO (satu PO satu laci).
+    - `POST /api/purchases/:id/cancel` -> 200 (hanya `order`; received tak bisa
+      batal — koreksi stok via opname). Tak ada DELETE (nota PO = arsip).
+    - `GET /api/purchases?status=order|received|cancel|semua&limit=&offset=`
+      -> `{data:[{...,sisa, n_items}], total}` (`sisa = total−terbayar`
+      computed, prinsip ledger; `id DESC`).
+    - `GET /api/purchases/:id` -> `{data:{purchase(+sisa),items}}`.
+    - Laci: `SUM(terbayar)` nota received terikat shift (`n_purchase`/
+      `purchase_total` di `GET /api/shifts` → `kasSeharusnya()`); rekap harian
+      `GET /api/reports/daily` (`purchase:{n,total}` = nilai DITERIMA,
+      by `received_at`, kartu ke-8 — tidak menggerus laba).
   - **Pengeluaran kas (Tahap 1, 2026-10-11, halaman `#/expenses`)** — kas
     TUNAI keluar operasional. Bukan mutasi stok (tidak menyentuh
     `products.version`) dan bukan HPP (laba = omzet − HPP, definisi tetap).
@@ -1186,9 +1232,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       (`n_expense`/`expense_total` di `GET /api/shifts` → `kasSeharusnya()`
       di `shift-tutup.ts`); rekap harian di `GET /api/reports/daily`
       (`expense:{n,total}`, dilaporkan TERPISAH — tidak menggerus laba).
-  - `GET /api/customer-debts?status=open|semua` -> `{data:[{customer_id,name,phone,charge,bayar,sisa,terakhir}], total}`
+  - `GET /api/customer-debts?status=open|semua&limit=&offset=` -> `{data:[{customer_id,name,phone,charge,bayar,sisa,terakhir}], total, count}`
     - **Ringkasan saldo per pelanggan** (tabel utama halaman `#/debts`).
-      Read-only.
+      Read-only. `limit` default 50 maks 200 (2026-10-11); `total` TETAP
+      jumlah uang (kartu piutang — jangan dipakai hitung halaman), pager
+      memakai `count` (= jumlah pelanggan).
     - `status` default `open` = hanya `sisa > 0`; `semua` = semua yang punya
       riwayat (termasuk lunas, `sisa` 0). Nilai lain -> 400
       `"status harus open|semua"`.
@@ -1494,7 +1542,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
        (hanya yang terikat shift ini).
     5. Retur (Tahap 2, 2026-10-11, keputusan pemilik (a)): laci **TURUN**
        `retur_total` (uang kembali ke pelanggan; hanya yang terikat shift).
-    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin − expense_total − retur_total`
+    6. Pembelian (Tahap 3, 2026-10-11, keputusan pemilik (b)): laci **TURUN**
+       `purchase_total` (= SUM `terbayar` nota received, bukan total nota —
+       sisa hutang tak gerakkan kas; hanya yang terikat shift).
+    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin − expense_total − retur_total − purchase_total`
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shift-tutup.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
@@ -1684,7 +1735,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
-  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total}}}`
+  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total}}}`
   - `hpp = ROUND(SUM(sale_items.qty * sale_items.cost))` untuk penjualan hari itu.
   - `laba = sales.omzet - hpp` (omzet sudah **setelah** semua diskon).
   - `expense` (Tahap 1, 2026-10-11) = COUNT + SUM `expenses` hari itu —

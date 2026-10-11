@@ -132,20 +132,34 @@ try {
     await page.waitForTimeout(1800);
     const menu = await page.locator('a[href="#/history"]').count();
     ok('menu sidebar "Riwayat transaksi" ada', menu === 1, `jumlah=${menu}`);
-    const nBaris = await page.locator('#page tbody tr[data-trx]').count();
-    // Ambil ulang data SEKARANG (bukan snapshot dflt/tp di atas — beberapa
-    // suite lain menulis DB terus-menerus, jadi angka lama bisa basi). Topup/
-    // tarik yang dibayar BERSAMA sebuah nota (sale_id cocok dengan salah satu
-    // sale hari ini) dirender sebagai SUB-BARIS di bawah induknya (pola
-    // note-di-bawah-produk), jadi TIDAK punya tr[data-trx] sendiri. Hanya
-    // topup mandiri (sale_id null / yatim) jadi baris linimasa sendiri.
+    // Pager bernomor (2026-10-11): 20 induk termuat per halaman (sub-baris
+    // menempel induk, bukan baris halaman). Ambil ulang data SEKARANG (bukan
+    // snapshot dflt/tp di atas — beberapa suite lain menulis DB terus-menerus,
+    // jadi angka lama bisa basi). Topup/tarik yang dibayar BERSAMA sebuah nota
+    // (sale_id cocok dengan salah satu sale hari ini) dirender sebagai
+    // SUB-BARIS di bawah induknya (pola note-di-bawah-produk), jadi TIDAK
+    // punya tr[data-trx] sendiri. Hanya topup mandiri (sale_id null / yatim)
+    // jadi baris linimasa sendiri.
     const segarS = (await ambil(`/api/sales?date=${hariIni()}&limit=200`)).body;
     const segarT = (await ambil(`/api/topups?date=${hariIni()}&limit=200`)).body;
     const saleIds = new Set(segarS.data.map((r) => r.id));
     const mandiri = segarT.data.filter((r) => !r.sale_id || !saleIds.has(r.sale_id)).length;
-    const harap = Math.min(segarS.total, 200) + Math.min(mandiri, 200);
-    ok(`baris linimasa = penjualan + topup mandiri (${harap})`, nBaris === harap,
-      `ada=${nBaris} harap=${harap} (topup=${segarT.total} mandiri=${mandiri})`);
+    const induk = Math.min(segarS.total, 200) + Math.min(mandiri, 200);
+    if (induk > 20) {
+      const hal1 = await page.locator('#page tbody tr[data-trx]').first().textContent();
+      await page.click('[data-pg="next"]'); await page.waitForTimeout(800);
+      const hal2 = await page.locator('#page tbody tr[data-trx]').first().textContent();
+      const info2 = await page.textContent('#page');
+      await page.click('[data-pg="prev"]'); await page.waitForTimeout(800);
+      const kembali = await page.locator('#page tbody tr[data-trx]').first().textContent();
+      ok(`pager: next Hal 2 + prev kembali (induk=${induk})`,
+        /Hal 2 dari/.test(info2) && hal2 !== hal1 && kembali === hal1,
+        `hal2=${(hal2 ?? '').slice(0, 40)}`);
+    } else {
+      const nBaris = await page.locator('#page tbody tr[data-trx]').count();
+      ok(`tanpa pager: semua ${induk} induk muat 1 halaman`, nBaris === induk,
+        `ada=${nBaris} harap=${induk}`);
+    }
     const ringkas = (await page.locator('#h-body .card .chip').allInnerTexts()).join(' ');
     ok('ringkasan seangka laporan (n penjualan & omzet)',
       ringkas.includes(`${rep.sales.n} penjualan`) && ringkas.includes('omzet'), ringkas);

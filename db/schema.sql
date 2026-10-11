@@ -210,6 +210,53 @@ CREATE INDEX IF NOT EXISTS idx_returns_sale ON returns(sale_id);
 CREATE INDEX IF NOT EXISTS idx_return_items_return ON return_items(return_id);
 CREATE INDEX IF NOT EXISTS idx_return_items_sale_item ON return_items(sale_item_id);
 
+-- Pembelian / kulakan (Tahap 3, 2026-10-11, halaman #/purchases): nota PO ke
+-- supplier — order dulu, barang datang baru receive (stok masuk), bayar tunai
+-- (bawaan lunas; boleh sisa hutang — keputusan pemilik (b): praktik selalu
+-- tunai, kolom hutang hanya bila suatu saat terjadi).
+--   - order: TANPA sentuhan stok/kas (catatan pesanan saja).
+--   - receive: per item rumus SAMA PERSIS dengan restock (avg_cost tertimbang
+--     + stock += qty + version++ + stock_moves reason='beli'); `terbayar`
+--     bawaan = total (tunai penuh); kurang dari itu = sisa hutang supplier.
+--   - Kas keluar = `terbayar` (bukan total): yang mengurangi laci hanya uang
+--     yang benar-benar keluar, di shift yang tertera (`n_purchase` /
+--     `purchase_total` di GET /api/shifts → kasSeharusnya). Rekap harian di
+--     GET /api/reports/daily (`purchase:{n,total}` = nilai yang DITERIMA).
+CREATE TABLE IF NOT EXISTS purchases (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Pemasok + snapshot namanya (pola sales.customer_id/customer_name):
+  -- riwayat tetap menampilkan nama walau master supplier kelak diubah/dihapus.
+  -- NULL = tanpa pemasok (kulakan eceran). Guard hapus supplier (400) memakai
+  -- kolom ini — supplier yang pernah dipakai PO tidak bisa dihapus.
+  supplier_id   INTEGER REFERENCES suppliers(id),
+  supplier_name TEXT NOT NULL DEFAULT '',
+  -- order = pesanan (belum ada barang/uang) | received = barang masuk (+kas
+  -- keluar sebesar terbayar) | cancel = batal (hanya dari order).
+  status      TEXT NOT NULL DEFAULT 'order' CHECK (status IN ('order', 'received', 'cancel')),
+  total       INTEGER NOT NULL CHECK (total > 0),   -- SUM(qty*harga_beli)
+  terbayar    INTEGER NOT NULL DEFAULT 0 CHECK (terbayar >= 0), -- tunai keluar
+  -- Waktu TERIMA (NULL selama masih order): rekap harian + agregat
+  -- dihitung dari tanggal ini (tanggal PO ≠ tanggal barang datang).
+  received_at TEXT,
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  shift_id    INTEGER REFERENCES shifts(id),  -- NULL = di luar shift
+  note        TEXT NOT NULL DEFAULT ''        -- maks 200 char (aturan catatan)
+);
+CREATE TABLE IF NOT EXISTS purchase_items (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_id   INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+  product_id    INTEGER NOT NULL REFERENCES products(id),
+  name          TEXT NOT NULL,           -- snapshot nama (riwayat stabil)
+  qty           REAL NOT NULL CHECK (qty > 0),
+  harga_beli    INTEGER NOT NULL CHECK (harga_beli >= 0),
+  amount        INTEGER NOT NULL         -- qty*harga_beli
+);
+CREATE INDEX IF NOT EXISTS idx_purchases_status ON purchases(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_purchases_shift ON purchases(shift_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items(purchase_id);
+
 -- Topup & tarik tunai: nominal bebas + admin editable.
 -- nominal = mutasi modal/e-money, admin = pendapatan jasa.
 CREATE TABLE IF NOT EXISTS topup_txns (
@@ -238,7 +285,7 @@ CREATE TABLE IF NOT EXISTS stock_moves (
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   product_id  INTEGER NOT NULL REFERENCES products(id),
   qty         REAL NOT NULL,           -- +masuk / -keluar
-  reason      TEXT NOT NULL,           -- sale | restock | opname | rusak
+  reason      TEXT NOT NULL,           -- sale | restock | opname | rusak | retur (Tahap 2) | beli (Tahap 3)
   ref_id      TEXT,                    -- id sale bila reason=sale
   -- Biaya per satuan pada saat mutasi: restock = harga beli; sale/opname =
   -- avg_cost saat itu. Inilah riwayat pembelian yang selama ini tidak ada —

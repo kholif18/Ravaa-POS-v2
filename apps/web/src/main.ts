@@ -8,6 +8,7 @@ import { mountProductsPage } from './pages/products';
 import { mountSatuanPage } from './pages/satuan';
 import { mountCustomersPage } from './pages/customers';
 import { mountSuppliersPage } from './pages/suppliers';
+import { mountPurchasesPage } from './pages/purchases';
 import { mountExpensesPage } from './pages/expenses';
 import { mountDebtsPage } from './pages/debts';
 import { mountShiftsPage } from './pages/shifts';
@@ -66,6 +67,9 @@ function render(): void {
   } else if (route === 'suppliers') {
     // Supplier: master pemasok, state sendiri (cari multi-kata + CRUD).
     void mountSuppliersPage(page);
+  } else if (route === 'purchases') {
+    // Pembelian: nota PO kulakan, state sendiri (filter status + dialog).
+    void mountPurchasesPage(page);
   } else if (route === 'expenses') {
     // Pengeluaran: kas keluar operasional per hari, state sendiri.
     void mountExpensesPage(page);
