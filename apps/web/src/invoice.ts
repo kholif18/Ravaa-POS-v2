@@ -209,6 +209,137 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
 </html>`;
 }
 
+/** Baris shift untuk rekap cetak (kontrak GET /api/shifts + agregat Z-report —
+ *  `import type` dari shift-tutup agar satu sumber, tanpa runtime cycle). */
+import type { ShiftRow } from './pages/shift-tutup';
+
+/** Tanggal lokal `D/M/YYYY HH:MM` untuk rekap (pola tglAronium di atas). */
+function tglRekap(iso: string | null): string {
+  if (!iso) return '—';
+  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) || iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`;
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Rekap tutup shift ala Z-report Aronium (2026-10-11) — dokumen A4 mandiri
+ *  (CSS inline sendiri, kelas meniru invoice di atas: kop/meta/table/ringkas).
+ *  `fisik` = modal akhir hitung kasir; null = sementara (X, tanpa fisik &
+ *  selisih). Kas seharusnya dihitung ulang di sini? TIDAK — pemanggil
+ *  mengirim angka final? Kontrak: fungsi ini MENGHITUNG dari baris (rumus
+ *  kasSeharusnya ada di shift-tutup, tak diimpor agar invoice.ts tetap
+ *  mandiri): modal + (omzet − hutang) + topup + piutang − expense − retur
+ *  − purchase. Rumus ditulis SEKALI di sini + SEKALI di kasSeharusnya —
+ *  duplikasi disengaja & ditandai; bila rumus berubah, ubah keduanya
+ *  (dicek test rekap: angka PDF = angka dialog). */
+export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): string {
+  const kasHarus = s.modal_awal + (s.omzet - (s.hutang_baru ?? 0))
+    + s.topup_nominal + s.topup_admin + (s.piutang_bayar ?? 0)
+    - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
+  const d = fisik !== null ? fisik - kasHarus : null;
+  const nota = s.inv_awal && s.inv_akhir ? `${s.inv_awal} – ${s.inv_akhir}` : 'Tanpa penjualan';
+  const R = (label: string, nilai: number, kuat = false) =>
+    `<tr><td>${label}</td><td class="r"${kuat ? ' style="font-weight:700"' : ''}>${rpNum(nilai)}</td></tr>`;
+  return `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Rekap Shift #${s.id}</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45; }
+  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
+  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .alamat { margin-top: 4px; max-width: 60%; }
+  .logo { width: 66px; height: 66px; border-radius: 50%; background: #4a90d9; color: #fff;
+          font-size: 40px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
+  .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
+  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
+  .rincian .baris { display: flex; }
+  .rincian .baris .lbl { width: 118px; }
+  table.items { width: 100%; border-collapse: collapse; }
+  table.items th { font-size: 10px; padding: 5px 6px; border-top: 1px solid #444;
+                   border-bottom: 1px solid #444; text-align: left; }
+  table.items th.r, table.items td.r { text-align: right; }
+  table.items td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
+  .ringkas { width: 55%; margin-left: auto; margin-top: 14px; }
+  .kotak { display: flex; justify-content: space-between; border: 1px solid #444; padding: 5px 9px; margin-bottom: 7px; }
+  .kotak .lbl { font-weight: 700; }
+  .putus { border-top: 1px dashed #999; margin: 4px 0 11px; }
+  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+</style>
+</head>
+<body>
+  <div class="kop">
+    <div>
+      <div class="judul">${fisik !== null ? 'REKAP TUTUP SHIFT' : 'REKAP SEMENTARA (X)'}</div>
+      <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
+      ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
+    </div>
+    <div class="logo" aria-hidden="true">R</div>
+  </div>
+  <hr>
+  <div class="meta">
+    <div>
+      <div class="ttl">Shift</div>
+      <div>#${s.id} · ${esc(s.cashier)}</div>
+    </div>
+    <div class="rincian">
+      <div class="baris"><span class="lbl">Buka:</span><span>${tglRekap(s.opened_at)}</span></div>
+      <div class="baris"><span class="lbl">Tutup:</span><span>${tglRekap(s.closed_at)}</span></div>
+      <div class="baris"><span class="lbl">Nota:</span><span>${esc(nota)}</span></div>
+    </div>
+  </div>
+  <table class="items">
+    <thead><tr><th>Uraian</th><th class="r" style="width:150px">Nilai</th></tr></thead>
+    <tbody>
+      ${R('Modal awal', s.modal_awal)}
+      ${R(`Penjualan (${s.n_sales} nota)`, s.omzet)}
+      ${R('&nbsp;&nbsp;Tunai', s.tunai)}
+      ${R('&nbsp;&nbsp;QRIS', s.qris)}
+      ${R('&nbsp;&nbsp;Transfer', s.transfer)}
+      ${R('Diskon', s.diskon_total ?? 0)}
+      ${R('Topup nominal', s.topup_nominal)}
+      ${R('Topup admin', s.topup_admin)}
+      ${R('Tarik nominal', s.tarik_nominal)}
+      ${R('Tarik admin', s.tarik_admin)}
+      ${R(`Retur (${s.n_retur})`, s.retur_total)}
+      ${R(`Pengeluaran (${s.n_expense})`, s.expense_total)}
+      ${R(`Pembelian (${s.n_purchase})`, s.purchase_total)}
+      ${R('Hutang terbentuk', s.hutang_baru ?? 0)}
+      ${R('Piutang terbayar', s.piutang_bayar ?? 0)}
+    </tbody>
+  </table>
+  <div class="ringkas">
+    <div class="kotak"><span class="lbl">Kas seharusnya</span><span>${rpNum(kasHarus)}</span></div>
+    ${fisik !== null ? `<div class="kotak"><span class="lbl">Modal akhir (fisik)</span><span>${rpNum(fisik)}</span></div>` : ''}
+    ${d !== null ? `<div class="kotak"><span class="lbl">Selisih</span><span>${d < 0 ? '-' : ''}${rpNum(Math.abs(d))}</span></div>` : ''}
+  </div>
+  <div class="putus"></div>
+  <div class="foot">Dicetak dari Ravaa POS</div>
+  <script>
+    window.addEventListener('load', function () { window.print(); });
+  </script>
+</body>
+</html>`;
+}
+
+/** Ambil kop toko + buka tab rekap A4 dan cetak (window.print()).
+ *  Baris shift SUDAH di tangan pemanggil (tanpa endpoint baru) — hanya kop
+ *  yang di-fetch. Melempar Error bila popup diblokir (pemanggil toast saja). */
+export async function cetakRekapShift(s: ShiftRow, fisik: number | null): Promise<void> {
+  const set = await apiGet<{ data: Toko }>('/api/settings');
+  const html = htmlRekapShift(s, set.data, fisik);
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak rekap A4/PDF');
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
 /** Ambil nota + kop lalu buka tab invoice A4 dan cetak (window.print()).
  *  Melempar Error bila API tidak terjangkau / popup diblokir — pemanggil
  *  (pos.ts / history.ts) hanya memberi toast; penjualan TIDAK dibatalkan. */

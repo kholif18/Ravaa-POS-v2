@@ -1163,7 +1163,36 @@ app.get('/api/shifts', (c) => {
             -- Hanya nota received yang terikat shift ini; cicilan susulan ikut
             -- shift PO-nya (satu PO satu laci, lihat POST /:id/pay).
             (SELECT COUNT(*) FROM purchases p WHERE p.shift_id = s.id AND p.status = 'received') AS n_purchase,
-            (SELECT COALESCE(SUM(p.terbayar),0) FROM purchases p WHERE p.shift_id = s.id AND p.status = 'received') AS purchase_total
+            (SELECT COALESCE(SUM(p.terbayar),0) FROM purchases p WHERE p.shift_id = s.id AND p.status = 'received') AS purchase_total,
+            -- Rekap tutup shift ala Z-report Aronium (2026-10-11): rentang
+            -- nota + total diskon + hutang terbentuk + piutang terbayar.
+            -- invoice_no YYMMDD-NNNNNN urut leksikal = kronologis, jadi
+            -- MIN/MAX cukup untuk rentang dokumen (butir 5 Z-report).
+            (SELECT MIN(sl.invoice_no) FROM sales sl WHERE sl.shift_id = s.id) AS inv_awal,
+            (SELECT MAX(sl.invoice_no) FROM sales sl WHERE sl.shift_id = s.id) AS inv_akhir,
+            -- Diskon hari-shift = transaksi + per baris (rumus SAMA dengan
+            -- sales.diskon di reports/daily — satu definisi, dua pemakai).
+            ((SELECT COALESCE(SUM(sl.discount),0) FROM sales sl WHERE sl.shift_id = s.id) +
+             (SELECT COALESCE(SUM(si.discount),0) FROM sale_items si
+               JOIN sales sl ON sl.id = si.sale_id WHERE sl.shift_id = s.id)) AS diskon_total,
+            -- Hutang TERBENTUK shift ini (butir "credit" Z-report): CASE yang
+            -- SAMA PERSIS dengan penanda sisa_hutang di GET /api/sales
+            -- (tunai + kurang + pelanggan valid) — laci TIDAK menerima porsi
+            -- ini, jadi rumus kasSeharusnya mengurangkannya dari omzet.
+            (SELECT COALESCE(SUM(CASE WHEN sl.pay_method='tunai' AND sl.total > sl.cash_in
+                   AND sl.customer_id IS NOT NULL
+                   AND sl.customer_name <> 'Pelanggan Umum'
+                  THEN sl.total - sl.cash_in ELSE 0 END),0)
+               FROM sales sl WHERE sl.shift_id = s.id) AS hutang_baru,
+            -- Piutang TERBAYAR ke laci shift ini (butir 7-8 Z-report "credit
+            -- payments collected"): ledger tak punya shift_id, jadi diikat
+            -- lewat periode (created_at di antara opened_at..closed_at —
+            -- format datetime('now') sama, perbandingan string valid).
+            -- Masuk rumus kasSeharusnya (uang fisik masuk laci).
+            (SELECT COALESCE(SUM(d.amount),0) FROM customer_debts d
+              WHERE d.type = 'payment'
+                AND datetime(d.created_at) >= datetime(s.opened_at)
+                AND (s.closed_at IS NULL OR datetime(d.created_at) <= datetime(s.closed_at))) AS piutang_bayar
        FROM shifts s
        ${klausul}
       ORDER BY s.id DESC

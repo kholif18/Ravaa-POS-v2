@@ -179,15 +179,16 @@ try {
     await page.locator(`#sh-body tbody tr[data-shift="${kasirId}"] [data-tutup]`).click();
     await page.waitForTimeout(350);
     const harusKasir = await page.locator('#sh-harus').innerText();
-    // Rumus Tahap 1–3 (2026-10-11): − expense − retur − pembelian (data nyata
-    // shift kasir bisa memuat pengeluaran/retur/pembelian betulan).
-    const expectedKasir = kasirRow.modal_awal + kasirRow.omzet
-      + kasirRow.topup_nominal + kasirRow.topup_admin
+    // Rumus rekap Z-report (2026-10-11): omzet − hutang terbentuk + topup +
+    // piutang terbayar − expense − retur − pembelian (data nyata shift kasir
+    // bisa memuat semuanya betulan).
+    const expectedKasir = kasirRow.modal_awal + (kasirRow.omzet - (kasirRow.hutang_baru ?? 0))
+      + kasirRow.topup_nominal + kasirRow.topup_admin + (kasirRow.piutang_bayar ?? 0)
       - (kasirRow.expense_total ?? 0) - (kasirRow.retur_total ?? 0)
       - (kasirRow.purchase_total ?? 0);
-    ok(`dialog kasir: kas seharusnya = modal+omzet+topup-exp-ret-po (${rp(expectedKasir)})`,
+    ok(`dialog kasir: kas seharusnya = modal+(omzet-hutang)+topup+piutang-exp-ret-po (${rp(expectedKasir)})`,
       harusKasir === rp(expectedKasir),
-      `dialog=${harusKasir} hitung=${rp(expectedKasir)} (modal=${kasirRow.modal_awal} omzet=${kasirRow.omzet} topup=${kasirRow.topup_nominal}+${kasirRow.topup_admin} exp=${kasirRow.expense_total} ret=${kasirRow.retur_total} po=${kasirRow.purchase_total})`);
+      `dialog=${harusKasir} hitung=${rp(expectedKasir)} (modal=${kasirRow.modal_awal} omzet=${kasirRow.omzet} hutang=${kasirRow.hutang_baru} topup=${kasirRow.topup_nominal}+${kasirRow.topup_admin} piutang=${kasirRow.piutang_bayar} exp=${kasirRow.expense_total} ret=${kasirRow.retur_total} po=${kasirRow.purchase_total})`);
     await page.click('.modal-overlay [data-x]'); // Batal — shift kasir tetap open
     await page.waitForTimeout(350);
 

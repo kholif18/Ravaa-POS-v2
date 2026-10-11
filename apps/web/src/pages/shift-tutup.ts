@@ -15,21 +15,38 @@
 //   6. Pembelian tunai (Tahap 3, 2026-10-11, keputusan pemilik (b)) -> laci
 //      TURUN sebesar yang DIBAYAR (bukan total nota — sisa hutang supplier
 //      tak gerakkan kas); hanya nota received yang terikat shift ini.
+//   7. Hutang TERBENTUK (tunai kurang, pelanggan valid) -> laci TIDAK
+//      menerima porsinya: omzet tercatat penuh tapi uangnya tidak masuk,
+//      jadi dikurangkan dari omzet (ala "credit" Z-report Aronium).
+//   8. Piutang TERBAYAR ke laci shift ini -> laci NAIK (ala "credit payments
+//      collected" Z-report butir 7-8; ledger diikat lewat periode
+//      opened_at..closed_at karena tak punya shift_id).
 // Jadi:
-//   kas seharusnya = modal_awal + penjualan (SEMUA metode)
-//                    + topup (nominal+admin) − pengeluaran − retur
-//                    − pembelian (terbayar, shift ini)
+//   kas seharusnya = modal_awal + (omzet − hutang_baru) + (topup nominal+admin)
+//                    + piutang_bayar − pengeluaran − retur − pembelian
+//                    (terbayar, shift ini)
 //   selisih        = modal_akhir − kas seharusnya
 // Rumusnya ada di DUA fungsi kecil di bawah (kasSeharusnya/hitungSelisih) —
 // bila keputusan berubah, ubah di situ, jangan menyebar ke tempat lain.
+// REKAP CETAK ala Z-report Aronium (2026-10-11): dialog ini + dialog pasca-
+// tutup memuat tombol [Thermal] (struk 32 kolom via print-agent, builder
+// bangunStrukRekap di bawah — objek Struk yang SAMA dipakai sesuaikanPrinter)
+// dan [PDF] (dokumen A4 browser via htmlRekapShift/cetakRekapShift di
+// invoice.ts, pola cetakInvoice). X = cetak kapan pun tanpa menutup shift
+// (tanpa fisik/selisih); Z = setelah tutup (lengkap fisik + selisih).
 
-import { apiPost, HttpError } from '../api';
+import { apiGet, apiPost, HttpError } from '../api';
+import { icon } from '../ui/icons';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
-import { rp } from '../escpos';
+import { choiceDialog } from '../ui/confirm';
+import { getAutoPrint, getPrintPause } from '../ui/print-pref';
+import { kirimPrint, rp, strukUntuk, type Struk } from '../escpos';
+import { cetakRekapShift } from '../invoice';
 
 /** Baris `GET /api/shifts` (kontrak lengkap dengan agregat subquery —
- *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran). */
+ *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran, retur,
+ *  pembelian + rekap Z-report: rentang nota, diskon, hutang, piutang). */
 export type ShiftRow = {
   id: number; opened_at: string; closed_at: string | null;
   modal_awal: number; modal_akhir: number | null; cashier: string; status: string;
@@ -40,6 +57,14 @@ export type ShiftRow = {
   n_expense: number; expense_total: number;
   n_retur: number; retur_total: number;
   n_purchase: number; purchase_total: number;
+  /** Nota pertama/terakhir shift (MIN/MAX invoice_no, NULL bila tanpa jual). */
+  inv_awal: string | null; inv_akhir: string | null;
+  /** Diskon shift = transaksi + per baris (rumus SAMA dengan reports/daily). */
+  diskon_total: number;
+  /** Hutang TERBENTUK (tunai kurang + pelanggan valid) — laci tak menerimanya. */
+  hutang_baru: number;
+  /** Piutang TERBAYAR ke laci dalam periode shift — laci naik. */
+  piutang_bayar: number;
 };
 
 function errMsg(e: unknown): string {
@@ -48,18 +73,142 @@ function errMsg(e: unknown): string {
 }
 
 /** Kas yang SEHARUSNYA ada di laci menurut keputusan pemilik 2026-10-01
- *  (lihat komentar kepala file) + Tahap 1–3 (2026-10-11): modal awal +
- *  penjualan semua metode + topup (nominal + admin, dua angka dipisah di
- *  tampilan tapi keduanya masuk laci) − pengeluaran − retur − pembelian
- *  (terbayar, shift ini). Tarik tunai sengaja TIDAK ikut. */
+ *  (lihat komentar kepala file) + Tahap 1–3 (2026-10-11) + rekap Z-report:
+ *  modal awal + (omzet − hutang terbentuk, karena porsi hutang tak masuk
+ *  laci) + topup (nominal + admin) + piutang terbayar − pengeluaran − retur
+ *  − pembelian (terbayar, shift ini). Tarik tunai sengaja TIDAK ikut.
+ *  `?? 0` = baris lama/server lama tanpa kolom baru (kontrak aditif). */
 export function kasSeharusnya(s: ShiftRow): number {
-  return s.modal_awal + s.omzet + s.topup_nominal + s.topup_admin
+  return s.modal_awal + (s.omzet - (s.hutang_baru ?? 0)) + s.topup_nominal + s.topup_admin
+    + (s.piutang_bayar ?? 0)
     - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
 }
 
 /** Selisih kas = kas fisik − kas seharusnya (rumus di satu tempat). */
 export function hitungSelisih(modalAkhir: number, kasSeharusnyaDiLaci: number): number {
   return modalAkhir - kasSeharusnyaDiLaci;
+}
+
+/* ---------- Rekap cetak ala Z-report Aronium ---------- */
+
+async function namaToko(): Promise<string> {
+  try {
+    const r = await apiGet<{ data: { store_name: string } }>('/api/settings');
+    return r.data.store_name.trim() || 'RAVA POS';
+  } catch {
+    return 'RAVA POS'; // kop gagal dimuat = fallback, cetak TETAP jalan
+  }
+}
+
+const potongTgl = (iso: string | null): string => (iso ?? '').slice(0, 16) || '—';
+
+/** Susun objek Struk rekap shift (dipakai Thermal via print-agent).
+ *  `fisik` = modal akhir hitung kasir; null = rekap SEMENTARA (X, tanpa
+ *  fisik/selisih). Semua butir tampil walau 0 (auditabel, pola Z-report) —
+ *  kecuali blok fisik/selisih yang hanya ada di Z pasca-tutup. */
+export function bangunStrukRekap(s: ShiftRow, toko: string, fisik: number | null): Struk {
+  const nota = s.inv_awal && s.inv_akhir ? `${s.inv_awal} - ${s.inv_akhir}` : 'Tanpa penjualan';
+  const kasHarus = kasSeharusnya(s);
+  const baris: Struk['baris'] = [
+    { kiri: 'Modal awal', kanan: rp(s.modal_awal) },
+    { kiri: `Penjualan (${s.n_sales} nota)`, kanan: rp(s.omzet) },
+    { kiri: '  Tunai', kanan: rp(s.tunai) },
+    { kiri: '  QRIS', kanan: rp(s.qris) },
+    { kiri: '  Transfer', kanan: rp(s.transfer) },
+    { kiri: 'Diskon', kanan: rp(s.diskon_total ?? 0) },
+    { kiri: 'Topup nominal', kanan: rp(s.topup_nominal) },
+    { kiri: 'Topup admin', kanan: rp(s.topup_admin) },
+    { kiri: 'Tarik nominal', kanan: rp(s.tarik_nominal) },
+    { kiri: 'Tarik admin', kanan: rp(s.tarik_admin) },
+    { kiri: `Retur (${s.n_retur})`, kanan: rp(s.retur_total) },
+    { kiri: `Pengeluaran (${s.n_expense})`, kanan: rp(s.expense_total) },
+    { kiri: `Pembelian (${s.n_purchase})`, kanan: rp(s.purchase_total) },
+    { kiri: 'Hutang terbentuk', kanan: rp(s.hutang_baru ?? 0) },
+    { kiri: 'Piutang terbayar', kanan: rp(s.piutang_bayar ?? 0) },
+    { kiri: 'Kas seharusnya', kanan: rp(kasHarus), tebal: true },
+  ];
+  if (fisik !== null) {
+    const d = hitungSelisih(fisik, kasHarus);
+    baris.push(
+      { kiri: 'Modal akhir (fisik)', kanan: rp(fisik) },
+      { kiri: 'Selisih', kanan: `${d < 0 ? '-' : ''}${rp(Math.abs(d))}` },
+    );
+  }
+  return {
+    judul: toko,
+    subjudul: fisik !== null ? 'REKAP TUTUP SHIFT' : 'REKAP SEMENTARA (X)',
+    meta: [
+      `Shift #${s.id} · ${s.cashier}`,
+      `Buka ${potongTgl(s.opened_at)}${s.closed_at ? ` · Tutup ${potongTgl(s.closed_at)}` : ''}`,
+      `Nota ${nota}`,
+    ],
+    items: [],
+    baris,
+    kaki: ['Dicetak dari Ravaa POS'],
+  };
+}
+
+/** Kirim rekap ke printer thermal. Gagal cetak TAK PERNAH membatalkan apa
+ *  pun — hanya toast (pola cetak() POS). Saklar mati = info, bukan error. */
+async function kirimRekapThermal(s: ShiftRow, fisik: number | null): Promise<void> {
+  if (!getAutoPrint()) {
+    toast('Cetak sedang mati — nyalakan saklar "Cetak struk otomatis" bila ingin mengirim ke printer.', 'info');
+    return;
+  }
+  try {
+    await kirimPrint(strukUntuk(bangunStrukRekap(s, await namaToko(), fisik), 'thermal'));
+  } catch (e) {
+    toast(`Rekap tidak tercetak: ${e instanceof Error ? e.message : 'print-agent tidak jalan'}.`, 'warning', 9000);
+  }
+}
+
+/** PDF browser (pola cetakInvoice — window.print, bukan print-agent). */
+async function kirimRekapPdf(s: ShiftRow, fisik: number | null): Promise<void> {
+  try {
+    await cetakRekapShift(s, fisik);
+  } catch (e) {
+    toast(`Rekap PDF gagal: ${e instanceof Error ? e.message : 'popup diblokir?'}.`, 'warning', 9000);
+  }
+}
+
+/** Dialog rekap PASCA-tutup (Z): ringkasan + [Thermal][PDF][Selesai].
+ *  Dipanggil setelah POST close sukses dengan baris SEGAR dari server
+ *  (agregat + modal_akhir + closed_at sudah final). */
+async function rekapPascaTutup(id: number, onSelesai: () => void | Promise<void>): Promise<void> {
+  let segar: ShiftRow | null = null;
+  try {
+    const r = await apiGet<{ data: ShiftRow[] }>('/api/shifts?status=closed&limit=200');
+    segar = r.data.find((x) => x.id === id) ?? null;
+  } catch { /* jatuh ke toast di bawah */ }
+  if (!segar) {
+    toast(`Shift #${id} ditutup`, 'success');
+    await onSelesai();
+    return;
+  }
+  const fisik = segar.modal_akhir ?? 0;
+  const d = hitungSelisih(fisik, kasSeharusnya(segar));
+  const pilihan = await choiceDialog({
+    title: `Shift #${id} ditutup — selisih ${d === 0 ? 'Rp0 (pas)' : `${d < 0 ? 'kurang' : 'lebih'} ${rp(Math.abs(d))}`}`,
+    html: `<div class="struk-muka">
+      <div class="struk-tengah struk-redup">Rekap tutup shift tersimpan.</div>
+      <div class="struk-tengah struk-tebal">Shift #${segar.id} · ${segar.cashier}</div>
+      <div class="struk-garis"></div>
+      <div class="struk-baris"><span>Omzet (${segar.n_sales} nota)</span><span>${rp(segar.omzet)}</span></div>
+      <div class="struk-baris"><span>Kas seharusnya</span><span>${rp(kasSeharusnya(segar))}</span></div>
+      <div class="struk-baris"><span>Modal akhir</span><span>${rp(fisik)}</span></div>
+      <div class="struk-garis"></div>
+      <div class="struk-baris struk-total"><span>Selisih</span><span>${d < 0 ? '-' : ''}${rp(Math.abs(d))}</span></div>
+    </div>`,
+    icon: d === 0 ? 'success' : 'warning',
+    choices: [
+      { key: 'thermal', label: 'Thermal' },
+      { key: 'pdf', label: 'PDF' },
+    ],
+    cancelLabel: 'Selesai',
+  });
+  if (pilihan === 'thermal') await kirimRekapThermal(segar, fisik);
+  else if (pilihan === 'pdf') await kirimRekapPdf(segar, fisik);
+  await onSelesai();
 }
 
 /** Dialog tutup shift (identik untuk #/shifts dan POS): rincian laci +
@@ -91,6 +240,14 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         ${s.n_expense > 0 || s.expense_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pengeluaran — mengurangi laci</div>${baris(`Kas keluar (${s.n_expense} catatan)`, s.expense_total)}` : ''}
         ${s.n_retur > 0 || s.retur_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Retur — uang kembali, mengurangi laci</div>${baris(`Kembali ke pelanggan (${s.n_retur} retur)`, s.retur_total)}` : ''}
         ${s.n_purchase > 0 || s.purchase_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pembelian — kulakan tunai, mengurangi laci</div>${baris(`Bayar supplier (${s.n_purchase} nota)`, s.purchase_total)}` : ''}
+        <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Piutang (butir Z-report: credit)</div>
+        ${baris('Hutang terbentuk (tak masuk laci)', s.hutang_baru ?? 0)}
+        ${baris('Piutang terbayar (masuk laci)', s.piutang_bayar ?? 0)}
+        <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Rekap sementara (X) — tanpa menutup shift</div>
+        <div class="flex gap-2">
+          <button type="button" data-rekap="thermal" class="btn btn-ghost flex-1 justify-center">${icon('print')}<span>Thermal</span></button>
+          <button type="button" data-rekap="pdf" class="btn btn-ghost flex-1 justify-center">${icon('download')}<span>PDF</span></button>
+        </div>
         <div class="mt-2 flex justify-between gap-2 border-t border-gray-200 pt-2 dark:border-gray-700">
           <span class="font-medium text-gray-900 dark:text-white">Kas seharusnya di laci</span>
           <b id="sh-harus" class="tabular-nums text-gray-900 dark:text-white">${rp(kasHarus)}</b>
@@ -105,15 +262,24 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         <b id="sh-selisih" class="ml-1 tabular-nums">—</b>
       </p>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Kas seharusnya = modal awal + penjualan (semua metode) + topup
-        (nominal + admin) − pengeluaran − retur − pembelian (terbayar) shift
-        ini, sesuai keputusan pemilik 2026-10-01 + Tahap 1–3 (2026-10-11).
-        Tarik tunai tidak mengurangi laci — hanya dicatat sebagai info.
+        Kas seharusnya = modal awal + (omzet − hutang terbentuk) + topup
+        (nominal + admin) + piutang terbayar − pengeluaran − retur −
+        pembelian (terbayar) shift ini, sesuai keputusan pemilik 2026-10-01 +
+        Tahap 1–3 + rekap Z-report (2026-10-11). Tarik tunai tidak mengurangi
+        laci — hanya dicatat sebagai info.
       </p>`,
     onMount: ({ el, ok, close }) => {
       const akhir = el.querySelector('#sh-akhir') as HTMLInputElement;
       const sel = el.querySelector('#sh-selisih') as HTMLElement;
       akhir.focus();
+      // Rekap SEMENTARA (X): cetak kapan pun tanpa menutup shift (tanpa
+      // fisik/selisih — fisik baru diketahui saat kasir mengisi kolom).
+      el.querySelectorAll<HTMLElement>('[data-rekap]').forEach((b) =>
+        b.addEventListener('click', () => {
+          if (b.dataset.rekap === 'pdf') void kirimRekapPdf(s, null);
+          else void kirimRekapThermal(s, null);
+        }),
+      );
       akhir.addEventListener('input', () => {
         const v = akhir.value.trim();
         if (v === '' || !Number.isFinite(Number(v))) { sel.textContent = '—'; sel.className = 'ml-1 tabular-nums'; return; }
@@ -130,8 +296,9 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         try {
           await apiPost(`/api/shifts/${s.id}/close`, { modal_akhir: Number(v) });
           close();
-          toast(`Shift #${s.id} ditutup`, 'success');
-          await onSelesai();
+          // Z pasca-tutup: dialog rekap (Thermal/PDF/Selesai) + onSelesai di
+          // dalamnya — toast "ditutup" diganti judul dialog (tak redundan).
+          await rekapPascaTutup(s.id, onSelesai);
         } catch (e) {
           // 404 = sudah tutup / tidak ada (baris berubah di tab lain).
           toast(`Gagal: ${errMsg(e)}`, 'error');

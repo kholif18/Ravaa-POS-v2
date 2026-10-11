@@ -1539,6 +1539,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `n_expense` (COUNT) / `expense_total` (SUM `jumlah`, Tahap 1 2026-10-11) —
     hanya yang `shift_id`-nya cocok (yang NULL = di luar shift, tak kurangi
     laci mana pun).
+    `inv_awal` / `inv_akhir` (MIN/MAX `invoice_no`, rentang nota butir 5
+    Z-report), `diskon_total` (transaksi + per baris, rumus SAMA dengan
+    `sales.diskon` reports/daily), `hutang_baru` (SUM CASE `sisa_hutang`
+    persis GET /api/sales — porsi tunai tak masuk laci), `piutang_bayar`
+    (SUM `customer_debts` payment dalam periode opened..closed — ledger tak
+    punya shift_id; masuk laci). Semua 2026-10-11, rekap Z-report.
   - Agregat dihitung **all-time** (bukan per hari), sehingga penjualan offline
     yang masuk lewat outbox ikut terhitung begitu tersimpan dengan `shift_id`.
   - **Rumus selisih tutup shift = expected-cash (keputusan pemilik
@@ -1556,10 +1562,24 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     6. Pembelian (Tahap 3, 2026-10-11, keputusan pemilik (b)): laci **TURUN**
        `purchase_total` (= SUM `terbayar` nota received, bukan total nota —
        sisa hutang tak gerakkan kas; hanya yang terikat shift).
-    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin − expense_total − retur_total − purchase_total`
+    7. Hutang TERBENTUK (rekap Z-report, 2026-10-11): laci **TIDAK** menerima
+       `hutang_baru` — omzet tercatat penuh tapi uangnya kurang, jadi
+       dikurangkan (tanpa ini nota kredit selalu membuat selisih minus).
+    8. Piutang TERBAYAR (rekap Z-report, 2026-10-11, butir 7-8 "credit
+       payments collected"): laci **NAIK** `piutang_bayar`.
+    `kas seharusnya = modal_awal + (omzet − hutang_baru) + topup_nominal + topup_admin + piutang_bayar − expense_total − retur_total − purchase_total`
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shift-tutup.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
+  - **Rekap cetak tutup shift ala Z-report Aronium (2026-10-11)**:
+    dialog tutup = tombol [Thermal] [PDF] rekap SEMENTARA (X, tanpa
+    fisik/selisih, tanpa menutup); setelah POST close sukses = dialog rekap
+    (Z) [Thermal] [PDF] [Selesai]. Thermal = objek `Struk` dari
+    `bangunStrukRekap()` via print-agent 32 kolom (guard autoPrint/pause
+    pola `cetak()` POS); PDF = `htmlRekapShift()` + `cetakRekapShift()` di
+    `invoice.ts` (window.print browser, pola `cetakInvoice` — kop `store_*`,
+    tabel uraian, kotak Kas seharusnya/Modal akhir/Selisih). Gagal cetak
+    tak pernah membatalkan tutup shift (toast saja).
 * `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?,customer_id?}`
   - **`invoice_no` (baru 2026-10-03, direvisi 2026-10-04, fitur Invoice A4)**:
     di-assign **SERVER**, tidak pernah dari client. Format **`YYMMDD-NNNNNN`**
