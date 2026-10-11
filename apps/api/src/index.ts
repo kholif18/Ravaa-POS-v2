@@ -1095,7 +1095,12 @@ app.get('/api/shifts', (c) => {
             -- Hanya yang terikat shift_id ini; yang NULL (di luar shift)
             -- tetap tercatat + masuk laporan harian, bukan hitungan laci.
             (SELECT COUNT(*) FROM expenses e WHERE e.shift_id = s.id) AS n_expense,
-            (SELECT COALESCE(SUM(e.jumlah),0) FROM expenses e WHERE e.shift_id = s.id) AS expense_total
+            (SELECT COALESCE(SUM(e.jumlah),0) FROM expenses e WHERE e.shift_id = s.id) AS expense_total,
+            -- Retur tunai (Tahap 2, 2026-10-11): uang KEMBALI ke pelanggan —
+            -- mengurangi expected-cash di kasSeharusnya() (keputusan pemilik
+            -- (a)). Hanya yang terikat shift_id ini.
+            (SELECT COUNT(*) FROM returns r WHERE r.shift_id = s.id) AS n_retur,
+            (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.shift_id = s.id) AS retur_total
        FROM shifts s
        ${klausul}
       ORDER BY s.id DESC
@@ -1568,6 +1573,208 @@ app.delete('/api/expenses/:id', (c) => {
   return c.json({ data: { id, deleted: true } });
 });
 
+// ---------- retur penjualan (Tahap 2, 2026-10-11) ----------
+// Barang kembali (stok += qty, version++, stock_moves reason='retur') + uang
+// tunai kembali ke pelanggan (mengurangi laci bila terikat shift — keputusan
+// pemilik (a)). SEMUA mutasi dalam SATU db.transaction (skala 1-2 kasir:
+// atomic cukup, pola simpanMutasiHutang / restock).
+//   - Baris ber-nota (`sale_item_id`): harga/nama di-SNAPSHOT dari sale_items
+//     (uang yang kembali = harga SAAT JUAL, bukan harga master sekarang);
+//     qty ≤ qty terjual − sudah diretura (400 bila lebih).
+//   - Baris manual (`product_id` + `price`): untuk retur tanpa nota; produk
+//     harus ada, harga wajib dikirim (server tidak menebak harga).
+//   - Stok hanya kembali untuk produk track_stock=1 (pola POST /api/sales:
+//     jasa/cetak tidak punya stok untuk dikembalikan); uang kembali TETAP
+//     dihitung untuk semua baris (jasa yang dibatalkan = refund uang).
+type ReturItemIn = { sale_item_id?: number; product_id?: number; qty?: number; price?: number };
+const simpanRetur = db.transaction(
+  (masuk: { sale_id: string | null; items: ReturItemIn[]; note: string; cashier: string; shift_id: number | null }) => {
+    // Validasi shift up-front (di luar mutasi stok, pesannya duluan).
+    if (masuk.shift_id !== null) {
+      const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(masuk.shift_id) as { id: number } | undefined;
+      if (!ada) throw new Error('shift tidak dikenal');
+    }
+    let saleId: string | null = null;
+    if (masuk.sale_id !== null && masuk.sale_id !== '') {
+      const nota = db.prepare('SELECT id FROM sales WHERE id = ?').get(masuk.sale_id) as { id: string } | undefined;
+      if (!nota) throw new Error('nota asal tidak dikenal');
+      saleId = nota.id;
+    }
+    if (!masuk.items.length) throw new Error('baris retur kosong');
+    // Sisa boleh-diretura per baris nota = terjual − sudah diretura.
+    const sisaBaris = (saleItemId: number): number => {
+      const jual = db.prepare('SELECT qty FROM sale_items WHERE id = ?').get(saleItemId) as { qty: number } | undefined;
+      if (!jual) throw new Error(`baris nota #${saleItemId} tidak dikenal`);
+      const sudah = db.prepare('SELECT COALESCE(SUM(qty),0) AS t FROM return_items WHERE sale_item_id = ?').get(saleItemId) as { t: number };
+      return jual.qty - sudah.t;
+    };
+    const baris: { sale_item_id: number | null; product_id: number | null; name: string; qty: number; price: number; amount: number }[] = [];
+    for (const [i, it] of masuk.items.entries()) {
+      const qty = Number(it.qty ?? 0);
+      if (!Number.isFinite(qty) || qty <= 0) throw new Error(`baris ${i + 1}: qty harus > 0`);
+      if (it.sale_item_id !== undefined && it.sale_item_id !== null) {
+        const siId = Number(it.sale_item_id);
+        if (!Number.isInteger(siId)) throw new Error(`baris ${i + 1}: sale_item_id harus integer`);
+        const si = db.prepare(
+          `SELECT si.*, c.track_stock FROM sale_items si
+             LEFT JOIN products p ON p.id = si.product_id
+             LEFT JOIN categories c ON c.id = p.category_id
+            WHERE si.id = ?`,
+        ).get(siId) as { id: number; sale_id: string; product_id: number | null; name: string; price: number; track_stock: number | null } | undefined;
+        if (!si) throw new Error(`baris ${i + 1}: baris nota tidak dikenal`);
+        if (saleId !== null && si.sale_id !== saleId) throw new Error(`baris ${i + 1}: bukan baris nota ini`);
+        if (qty - sisaBaris(siId) > 1e-9) throw new Error(`baris ${i + 1}: melebihi sisa (${sisaBaris(siId)} ${si.name})`);
+        baris.push({ sale_item_id: siId, product_id: si.product_id, name: si.name, qty, price: si.price, amount: Math.round(qty * si.price) });
+      } else {
+        const pid = Number(it.product_id);
+        const price = Number(it.price ?? NaN);
+        if (!Number.isInteger(pid)) throw new Error(`baris ${i + 1}: product_id harus integer`);
+        if (!Number.isFinite(price) || price < 0) throw new Error(`baris ${i + 1}: harga wajib dikirim (>= 0)`);
+        const p = db.prepare(
+          `SELECT p.id, p.name, c.track_stock FROM products p JOIN categories c ON c.id = p.category_id WHERE p.id = ?`,
+        ).get(pid) as { id: number; name: string; track_stock: number } | undefined;
+        if (!p) throw new Error(`baris ${i + 1}: produk tidak dikenal`);
+        baris.push({ sale_item_id: null, product_id: pid, name: p.name, qty, price: Math.round(price), amount: Math.round(qty * Math.round(price)) });
+      }
+    }
+    const total = baris.reduce((s, b) => s + b.amount, 0);
+    if (total <= 0) throw new Error('total retur harus > 0');
+    const ret = db.prepare(
+      `INSERT INTO returns (sale_id, total, cashier, shift_id, note) VALUES (?, ?, ?, ?, ?) RETURNING *`,
+    ).get(saleId, total, masuk.cashier, masuk.shift_id, masuk.note) as { id: number };
+    const insItem = db.prepare(
+      `INSERT INTO return_items (return_id, sale_item_id, product_id, name, qty, price, amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const b of baris) {
+      insItem.run(ret.id, b.sale_item_id, b.product_id, b.name, b.qty, b.price, b.amount);
+      // Stok kembali HANYA untuk barang fisik (track_stock=1, pola sales):
+      // jasa/cetak refund uangnya saja. version WAJIB naik (aturan mutasi
+      // products — delta sync kasir). unit_cost = avg_cost saat itu (pola
+      // sale/opname, bukan harga batch seperti restock).
+      if (b.product_id !== null) {
+        const p = db.prepare(
+          `SELECT p.stock, p.avg_cost, c.track_stock FROM products p
+             JOIN categories c ON c.id = p.category_id WHERE p.id = ?`,
+        ).get(b.product_id) as { stock: number; avg_cost: number; track_stock: number } | undefined;
+        if (p?.track_stock) {
+          db.prepare(
+            `UPDATE products SET stock = stock + ?, updated_at = datetime('now'),
+               version = (SELECT COALESCE(MAX(version),0) + 1 FROM products)
+             WHERE id = ?`,
+          ).run(b.qty, b.product_id);
+          db.prepare(`INSERT INTO stock_moves (product_id, qty, reason, ref_id, unit_cost, cashier) VALUES (?, ?, 'retur', ?, ?, ?)`)
+            .run(b.product_id, b.qty, String(ret.id), p.avg_cost, masuk.cashier);
+        }
+      }
+    }
+    return db.prepare('SELECT * FROM returns WHERE id = ?').get(ret.id);
+  },
+);
+
+app.post('/api/returns', async (c) => {
+  try {
+    const body = await c.req.json();
+    const rawItems = body?.items;
+    if (!Array.isArray(rawItems) || !rawItems.length) return c.json({ error: 'items wajib array non-kosong' }, 400);
+    if (rawItems.length > 200) return c.json({ error: 'maks 200 baris per retur' }, 400);
+    const note = String(body?.note ?? '').trim();
+    if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    const rawShift = body?.shift_id;
+    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
+    if (shiftId !== null && !Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
+    const rawSale = body?.sale_id;
+    const saleId = rawSale === undefined || rawSale === null || rawSale === '' ? null : String(rawSale);
+    const row = simpanRetur({
+      sale_id: saleId,
+      items: rawItems as ReturItemIn[],
+      note,
+      cashier: String(body?.cashier ?? '').trim() || 'kasir',
+      shift_id: shiftId,
+    });
+    const items = db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all((row as { id: number }).id);
+    return c.json({ data: { retur: row, items } }, 201);
+  } catch (e) {
+    const pesan = e instanceof Error ? e.message : 'gagal simpan retur';
+    // "tidak dikenal" = referensi ngawur → 404, KECUALI shift (kontrak:
+    // shift_id tak dikenal = 400 "shift tidak dikenal", pola expenses).
+    const hilang = /tidak dikenal|tidak ada/.test(pesan) && !/shift/.test(pesan);
+    return c.json({ error: pesan }, hilang ? 404 : 400);
+  }
+});
+
+// Daftar retur per hari (halaman #/returns) — filter tanggal + limit/offset
+// via helper bacaHari (pola GET /api/sales); `jumlah` = total uang kembali
+// hari itu untuk kartu halaman. Urutan terbaru di atas.
+app.get('/api/returns', (c) => {
+  const h = bacaHari((k) => c.req.query(k));
+  if (!h.ok) return c.json({ error: h.error }, 400);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM returns WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT r.*, s.invoice_no AS invoice_no,
+            (SELECT COUNT(*) FROM return_items ri WHERE ri.return_id = r.id) AS n_items
+       FROM returns r LEFT JOIN sales s ON s.id = r.sale_id
+      WHERE date(r.created_at)=date(?) ORDER BY r.created_at DESC, r.id DESC LIMIT ? OFFSET ?`,
+  ).all(h.hari, h.limit, h.offset);
+  const jumlah = (db.prepare(`SELECT COALESCE(SUM(total),0) AS t FROM returns WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { t: number }).t;
+  return c.json({ data, total, jumlah });
+});
+
+// Isi lengkap satu retur (baris + nota asal bila ada).
+app.get('/api/returns/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const retur = db.prepare(
+    `SELECT r.*, s.invoice_no AS invoice_no FROM returns r LEFT JOIN sales s ON s.id = r.sale_id WHERE r.id = ?`,
+  ).get(id);
+  if (!retur) return c.json({ error: 'retur tidak ada' }, 404);
+  const items = db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all(id);
+  return c.json({ data: { retur, items } });
+});
+
+// Batalkan retur salah ketik: stok dikembalikan KELUAR lagi (mutasi lawan
+// reason='retur', qty negatif + note penanda) lalu baris dihapus — dalam satu
+// transaction. Stok yang tidak cukup (barang sudah terjual lagi) = 400,
+// bukan diam-diam minus: tanpa guard ini pembatalan mengarang stok dari nol.
+app.delete('/api/returns/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  try {
+    db.transaction(() => {
+      const r = db.prepare('SELECT * FROM returns WHERE id = ?').get(id) as { id: number; cashier: string } | undefined;
+      if (!r) throw new Error('retur tidak ada');
+      const items = db.prepare('SELECT * FROM return_items WHERE return_id = ?').all(id) as { product_id: number | null; qty: number; name: string }[];
+      for (const it of items) {
+        if (it.product_id === null) continue;
+        const p = db.prepare(
+          `SELECT p.stock, c.track_stock FROM products p
+             JOIN categories c ON c.id = p.category_id WHERE p.id = ?`,
+        ).get(it.product_id) as { stock: number; track_stock: number } | undefined;
+        if (p?.track_stock && p.stock - it.qty < 0) {
+          const allow = db.prepare(`SELECT value FROM settings WHERE key = 'allow_negative_stock'`).get() as { value: string } | undefined;
+          if (!allow || allow.value !== '1') throw new Error(`stok ${it.name} tidak cukup untuk pembatalan (sisa ${p.stock})`);
+        }
+        if (p?.track_stock) {
+          db.prepare(
+            `UPDATE products SET stock = stock - ?, updated_at = datetime('now'),
+               version = (SELECT COALESCE(MAX(version),0) + 1 FROM products)
+             WHERE id = ?`,
+          ).run(it.qty, it.product_id);
+          db.prepare(`INSERT INTO stock_moves (product_id, qty, reason, ref_id, unit_cost, cashier) VALUES (?, ?, 'retur', ?, 0, ?)`)
+            .run(it.product_id, -it.qty, `batal-${id}`, r.cashier);
+        }
+      }
+      db.prepare('DELETE FROM returns WHERE id = ?').run(id);
+    })();
+    return c.json({ data: { id, deleted: true } });
+  } catch (e) {
+    const pesan = e instanceof Error ? e.message : 'gagal batalkan retur';
+    return c.json({ error: pesan }, /tidak ada/.test(pesan) ? 404 : 400);
+  }
+});
+
 // ---------- Pengaturan toko ----------
 // Tabel key/value supaya menambah opsi baru tidak butuh migrasi kolom.
 // Nilai disimpan sebagai teks '0'/'1' — angka boolean dilewatkan lewat JSON
@@ -1860,7 +2067,14 @@ app.get('/api/reports/daily', (c) => {
     `SELECT COUNT(*) AS n, COALESCE(SUM(jumlah),0) AS total
      FROM expenses WHERE date(created_at)=date(?)`,
   ).get(date) as { n: number; total: number };
-  return c.json({ data: { date, sales, hpp, laba, byMethod, topup, topItems, lowStock, expense } });
+  // Retur hari itu (Tahap 2, 2026-10-11) — dilaporkan TERPISAH + dipakai kartu
+  // "Omzet bersih" (keputusan (c) hybrid: kotor + retur + bersih). Total =
+  // uang kembali (SUM returns.total), bukan qty.
+  const retur = db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
+     FROM returns WHERE date(created_at)=date(?)`,
+  ).get(date) as { n: number; total: number };
+  return c.json({ data: { date, sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur } });
 });
 
 const port = Number(process.env.PORT ?? 3001);

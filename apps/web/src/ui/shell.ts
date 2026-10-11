@@ -1,7 +1,7 @@
 import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'customers' | 'debts' | 'reports' | 'expenses' | 'shifts' | 'settings';
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'shifts' | 'settings';
 export type Route = 'pos' | AdminRoute;
 
 interface NavItem {
@@ -16,12 +16,14 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     items: [{ route: 'dashboard', label: 'Dashboard', icon: 'dashboard' }],
   },
   {
-    // Alur uang masuk: lihat transaksi -> kelola pelanggan -> piutang.
-    // Slot Retur (#/returns) masuk posisi kedua grup ini saat fiturnya dibangun.
+    // Alur uang masuk: lihat transaksi -> retur (uang keluar) -> kelola
+    // pelanggan -> piutang.
     group: 'Penjualan',
     items: [
       // Linimasa penjualan + topup/tarik per hari (baru 2026-09-30).
       { route: 'history', label: 'Riwayat transaksi', icon: 'receipt' },
+      // Retur penjualan (Tahap 2, 2026-10-11): barang kembali + uang kembali.
+      { route: 'returns', label: 'Retur', icon: 'sync' },
       // Pelanggan & piutang (baru 2026-10-04): master kontak + ledger hutang.
       { route: 'customers', label: 'Pelanggan', icon: 'users' },
       { route: 'debts', label: 'Hutang', icon: 'wallet' },
@@ -72,6 +74,7 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   stock: 'Stok',
   suppliers: 'Supplier',
   history: 'Riwayat transaksi',
+  returns: 'Retur',
   customers: 'Pelanggan',
   debts: 'Hutang',
   reports: 'Laporan',
@@ -89,6 +92,7 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   stock: ['Barang', 'Stok'],
   suppliers: ['Barang', 'Supplier'],
   history: ['Penjualan', 'Riwayat transaksi'],
+  returns: ['Penjualan', 'Retur'],
   customers: ['Penjualan', 'Pelanggan'],
   debts: ['Penjualan', 'Hutang'],
   reports: ['Keuangan', 'Laporan'],
@@ -106,6 +110,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   stock: 'Pantau stok menipis dan riwayat restock.',
   suppliers: 'Pemasok barang kulakan — dipakai untuk Pembelian (Tahap 3).',
   history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
+  returns: 'Barang kembali + uang kembali ke pelanggan — mengurangi laci bila terikat shift.',
   customers: 'Kontak pembeli — dipakai untuk mencatat hutang di halaman Hutang.',
   debts: 'Buku piutang: catat siapa berhutang dan pembayarannya.',
   reports: 'Omzet, laba, HPP, rekap metode bayar, produk terlaris, dan stok menipis.',

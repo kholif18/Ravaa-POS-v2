@@ -1,6 +1,7 @@
 import { mountLabelsPage, unmountLabelsPage } from './pages/labels';
 import { mountDashboardPage } from './pages/dashboard';
 import { mountHistoryPage } from './pages/history';
+import { mountReturnsPage } from './pages/returns';
 import { mountReportsPage } from './pages/reports';
 import { mountPosPage, unmountPosPage } from './pages/pos';
 import { mountProductsPage } from './pages/products';
@@ -80,6 +81,9 @@ function render(): void {
   } else if (route === 'history') {
     // Riwayat transaksi: linimasa penjualan + topup/tarik, state sendiri.
     void mountHistoryPage(page);
+  } else if (route === 'returns') {
+    // Retur penjualan: linimasa + retur manual, state sendiri.
+    void mountReturnsPage(page);
   } else if (route === 'reports') {
     // Laporan harian: angka diambil utuh dari GET /api/reports/daily.
     void mountReportsPage(page);

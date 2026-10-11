@@ -41,6 +41,9 @@ type Laporan = {
   /** Pengeluaran kas hari itu (Tahap 1, 2026-10-11) — opsional supaya halaman
    *  tetap jalan melawan server lama yang belum mengirimkannya. */
   expense?: { n: number; total: number };
+  /** Retur hari itu (Tahap 2, 2026-10-11) — total = uang kembali. Opsional
+   *  dengan alasan yang sama. Dipakai kartu Retur + Omzet bersih (hybrid). */
+  retur?: { n: number; total: number };
 };
 
 /* ---------- state ---------- */
@@ -105,8 +108,14 @@ function toolbar(): string {
 
 function ringkasan(l: Laporan): string {
   const exp = l.expense ?? { n: 0, total: 0 };
+  const ret = l.retur ?? { n: 0, total: 0 };
+  // Hybrid keputusan (c): Omzet KOTOR + Retur terpisah + Omzet bersih.
+  // Bersih = omzet − retur, dihitung di klien dari dua angka server (preseden:
+  // `nonTunai = omzet − tunai` di shift-tutup.ts) — agregatnya tetap server.
   const kartu = [
     { label: 'Omzet', nilai: rp(l.sales.omzet), sub: `${l.sales.n} transaksi (setelah diskon)` },
+    { label: 'Retur', nilai: rp(ret.total), sub: `${ret.n} retur · uang kembali`, link: '#/returns' },
+    { label: 'Omzet bersih', nilai: rp(l.sales.omzet - ret.total), sub: 'omzet − retur' },
     { label: 'Laba', nilai: rp(l.laba), sub: 'omzet − HPP', tone: l.laba < 0 ? 'danger' : '' },
     { label: 'HPP', nilai: rp(l.hpp), sub: 'modal rata-rata tertimbang' },
     { label: 'Diskon', nilai: rp(l.sales.diskon), sub: 'transaksi + per baris' },
@@ -114,7 +123,7 @@ function ringkasan(l: Laporan): string {
     // (laba = laba kotor dagang). Link ke halaman catatnya.
     { label: 'Pengeluaran', nilai: rp(exp.total), sub: `${exp.n} catatan · kas keluar`, link: '#/expenses' },
   ];
-  return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+  return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
     ${kartu
       .map((k) => {
         const warna = k.tone === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white';
@@ -266,7 +275,9 @@ function stokMenipis(l: Laporan): string {
 function isi(): string {
   if (state.loading) {
     return `<div class="space-y-3">
-      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
+        <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
         <div class="card"><div class="skel h-3 w-24"></div><div class="skel mt-2 h-7 w-32"></div></div>
@@ -339,6 +350,8 @@ function eksporCSV(): void {
     ['Diskon', l.sales.diskon],
     ['HPP', l.hpp],
     ['Laba', l.laba],
+    ['Retur', (l.retur ?? { n: 0, total: 0 }).total],
+    ['Omzet bersih', l.sales.omzet - (l.retur ?? { n: 0, total: 0 }).total],
     ['Pengeluaran', (l.expense ?? { n: 0, total: 0 }).total],
     [],
     ['Metode bayar'],

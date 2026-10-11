@@ -169,6 +169,47 @@ CREATE TABLE IF NOT EXISTS sale_items (
 );
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
 
+-- Retur penjualan (Tahap 2, 2026-10-11, halaman #/returns + tombol per nota
+-- di #/history): barang kembali dari pelanggan, uang kembali ke pelanggan.
+-- Stok produk fisik KEMBALI masuk (`stock += qty` + `version++` + `stock_moves`
+-- `reason='retur'`, qty positif = barang masuk). Uang tunai KELUAR dari laci:
+-- mengurangi `kasSeharusnya()` bila terikat shift (agregat `retur_total` di
+-- GET /api/shifts — keputusan pemilik (a): retur kurangi laci). Rekap harian
+-- di GET /api/reports/daily (`retur:{n,total}`); laporan menampilkan 3 angka
+-- hybrid — Omzet kotor + Retur terpisah + Omzet bersih (keputusan (c)).
+CREATE TABLE IF NOT EXISTS returns (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Nota asal (opsional): NULL = retur tanpa nota (barang dibawa tanpa struk).
+  -- Bila terisi harus sales yang ada — sisa qty per baris divalidasi server
+  -- (qty retur ≤ qty terjual − sudah diretura).
+  sale_id     TEXT REFERENCES sales(id),
+  -- Total uang kembali = SUM(qty*harga) baris. Tunai keluar laci shift ini
+  -- (bila shift_id terikat); NULL = di luar shift (tetap tercatat + laporan).
+  total       INTEGER NOT NULL CHECK (total > 0),
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  shift_id    INTEGER REFERENCES shifts(id),
+  note        TEXT NOT NULL DEFAULT ''  -- maks 200 char (aturan catatan)
+);
+CREATE TABLE IF NOT EXISTS return_items (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  return_id     INTEGER NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+  -- Baris nota asal (opsional, terisi bila retur ber-nota): harga & nama
+  -- di-SNAPSHOT dari sale_items (bukan dari master — harga saat jual yang
+  -- kembali, bukan harga sekarang).
+  sale_item_id  INTEGER REFERENCES sale_items(id),
+  product_id    INTEGER REFERENCES products(id),
+  name          TEXT NOT NULL,           -- snapshot nama (struk/riwayat stabil)
+  qty           REAL NOT NULL CHECK (qty > 0),
+  price         INTEGER NOT NULL,        -- harga satuan saat jual (snapshot)
+  amount        INTEGER NOT NULL         -- qty*price (nilai kembali baris ini)
+);
+CREATE INDEX IF NOT EXISTS idx_returns_tanggal ON returns(created_at);
+CREATE INDEX IF NOT EXISTS idx_returns_shift ON returns(shift_id);
+CREATE INDEX IF NOT EXISTS idx_returns_sale ON returns(sale_id);
+CREATE INDEX IF NOT EXISTS idx_return_items_return ON return_items(return_id);
+CREATE INDEX IF NOT EXISTS idx_return_items_sale_item ON return_items(sale_item_id);
+
 -- Topup & tarik tunai: nominal bebas + admin editable.
 -- nominal = mutasi modal/e-money, admin = pendapatan jasa.
 CREATE TABLE IF NOT EXISTS topup_txns (

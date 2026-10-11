@@ -854,14 +854,31 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           sendiri + jejak `· +N layanan` di Keterangan). Yang
                           `sale_id` null / yatim tetap baris linimasa mandiri
                           seperti dulu. Kelompokkan via `Set` saleIds + `Map`
-                          subMap di `baris()`; `renderTabel()` sisipkan
-                          `<tr class="topup-subrow">` (tanpa `data-trx`) tepat
-                          setelah induknya.
+                         subMap di `baris()`; `renderTabel()` sisipkan
+                         `<tr class="topup-subrow">` (tanpa `data-trx`) tepat
+                         setelah induknya.
+                         **Tombol "Buat retur" (Tahap 2, 2026-10-11)** di kartu
+                         Pembayaran `detailJual()` (`data-retur-nota`):
+                         `dialogReturNota()` prefill item nota + input qty
+                         kembali per baris → `POST /api/returns`
+                         (`sale_id` + shift TERBUKA KINI, bukan shift nota
+                         asal) — riwayat nota lama tidak diubah, catatan baru
+                         masuk `#/returns`.
  apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan): laporan harian
-                          pemilik — 4 kartu (omzet/laba/HPP/diskon), rekap metode
-                          bayar, topup & tarik, produk terlaris, stok menipis,
-                          ekspor CSV. SELURUH angka dari GET /api/reports/daily
-                          apa adanya (tanpa hitung ulang di klien).
+                          pemilik — 7 kartu (omzet/retur/bersih/laba/HPP/
+                          diskon/pengeluaran — hybrid keputusan (c): kotor +
+                          retur terpisah + bersih = omzet−retur dihitung klien
+                          dari dua angka server, preseden `nonTunai` di
+                          shift-tutup.ts), rekap metode bayar, topup & tarik,
+                          produk terlaris, stok menipis, ekspor CSV (ikut baris
+                          Retur + Omzet bersih). SELURUH agregat dari GET
+                          /api/reports/daily apa adanya.
+ apps/web/src/pages/returns.ts  Halaman #/returns (Tahap 2, 2026-10-11):
+                          linimasa retur per hari (toolbar tanggal pola
+                          expenses.ts) + kartu uang kembali + tabel (klik baris
+                          = rincian + tombol Batalkan) + dialog retur manual
+                          (cari produk server-side, baris qty/harga prefill) —
+                          retur DARI nota lewat tombol di Riwayat, bukan di sini.
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
 apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
@@ -1126,9 +1143,32 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     - `POST /api/suppliers` `{id?,name,phone?,address?,note?}` -> 201/200
       (validasi & penomoran `SUP-<6 digit>` via `nomorUrut` persis customers;
       **sengaja TIDAK upsert by phone**, alasan sama).
-    - `DELETE /api/suppliers/:id` -> `{data:{id,deleted:true}}` — hapus
-      LANGSUNG (belum ada tabel yang mereferensinya; Tahap 3 **wajib**
-      menambah guard 400 seperti hapus pelanggan berhutang).
+  - `DELETE /api/suppliers/:id` -> `{data:{id,deleted:true}}` — hapus
+    LANGSUNG (belum ada tabel yang mereferensinya; Tahap 3 **wajib**
+    menambah guard 400 seperti hapus pelanggan berhutang).
+  - **Retur penjualan (Tahap 2, 2026-10-11, halaman `#/returns` + tombol per
+    nota di `#/history`)** — barang kembali (stok += qty) + uang tunai kembali
+    (kurangi laci bila terikat shift — keputusan pemilik (a)). Satu
+    `db.transaction` (`simpanRetur`, pola restock/hutang).
+    - `POST /api/returns` `{sale_id?,items:[{sale_item_id?,product_id?,qty>0,price?}],note?≤200,cashier?,shift_id?}`
+      -> 201 `{data:{retur,items}}`. Baris ber-nota: harga/nama SNAPSHOT dari
+      `sale_items` (uang kembali = harga saat jual), `qty ≤ terjual − sudah
+      diretura` (400 `"baris N: melebihi sisa..."`); baris manual: produk harus
+      ada + `price` wajib (400 bila ditebak). Stok kembali HANYA
+      `track_stock=1` (+`version++` + `stock_moves reason='retur'`,
+      `unit_cost=avg_cost`); uang dihitung semua baris. `shift_id` opsional
+      (harus ada bila dikirim, 400 `"shift tidak dikenal"`); maks 200 baris.
+    - `GET /api/returns?date=&limit=&offset=` -> `{data:[{...,invoice_no,n_items}], total, jumlah}`
+      (`jumlah` = uang kembali hari itu; `invoice_no` via LEFT JOIN sales).
+    - `GET /api/returns/:id` -> `{data:{retur,items}}`.
+    - `DELETE /api/returns/:id` (batal salah ketik): stok KELUAR lagi
+      (mutasi lawan `reason='retur'` qty negatif, `ref_id='batal-<id>'`) lalu
+      baris dihapus, satu transaction; stok tak cukup → 400 (kecuali
+      `allow_negative_stock=1`), tak ada → 404.
+    - Laci: yang terikat `shift_id` mengurangi expected-cash
+      (`n_retur`/`retur_total` di `GET /api/shifts` → `kasSeharusnya()`);
+      rekap harian `GET /api/reports/daily` (`retur:{n,total}` — kartu Retur +
+      Omzet bersih hybrid, tidak menggerus laba).
   - **Pengeluaran kas (Tahap 1, 2026-10-11, halaman `#/expenses`)** — kas
     TUNAI keluar operasional. Bukan mutasi stok (tidak menyentuh
     `products.version`) dan bukan HPP (laba = omzet − HPP, definisi tetap).
@@ -1452,7 +1492,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
        rekening; rincian per metode wajib ditampilkan.
     4. Pengeluaran (Tahap 1, 2026-10-11): laci **TURUN** `expense_total`
        (hanya yang terikat shift ini).
-    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin − expense_total`
+    5. Retur (Tahap 2, 2026-10-11, keputusan pemilik (a)): laci **TURUN**
+       `retur_total` (uang kembali ke pelanggan; hanya yang terikat shift).
+    `kas seharusnya = modal_awal + omzet + topup_nominal + topup_admin − expense_total − retur_total`
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shift-tutup.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
@@ -1642,7 +1684,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
-  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total}}}`
+  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total}}}`
   - `hpp = ROUND(SUM(sale_items.qty * sale_items.cost))` untuk penjualan hari itu.
   - `laba = sales.omzet - hpp` (omzet sudah **setelah** semua diskon).
   - `expense` (Tahap 1, 2026-10-11) = COUNT + SUM `expenses` hari itu —

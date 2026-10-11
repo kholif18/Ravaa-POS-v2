@@ -11,14 +11,16 @@
 // jadi ringkasan di atas tabel diambil dari laporan itu sendiri sehingga angka
 // di sini TIDAK MUNGKIN berbeda dengan halaman Laporan.
 //
-// Tidak ada pembatalan/refund di sini: riwayat bersifat catatan. Koreksi nota
-// lewat jalur yang sama seperti sebelumnya (stok opname + transaksi baru).
+// Retur ADA di sini (Tahap 2, 2026-10-11) — sebagai CATATAN BARU lewat tombol
+// "Buat retur" per nota (dialog prefill item), bukan edit nota lama: riwayat
+// penjualan tetap utuh, stok kembali + uang keluar tercatat di #/returns.
 
-import { apiGet, HttpError } from '../api';
+import { apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
 import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
-import { getToko } from '../ui/user';
+import { getCashier, getToko } from '../ui/user';
+import { openModal } from '../ui/modal';
 import { rp, strukUntuk, kirimPrint, type Struk } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog } from '../ui/confirm';
@@ -292,8 +294,89 @@ function detailJual(s: SaleRow): string {
       <button type="button" data-reprint="${esc(s.id)}" class="btn btn-primary mt-3 w-full justify-center">
         ${icon('print')}<span>Cetak ulang struk</span>
       </button>
+      <button type="button" data-retur-nota="${esc(s.id)}" class="btn btn-ghost mt-2 w-full justify-center" title="Barang kembali + uang kembali ke pelanggan">
+        ${icon('sync')}<span>Buat retur</span>
+      </button>
     </div>
   </div>`;
+}
+
+/** Dialog retur DARI nota (Tahap 2, 2026-10-11): item nota di-prefill, kasir
+ *  mengisi qty kembali per baris (0 = tidak ikut). Server menjaga sisa
+ *  (qty ≤ terjual − sudah diretura, 400 bila lebih) + mengembalikan stok
+ *  fisik + mencatat uang keluar. Uang terikat shift TERBUKA KINI (laci yang
+ *  keluar uangnya sekarang), bukan shift nota asal yang bisa sudah tutup. */
+async function dialogReturNota(s: SaleRow): Promise<void> {
+  let items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
+  if (!items.length) {
+    try {
+      const j = await apiGet<{ data: { items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
+      items = j.data.items;
+    } catch (e) {
+      toast(`Gagal memuat nota: ${errMsg(e)}`, 'error');
+      return;
+    }
+  }
+  if (!items.length) {
+    toast('Nota ini tanpa baris item — tidak ada yang bisa diretura', 'warning');
+    return;
+  }
+  let shiftId: number | null = null;
+  try {
+    const r = await apiGet<{ data: { id: number } | null }>(
+      `/api/shifts/open?cashier=${encodeURIComponent(getCashier())}`,
+    );
+    shiftId = r.data?.id ?? null;
+  } catch { /* di luar shift = NULL, bukan error */ }
+  openModal({
+    title: `Retur — Nota ${s.invoice_no ?? s.id.slice(0, 8)}`,
+    okLabel: 'Simpan retur',
+    wide: true,
+    body: `
+      <div class="space-y-1">
+        ${items.map((it) => `
+          <div class="flex items-center justify-between gap-2 border-b border-gray-100 py-1.5 last:border-0 dark:border-gray-800">
+            <span class="min-w-0 text-sm"><b>${it.qty}${it.unit ? ` ${esc(it.unit)}` : ''} ×</b> ${esc(it.name)}
+              <span class="cell-sub">(${rp(it.price)}${it.product_id === null ? ' · tanpa stok' : ''})</span></span>
+            <span class="flex shrink-0 items-center gap-1.5">
+              <label class="text-xs text-gray-500 dark:text-gray-400" for="rt-${it.id}">kembali</label>
+              <input id="rt-${it.id}" data-rt-qty="${it.id}" data-rt-max="${it.qty}" class="input input-sm !w-24 text-right tabular-nums" type="number" min="0" max="${it.qty}" step="any" value="0" />
+            </span>
+          </div>`).join('')}
+      </div>
+      <div class="field mt-3">
+        <label class="label" for="rt-note">Catatan</label>
+        <input id="rt-note" class="input" maxlength="200" placeholder="cth: dus rusak saat dibuka" />
+      </div>
+      <p class="text-xs text-gray-500 dark:text-gray-400">${
+        shiftId
+          ? `Masuk hitungan Shift #${shiftId} (uang keluar laci, stok kembali masuk).`
+          : 'Di luar shift — tercatat + masuk laporan.'
+      }</p>`,
+    onMount: ({ el, ok, close }) => {
+      ok.addEventListener('click', async () => {
+        const baris: { sale_item_id: number; qty: number }[] = [];
+        el.querySelectorAll<HTMLInputElement>('[data-rt-qty]').forEach((inp) => {
+          const q = Number(inp.value || 0);
+          if (q > 0) baris.push({ sale_item_id: Number(inp.dataset.rtQty), qty: q });
+        });
+        if (!baris.length) { toast('Isi dulu qty kembali minimal 1 baris', 'warning'); return; }
+        try {
+          const r = await apiPost<{ data: { retur: { id: number; total: number } } }>('/api/returns', {
+            sale_id: s.id,
+            items: baris,
+            note: (el.querySelector('#rt-note') as HTMLInputElement).value.trim(),
+            cashier: getCashier(),
+            ...(shiftId !== null ? { shift_id: shiftId } : {}),
+          });
+          close();
+          toast(`Retur #${r.data.retur.id} tersimpan · kembali ${rp(r.data.retur.total)}`, 'success');
+        } catch (e) {
+          toast(`Gagal: ${errMsg(e)}`, 'error');
+        }
+      });
+    },
+  });
 }
 
 function detailTopup(t: TopupRow): string {
@@ -515,6 +598,13 @@ function bind(): void {
     b.addEventListener('click', () => {
       const s = state.sales.find((x) => x.id === b.dataset.reprint);
       if (s) void cetakUlang(s);
+    }),
+  );
+  // Retur dari nota (Tahap 2): tombol di kartu Pembayaran detailJual.
+  root.querySelectorAll<HTMLElement>('[data-retur-nota]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const s = state.sales.find((x) => x.id === b.dataset.returNota);
+      if (s) void dialogReturNota(s);
     }),
   );
 }
