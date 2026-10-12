@@ -87,7 +87,7 @@
        dasar/fallback untuk dark-mode override di bawah. */
     background-image:
       radial-gradient(120% 60% at 0% 0%, rgb(59 130 246 / 0.35) 0%, transparent 60%),
-      linear-gradient(165deg, #1a4bb8 0%, #0F2858 48%, #0a1c45 100%);
+      linear-gradient(165deg, #143a94 0%, #0F2858 48%, #0a1c45 100%);
     /* Dark mode #101828 vs halaman #111827 nyaris sama -> butuh garis
        pembatas. Di light mode border transparan (kontrasnya sudah jelas).
        border-box (preflight) membuat garis masuk ke dalam w-64, jadi

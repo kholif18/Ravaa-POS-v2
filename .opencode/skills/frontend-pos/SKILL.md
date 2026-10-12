@@ -19,7 +19,7 @@ panel topup/laporan, modal struk, atau styling apa pun.
   kontras putih 13px ~4.7:1 lolos AA, `#0087ff` lama hanya ~3.1:1 GAGAL),
   hover **`#1757c8`**, primary-soft **`#e9f1ff`**, canvas **`#f2f5fa`**
   (kartu putih `#fff`, garis `border-gray-200/70`), sidebar biru tua
-  **`#0F2858`** (gradien 165deg `#1a4bb8 → #0F2858 → #0a1c45` + glow biru
+  **`#0F2858`** (gradien 165deg `#143a94 → #0F2858 → #0a1c45` (dipergelapan lagi) + glow biru
   pojok — restyle Sandik 2026-10-12, diperdalam permintaan pemilik) +
   hover **`#1a3a7e`** + aktif
   **`#2563eb`** (pil biru solid ber-shadow) + teks **`#b9c8e4`** (naik dari
@@ -154,6 +154,11 @@ panel topup/laporan, modal struk, atau styling apa pun.
     (`#pos-pay` **52px/18px/px-10**, okLabel HTML wallet+panah; Batal
     polos). Test layout = kontrak mockup (band+header-sembunyi+
     total-sama+cek+info+note+trust; jumlah `ok()` tetap).
+   **Info bar BIRU (2026-10-12, mockup "Modern Blue POS")**: kartu info-bar
+   POS = `.pos-ibar-biru` (pos.css — gradien token sidebar/grad-blue, TANPA
+   hex baru) + `!bg-transparent !border-white/20`; teks putih/putih-transparan,
+   Tutup shift = merah tembus pandang, chip Grosir & tombol F9 = putih/15,
+   `#pos-grand` putih (bukan primary). Layout 3 kolom TETAP.
    **Jebakan**: kelas arbitrary yang MENEMPEL `${` tanpa spasi TIDAK
    di-generate scanner
    Tailwind v4 — selalu spasi sebelum interpolasi template literal.

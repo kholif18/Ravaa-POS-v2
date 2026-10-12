@@ -1208,7 +1208,7 @@ function infoBarHtml(): string {
   // aturan CSS di pos.css (`.pos-ibar-grid` + `.is-stacked`), menggantikan
   // interpolasi gridCls/batas inline (refactor 2026-10-09 pos.css).
   return `
-    <div class="card info-bar !p-3">
+    <div class="card info-bar pos-ibar-biru !border-white/20 !bg-transparent !p-3">
       <!-- Tiga kolom SAMA RATA (permintaan pemilik 2026-10-04 putaran 9:
            "buat kolomnya sama rata, jangan lebar di tengah, belum sama
            rata ukuran kolomnya") — lg:grid-cols-3. Revisi pemilik
@@ -1221,11 +1221,11 @@ function infoBarHtml(): string {
            kolom menumpuk, garis jadi noise). Kolom kanan = label+qty di
            KIRI, angka TOTAL di KANAN. -->
       <div class="pos-ibar-grid${mobileMode ? ' is-stacked' : ''}">
-        <div class="pos-cell flex items-center gap-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+        <div class="pos-cell flex items-center gap-2 whitespace-nowrap text-sm text-white/85">
           ${tombolKembaliHtml()}
           <div class="flex flex-col gap-y-0.5">
             <span class="flex items-center gap-1.5">${icon('clock')}<span class="font-semibold">Waktu:</span><span id="pos-jam" class="tabular-nums">${jamPos()}</span></span>
-            <span class="flex items-center gap-1.5">${icon('users')}<span class="font-semibold">Kasir:</span><span>${esc(getCashier())}</span><span class="text-gray-400">· Shift #${shift?.id}</span></span>
+            <span class="flex items-center gap-1.5">${icon('users')}<span class="font-semibold">Kasir:</span><span>${esc(getCashier())}</span><span class="text-white/60">· Shift #${shift?.id}</span></span>
           </div>
           <!-- Tombol MERAH tutup shift — revisi pemilik 2026-10-06: tetap di
                kolom ini (bukan kolom terpisah seperti versi track-auto),
@@ -1235,7 +1235,7 @@ function infoBarHtml(): string {
                Shift); kula-07-pos-kasir.png taruh "Tutup Sesi Kas" di
                toolbar atas. -->
           <button type="button" id="pos-shift-tutup"
-            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-sm !bg-red-50 !border-transparent !text-red-600 hover:!bg-red-100 dark:!bg-red-500/10 dark:!text-red-400 dark:hover:!bg-red-500/20"
+            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-sm !bg-red-500/20 !border-transparent !text-red-100 hover:!bg-red-500/35 dark:!bg-red-500/20 dark:!text-red-100 dark:hover:!bg-red-500/35"
             title="Tutup shift kasir (hitung laci dulu)" aria-label="Tutup shift">
             ${icon('logout')}<span>Tutup shift</span>
           </button>
@@ -1252,7 +1252,7 @@ function infoBarHtml(): string {
             <!-- Chip tier grosir (2026-10-11): tampil bila pelanggan terpilih
                  tier-nya grosir — penanda harga grosir aktif di keranjang.
                  Di-toggle paintTier() (tanpa repaint) tiap ganti pelanggan. -->
-            <label class="label" for="pos-customer">Pelanggan <span id="pos-tier" class="chip !border-primary !text-primary${pelangganGrosir() ? '' : ' hidden'}">Grosir</span></label>
+            <label class="label !text-white/75" for="pos-customer">Pelanggan <span id="pos-tier" class="chip !border-white/40 !bg-white/15 !text-white${pelangganGrosir() ? '' : ' hidden'}">Grosir</span></label>
             <!-- Revisi putaran 8b (2026-10-04): "tombol dan dropdown customer
                  tidak inline" — tombol KEMBALI sebaris dengan select (dulu
                  sempat dipindah ke baris label di atas). Bentuknya kini
@@ -1263,7 +1263,7 @@ function infoBarHtml(): string {
                  = openCariPelanggan() ala F3 produk (putaran 7). -->
             <div class="flex items-stretch gap-1.5">
               <select id="pos-customer" class="input input-sm min-w-0 flex-1">${pilih}</select>
-              <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-sm font-semibold tracking-wide">F9</span></button>
+              <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5 !bg-white/10 !border-transparent !text-white hover:!bg-white/25" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-sm font-semibold tracking-wide">F9</span></button>
             </div>
           </div>
         </div>
@@ -1273,14 +1273,14 @@ function infoBarHtml(): string {
              memberi ruang pada track auto. -->
         <div class="pos-cell flex items-center justify-between gap-3">
           <div class="min-w-0 text-left">
-            <div class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total belanja</div>
-            <div id="pos-owncount" class="text-sm text-gray-500 dark:text-gray-400">${keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item'}</div>
+            <div class="text-sm font-semibold uppercase tracking-wide text-white/75">Total belanja</div>
+            <div id="pos-owncount" class="text-sm text-white/70">${keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item'}</div>
           </div>
           <!-- text-[48px] ukuran KUSTOM (Tailwind arbitrary value) = 2x lipat
                text-2xl lama (24px) — permintaan pemilik 2026-10-04 "custom
                ukuran font, besarkan lagi 2x lipat". Total belanja = angka
                terpenting di layar kasir. -->
-           <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums tracking-tight text-primary">${rp(totalBayar())}</div>
+           <div id="pos-grand" class="shrink-0 text-right text-[48px] font-bold leading-tight tabular-nums tracking-tight text-white">${rp(totalBayar())}</div>
         </div>
       </div>
     </div>`;
