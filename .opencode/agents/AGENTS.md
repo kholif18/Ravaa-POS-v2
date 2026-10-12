@@ -1445,6 +1445,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     Ganti sandi sendiri (`/api/users/password`) = verifikasi sandi lama,
     membersihkan must_change. Seed: `pemilik`/`admin123` (name `kasir`,
     must_change 1) HANYA bila tabel kosong.
+  - **Profil (2026-10-12)**: `users.avatar` (nama file di img/, pola
+    products.image; dataURL <=120KB di-resize client 256px) + `users.email`
+    (opsional, validasi format). `POST /api/users/me/avatar` {image} ('' =
+    hapus), `GET /api/users/:id/avatar` publik (img tag — pengecualian token
+    kedua, whitelist nama file), `POST /api/users/profile` {name,email}.
+    Halaman `#/profil` SEMUA peran: avatar opsional (kosong = inisial),
+    username READ-ONLY (kunci login), sandi blok kondisional (lama+baru+
+    konfirmasi). Dropdown akun: satu label "Edit Profil"; header avatar+nama
+    ikut akun (profilSaya() menyinkronkan setCashier). Blok "Perangkat ini"
+    (nama toko struk thermal + tema) PINDAH ke Sistem → kartu "Tampilan
+    perangkat ini" (kartuPerangkat di settings.ts, localStorage).
   - Frontend: `ui/auth.ts` (token localStorage, profilSaya() dengan fallback
     offline ke simpanan terakhir), rute `#/login` & `#/ubah-sandi` (render
     tanpa shell), guard `bolehBuka()` per peran (nav difilter `roles` di

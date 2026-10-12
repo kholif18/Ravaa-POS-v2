@@ -49,11 +49,12 @@ function sesiDariToken(auth: string | undefined): Sesi | null {
 // Jalur publik (tanpa token): health + login. Semua /api lain wajib token.
 app.use('/api/*', async (c, next) => {
   if (c.req.path === '/api/login') return next();
-  // Foto produk thumbnail = SATU-SATUNYA pengecualian token: dimuat lewat tag
+  // Foto produk & avatar pengguna = pengecualian token: dimuat lewat tag
   // `<img src>` (cache-buster ?version) yang TIDAK bisa membawa header
-  // Authorization. Isinya gambar produk yang memang tampil di layar kasir —
-  // bukan data sensitif; id produk saja tidak membuka apa pun lain.
+  // Authorization. Keduanya gambar yang memang tampil di layar kasir — bukan
+  // data sensitif; id saja tidak membuka apa pun lain.
   if (c.req.method === 'GET' && /^\/api\/products\/\d+\/image$/.test(c.req.path)) return next();
+  if (c.req.method === 'GET' && /^\/api\/users\/\d+\/avatar$/.test(c.req.path)) return next();
   const user = sesiDariToken(c.req.header('Authorization'));
   if (!user) return c.json({ error: 'belum login — masuk dulu di halaman Login' }, 401);
   // Sandi wajib ganti (akun baru/reset): selain ganti-sandi, keluar, dan
@@ -130,17 +131,23 @@ app.post('/api/logout', (c) => {
 // Profil sesi berjalan (dipakai guard rute + nama kasir di frontend).
 app.get('/api/me', (c) => {
   const u = c.get('user') as Sesi;
+  // Baca ulang baris user: avatar/email bisa berubah di tengah sesi (edit
+  // profil) — jangan pakai snapshot middleware yang hanya memuat 4 kolom.
+  const segar = db.prepare('SELECT id, username, name, role, avatar, email FROM users WHERE id = ?').get(u.id) as
+    | { id: number; username: string; name: string; role: string; avatar: string | null; email: string }
+    | undefined;
+  const user = segar ?? { id: u.id, username: u.username, name: u.name, role: u.role, avatar: null, email: '' };
   return c.json({
     data: {
-      user: { id: u.id, username: u.username, name: u.name, role: u.role },
+      user,
       must_change: u.must_change === 1,
     },
   });
 });
 
 function barisUserBersih(r: unknown) {
-  const u = r as { id: number; username: string; name: string; role: string; is_active: number; must_change: number; created_at: string };
-  return { id: u.id, username: u.username, name: u.name, role: u.role, is_active: u.is_active, must_change: u.must_change, created_at: u.created_at };
+  const u = r as { id: number; username: string; name: string; role: string; is_active: number; must_change: number; created_at: string; avatar?: string | null; email?: string };
+  return { id: u.id, username: u.username, name: u.name, role: u.role, is_active: u.is_active, must_change: u.must_change, created_at: u.created_at, avatar: u.avatar ?? null, email: u.email ?? '' };
 }
 
 // Daftar akun (pemilik saja) — TANPA hash sandi, jangan pernah dikirim.
@@ -178,7 +185,7 @@ app.post('/api/users', hanyaPemilik, async (c) => {
       }
       const row = db.prepare(
         `INSERT INTO users (username, name, password_hash, role, must_change)
-         VALUES (?, ?, ?, ?, 1) RETURNING id, username, name, role, is_active, must_change, created_at`,
+         VALUES (?, ?, ?, ?, 1) RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email`,
       ).get(username, name, hashPassword(password), role);
       return c.json({ data: barisUserBersih(row) }, 201);
     }
@@ -215,11 +222,13 @@ app.post('/api/users', hanyaPemilik, async (c) => {
          role = COALESCE(?, role),
          is_active = COALESCE(?, is_active),
          password_hash = COALESCE(?, password_hash),
+         email = COALESCE(?, email),
          must_change = CASE WHEN ? IS NOT NULL THEN 1 ELSE must_change END
-       WHERE id = ? RETURNING id, username, name, role, is_active, must_change, created_at`,
+       WHERE id = ? RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email`,
     ).get(
       name ?? null, role ?? null, aktif === undefined ? null : aktif ? 1 : 0,
       password === undefined ? null : hashPassword(password),
+      body?.email === undefined || body?.email === null ? null : String(body.email).trim(),
       password === undefined ? null : 1, id,
     );
     return c.json({ data: barisUserBersih(row) }, 200);
@@ -246,6 +255,56 @@ app.post('/api/users/:id/password', hanyaPemilik, async (c) => {
   }
 });
 
+// Avatar SENDIRI (semua peran, 2026-10-11): dataURL hasil resize client
+// (sisi terpanjang <=256px JPEG, pola foto produk). File di img/ sebelah DB,
+// kolom users.avatar = NAMA FILE. '' / null = hapus (kembali ke inisial).
+const AVATAR_MAKS_BYTE = 120_000; // 256px JPEG ~10-40KB; batas menahan foto asli HP
+app.post('/api/users/me/avatar', async (c) => {
+  try {
+    const body = await c.req.json();
+    const u = c.get('user') as Pengguna;
+    const kiriman = body?.image;
+    if (kiriman === undefined) return c.json({ error: 'image wajib diisi ("" untuk menghapus)' }, 400);
+    const lama = (db.prepare('SELECT avatar FROM users WHERE id = ?').get(u.id) as { avatar: string | null } | undefined)?.avatar ?? null;
+    if (kiriman === null || String(kiriman).trim() === '') {
+      if (lama) buangFileFoto(lama);
+      db.prepare('UPDATE users SET avatar = NULL WHERE id = ?').run(u.id);
+      return c.json({ data: { avatar: null } });
+    }
+    const val = String(kiriman).trim();
+    const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(val);
+    if (!m) return c.json({ error: 'image harus dataURL data:image/...;base64' }, 400);
+    const [, mime, b64] = m;
+    const buf = Buffer.from(b64, 'base64');
+    if (buf.byteLength > AVATAR_MAKS_BYTE) return c.json({ error: 'avatar terlalu besar (maks 120KB setelah resize)' }, 400);
+    const ext = mime === 'jpeg' ? 'jpg' : mime;
+    const nama = `avatar-${u.id}-${Date.now()}.${ext}`;
+    imgDir();
+    fs.writeFileSync(path.join(IMG_DIR, nama), buf);
+    if (lama) buangFileFoto(lama);
+    db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(nama, u.id);
+    return c.json({ data: { avatar: nama } }, 200);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal unggah avatar' }, 400);
+  }
+});
+
+// Baca avatar by user id (img tag tak bisa bawa header — pengecualian
+// middleware di atas; hanya melayani file gambar, bukan data akun).
+app.get('/api/users/:id/avatar', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const row = db.prepare('SELECT avatar FROM users WHERE id = ?').get(id) as { avatar: string | null } | undefined;
+  const nama = row?.avatar;
+  if (!nama) return c.json({ error: 'tanpa avatar' }, 404);
+  const aman = path.basename(nama) === nama && /^avatar-\d+-\d+\.(jpg|png|webp)$/.test(nama);
+  if (!aman) return c.json({ error: 'file avatar tidak valid' }, 404);
+  const file = path.join(IMG_DIR, nama);
+  if (!fs.existsSync(file)) return c.json({ error: 'file avatar hilang' }, 404);
+  const ct = nama.endsWith('.png') ? 'image/png' : nama.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+  return c.body(new Uint8Array(fs.readFileSync(file)), 200, { 'Content-Type': ct });
+});
+
 // Edit profil SENDIRI (semua peran — 2026-10-11): hanya `name`. Terpisah
 // dari POST /api/users (khusus pemilik) supaya kasir tetap bisa memperbarui
 // nama tampilannya sendiri; username & peran tak tersentuh di sini.
@@ -256,9 +315,18 @@ app.post('/api/users/profile', async (c) => {
     const name = String(body?.name ?? '').trim();
     if (!name) return c.json({ error: 'nama tidak boleh kosong' }, 400);
     if (name.length > 32) return c.json({ error: 'nama maksimal 32 karakter' }, 400);
+    // Email OPSIONAL: kosong = hapus; isi = divalidasi format sederhana.
+    const emailRaw = body?.email === undefined || body?.email === null ? undefined : String(body.email).trim();
+    let email: string | undefined;
+    if (emailRaw !== undefined) {
+      if (emailRaw === '') email = '';
+      else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailRaw) || emailRaw.length > 64) {
+        return c.json({ error: 'email tidak valid' }, 400);
+      } else email = emailRaw;
+    }
     const row = db.prepare(
-      `UPDATE users SET name = ? WHERE id = ? RETURNING id, username, name, role, is_active, must_change, created_at`,
-    ).get(name, u.id);
+      `UPDATE users SET name = ?, email = COALESCE(?, email) WHERE id = ? RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email`,
+    ).get(name, email ?? null, u.id);
     return c.json({ data: barisUserBersih(row) }, 200);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan profil' }, 400);

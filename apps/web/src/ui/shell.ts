@@ -288,17 +288,24 @@ function titleBlock(active: AdminRoute | 'profil'): string {
 /** Menu user paling kanan: avatar + nama + lencana peran, dropdown profil & keluar. */
 function userMenu(name: string, peran: Peran): string {
   // Lencana peran TIDAK di tombol (permintaan pemilik: avatar+nama saja);
-  // peran baru tampil di dropdown (dd-head).
+  // peran baru tampil di dropdown (dd-head). Avatar = file server bila ada,
+  // fallback INISIAL nama (bukan gambar bawaan — pembeda akun tetap jelas).
+  const av = akunTersimpan()?.akun.avatar;
+  const avSrc = av ? `/api/users/${akunTersimpan()!.akun.id}/avatar?${Date.now()}` : '';
+  const avat = (cls: string, id: string) =>
+    avSrc
+      ? `<span class="${cls}" id="${id}"><img src="${avSrc}" alt="${name}" class="size-full rounded-full object-cover" /></span>`
+      : `<span class="${cls}" id="${id}">${initials(name)}</span>`;
   return `
     <div class="user-wrap" id="user-wrap">
       <button type="button" id="user-btn" class="user-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Menu akun ${name}" title="Akun">
-        <span class="avatar" id="user-avatar">${initials(name)}</span>
+        ${avat('avatar', 'user-avatar')}
         <span class="user-name" id="user-name">${name}</span>
         ${icon('chevD')}
       </button>
       <div class="user-dd" id="user-dd" role="menu" hidden>
         <div class="dd-head">
-          <span class="avatar avatar-lg" id="dd-avatar">${initials(name)}</span>
+          ${avat('avatar avatar-lg', 'dd-avatar')}
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-gray-900 dark:text-white" id="dd-name">${name}</p>
             <p class="text-xs text-gray-500 dark:text-gray-400" id="dd-role">${peran === 'pemilik' ? 'Owner' : 'Kasir'}</p>
@@ -385,12 +392,21 @@ function paintUserMenu(): void {
   const name = getCashier();
   const ini = initials(name);
   const peran = akunTersimpan()?.akun.role === 'pemilik' ? 'Owner' : 'Kasir';
+  const av = akunTersimpan()?.akun.avatar;
+  const avSrc = av ? `/api/users/${akunTersimpan()!.akun.id}/avatar?${Date.now()}` : '';
+  const isiAvatar = (id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = avSrc
+      ? `<img src="${avSrc}" alt="${name}" class="size-full rounded-full object-cover" />`
+      : ini;
+  };
+  isiAvatar('user-avatar');
+  isiAvatar('dd-avatar');
   const set = (id: string, text: string) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   };
-  set('user-avatar', ini);
-  set('dd-avatar', ini);
   set('user-name', name);
   set('dd-name', name);
   set('dd-role', peran);

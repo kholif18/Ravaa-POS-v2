@@ -80,6 +80,7 @@ const SUITE = [
   ['laporan-menu-test.mjs', 16],
   ['harga-dinamis-test.mjs', 18],
   ['pos-notif-test.mjs', 6],
+  ['profil-test.mjs', 18],
   ['login-test.mjs', 26],
 ];
 

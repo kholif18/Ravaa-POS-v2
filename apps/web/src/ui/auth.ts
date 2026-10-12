@@ -11,6 +11,10 @@ export interface Akun {
   username: string;
   name: string;
   role: Peran;
+  /** Avatar OPSIONAL: nama file di server (img/). Null = inisial nama. */
+  avatar?: string | null;
+  /** Email opsional profil. */
+  email?: string;
 }
 
 const Kunci_TOKEN = 'ravaa.token';

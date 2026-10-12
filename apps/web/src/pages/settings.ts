@@ -14,6 +14,7 @@
 import { apiGet, apiPost, HttpError } from '../api';
 import { confirmDialog } from '../ui/confirm';
 import { icon } from '../ui/icons';
+import { getToko, setToko } from '../ui/user';
 import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPause, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
@@ -113,10 +114,45 @@ function renderBody(): string {
         <div class="shrink-0">${switchHtml('set-kadaluarsa', state.kadaluarsa, state.kadaluarsa ? 'Aktif' : 'Nonaktif')}</div>
       </div>
     </div>
+    ${kartuPerangkat()}
     ${kartuToko()}
     ${kartuCetak()}
     ${kartuBackup()}
   </div>`;
+}
+
+// Kartu "Tampilan perangkat" (2026-10-11, pindahan dari halaman Profil —
+// nama toko kepala struk + tema). Per-device localStorage, tanpa API.
+function kartuPerangkat(): string {
+  const toko = getToko();
+  const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  return `
+    <div class="card">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Tampilan perangkat ini</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Nama toko di <b>kepala struk thermal</b> dan tema warna — tersimpan di
+            <b>browser device ini</b> (beda dengan kop INVOICE A4 di atas yang
+            berlaku semua device).
+          </p>
+          <div class="mt-3 grid gap-2 sm:grid-cols-2">
+            <div class="field-sm">
+              <label class="label" for="set-dev-toko">Nama toko (struk thermal)</label>
+              <input id="set-dev-toko" class="input input-sm" maxlength="32" value="${getToko() === 'RAVA POS' ? '' : getToko()}" placeholder="RAVA POS" />
+            </div>
+            <div class="field-sm">
+              <label class="label" for="set-dev-theme">Tema</label>
+              <select id="set-dev-theme" class="input input-sm">
+                <option value="light" ${theme === 'light' ? 'selected' : ''}>Terang</option>
+                <option value="dark" ${theme === 'dark' ? 'selected' : ''}>Gelap</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <button type="button" id="set-dev-simpan" class="btn btn-ghost shrink-0">${icon('check')}<span>Simpan</span></button>
+      </div>
+    </div>`;
 }
 
 // Kartu "Pengaturan toko" — kop INVOICE A4 (cetak gaya Aronium). Disimpan di
@@ -361,6 +397,18 @@ function bind(): void {
   // Kartu "Cetak struk": preferensi per-device, langsung tersimpan tanpa
   // konfirmasi (non-destruktif & bisa dibalik — alasan sama dengan Backup).
   // Di-paint ulang supaya label saklar ("Aktif"/"Nonaktif") ikut terbarui.
+  // Kartu "Tampilan perangkat ini": localStorage saja (tanpa API) — pindahan
+  // dari halaman Profil (2026-10-11). applyTheme + event ravaa:theme agar
+  // sidebar/header ikut tercatat ulang seketika.
+  host?.querySelector('#set-dev-simpan')?.addEventListener('click', () => {
+    const toko = (host?.querySelector<HTMLInputElement>('#set-dev-toko')?.value ?? '').trim() || 'RAVA POS';
+    const t = (host?.querySelector<HTMLSelectElement>('#set-dev-theme')?.value ?? 'light') === 'dark' ? 'dark' : 'light';
+    setToko(toko);
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem('ravaa.theme', t); } catch { /* abaikan */ }
+    document.dispatchEvent(new CustomEvent('ravaa:theme'));
+    toast('Tampilan perangkat disimpan', 'success');
+  });
   host?.querySelector<HTMLInputElement>('#set-pause')?.addEventListener('change', (e) => {
     const nyala = (e.target as HTMLInputElement).checked;
     setPrintPause(!nyala); // saklar menyala = CETAK menyala = pause mati

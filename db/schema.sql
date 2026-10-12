@@ -404,6 +404,12 @@ CREATE TABLE IF NOT EXISTS users (
   name          TEXT NOT NULL DEFAULT '',
   password_hash TEXT NOT NULL,
   role          TEXT NOT NULL CHECK (role IN ('pemilik', 'kasir')),
+  -- Avatar OPSIONAL: nama file di folder img/ sebelah DB (pola products.image),
+  -- di-resize client (sisi terpanjang <=256px JPEG). NULL/'' = pakai inisial
+  -- nama (atau /avatar.png bawaan). Diunggah lewat POST /api/users/me/avatar.
+  avatar        TEXT,
+  -- Email opsional profil (belum dipakai kirim email — hanya identitas).
+  email         TEXT NOT NULL DEFAULT '',
   is_active     INTEGER NOT NULL DEFAULT 1,
   must_change   INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
