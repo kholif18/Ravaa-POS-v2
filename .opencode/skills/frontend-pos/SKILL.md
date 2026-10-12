@@ -19,8 +19,9 @@ panel topup/laporan, modal struk, atau styling apa pun.
   kontras putih 13px ~4.7:1 lolos AA, `#0087ff` lama hanya ~3.1:1 GAGAL),
   hover **`#1757c8`**, primary-soft **`#e9f1ff`**, canvas **`#f2f5fa`**
   (kartu putih `#fff`, garis `border-gray-200/70`), sidebar biru tua
-  **`#0d1f4d`** (gradien 165deg `#1b3f9e → #12337f → #0c2158` + glow biru
-  pojok — restyle Sandik 2026-10-12) + hover **`#16306b`** + aktif
+  **`#0F2858`** (gradien 165deg `#1a4bb8 → #0F2858 → #0a1c45` + glow biru
+  pojok — restyle Sandik 2026-10-12, diperdalam permintaan pemilik) +
+  hover **`#1a3a7e`** + aktif
   **`#2563eb`** (pil biru solid ber-shadow) + teks **`#b9c8e4`** (naik dari
   #93a3bd — kontras di biru tua), teks
   `#18181b`/muted `#71717a` tidak berubah. Dua token bayangan BARU:

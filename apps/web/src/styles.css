@@ -39,8 +39,8 @@
   --color-primary-hover: #1757c8;
   --color-primary-soft: #e9f1ff;
   --color-canvas: #f2f5fa;
-  --color-sidebar: #0d1f4d;
-  --color-sidebar-hover: #16306b;
+  --color-sidebar: #0F2858;
+  --color-sidebar-hover: #1a3a7e;
   --color-sidebar-active: #2563eb;
   --color-sidebar-text: #b9c8e4;
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 12px 28px -18px rgb(15 23 42 / 0.22);
@@ -86,8 +86,8 @@
        160deg, dua stop + ornamen cahaya di pojok. Token bg-sidebar tetap
        dasar/fallback untuk dark-mode override di bawah. */
     background-image:
-      radial-gradient(120% 60% at 0% 0%, rgb(59 130 246 / 0.4) 0%, transparent 62%),
-      linear-gradient(165deg, #1b3f9e 0%, var(--grad-blue-to) 55%, #0c2158 100%);
+      radial-gradient(120% 60% at 0% 0%, rgb(59 130 246 / 0.35) 0%, transparent 60%),
+      linear-gradient(165deg, #1a4bb8 0%, #0F2858 48%, #0a1c45 100%);
     /* Dark mode #101828 vs halaman #111827 nyaris sama -> butuh garis
        pembatas. Di light mode border transparan (kontrasnya sudah jelas).
        border-box (preflight) membuat garis masuk ke dalam w-64, jadi
