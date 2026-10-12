@@ -11,7 +11,7 @@ import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
-import type { Peran } from '../ui/auth';
+import { akunTersimpan, type Peran } from '../ui/auth';
 
 type UserRow = {
   id: number;
@@ -242,9 +242,11 @@ function bindRows(): void {
   );
 }
 
+/** Muat ulang daftar + segarkan header bila AKUN SENDIRI diubah (nama/peran):
+ *  header (avatar/nama) membaca simpanan perangkat, bukan server langsung —
+ *  `profilSaya()` menyinkronkan + event `ravaa:user` mengecat ulang header. */
 async function load(): Promise<void> {
-  state.loading = true;
-  state.error = '';
+  const sebelum = akunTersimpan()?.akun;
   paint();
   try {
     const r = await apiGet<{ data: UserRow[] }>('/api/users');
@@ -254,6 +256,12 @@ async function load(): Promise<void> {
   }
   state.loading = false;
   if (host?.isConnected) paint();
+  const sesudah = akunTersimpan()?.akun;
+  if (sesudah && sebelum && (sesudah.name !== sebelum.name || sesudah.role !== sebelum.role)) {
+    const { profilSaya } = await import('../ui/auth');
+    await profilSaya();
+    document.dispatchEvent(new CustomEvent('ravaa:user'));
+  }
 }
 
 export async function mountUsersPage(el: HTMLElement): Promise<void> {

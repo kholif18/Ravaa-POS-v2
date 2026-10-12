@@ -126,6 +126,10 @@ export async function profilSaya(): Promise<{ akun: Akun; wajib: boolean } | nul
     } catch {
       /* abaikan */
     }
+    // Nama kasir perangkat IKUT nama akun terkini — ganti nama di halaman
+    // Pengguna tercermin di header setelah navigasi berikutnya (shift/laporan
+    // memakai nama ini; menyinkronkan di sini = satu sumber: akun server).
+    setCashier(meCache.akun.name);
     return meCache;
   } catch (e) {
     if (e instanceof Error && /^HTTP 401/.test(e.message)) {
