@@ -39,12 +39,17 @@
   --color-primary-hover: #1757c8;
   --color-primary-soft: #e9f1ff;
   --color-canvas: #f2f5fa;
-  --color-sidebar: #0b1220;
-  --color-sidebar-hover: #16213a;
-  --color-sidebar-active: #1d4ed8;
-  --color-sidebar-text: #93a3bd;
+  --color-sidebar: #0d1f4d;
+  --color-sidebar-hover: #16306b;
+  --color-sidebar-active: #2563eb;
+  --color-sidebar-text: #b9c8e4;
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 12px 28px -18px rgb(15 23 42 / 0.22);
   --shadow-pop: 0 2px 6px rgb(15 23 42 / 0.06), 0 18px 40px -22px rgb(15 23 42 / 0.3);
+  /* Gradasi biru modern ala Sandik (2026-10-12): sidebar & layar login.
+     Semua anggota keluarga primary biru — BUKAN warna baru di luar palet. */
+  --grad-blue-from: #1d6df0;
+  --grad-blue-via: #1b4fd8;
+  --grad-blue-to: #12337f;
 }
 
 @font-face {
@@ -77,10 +82,12 @@
   }
   .sidebar {
     @apply fixed inset-y-0 left-0 z-50 flex w-64 -translate-x-full flex-col border-r border-transparent bg-sidebar text-sidebar-text transition-[width,transform] duration-300 ease-out lg:translate-x-0 dark:border-gray-700;
-    /* Lapisan gradien halus (restyle 2026-10-08): sidebar polos satu warna
-       terasa "template" — gradasi navy atas->bawah memberi kedalaman tanpa
-       menambah warna baru di luar token (bg-sidebar tetap dasar/fallback). */
-    background-image: linear-gradient(180deg, var(--color-sidebar) 0%, #131d33 100%);
+    /* Gradien biru modern ala Sandik (2026-10-12): dari primary -> biru tua
+       160deg, dua stop + ornamen cahaya di pojok. Token bg-sidebar tetap
+       dasar/fallback untuk dark-mode override di bawah. */
+    background-image:
+      radial-gradient(120% 60% at 0% 0%, rgb(59 130 246 / 0.4) 0%, transparent 62%),
+      linear-gradient(165deg, #1b3f9e 0%, var(--grad-blue-to) 55%, #0c2158 100%);
     /* Dark mode #101828 vs halaman #111827 nyaris sama -> butuh garis
        pembatas. Di light mode border transparan (kontrasnya sudah jelas).
        border-box (preflight) membuat garis masuk ke dalam w-64, jadi
@@ -250,7 +257,13 @@
      restyle 2026-10-08. `.transition` pada .btn sudah mencakup box-shadow &
      transform jadi tidak perlu transisi tambahan. */
   .btn-primary {
-    @apply bg-primary text-white shadow-md shadow-primary/30 hover:-translate-y-px hover:bg-primary-hover hover:shadow-lg hover:shadow-primary/35;
+    /* Gradasi modern ala Sandik (2026-10-12): primary -> hover 120deg; hover
+       tetap menggelapkan via overlay agar teks putih kontras tetap AA. */
+    @apply bg-primary text-white shadow-md shadow-primary/30 hover:-translate-y-px hover:shadow-lg hover:shadow-primary/35;
+    background-image: linear-gradient(120deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+  }
+  .btn-primary:hover {
+    background-image: linear-gradient(120deg, var(--color-primary-hover) 0%, #123a9e 100%);
   }
   /* Tombol sekunder = "soft pill" abu (gaya KulaPOS/modern): dulu abu polos
      ber-border 1px yang terasa seperti tabel. `border-transparent` 1px
@@ -429,7 +442,36 @@
   transform: scale(0.97);
   transition-duration: 90ms;
 }
-.swal2-container .sw-btn-primary {
+  /* ---------- Login ala Sandik (2026-10-12) ----------
+     Latar gradasi biru 135deg + tiga ornamen lingkaran blur (glassmorphism)
+     + kartu kaca putih/10 dengan backdrop-blur. Dipakai #/login & #/ubah-sandi. */
+  .login-bg {
+    @apply relative flex min-h-full flex-col overflow-hidden bg-gradient-to-br;
+    background-image: linear-gradient(135deg, var(--grad-blue-from) 0%, var(--grad-blue-via) 45%, var(--grad-blue-to) 100%);
+  }
+  .login-orb {
+    @apply pointer-events-none absolute rounded-full;
+    background: radial-gradient(circle at 30% 30%, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0.04) 65%);
+    filter: blur(2px);
+  }
+  .login-orb-1 {
+    @apply -left-24 -top-24 size-80;
+  }
+  .login-orb-2 {
+    @apply -right-32 top-1/3 size-96 opacity-80;
+  }
+  .login-orb-3 {
+    @apply -bottom-28 left-1/4 size-72 opacity-60;
+  }
+  .login-card-glass {
+    @apply relative z-10 rounded-2xl border border-white/15 bg-white/10 p-6 shadow-2xl backdrop-blur-md;
+  }
+  /* Input di atas kaca: putih solid agar kontras teks tetap AA. */
+  .login-input {
+    @apply border-transparent bg-white/95 text-gray-900 placeholder:text-gray-400 focus:bg-white;
+  }
+
+  .swal2-container .sw-btn-primary {
   @apply bg-primary text-white shadow-md shadow-primary/30 hover:bg-primary-hover hover:shadow-lg hover:shadow-primary/35;
 }
 .swal2-container .sw-btn-danger {

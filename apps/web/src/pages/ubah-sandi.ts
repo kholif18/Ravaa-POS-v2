@@ -16,30 +16,34 @@ export function renderUbahSandiPage(el: HTMLElement): void {
   const wajib = tersimpan?.wajib ?? true;
   const peran: Peran = tersimpan?.akun.role ?? 'kasir';
   el.innerHTML = `
-  <div class="flex min-h-full items-center justify-center p-4">
-    <div class="card w-full max-w-sm">
-      <h1 class="text-sm font-semibold text-gray-900 dark:text-white">Ganti sandi${nama ? ` — ${nama}` : ''}</h1>
-      <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${
-        wajib
-          ? 'Akun ini wajib ganti sandi dulu sebelum memakai aplikasi.'
-          : 'Isi sandi baru di bawah.'
-      }</p>
-      <form id="gs-form" class="mt-4 space-y-3" autocomplete="off">
-        <div class="field">
-          <label class="label" for="gs-lama">Sandi lama</label>
-          <input id="gs-lama" class="input" type="password" autocomplete="current-password" />
-        </div>
-        <div class="field">
-          <label class="label" for="gs-baru">Sandi baru (min. 4 karakter)</label>
-          <input id="gs-baru" class="input" type="password" autocomplete="new-password" />
-        </div>
-        <div class="field">
-          <label class="label" for="gs-ulang">Ulangi sandi baru</label>
-          <input id="gs-ulang" class="input" type="password" autocomplete="new-password" />
-        </div>
-        <p id="gs-err" class="hidden text-xs font-medium text-red-600 dark:text-red-400"></p>
-        <button type="submit" id="gs-ok" class="btn btn-primary w-full">Simpan sandi baru</button>
-      </form>
+  <div class="login-bg">
+    <span class="login-orb login-orb-2" aria-hidden="true"></span>
+    <span class="login-orb login-orb-3" aria-hidden="true"></span>
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="login-card-glass w-full max-w-sm">
+        <h1 class="text-sm font-semibold text-white">Ganti sandi${nama ? ` — ${nama}` : ''}</h1>
+        <p class="mt-0.5 text-xs text-white/70">${
+          wajib
+            ? 'Akun ini wajib ganti sandi dulu sebelum memakai aplikasi.'
+            : 'Isi sandi baru di bawah.'
+        }</p>
+        <form id="gs-form" class="mt-5 space-y-3" autocomplete="off">
+          <div class="field">
+            <label class="label !text-white/75" for="gs-lama">Sandi lama</label>
+            <input id="gs-lama" class="input login-input" type="password" autocomplete="current-password" />
+          </div>
+          <div class="field">
+            <label class="label !text-white/75" for="gs-baru">Sandi baru (min. 4 karakter)</label>
+            <input id="gs-baru" class="input login-input" type="password" autocomplete="new-password" />
+          </div>
+          <div class="field">
+            <label class="label !text-white/75" for="gs-ulang">Ulangi sandi baru</label>
+            <input id="gs-ulang" class="input login-input" type="password" autocomplete="new-password" />
+          </div>
+          <p id="gs-err" class="hidden text-xs font-medium text-amber-200"></p>
+          <button type="submit" id="gs-ok" class="btn btn-primary w-full !bg-white !text-primary hover:!bg-white/90">Simpan sandi baru</button>
+        </form>
+      </div>
     </div>
   </div>`;
   const form = el.querySelector<HTMLFormElement>('#gs-form')!;

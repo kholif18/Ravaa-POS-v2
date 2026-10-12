@@ -8,31 +8,41 @@ import { toast } from '../ui/toast';
 import { masuk, ruteBawaan } from '../ui/auth';
 
 export function renderLoginPage(el: HTMLElement): void {
+  // Gaya "Sandik" (2026-10-12): latar GRADASI BIRU modern 135deg + ornamen
+  // lingkaran glassmorphism + kartu kaca putih/5. Kelas .login-bg/.login-card-glass
+  // didefinisikan di styles.css (token tetap dari @theme — biru primary).
   el.innerHTML = `
-  <div class="flex min-h-full items-center justify-center p-4">
-    <div class="card w-full max-w-sm">
-      <div class="flex items-center gap-3">
-        <img class="brand-logo" src="/logo.png" alt="Logo Ravaa" />
-        <div class="min-w-0">
-          <h1 class="text-sm font-semibold text-gray-900 dark:text-white">Masuk Ravaa POS</h1>
-          <p class="text-xs text-gray-500 dark:text-gray-400">Kasir & pemilik punya akun masing-masing.</p>
+  <div class="login-bg">
+    <span class="login-orb login-orb-1" aria-hidden="true"></span>
+    <span class="login-orb login-orb-2" aria-hidden="true"></span>
+    <span class="login-orb login-orb-3" aria-hidden="true"></span>
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="login-card-glass w-full max-w-sm">
+        <div class="flex items-center gap-3">
+          <span class="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white">
+            ${icon('pos')}
+          </span>
+          <div class="min-w-0">
+            <h1 class="text-sm font-semibold text-white">Masuk Ravaa POS</h1>
+            <p class="text-xs text-white/70">Kasir & pemilik punya akun masing-masing.</p>
+          </div>
         </div>
+        <form id="login-form" class="mt-5 space-y-3" autocomplete="off">
+          <div class="field">
+            <label class="label !text-white/75" for="login-user">Username</label>
+            <input id="login-user" class="input login-input" autocomplete="username" placeholder="cth: pemilik" />
+          </div>
+          <div class="field">
+            <label class="label !text-white/75" for="login-pass">Sandi</label>
+            <input id="login-pass" class="input login-input" type="password" autocomplete="current-password" placeholder="••••••" />
+          </div>
+          <p id="login-err" class="hidden text-xs font-medium text-amber-200"></p>
+          <button type="submit" id="login-ok" class="btn btn-primary w-full !bg-white !text-primary hover:!bg-white/90 hover:!-translate-y-px">Masuk</button>
+        </form>
+        <p class="mt-4 text-center text-xs text-white/60">
+          Akun bawaan: <span class="font-mono">pemilik</span> / <span class="font-mono">admin123</span> (wajib diganti saat masuk pertama).
+        </p>
       </div>
-      <form id="login-form" class="mt-4 space-y-3" autocomplete="off">
-        <div class="field">
-          <label class="label" for="login-user">Username</label>
-          <input id="login-user" class="input" autocomplete="username" placeholder="cth: pemilik" />
-        </div>
-        <div class="field">
-          <label class="label" for="login-pass">Sandi</label>
-          <input id="login-pass" class="input" type="password" autocomplete="current-password" placeholder="••••••" />
-        </div>
-        <p id="login-err" class="hidden text-xs font-medium text-red-600 dark:text-red-400"></p>
-        <button type="submit" id="login-ok" class="btn btn-primary w-full">Masuk</button>
-      </form>
-      <p class="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
-        Akun bawaan: <span class="font-mono">pemilik</span> / <span class="font-mono">admin123</span> (wajib diganti saat masuk pertama).
-      </p>
     </div>
   </div>`;
   const form = el.querySelector<HTMLFormElement>('#login-form')!;

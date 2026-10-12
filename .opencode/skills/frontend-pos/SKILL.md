@@ -18,9 +18,11 @@ panel topup/laporan, modal struk, atau styling apa pun.
   menyinkronkan token di sini): primer biru **`#1d6df0`** (dari `#0087ff` —
   kontras putih 13px ~4.7:1 lolos AA, `#0087ff` lama hanya ~3.1:1 GAGAL),
   hover **`#1757c8`**, primary-soft **`#e9f1ff`**, canvas **`#f2f5fa`**
-  (kartu putih `#fff`, garis `border-gray-200/70`), sidebar navy
-  **`#0b1220`** (gradien ke `#131d33`) + hover **`#16213a`** + aktif
-  **`#1d4ed8`** (pil biru solid ber-shadow) + teks **`#93a3bd`**, teks
+  (kartu putih `#fff`, garis `border-gray-200/70`), sidebar biru tua
+  **`#0d1f4d`** (gradien 165deg `#1b3f9e → #12337f → #0c2158` + glow biru
+  pojok — restyle Sandik 2026-10-12) + hover **`#16306b`** + aktif
+  **`#2563eb`** (pil biru solid ber-shadow) + teks **`#b9c8e4`** (naik dari
+  #93a3bd — kontras di biru tua), teks
   `#18181b`/muted `#71717a` tidak berubah. Dua token bayangan BARU:
   **`--shadow-card`** (kartu/tabel — `.card`, `.table-wrap`, `.modal`)
   dan **`--shadow-pop`** (dropdown/toast/lapis melayang). Success
