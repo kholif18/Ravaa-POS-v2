@@ -246,6 +246,25 @@ app.post('/api/users/:id/password', hanyaPemilik, async (c) => {
   }
 });
 
+// Edit profil SENDIRI (semua peran — 2026-10-11): hanya `name`. Terpisah
+// dari POST /api/users (khusus pemilik) supaya kasir tetap bisa memperbarui
+// nama tampilannya sendiri; username & peran tak tersentuh di sini.
+app.post('/api/users/profile', async (c) => {
+  try {
+    const body = await c.req.json();
+    const u = c.get('user') as Pengguna;
+    const name = String(body?.name ?? '').trim();
+    if (!name) return c.json({ error: 'nama tidak boleh kosong' }, 400);
+    if (name.length > 32) return c.json({ error: 'nama maksimal 32 karakter' }, 400);
+    const row = db.prepare(
+      `UPDATE users SET name = ? WHERE id = ? RETURNING id, username, name, role, is_active, must_change, created_at`,
+    ).get(name, u.id);
+    return c.json({ data: barisUserBersih(row) }, 200);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan profil' }, 400);
+  }
+});
+
 // Ganti sandi sendiri (semua peran — satu-satunya jalan keluar dari
 // must_change). Selalu membersihkan must_change bila sandi lama benar.
 app.post('/api/users/password', async (c) => {

@@ -42,7 +42,10 @@ try {
   ok('7 panggilan laporan sukses', laporan.every((x) => x.j?.date === x.d),
     laporan.map((x) => x.j?.date).join(','));
 
-  const kasir = 'kasir';
+  // Nama kasir = nama AKUN yang login (bukan lagi hardcoded 'kasir') —
+  // dashboard menampilkan shift atas nama sesi ini (satu sumber dgn gerbang POS).
+  const me = await get('/api/me');
+  const kasir = me.body?.data?.user?.name ?? 'kasir';
   const sh = await get(`/api/shifts/open?cashier=${kasir}`);
   ok('200 shifts/open (bukan 404/500)', sh.status === 200, `status=${sh.status}`);
 

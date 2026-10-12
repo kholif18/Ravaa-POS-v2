@@ -15,6 +15,7 @@ import { mountShiftsPage } from './pages/shifts';
 import { mountSettingsPage } from './pages/settings';
 import { mountUsersPage } from './pages/users';
 import { renderLoginPage } from './pages/login';
+import { renderProfilPage } from './pages/profil';
 import { renderUbahSandiPage } from './pages/ubah-sandi';
 import { mountStockPage, unmountStockPage } from './pages/stock';
 import {
@@ -64,6 +65,14 @@ async function render(): Promise<void> {
   if (saya.wajib && route !== 'ubah-sandi') {
     if (location.hash !== '#/ubah-sandi') location.hash = '#/ubah-sandi';
     else renderBare('Ganti sandi', renderUbahSandiPage);
+    return;
+  }
+  if (route === 'profil') {
+    // Profil: edit nama sendiri + pref perangkat — di dalam shell (semua peran).
+    app!.innerHTML = renderShell(route, cashier(), saya.akun.role);
+    bindShell();
+    updateOutboxBadge();
+    renderProfilPage(document.getElementById('page')!);
     return;
   }
   if (route === 'ubah-sandi') {

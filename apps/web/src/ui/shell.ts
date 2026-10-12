@@ -4,7 +4,8 @@ import { akunTersimpan, type Peran } from './auth';
 
 export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings' | 'users';
 // login & ubah-sandi dirender TANPA shell (layar penuh) — bukan admin.
-export type Route = 'pos' | 'login' | 'ubah-sandi' | AdminRoute;
+// profil = halaman shell SEMUA peran (edit nama sendiri + pref perangkat).
+export type Route = 'pos' | 'login' | 'ubah-sandi' | 'profil' | AdminRoute;
 
 interface NavItem {
   route: AdminRoute;
@@ -101,6 +102,11 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   users: 'Pengguna',
 };
 
+/** Metadata halaman di LUAR nav (profil — dropdown akun): dipakai header. */
+export const ROUTE_META_EXTRA: Partial<Record<Route, { title: string; crumb: string[]; sub: string }>> = {
+  profil: { title: 'Profil Saya', crumb: ['Akun', 'Profil Saya'], sub: 'Nama tampil, tampilan perangkat, dan keamanan akun.' },
+};
+
 /** Breadcrumb: grup nav -> halaman. Ditampilkan menyatu dengan judul di header. */
 export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   dashboard: ['Utama', 'Dashboard'],
@@ -157,6 +163,7 @@ export function parseRoute(hash: string): Route {
   if (slug === 'pos' || slug === 'kasir') return 'pos';
   if (slug === 'login') return 'login';
   if (slug === 'ubah-sandi') return 'ubah-sandi';
+  if (slug === 'profil') return 'profil';
   if (ADMIN_ROUTES.has(slug)) return slug as AdminRoute;
   return 'pos';
 }
@@ -168,7 +175,7 @@ export function isAdminRoute(route: Route): route is AdminRoute {
 /** Bolehkah peran ini membuka rute? POS/login/ubah-sandi selalu boleh
  *  (dijaga terpisah); halaman admin ikut `roles` item nav-nya. */
 export function bolehBuka(route: Route, peran: Peran): boolean {
-  if (route === 'pos' || route === 'login' || route === 'ubah-sandi') return true;
+  if (route === 'pos' || route === 'login' || route === 'ubah-sandi' || route === 'profil') return true;
   for (const g of ADMIN_NAV) {
     const item = g.items.find((i) => i.route === route);
     if (item) return item.roles.includes(peran);
@@ -222,7 +229,7 @@ export function applySidebarState(): void {
 
 /* ---------- Render shell ---------- */
 
-function navHtml(active: AdminRoute, peran: Peran): string {
+function navHtml(active: AdminRoute | 'profil', peran: Peran): string {
   return ADMIN_NAV.map((group) => {
     const items = group.items.filter((i) => i.roles.includes(peran));
     if (!items.length) return '';
@@ -250,10 +257,22 @@ function iconBtn(id: string, name: IconName, label: string): string {
 }
 
 /** Blok kiri header: breadcrumb + judul jadi satu baris, subjudul di bawahnya. */
-function titleBlock(active: AdminRoute): string {
-  const crumb = ROUTE_CRUMB[active];
+function titleBlock(active: AdminRoute | 'profil'): string {
+  const extra = ROUTE_META_EXTRA[active];
+  if (extra) {
+    return `
+    <div class="min-w-0 flex-1">
+      <h1 class="page-title flex items-center gap-1.5">
+        ${extra.crumb.slice(0, -1).map((c) => `<span class="crumb">${c}</span><span class="crumb-sep" aria-hidden="true">${icon('chevR')}</span>`).join('')}
+        <span class="truncate">${extra.title}</span>
+      </h1>
+      <p class="page-sub">${extra.sub}</p>
+    </div>`;
+  }
+  const meta = active as AdminRoute;
+  const crumb = ROUTE_CRUMB[meta];
   const lead = crumb.slice(0, -1);
-  const last = crumb[crumb.length - 1] ?? ROUTE_TITLES[active];
+  const last = crumb[crumb.length - 1] ?? ROUTE_TITLES[meta];
   return `
     <div class="min-w-0 flex-1">
       <h1 class="page-title flex items-center gap-1.5">
@@ -262,7 +281,7 @@ function titleBlock(active: AdminRoute): string {
           .join('')}
         <span class="truncate">${last}</span>
       </h1>
-      <p class="page-sub">${ROUTE_SUBS[active]}</p>
+      <p class="page-sub">${ROUTE_SUBS[meta]}</p>
     </div>`;
 }
 
@@ -286,9 +305,9 @@ function userMenu(name: string, peran: Peran): string {
           </div>
         </div>
         <div class="dd-sep"></div>
-        <button type="button" class="dd-item" role="menuitem" data-user-act="profile">
-          ${icon('users')}<span>Pengaturan Akun / Edit Profil</span>
-        </button>
+        <a href="#/profil" class="dd-item no-underline" role="menuitem" data-user-act="profile">
+          ${icon('users')}<span>Edit Profil</span>
+        </a>
         <div class="dd-sep"></div>
         <button type="button" class="dd-item dd-item-danger" role="menuitem" data-user-act="logout">
           ${icon('logout')}<span>Keluar</span>
@@ -297,8 +316,9 @@ function userMenu(name: string, peran: Peran): string {
     </div>`;
 }
 
-export function renderShell(active: AdminRoute, cashier: string, peran: Peran): string {
-  const tanpaHeader = TANPA_HEADER.includes(active);
+export function renderShell(active: AdminRoute | 'profil', cashier: string, peran: Peran): string {
+  // 'profil' sengaja TIDAK ada di daftar ini (selalu berheader).
+  const tanpaHeader = (TANPA_HEADER as readonly string[]).includes(active);
   return `
   <div class="app-layout">
     <aside class="sidebar" id="sidebar" aria-label="Navigasi utama">
@@ -440,12 +460,14 @@ export function bindShell(): void {
     setUserMenu(document.getElementById('user-dd')?.hidden !== false);
   });
 
+  // "Edit Profil" kini <a href="#/profil"> (navigasi biasa) — hanya logout
+  // yang masih aksi JS di sini. Tutup dropdown saat klik apa pun di dalamnya
+  // (sidebar handler a[href^="#/"] di atas tidak menjangkau user-dd).
   document.querySelectorAll<HTMLElement>('[data-user-act]').forEach((b) => {
     b.addEventListener('click', async () => {
       const act = b.dataset.userAct;
       setUserMenu(false);
-      if (act === 'profile') openProfileModal();
-      else if (act === 'logout') await logout();
+      if (act === 'logout') await logout();
     });
   });
 

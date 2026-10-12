@@ -54,6 +54,19 @@ export function tokenUji() {
   } catch {
     /* abaikan — token tetap dipakai */
   }
+  // Pastikan shift terbuka atas NAMA AKUN (header/POS memakai nama ini —
+  // bila pemilik mengganti nama akun, gate "Buka shift dulu" akan menghalangi
+  // semua suite UI). 409 = sudah terbuka, aman diabaikan.
+  const nama = login?.data?.user?.name || user;
+  try {
+    curlJson(
+      ['-s', '-m', '10', '-X', 'POST', `${API}/api/shifts/open`, '-H', 'content-type: application/json',
+        '-H', `Authorization: Bearer ${token}`, '-d', '@-'],
+      JSON.stringify({ modal_awal: 100000, cashier: nama }),
+    );
+  } catch {
+    /* abaikan */
+  }
   tokenCache = token;
   return token;
 }
