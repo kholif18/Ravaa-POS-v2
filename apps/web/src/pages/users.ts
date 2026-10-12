@@ -39,7 +39,7 @@ function errMsg(e: unknown): string {
 
 function badgePeran(role: string): string {
   return role === 'pemilik'
-    ? `<span class="badge-dyn">Pemilik</span>`
+    ? `<span class="badge-dyn">Owner</span>`
     : `<span class="chip">Kasir</span>`;
 }
 
@@ -107,7 +107,7 @@ function renderTable(): string {
     </div>
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-    Diri sendiri dan pemilik aktif terakhir dilindungi server — tidak bisa
+    Diri sendiri dan owner aktif terakhir dilindungi server — tidak bisa
     diubah perannya, dinonaktifkan, atau dihapus.
   </p>`;
 }
@@ -138,7 +138,7 @@ function formSimpan(id: number | null, awal?: UserRow): void {
           <label class="label" for="u-role">Peran *</label>
           <select id="u-role" class="input">
             <option value="kasir"${(awal?.role ?? 'kasir') === 'kasir' ? ' selected' : ''}>Kasir</option>
-            <option value="pemilik"${awal?.role === 'pemilik' ? ' selected' : ''}>Pemilik</option>
+            <option value="pemilik"${awal?.role === 'pemilik' ? ' selected' : ''}>Owner</option>
           </select>
         </div>
         ${isNew ? '' : `
