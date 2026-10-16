@@ -12,4 +12,12 @@ export default defineConfig({
     },
   },
   build: { outDir: 'dist' },
+  // Pratinjau `vite preview` (port bawaan 4173) ikut meneruskan /api seperti
+  // dev, supaya PWA hasil build bisa diuji end-to-end (service worker + API
+  // nyata) TANPA bentrok port dengan dev server :5656.
+  preview: {
+    proxy: {
+      '/api': 'http://localhost:3001',
+    },
+  },
 });

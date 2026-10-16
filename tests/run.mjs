@@ -82,6 +82,14 @@ const SUITE = [
   ['pos-notif-test.mjs', 6],
   ['profil-test.mjs', 18],
   ['login-test.mjs', 26],
+  ['aging-test.mjs', 21],
+  ['audit-test.mjs', 24],
+  // restore-test memulihkan DB ke snapshot yang ia buat SENDIRI di awal suite
+  // (data suite sebelumnya ikut masuk snapshot) — taruh menjelang akhir supaya
+  // suite yang butuh data live panjang tidak terpengaruh urutan.
+  ['restore-test.mjs', 21],
+  // pwa-test membangun dist + menjalankan vite preview :4179 sendiri.
+  ['pwa-test.mjs', 11],
 ];
 
 let total = 0;

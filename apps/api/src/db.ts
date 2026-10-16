@@ -30,12 +30,60 @@ function loadSql(name: 'schema.sql' | 'seed.sql'): string {
 }
 
 export const dbPath = resolveDbPath();
-export const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+
+/** Buka koneksi baru ke file DB + pragma wajib (WAL + foreign_keys). */
+function bukaKoneksi(p: string) {
+  const d = new Database(p);
+  d.pragma('journal_mode = WAL');
+  d.pragma('foreign_keys = ON');
+  return d;
+}
+
+// `let` (bukan const) — SATU-SATUNYA alasan: restore backup
+// (POST /api/backup/restore) menukar file DB di disk saat API hidup, jadi
+// koneksi harus bisa ditutup lalu dibuka ulang (pulihkanDari di bawah).
+// ESM live binding: reassignment di sini terlihat oleh `import { db }` di
+// index.ts — bukan tebakan, sudah diuji dengan tsx pada setup repo ini.
+export let db = bukaKoneksi(dbPath);
+
+/** Bungkus `db.transaction` yang SELALU memakai koneksi `db` terbaru.
+ *
+ *  `const tx = db.transaction(fn)` di scope modul mengikat instance koneksi
+ *  YANG SAAT ITU — setelah `pulihkanDari()` menutup koneksi lama dan membuka
+ *  yang baru, `tx` masih menunjuk koneksi tertutup itu dan setiap tulisan
+ *  lewat tx gagal "The database connection is not open" (bug nyata: sesudah
+ *  restore, POST /api/sales & /api/products & /api/returns & mutasi hutang
+ *  mati sampai proses API di-restart). Dengan helper ini transaction dibuat
+ *  per pemanggilan, jadi binding live ESM selalu segar. Call site TIDAK
+ *  berubah: `const simpanX = transaksi((a, b) => {...})`. */
+export function transaksi<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  return (...args: A) => db.transaction(fn)(...args);
+}
 
 export function migrate(): void {
   db.exec(loadSql('schema.sql'));
+}
+
+/** Pulihkan DB dari file backup (dipakai POST /api/backup/restore).
+ *
+ *  Urutan sengaja: SALIN dulu ke file sementara (kalau disk penuh/gagal
+ *  baca, DB yang hidup belum tersentuh sama sekali), baru tutup koneksi,
+ *  tukar file secara rename (atomik satu filesystem), buang pendamping
+ *  -wal/-shm (file backup dibuat ber-mode DELETE, jadi pendamping lama pasti
+ *  basi), lalu buka ulang koneksi — termasuk di jalur error, supaya API
+ *  tidak pernah tertinggal tanpa koneksi DB. */
+export function pulihkanDari(fileBackup: string): void {
+  const sementara = `${dbPath}.tmp-restore`;
+  fs.copyFileSync(fileBackup, sementara); // bisa throw — DB hidup masih utuh
+  db.close();
+  try {
+    fs.renameSync(sementara, dbPath);
+    fs.rmSync(`${dbPath}-wal`, { force: true });
+    fs.rmSync(`${dbPath}-shm`, { force: true });
+  } finally {
+    db = bukaKoneksi(dbPath);
+    fs.rmSync(sementara, { force: true });
+  }
 }
 
 /** Hash sandi format `saltHex:hashHex` (scrypt bawaan node, tanpa dep baru). */

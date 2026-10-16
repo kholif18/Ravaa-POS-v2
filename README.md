@@ -63,8 +63,13 @@ Backup DB: API membuat **backup otomatis** — sekali saat hidup lalu cek tiap
 jam (idempoten per hari UTC), file baru juga dari tombol **Backup sekarang**
 di `#/settings`. File ada di `apps/api/data/backups/` (retensi 14 terbaru).
 
-**Restore (manual):** matikan API -> salin file backup pilihan menjadi
-`apps/api/data/data.db` -> hidupkan lagi -> buka shift baru. Contoh:
+**Restore:** sejak 2026-10-16 bisa langsung dari UI — kartu **Backup data**
+di `#/settings` punya tombol **Pulihkan** per file (server memverifikasi
+integritas dulu, membuat **backup pengaman** otomatis, lalu memulihkan tanpa
+perlu restart API; sesi login ikut kembali ke snapshot, jadi device lain bisa
+ter-logout). Jalur manual tetap tersedia sebagai darurat: matikan API ->
+salin file backup pilihan menjadi `apps/api/data/data.db` -> hidupkan lagi
+-> buka shift baru. Contoh:
 
 ```bash
 systemctl --user stop ravaa-api   # atau Ctrl+C proses dev:api
@@ -120,6 +125,26 @@ npm run dev:api
    **manual di halaman ini** *dan* **otomatis dari POS** sejak putaran 12
    (uang kurang/0 + pelanggan valid -> `charge` `Nota <invoice_no> — sisa
    bayar POS`; lihat butir Hutang di POS).
+* **Pengingat umur hutang (aging, 2026-10-16)**: bantu pemilik melihat
+  piutang/hutang yang mengendap — di `#/debts` ada **chip "n lewat 30 hari"**
+  + **badge umur per baris** (hutang TERTUA yang masih terbuka, FIFO: charge
+  terlama dulu, bayar sebagian tidak mereset umur; merah bila >= 30 hari) dan
+  hal yang sama untuk nota kulakan diterima-belum-lunas di `#/purchases`
+  (umur sejak barang diterima). Angka dihitung server dari data asli saat
+  dibaca (`umur_hari`/`lewat30`) — bukan saldo tersimpan.
+* **Jejak audit** (`#/audit`, menu **Jejak Audit**, khusus pemilik, baru
+  2026-10-16): catatan mutasi penting master & sistem — produk, kategori,
+  satuan, pelanggan, supplier, hutang, user, pengaturan, stok, pengeluaran,
+  retur, pembelian, backup/restore, plus login berhasil/gagal (dengan nama
+  akun sebagai snapshot). Filter entitas/aksi/tanggal + cari multi-kata;
+  klik baris = modal detail. Penjualan tidak diduplikasi di sini (sudah ada
+  Riwayat + Laporan).
+* **PWA (bisa dipasang, 2026-10-16)**: aplikasi web punya manifest + service
+  worker, jadi bisa **dipasang ke home screen Android/HP atau desktop**
+  (display standalone) dan **shell-nya tetap terbuka tanpa jaringan**. Data
+  `/api/*` tidak pernah di-cache service worker (angka kasir yang basi lebih
+  berbahaya daripada layar error) — antrean tulis offline tetap lewat outbox
+  yang sudah ada. Registrasi SW hanya di build produksi.
 * **Form produk** (`#/products` -> Tambah/Edit) memakai **modal 2 kolom ala
   RPOS** (lebar `max-w-5xl`): kolom **kiri = kotak foto persegi** (seluruh kotak
   diklik untuk pilih berkas — di mode Tambah/Duplikat pilihan ditahan di memori
@@ -906,6 +931,12 @@ npm run dev:api
     printer sama sekali. Sejak putaran 11 (2026-10-05) saklar **hanya
     mengizinkan pengiriman ke printer** — modal resume + pilihan cetak
     tetap muncul setiap penjualan (lihat "Modal resume" di atas).
+  - **Backup data** (tidak berubah sejak awal, ditambah **Pulihkan** 2026-10-16):
+    tombol **Backup sekarang** + daftar file (Unduh per baris). Sejak
+    2026-10-16 tiap baris juga punya tombol merah **Pulihkan** — swal
+    konfirmasi, server verifikasi integritas file dulu, membuat backup
+    pengaman otomatis, baru memulihkan (gagal di tahap mana pun = data lama
+    utuh). Konsekuensi yang ditulis di dialog: sesi login bisa ter-logout.
 * **HPP & laba (modal rata-rata)** — menutup celah "HPP rata-rata" di bawah.
   - Restock kini menerima **`harga_beli`** (opsional, isian "Harga beli / nota"
     di dialog stok, mode **Masuk barang**). Tidak diisi = rata-rata modal tidak

@@ -33,10 +33,33 @@
 ```
 apps/api/src/index.ts    API Hono. SATU-SATUNYA yang boleh tulis DB.
 apps/api/src/db.ts       Koneksi better-sqlite3 + migrate + seed. DB_PATH default ./data/data.db
+                         + **`pulihkanDari(file)`** (restore 2026-10-16: copy
+                         tmp -> db.close() -> rename -> buang -wal/-shm ->
+                         reopen; dipakai POST /api/backup/restore) + helper
+                         **`transaksi(fn)`** — WAJIB untuk setiap transaction
+                         di index.ts: `db` di-rebind object-nya saat restore,
+                         jadi `const tx = db.transaction(...)` di scope modul
+                         mengikat koneksi LAMA dan semua tulis lewat tx mati
+                         `The database connection is not open` sampai proses
+                         API di-restart (bug nyata 2026-10-16; helper membuat
+                         transaction per pemanggilan sehingga selalu ikut
+                         koneksi aktif — jangan kembalikan ke pola lama).
 apps/api/src/seed.ts     Runner seed (idempotent, INSERT OR IGNORE)
 db/schema.sql            SUMBER KEBENARAN skema. Ubah skema = edit file ini + migrasi manual.
 db/seed.sql              Master awal (8 kategori + contoh SKU).
 apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
+                         Registrasi service worker HANYA `import.meta.env.PROD`
+                         (PWA 2026-10-16) — dev TIDAK boleh di-cache SW.
+apps/web/public/sw.js    Service worker PWA (nol dependensi): shell+aset dari
+                         cache (`ravaa-shell-v1`; NAIKKAN versi bila isi file
+                         berubah), `/api/*`+non-GET+lintas origin SELALU
+                         jaringan (data kasir tak boleh basi; outbox tetap
+                         jalur tulis offline), navigasi network-first fallback
+                         shell `/`. Didukung `manifest.webmanifest` (display
+                         standalone; `start_url`/`scope` `/`) + `icons/`
+                         (192/512 any + maskable-512 + apple-touch-icon).
+                         Diuji `tests/pwa-test.mjs` (build dist + vite
+                         preview :4179 + offline reload).
 apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
                          `updateOutboxBadge()` menghitung `outboxCount()` sekali
                          lalu merawat DUA penampil: `#outbox-badge` (header, lama)
@@ -888,9 +911,19 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           Batal, klik = rincian) + dialog buat PO (supplier
                           select + cari produk + qty/harga per baris) + dialog
                           Terima (`dibayar` prefill total) + dialog Bayar sisa
-                          + Batalkan (order saja).
+                          + Batalkan (order saja). **Pengingat aging
+                          (2026-10-16)**: chip kuning `#po-lewat` ("n lewat 30
+                          hari", dari `lewat30` GET /api/purchases) + badge
+                          umur per baris (`umur_hari` sejak `received_at`,
+                          hanya nota diterima-belum-lunas; "baru" bila <= 0).
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
+apps/web/src/pages/audit.ts  Halaman #/audit (menu Jejak Audit, 2026-10-16,
+                         khusus pemilik): tabel audit_log dari GET /api/audit
+                         (chip jumlah `#audit-count`, filter entity/action +
+                         cari `#audit-q` multi-kata + tanggal), klik baris =
+                         modal detail read-only (pola riwayatForm — satu
+                         tombol "Tutup"; baris tanpa detail aman dibuka).
 apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
                           saklar SERVER — "Stok boleh minus" + "Tolak jual
                           kadaluarsa" -> GET/POST /api/settings (update PARSIAL:
@@ -912,7 +945,12 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
                            **Backup data** (tombol "Backup sekarang" ->
                            POST /api/backup + daftar file + Unduh per baris dari
                            GET /api/backup; tanpa swal — non-destruktif; daftar
-                           gagal-muat tidak mematahkan halaman).
+                           gagal-muat tidak mematahkan halaman; **sejak
+                           2026-10-16 tombol "Pulihkan" per baris backup**
+                           `[data-restore]` -> swal konfirmasi -> POST
+                           /api/backup/restore; copy di dialog menjelaskan
+                           otomatis backup pengaman + sesi login bisa ikut
+                           kembali ke snapshot (device lain mungkin logout)).
 apps/web/src/pages/customers.ts  Halaman #/customers (menu Pelanggan, baru
                            2026-10-04): master kontak pembeli — tabel nama/
                            HP/catatan, cari multi-kata, CRUD via openModal +
@@ -948,6 +986,13 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            `customer-debt-test.mjs` section 11 (popup A4:
                            tabel 3 baris tanpa `kotak` + kedua aturan
                            striping ada).
+                           **Pengingat aging (2026-10-16)**: chip kuning
+                           `#hutang-lewat` ("n lewat 30 hari", dari field
+                           `lewat30` GET /api/customer-debts) + badge umur
+                           per baris (`umur_hari` — hutang TERTUA yang masih
+                           terbuka, FIFO; merah bila >= 30, "hari ini" bila
+                           <= 0). Angka = cermin API, jangan dihitung ulang
+                           di klien.
 apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print-agent
                           + **`bukaLaci()` (Tahap 4a 2026-10-06)** — kick
                           `ESC p 00 19 FA` (5 byte) dibuka OTOMATIS tiap
@@ -1215,8 +1260,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     - `POST /api/purchases/:id/cancel` -> 200 (hanya `order`; received tak bisa
       batal — koreksi stok via opname). Tak ada DELETE (nota PO = arsip).
     - `GET /api/purchases?status=order|received|cancel|semua&limit=&offset=`
-      -> `{data:[{...,sisa, n_items}], total}` (`sisa = total−terbayar`
+      -> `{data:[{...,sisa, n_items, umur_hari}], total, lewat30}` (`sisa = total−terbayar`
       computed, prinsip ledger; `id DESC`).
+      **Aging (2026-10-16)**: `umur_hari` = lama hutang sejak `received_at`
+      (julianday SQLite = UTC; hanya `received` sisa>0 — null untuk
+      order/batal/lunas); `lewat30` = jumlah baris sisa>0 berumur >= 30 hari
+      (sumber chip `#po-lewat` halaman Pembelian + asersi aging-test).
     - `GET /api/purchases/:id` -> `{data:{purchase(+sisa),items}}`.
     - Laci: `SUM(terbayar)` nota received terikat shift (`n_purchase`/
       `purchase_total` di `GET /api/shifts` → `kasSeharusnya()`); rekap harian
@@ -1239,7 +1288,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       (`n_expense`/`expense_total` di `GET /api/shifts` → `kasSeharusnya()`
       di `shift-tutup.ts`); rekap harian di `GET /api/reports/daily`
       (`expense:{n,total}`, dilaporkan TERPISAH — tidak menggerus laba).
-  - `GET /api/customer-debts?status=open|semua&limit=&offset=` -> `{data:[{customer_id,name,phone,charge,bayar,sisa,terakhir}], total, count}`
+  - `GET /api/customer-debts?status=open|semua&limit=&offset=` -> `{data:[{customer_id,name,phone,charge,bayar,sisa,terakhir,umur_hari}], total, count, lewat30}`
     - **Ringkasan saldo per pelanggan** (tabel utama halaman `#/debts`).
       Read-only. `limit` default 50 maks 200 (2026-10-11); `total` TETAP
       jumlah uang (kartu piutang — jangan dipakai hitung halaman), pager
@@ -1249,6 +1298,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `"status harus open|semua"`.
     - Urutan `sisa DESC, terakhir DESC, customer_id`; `total` = jumlah `sisa`
       (dipakai kartu "Total piutang berjalan").
+    - **Aging (2026-10-16)**: `umur_hari` = umur HUTANG TERTUA yang masih
+      terbuka per pelanggan (FIFO: charge terlama dulu, pembayaran melunasi
+      yang tertua — bayar sebagian TIDAK mereset umur), null bila lunas;
+      `lewat30` = jumlah pelanggan open dengan umur >= 30 (sumber chip
+      `#hutang-lewat` halaman Hutang). Keduanya dihitung dari ledger saat
+      baca (prinsip yang sama: tidak ada saldo tersimpan).
   - `GET /api/customer-debts/:customerId` ->
     `{data:{customer:{id,name,phone,note,...}, rows:[{id,customer_id,type,amount,note,created_at,sisa}], charge, bayar, sisa}}`
     - Rincian ledger satu pelanggan; `rows` urut **terbaru di atas** (DESC),
@@ -1462,6 +1517,30 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     ADMIN_NAV; kasir nyasar = toast + alih ke `#/pos`), api.ts menyuntikkan
     header Bearer ke semua request (termasuk flush outbox), `Pengguna` page
     khusus pemilik, logout = hapus sesi server + token.
+* **Jejak audit (2026-10-16) — `GET /api/audit` -> `{data:[<baris audit_log>], total}`**
+  (halaman `#/audit`, menu **Jejak Audit**, `hanyaPemilik`; tabel `audit_log`
+  di `db/schema.sql`, ditulis `catatAudit(c,…)` di dalam rute — bukan
+  middleware, supaya hanya mutasi BERHASIL yang tercatat).
+  - Query: `entity` (persis, mis. `product`), `q` (multi-kata — SEMUA kata
+    harus cocok di gabungan `username action entity entity_id detail`,
+    di-lowercase server), `date` (validasi round-trip seperti sales/expenses
+    -> 400 `"date harus format YYYY-MM-DD"`), `limit` default 50 maks 200,
+    `offset`. Urutan `id DESC`. `total` = jumlah baris cocok-filter tanpa
+    limit.
+  - Kolom baris: `id, at, user_id, username, role` (snapshot aktor — tetap
+    terbaca walau akun diubah/dihapus), `action`
+    (`create|update|delete|restock|opname|import|restore|login|login-gagal`),
+    `entity`, `entity_id`, `detail` (JSON/teks ringkas, dipotong 500 char).
+  - **Cakupan instrumentasi**: produk (create/update/delete/restock/opname/
+    import), kategori, satuan, pelanggan, supplier, hutang (charge/payment/
+    hapus baris), user (create/update/reset sandi), settings, pengeluaran,
+    retur, pembelian (buat/terima/bayar/batal), backup + restore, dan
+    login/login-gagal. Penjualan/topup SENGAJA tidak diaudit per nota
+    (sudah punya linimasa Riwayat + laporan) — jangan tambahkan tanpa
+    permintaan.
+  - Diuji `tests/audit-test.mjs` (24 asersi): pencatatan create/update/delete,
+    filter q/tanggal/limit, 401 tanpa token, kasir 403, login-gagal tercatat,
+    dan UI `#/audit` (chip jumlah, cari, modal detail, Esc).
 * `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false,
   store_name:"",store_address:"",store_phone:"",store_email:""}}`
   (selalu ada — dua baris boolean default di-seed `db/seed.sql` lewat `INSERT OR
@@ -1864,14 +1943,31 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     hidup + `setInterval` tiap 1 jam; cek "sudah ada `data-<hari-UTC>-*.db`?"
     sebelum membuat — restart `tsx watch` tidak menggandakan backup, gap
     maksimal ±25 jam.
-  * **Restore = manual dokumentasi** (tanpa endpoint, disengaja): matikan API,
-    ganti `data.db` dengan file backup, hidupkan lagi. Jangan menambah endpoint
-    restore tanpa diskusi — menulis DB dari body request = risiko keamanan baru.
+  * **`POST /api/backup/restore` `{nama}` (2026-10-16) -> 200
+    `{data:{nama,pengaman}}`** (hanya pemilik; tercatat `restore` di audit).
+    Urutan: whitelist nama (basename + pola -> 404 `"file backup tidak ada"`),
+    file ada (404), `integrity_check` koneksi readonly terpisah (gagal dibaca
+    -> 400 `"file backup tidak bisa dibaca — tidak dipulihkan"`; selain `ok`
+    -> 400 `"file backup rusak (integrity check gagal) — tidak dipulihkan"`),
+    **backup pengaman otomatis dulu** (gagal -> 500, DB lama TIDAK disentuh),
+    baru `pulihkanDari()` (db.ts). SEMUA jalur gagal = DB lama tetap hidup
+    utuh. Konsekuensi yang didokumentasikan di dialog UI: sesi login ikut
+    kembali ke snapshot (device lain bisa ter-logout) dan proses API TIDAK
+    perlu restart sesudahnya. Tombolnya di kartu **Backup data** `#/settings`
+    (`[data-restore]` -> swal konfirmasi -> toast hasil).
+  * **Restore manual dokumentasi** tetap jalur darurat: matikan API, ganti
+    `data.db` dengan file backup, hidupkan lagi.
 * Endpoints backup diuji `tests/backup-test.mjs` (27 asersi, terdaftar di
   `tests/run.mjs`): daftar/POST/unduh+integrity/guard 3×404/retensi 16
   dummy/UI kartu. Test MEMINDAHKAN file asli ke snapshot lalu mengembalikan
   file asli di `finally` — jangan menghapus file `backups/` milik pemilik di
-  luar test.
+  luar test. **Restore diuji `tests/restore-test.mjs` (21 asersi)**: marker
+  A -> backup B1 -> marker B -> pulih ke B1 (A kembali, B hilang), guard
+  404 (berjalur/pola salah/file hilang), file rusak -> 400 tanpa mengubah DB,
+  audit + file pengaman terdaftar, UI `[data-restore]`/Unduh, dan section B2
+  anti-regresi: tulis lewat `upsertProduct`/`simpanMutasiHutang`/
+  `insertSale`/`simpanRetur` WAJIB hidup sesudah restore tanpa restart
+  (bug nyata 2026-10-16 — lihat `transaksi()` di §2).
 
 Aturan DB: tulis HANYA lewat prepared statement + transaction di `index.ts`.
 DILARANG: query string concat dari input user, tabel/kolom baru tanpa update `db/schema.sql`.
@@ -1911,6 +2007,27 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   layout `a4` TETAP 64 kolom (`COLS_A4`) — lebar masing-masing tidak boleh berubah
   tanpa menyesuaikan test (`escpos-test.ts`, `e2e-struk.mjs`). Uji dengan
   `npx tsx tests/escpos-test.ts` (asersi kolom) atau ukur tiap baris di test.
+* **DILARANG menyimpan `const tx = db.transaction(...)` di scope modul**
+  (index.ts) — `db` di-rebind saat restore (`pulihkanDari`), tx model lama
+  mengikat koneksi mati dan mematikan semua tulisan sesudah restore (bug
+  nyata 2026-10-16). Selalu bungkus lewat helper **`transaksi(fn)`** dari
+  `db.ts`; regresi dijaga section B2 `tests/restore-test.mjs`.
+* **Data uji WAJIB nama eksak + self-heal di awal suite.** Cleanup bertipe
+  prefix (`name LIKE 'UjiX%'`) pernah menjaring pelanggan durable milik suite
+  lain (`UjiHutang%` vs `UjiHutang POS E2E`) dan menyisakan yatim yang
+  menggeser baseline test lain (run penuh 2026-10-16). Aturan: hapus pakai
+  daftar nama EKSAK milik suite sendiri; di awal suite bersihkan sisa yatim
+  (termasuk efek sampingnya — stok/mutasi) supaya suite tetap hijau walau
+  run sebelumnya crash; helper `sql()` menyapa `apps/api/data/data.db`
+  langsung (CLI `sqlite3` TIDAK menegakkan foreign_keys — jangan andalkan).
+* **PWA**: service worker HANYA boleh meng-cache shell + aset statis — data
+  `/api/*` TIDAK PERNAH (angka kasir basi > layar error; outbox tetap jalur
+  tulis offline). Ubah isi `apps/web/public/sw.js` = NAIKKAN versi
+  `ravaa-shell-v1` (cache lama baru dibuang saat activate). Registrasi SW
+  tetap `import.meta.env.PROD` (dev jangan di-cache). Uji: `tests/pwa-test.mjs`.
+* `apps/web/vite.config.ts` `preview.proxy` (`/api` -> :3001) itu untuk
+  uji PWA di port bawaan 4173 — **JANGAN** pindahkan preview ke 5656
+  (dipakai dev server) atau hapus proxynya (pwa-test bergantung).
 * Setiap perubahan API: update kontrak §3 file ini + README bila endpoint berubah.
 * **Migrasi skema (kebijakan 2026-09-26): karena masih dev, TULIS kolom langsung
   di `db/schema.sql` (CREATE TABLE) lalu buat ulang DB — jangan pakai ALTER
@@ -2116,6 +2233,20 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
 * `node:sqlite` bawaan TIDAK dipakai di repo ini — jangan "memperbaiki" dengan menggantinya.
 * Print-agent menulis ke device: butuh grup `lp` di Linux (`sudo usermod -aG lp $USER`).
 * Tanpa sudo, `btrfs subvolume` / `/var/lib/docker` tidak terbaca — itu normal, bukan bug repo.
+* **Restore sesudah `POST /api/backup/restore`**: sesi login ikut snapshot
+  (device bisa logout — by design, didokumentasikan di dialog), tapi proses
+  API TIDAK butuh restart; kalau tiba-tiba semua POST mati
+  `The database connection is not open` sesudah restore, ada code path yang
+  memakai `db.transaction` lama — pindahkan ke `transaksi()` (§5).
+* **Uji PWA** (`tests/pwa-test.mjs`) membangun `dist/` lalu menyalakan
+  `vite preview` sendiri di **:4179 `--strictPort`** (proses detached —
+  dibunuh `process.kill(-pid)` di `finally`). Port bawaan preview = 4173;
+  `--root` BUKAN opsi valid `vite preview`. Saat membunuh proses manual
+  jangan `pkill -f "vite preview"` polos (self-match membunuh shell sendiri)
+  — pakai pola bracket `pkill -f "[v]ite preview"`.
+* Fixture foto test (`/tmp/opencode/foto-uji.jpg`) ditulis ULANG tiap run
+  profil-test; jangan kembalikan ke pola `existsSync` — file /tmp lama bisa
+  berisi JPEG rusak dan membuat `kecilkanAvatar` onerror tanpa jejak jelas.
 
 ## 7. Definisi selesai (Definition of Done)
 

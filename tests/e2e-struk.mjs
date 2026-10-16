@@ -971,7 +971,12 @@ try {
     (await page.locator('#pcust-list').count()) === 1 && fokusCari === 'pcust-q',
     JSON.stringify({ list: await page.locator('#pcust-list').count(), fokus: fokusCari }));
 
-  await page.fill('#pcust-q', 'UjiHutang');
+  // Nama PERSIS (bukan 'UjiHutang' polos): sisa data uji lain yang bernama
+  // 'UjiHutang Bersih'/'UjiHutang Papa Baru' (customer-debt-test) ikut
+  // terjaring kata kunci pendek dan menempati baris PERTAMA daftar — Enter
+  // lalu memilih pelanggan yang salah (terbukti gagal di run penuh
+  // 2026-10-16). Nama eksak membuat pilihan Enter deterministik.
+  await page.fill('#pcust-q', 'UjiHutang POS E2E');
   await page.waitForFunction(
     () => document.querySelectorAll('#pcust-list .suggest-item').length >= 1, { timeout: 5000 },
   );

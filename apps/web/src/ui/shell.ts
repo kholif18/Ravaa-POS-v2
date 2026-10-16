@@ -2,7 +2,7 @@ import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 import { akunTersimpan, type Peran } from './auth';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings' | 'users';
+export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings' | 'users' | 'audit';
 // login & ubah-sandi dirender TANPA shell (layar penuh) — bukan admin.
 // profil = halaman shell SEMUA peran (edit nama sendiri + pref perangkat).
 export type Route = 'pos' | 'login' | 'ubah-sandi' | 'profil' | AdminRoute;
@@ -79,6 +79,8 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
       { route: 'settings', label: 'Pengaturan', icon: 'settings', roles: MILIK },
       // Akun & peran (login 2026-10-11): khusus pemilik.
       { route: 'users', label: 'Pengguna', icon: 'shieldCheck', roles: MILIK },
+      // Jejak audit (2026-10-16): siapa mengubah apa — khusus pemilik.
+      { route: 'audit', label: 'Jejak audit', icon: 'clock', roles: MILIK },
     ],
   },
 ];
@@ -100,6 +102,7 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   shifts: 'Shift Kasir',
   settings: 'Pengaturan',
   users: 'Pengguna',
+  audit: 'Jejak audit',
 };
 
 /** Metadata halaman di LUAR nav (profil — dropdown akun): dipakai header. */
@@ -125,6 +128,7 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   shifts: ['Keuangan', 'Shift Kasir'],
   settings: ['Sistem', 'Pengaturan'],
   users: ['Sistem', 'Pengguna'],
+  audit: ['Sistem', 'Jejak audit'],
 };
 
 /** Subjudul per halaman (dipindah dari dalam body ke header). */
@@ -145,6 +149,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   shifts: 'Riwayat shift + buka/tutup shift dengan modal awal & modal akhir.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
   users: 'Akun kasir & pemilik: tambah, atur peran, reset sandi, nonaktifkan.',
+  audit: 'Siapa mengubah apa — jejak master, stok, aturan, dan uang (khusus pemilik).',
 };
 
 /** Rute yang tampil TANPA header sama sekali (keputusan pemilik 2026-10-03):

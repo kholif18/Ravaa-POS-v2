@@ -16,8 +16,12 @@ const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 
 // Bersihkan sisa run sebelumnya (urutan: ledger dulu, baru pelanggan — FK ON).
-sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name LIKE 'UjiHutang%');`);
-sql(`DELETE FROM customers WHERE name LIKE 'UjiHutang%';`);
+// Nama EKSAK milik suite ini saja — prefix 'UjiHutang%' menjaring juga
+// pelanggan 'UjiHutang POS E2E' milik e2e-struk (memutus pelanggan durable
+// + menyisakan customer_id yatim di sales). Terbukti bentrok di run penuh
+// 2026-10-16; jangan kembalikan ke LIKE.
+sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih'));`);
+sql(`DELETE FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih');`);
 
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
@@ -201,9 +205,9 @@ await p.click('.modal [data-x]'); await p.waitForTimeout(300);
 chk('tidak ada pageerror', err.length === 0, err.join(' ~ '));
 await b.close();
 
-// Bersihkan data uji (ledger dulu — FK ON).
-sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name LIKE 'UjiHutang%');`);
-sql(`DELETE FROM customers WHERE name LIKE 'UjiHutang%';`);
+// Bersihkan data uji (ledger dulu — FK ON). Nama eksak, lihat catatan di atas.
+sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih'));`);
+sql(`DELETE FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih');`);
 
 console.log(`\n=== ${fail ? 'ADA GAGAL' : 'SEMUA LOLOS'} ===  (lolos: ${pass}, gagal: ${fail})`);
 process.exit(fail ? 1 : 0);

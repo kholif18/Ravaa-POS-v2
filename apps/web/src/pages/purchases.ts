@@ -25,6 +25,10 @@ type Po = {
   total: number; terbayar: number; sisa: number;
   cashier: string; shift_id: number | null; received_at: string | null;
   note: string; n_items: number;
+  /** Usia hutang supplier (hari sejak DITERIMA, dihitung server 2026-10-16).
+   *  null = bukan hutang received (order/batal/lunas) — badge umur hanya muncul
+   *  saat masih ada sisa. */
+  umur_hari: number | null;
 };
 
 type PoItem = {
@@ -39,6 +43,9 @@ const state = {
   status: 'semua',
   items: [] as Po[],
   total: 0,
+  // Pengingat hutang supplier (2026-10-16): jumlah PO received bersisa >30 hari
+  // (dihitung server dari seluruh nota, bukan cuma halaman ini).
+  lewat30: 0,
   // Paginasi (2026-10-11): RESET ke 0 setiap status berubah.
   offset: 0,
   limit: PAGE_SIZE,
@@ -90,7 +97,13 @@ function renderPage(): string {
         <div class="flex flex-wrap items-center gap-1.5">
           ${STATUS.map((s) => `<button type="button" data-pstatus="${s.key}" class="chip${state.status === s.key ? ' !border-primary !text-primary' : ''}">${s.label}</button>`).join('')}
         </div>
-        <button type="button" id="po-new" class="btn btn-primary">${icon('plus')}<span>Buat PO</span></button>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="chip !border-amber-500/40 !text-amber-700 dark:!text-amber-400" id="po-lewat" hidden
+                title="Ada nota diterima dengan sisa hutang lebih dari 30 hari — segera dibayar">
+            ${icon('alert')}<span id="po-lewat-n">0</span><span>lewat 30 hari</span>
+          </span>
+          <button type="button" id="po-new" class="btn btn-primary">${icon('plus')}<span>Buat PO</span></button>
+        </div>
       </div>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Order dulu, barang datang baru Terima (stok masuk + kas keluar). Bawaan tunai penuh — kurangi bila hutang.</p>
     </div>
@@ -115,19 +128,27 @@ function renderTable(): string {
     </div>`;
   }
   const rows = state.items
-    .map(
-      (o) => `
+    .map((o) => {
+      // Umur hutang supplier (2026-10-16): hari sejak barang diterima; server
+      // hanya mengirim angka untuk PO received yang masih bersisa.
+      const umur = o.umur_hari ?? null;
+      return `
       <tr data-row="${o.id}" class="cursor-pointer" data-po-buka="${o.id}" title="Buka rincian">
         <td class="td tabular-nums">PO-${o.id}</td>
         <td class="td">
           <div class="cell-strong">${esc(o.supplier_name || 'Tanpa supplier')}</div>
           <div class="cell-sub">${o.n_items} baris${o.shift_id ? ` · Shift #${o.shift_id}` : ''} · ${esc(o.cashier)}</div>
         </td>
-        <td class="td">${badge(o)}</td>
+        <td class="td">${badge(o)}${
+          umur === null
+            ? ''
+            : `<div class="cell-sub tabular-nums${umur >= 30 ? ' font-semibold !text-red-600 dark:!text-red-400' : ''}"
+                    title="Usia hutang sejak barang diterima">${umur <= 0 ? 'baru' : `${umur} hari`}</div>`
+        }</td>
         <td class="td td-num">${rp(o.total)}</td>
         <td class="td td-num">${o.status === 'received' ? rp(o.terbayar) : '<span class="text-gray-400">—</span>'}</td>
-      </tr>`,
-    )
+      </tr>`;
+    })
     .join('');
   return `
   <div class="card-flush">
@@ -157,6 +178,13 @@ function paint(): void {
     b.classList.toggle('!border-primary', aktif);
     b.classList.toggle('!text-primary', aktif);
   });
+  // Pengingat hutang supplier: chip hanya tampil bila memang ada yang lewat 30 hari.
+  const lewatEl = host?.querySelector<HTMLElement>('#po-lewat');
+  if (lewatEl) {
+    lewatEl.hidden = state.lewat30 <= 0;
+    const n = lewatEl.querySelector('#po-lewat-n');
+    if (n) n.textContent = String(state.lewat30);
+  }
   bindPager(host!, (o) => {
     state.offset = o;
     void load();
@@ -447,11 +475,12 @@ async function load(): Promise<void> {
   paint();
   try {
     const [r, s] = await Promise.all([
-      apiGet<{ data: Po[]; total: number }>(`/api/purchases?status=${encodeURIComponent(state.status)}&limit=${state.limit}&offset=${state.offset}`),
+      apiGet<{ data: Po[]; total: number; lewat30: number }>(`/api/purchases?status=${encodeURIComponent(state.status)}&limit=${state.limit}&offset=${state.offset}`),
       apiGet<{ data: SupplierOpt[]; total: number }>('/api/suppliers'),
     ]);
     state.items = r.data;
     state.total = r.total;
+    state.lewat30 = r.lewat30 ?? 0;
     state.suppliers = s.data;
   } catch (e) {
     state.error = errMsg(e);

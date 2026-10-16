@@ -421,3 +421,30 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+-- Jejak audit (2026-10-16, halaman #/audit khusus pemilik): "siapa mengubah
+-- apa" untuk mutasi yang RISIKO-nya tidak terlihat dari tabel aslinya —
+-- master (produk/kategori/satuan/pelanggan/supplier/pengguna/setting),
+-- stok (restock/opname), koreksi dokumen uang (pengeluaran/piutang/retur
+-- dibatalkan), restore backup, dan login. Penjualan/topup/pembelian TIDAK
+-- dicatat di sini: nota-nota itu sudah tabelnya sendiri (tidak ada induk
+-- ganda). Ditulis lewat helper catatAudit() di index.ts — gagal tulis audit
+-- TIDAK PERNAH menggagalkan operasi aslinya (audit = metadata, bukan
+-- transaksi). Baris audit boleh dipangkas manual bila sudah terlalu tua;
+-- tidak ada endpoint hapus (jejak yang bisa dihapus dari UI bukan jejak).
+CREATE TABLE IF NOT EXISTS audit_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  at          TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Aktor: user_id NULL = bukan sesi login (mis. percobaan login gagal).
+  -- username/role disalin (snapshot) supaya jejak tetap terbaca walau akun
+  -- kelak dihapus/di-rename — pola snapshot sale_items.name.
+  user_id     INTEGER,
+  username    TEXT NOT NULL DEFAULT '',
+  role        TEXT NOT NULL DEFAULT '',
+  action      TEXT NOT NULL,            -- create|update|delete|restock|opname|import|restore|login|login-gagal
+  entity      TEXT NOT NULL,            -- product|category|unit|customer|supplier|user|setting|stock|expense|debt|return|backup|session
+  entity_id   TEXT NOT NULL DEFAULT '',
+  detail      TEXT NOT NULL DEFAULT ''  -- ringkasan singkat (JSON/teks, dipotong 500 char oleh server)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at, id);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, id DESC);

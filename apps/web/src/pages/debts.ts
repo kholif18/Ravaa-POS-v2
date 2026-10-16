@@ -29,6 +29,9 @@ type Ringkasan = {
   bayar: number;
   sisa: number;
   terakhir: string | null;
+  /** Usia charge TERTUA yang belum terbayar (FIFO, dihitung server 2026-10-16).
+   *  null = tidak dihitung (pelanggan lunas) — badge umur hanya untuk sisa > 0. */
+  umur_hari: number | null;
 };
 
 type Baris = {
@@ -57,6 +60,9 @@ const state = {
   // `count` = jumlah pelanggan (untuk pager); `total` TETAP jumlah uang
   // (kartu piutang) — kontrak server, jangan dipakai hitung halaman.
   count: 0,
+  // Pengingat umur piutang (2026-10-16): jumlah pelanggan berhutang >30 hari
+  // (dihitung server dari SELURUH ledger, bukan cuma halaman ini).
+  lewat30: 0,
   status: 'open' as 'open' | 'semua',
   limit: PAGE_SIZE,
   // Paginasi (2026-10-11): RESET ke 0 setiap toggle status.
@@ -102,6 +108,10 @@ function renderPage(): string {
           ${icon('wallet')}<span class="font-semibold tabular-nums" id="hutang-total">…</span>
         </span>
         <span class="chip" id="hutang-count">${icon('users')}<span>…</span></span>
+        <span class="chip !border-amber-500/40 !text-amber-700 dark:!text-amber-400" id="hutang-lewat" hidden
+              title="Ada pelanggan dengan hutang tertua lebih dari 30 hari — tagih segera">
+          ${icon('alert')}<span id="hutang-lewat-n">0</span><span>lewat 30 hari</span>
+        </span>
         <span class="ml-auto flex items-center gap-1">
           <button type="button" class="chip" data-status="open">Masih berhutang</button>
           <button type="button" class="chip" data-status="semua">Semua riwayat</button>
@@ -133,6 +143,9 @@ function renderTable(): string {
   const rows = state.rows
     .map((r) => {
       const lunas = r.sisa <= 0;
+      // Umur piutang (2026-10-16): usia charge tertua yang belum terbayar.
+      // Server hanya mengirim angka untuk pelanggan bersisa > 0.
+      const umur = !lunas && r.umur_hari !== null ? r.umur_hari : null;
       return `
       <tr data-row="${r.customer_id}">
         <td class="td">
@@ -143,6 +156,14 @@ function renderTable(): string {
         <td class="td text-right tabular-nums">${rp(r.bayar)}</td>
         <td class="td text-right">
           ${lunas ? '<span class="badge-ok">Lunas</span>' : `<span class="font-semibold text-red-600 dark:text-red-400 tabular-nums">${rp(r.sisa)}</span>`}
+          ${
+            umur === null
+              ? ''
+              : `<div class="cell-sub tabular-nums${umur >= 30 ? ' font-semibold !text-red-600 dark:!text-red-400' : ''}"
+                      title="Usia hutang tertua yang belum dibayar (hitung FIFO)">${
+                        umur <= 0 ? 'hari ini' : `${umur} hari`
+                      }</div>`
+          }
         </td>
         <td class="td text-right">${r.terakhir ? esc(waktu(r.terakhir)) : '—'}</td>
         <td class="td">
@@ -184,6 +205,8 @@ function renderTable(): string {
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
     Saldo dihitung ulang dari mutasi (hutang &minus; bayar), bukan angka tersimpan.
+    Angka &ldquo;n hari&rdquo; di bawah Sisa = usia hutang tertua yang belum dibayar
+    (dibayar masuk ke yang tertua dulu / FIFO); merah = sudah lewat 30 hari.
     Ikon dompet pada baris = catat pembayaran langsung untuk pelanggan itu;
     ikon nota = rincian ledger + cetak A4.
   </p>`;
@@ -194,6 +217,13 @@ function paint(): void {
   if (totalEl) totalEl.textContent = rp(state.total);
   const countEl = host?.querySelector('#hutang-count span');
   if (countEl) countEl.textContent = `${state.rows.length} pelanggan`;
+  // Pengingat umur piutang: chip hanya tampil bila memang ada yang lewat 30 hari.
+  const lewatEl = host?.querySelector<HTMLElement>('#hutang-lewat');
+  if (lewatEl) {
+    lewatEl.hidden = state.lewat30 <= 0;
+    const n = lewatEl.querySelector('#hutang-lewat-n');
+    if (n) n.textContent = String(state.lewat30);
+  }
   // Chip status: tandai yang aktif (gaya primary, pola chip filter history).
   host?.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((b) => {
     const aktif = b.dataset.status === state.status;
@@ -656,12 +686,13 @@ async function load(): Promise<void> {
   state.error = '';
   paint();
   try {
-    const r = await apiGet<{ data: Ringkasan[]; total: number; count: number }>(
+    const r = await apiGet<{ data: Ringkasan[]; total: number; count: number; lewat30: number }>(
       `/api/customer-debts?status=${state.status}&limit=${state.limit}&offset=${state.offset}`,
     );
     state.rows = r.data;
     state.total = r.total;
     state.count = r.count ?? r.data.length;
+    state.lewat30 = r.lewat30 ?? 0;
   } catch (e) {
     state.error = errMsg(e);
   }

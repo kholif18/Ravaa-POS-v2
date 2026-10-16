@@ -260,9 +260,17 @@ function kartuBackup(): string {
             <div class="truncate text-sm text-gray-700 dark:text-gray-300">${esc(b.nama)}</div>
             <div class="text-xs text-gray-500 dark:text-gray-400">${waktu(b.waktu)} · ${ukuranFile(b.ukuran)}</div>
           </div>
-          <a class="btn btn-outline btn-sm shrink-0" href="/api/backup/${encodeURIComponent(b.nama)}" download>
-            ${icon('download')}<span>Unduh</span>
-          </a>
+          <div class="flex shrink-0 items-center gap-1.5">
+            <!-- Pulihkan (2026-10-16): server verifikasi integritas -> backup
+                 pengaman -> ganti DB. Tombol disabilitas saat backup jalan. -->
+            <button type="button" data-restore="${esc(b.nama)}" class="btn btn-ghost btn-sm !text-red-600 dark:!text-red-400"
+                    ${state.backupJalan ? 'disabled' : ''} title="Kembalikan SELURUH database ke isi file backup ini">
+              ${icon('sync')}<span>Pulihkan</span>
+            </button>
+            <a class="btn btn-outline btn-sm shrink-0" href="/api/backup/${encodeURIComponent(b.nama)}" download>
+              ${icon('download')}<span>Unduh</span>
+            </a>
+          </div>
         </li>`).join('')}
       </ul>`
     : `<p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-backup-kosong>
@@ -278,9 +286,11 @@ function kartuBackup(): string {
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Backup data</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Salinan utuh database toko disimpan otomatis <b>1× sehari</b> (yang terbaru
-            disimpan <b>14 file</b>, sisanya dibuang sendiri). File ada di folder
-            <code>backups</code> sebelah database — restore = salin manual saat API
-            mati (lihat README).
+            disimpan <b>14 file</b>, sisanya dibuang sendiri). <b>Pulihkan</b> mengembalikan
+            SELURUH database ke isi file itu: server memverifikasi integritasnya lalu membuat
+            backup pengaman lebih dulu — tetapi data yang dibuat setelah backup (penjualan,
+            stok, hutang) hilang dan device bisa diminta login ulang. Dalam keadaan darurat
+            (API mati), restore manual = salin file saat API berhenti (lihat README).
           </p>
           ${err}
           ${daftar}
@@ -456,6 +466,46 @@ function bind(): void {
       if (host?.isConnected) paint();
     }
   });
+  // Tombol "Pulihkan" per baris backup (2026-10-16): operasi PALING berbahaya
+  // di halaman ini — konfirmasi danger, lalu server verifikasi integritas +
+  // membuat backup pengaman sebelum mengganti database. Setelah sukses,
+  // halaman DI-Reload: seluruh cache & angka di layar sudah basi.
+  host?.querySelectorAll<HTMLElement>('[data-restore]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      if (state.backupJalan) return;
+      const nama = btn.dataset.restore ?? '';
+      if (!nama) return;
+      const yes = await confirmDialog({
+        title: `Pulihkan database dari ${nama}?`,
+        message:
+          'SELURUH database dikembalikan ke isi file backup ini. Semua data yang dibuat ' +
+          'SETELAH backup (penjualan, stok, hutang, pengguna baru) akan HILANG dan tidak ' +
+          'bisa dikembalikan. Server membuat backup pengaman lebih dulu, dan device bisa ' +
+          'diminta login ulang. Lakukan hanya saat pemilik memerintahkan.',
+        okLabel: 'Ya, pulihkan',
+        cancelLabel: 'Batal, jangan dipulihkan',
+        danger: true,
+      });
+      if (!yes) return;
+      state.backupJalan = true;
+      state.backupErr = '';
+      paint();
+      try {
+        const r = await apiPost<{ data: { nama: string; pengaman: string } }>('/api/backup/restore', { nama });
+        toast(
+          `Database dipulihkan dari ${r.data.nama} · pengaman: ${r.data.pengaman}`,
+          'success',
+        );
+        // Tunda sebentar supaya toast terbaca, lalu muat ulang halaman.
+        window.setTimeout(() => location.reload(), 1500);
+      } catch (e) {
+        state.backupErr = `Gagal memulihkan: ${errMsg(e)}`;
+        toast(state.backupErr, 'error');
+        state.backupJalan = false;
+        if (host?.isConnected) paint();
+      }
+    }),
+  );
 }
 
 // Ambil daftar backup — gagal TIDAK menggagalkan halaman (kartu saklar tetap

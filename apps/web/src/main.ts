@@ -14,6 +14,7 @@ import { mountDebtsPage } from './pages/debts';
 import { mountShiftsPage } from './pages/shifts';
 import { mountSettingsPage } from './pages/settings';
 import { mountUsersPage } from './pages/users';
+import { mountAuditPage } from './pages/audit';
 import { renderLoginPage } from './pages/login';
 import { renderProfilPage } from './pages/profil';
 import { renderUbahSandiPage } from './pages/ubah-sandi';
@@ -151,6 +152,9 @@ async function render(): Promise<void> {
   } else if (route === 'users') {
     // Pengguna: akun kasir & pemilik (khusus pemilik, dijaga guard + nav).
     void mountUsersPage(page);
+  } else if (route === 'audit') {
+    // Jejak audit: read-only, siapa mengubah apa (khusus pemilik).
+    void mountAuditPage(page);
   }
   // Tidak ada cabang else: parseRoute hanya menghasilkan 'pos' atau salah satu
   // AdminRoute, dan semuanya sudah di-mount di atas.
@@ -162,6 +166,16 @@ function boot(): void {
   if (!location.hash) location.hash = '#/dashboard';
   void render();
   window.addEventListener('hashchange', () => void render());
+  // PWA (2026-10-16): service worker HANYA di build produksi. Di server dev
+  // Vite, SW justru merusak pengalaman (aset modul tidak ber-hash + cache
+  // menahan versi lama sesudah edit). Gagal daftar bukan alasan app berhenti.
+  if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        /* offline/PWA tidak tersedia — abaikan */
+      });
+    });
+  }
 }
 
 boot();

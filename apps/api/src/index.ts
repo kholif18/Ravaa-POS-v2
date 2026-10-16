@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { MiddlewareHandler } from 'hono/types';
 import { cors } from 'hono/cors';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { randomBytes } from 'node:crypto';
-import { db, dbPath, hashPassword, migrate, verifyPassword } from './db.js';
+import { db, dbPath, hashPassword, migrate, pulihkanDari, transaksi, verifyPassword } from './db.js';
 
 migrate();
 
@@ -85,6 +86,40 @@ const hanyaPemilik: MiddlewareHandler = async (c, next) => {
 
 const rupiah = (n: number) => `Rp${Number(n || 0).toLocaleString('id-ID')}`;
 
+// ---------- jejak audit (2026-10-16, halaman #/audit) ----------
+// "Siapa mengubah apa" untuk mutasi yang risiko-nya tidak terlihat dari tabel
+// aslinya: master (produk/kategori/satuan/pelanggan/supplier/pengguna/
+// setting), stok (restock/opname), koreksi dokumen uang (pengeluaran/
+// piutang/retur dibatalkan), restore backup, dan login. Penjualan/topup/
+// pembelian TIDAK dicatat di sini — nota-nota itu sudah tabelnya sendiri.
+// ATURAN: pencatatan audit TIDAK PERNAH menggagalkan operasi aslinya; gagal
+// tulis = console.error saja (audit metadata, bukan transaksi).
+type AksiAudit =
+  | 'create' | 'update' | 'delete' | 'restock' | 'opname'
+  | 'import' | 'restore' | 'login' | 'login-gagal';
+
+function catatAudit(
+  c: Context,
+  action: AksiAudit,
+  entity: string,
+  entityId: string | number,
+  detail: unknown = '',
+  aktor?: { id?: number; username?: string; role?: string },
+): void {
+  try {
+    const u = (c.get('user') as Pengguna | undefined) ?? undefined;
+    const a = aktor ?? u ?? {};
+    const d = typeof detail === 'string' ? detail : JSON.stringify(detail ?? '');
+    db.prepare(
+      `INSERT INTO audit_log (user_id, username, role, action, entity, entity_id, detail)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(a.id ?? null, a.username ?? '', a.role ?? '', action, entity, String(entityId ?? ''), String(d).slice(0, 500));
+  } catch (e) {
+    console.error('[audit] gagal mencatat:', e instanceof Error ? e.message : e);
+  }
+}
+
+
 // ---------- sesi & pengguna (login 2026-10-11) ----------
 const BOLEH_SANDI_MIN = 4;
 
@@ -100,6 +135,7 @@ app.post('/api/login', async (c) => {
       | { id: number; username: string; name: string; role: string; password_hash: string; is_active: number; must_change: number }
       | undefined;
     if (!u || !verifyPassword(password, u.password_hash)) {
+      catatAudit(c, 'login-gagal', 'session', '', { username });
       return c.json({ error: 'username atau password salah' }, 401);
     }
     if (!u.is_active) return c.json({ error: 'akun ini dinonaktifkan — hubungi pemilik' }, 403);
@@ -109,6 +145,7 @@ app.post('/api/login', async (c) => {
       `INSERT INTO sessions (token, user_id, expires_at)
        VALUES (?, ?, datetime('now', ?))`,
     ).run(token, u.id, `+${UMUR_SESI_HARI} days`);
+    catatAudit(c, 'login', 'session', u.id, { username: u.username }, { id: u.id, username: u.username, role: u.role });
     return c.json({
       data: {
         token,
@@ -187,7 +224,9 @@ app.post('/api/users', hanyaPemilik, async (c) => {
         `INSERT INTO users (username, name, password_hash, role, must_change)
          VALUES (?, ?, ?, ?, 1) RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email`,
       ).get(username, name, hashPassword(password), role);
-      return c.json({ data: barisUserBersih(row) }, 201);
+      const bersih = barisUserBersih(row);
+      catatAudit(c, 'create', 'user', bersih.id, { username: bersih.username, role: bersih.role });
+      return c.json({ data: bersih }, 201);
     }
     const ada = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as
       | { id: number; username: string; role: string; is_active: number }
@@ -231,7 +270,11 @@ app.post('/api/users', hanyaPemilik, async (c) => {
       body?.email === undefined || body?.email === null ? null : String(body.email).trim(),
       password === undefined ? null : 1, id,
     );
-    return c.json({ data: barisUserBersih(row) }, 200);
+    const bersih = barisUserBersih(row);
+    catatAudit(c, 'update', 'user', bersih.id, {
+      role: bersih.role, aktif: bersih.is_active, sandi_diubah: password !== undefined,
+    });
+    return c.json({ data: bersih }, 200);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengguna' }, 400);
   }
@@ -249,6 +292,7 @@ app.post('/api/users/:id/password', hanyaPemilik, async (c) => {
     if (!ada) return c.json({ error: 'pengguna tidak ada' }, 404);
     db.prepare('UPDATE users SET password_hash = ?, must_change = 1 WHERE id = ?').run(hashPassword(password), id);
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id); // paksa masuk ulang di semua device
+    catatAudit(c, 'update', 'user', id, { reset_sandi: true, sesi_diputus: true });
     return c.json({ data: { id, reset: true } });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal reset sandi' }, 400);
@@ -345,6 +389,7 @@ app.post('/api/users/password', async (c) => {
     const cur = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(u.id) as { password_hash: string };
     if (!verifyPassword(lama, cur.password_hash)) return c.json({ error: 'sandi lama salah' }, 401);
     db.prepare('UPDATE users SET password_hash = ?, must_change = 0 WHERE id = ?').run(hashPassword(baru), u.id);
+    catatAudit(c, 'update', 'user', u.id, { ganti_sandi_sendiri: true });
     return c.json({ data: { ok: true } });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal ganti sandi' }, 400);
@@ -366,6 +411,7 @@ app.delete('/api/users/:id', hanyaPemilik, (c) => {
     if (lain === 0) return c.json({ error: 'pemilik aktif terakhir tidak bisa dihapus' }, 400);
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(id); // sessions ikut CASCADE
+  catatAudit(c, 'delete', 'user', id);
   return c.json({ data: { id, deleted: true } });
 });
 
@@ -415,6 +461,7 @@ app.post('/api/categories', hanyaPemilik, async (c) => {
          sort = excluded.sort, use_expiry = excluded.use_expiry
        RETURNING *`,
     ).get(slug, name, track, sort, useExpiry);
+    catatAudit(c, cur ? 'update' : 'create', 'category', slug, { name, track_stock: track, use_expiry: useExpiry });
     return c.json({ data: row }, cur ? 200 : 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan kategori' }, 400);
@@ -430,6 +477,7 @@ app.delete('/api/categories/:slug', hanyaPemilik, (c) => {
   const n = db.prepare('SELECT COUNT(*) AS n FROM products WHERE category_id = ?').get(cat.id) as { n: number };
   if (n.n > 0) return c.json({ error: `kategori dipakai ${n.n} produk — pindahkan/nonaktifkan produknya dulu` }, 400);
   db.prepare('DELETE FROM categories WHERE id = ?').run(cat.id);
+  catatAudit(c, 'delete', 'category', slug);
   return c.json({ data: { slug } });
 });
 
@@ -471,6 +519,7 @@ app.post('/api/units', hanyaPemilik, async (c) => {
        ON CONFLICT(slug) DO UPDATE SET name = excluded.name
        RETURNING *`,
     ).get(slug, name);
+    catatAudit(c, existed ? 'update' : 'create', 'unit', slug, { name });
     return c.json({ data: row }, existed ? 200 : 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan satuan' }, 400);
@@ -485,6 +534,7 @@ app.delete('/api/units/:slug', hanyaPemilik, (c) => {
   const n = db.prepare('SELECT COUNT(*) AS n FROM products WHERE unit = ?').get(slug) as { n: number };
   if (n.n > 0) return c.json({ error: `satuan dipakai ${n.n} produk — pindahkan produknya dulu` }, 400);
   db.prepare('DELETE FROM units WHERE id = ?').run(u.id);
+  catatAudit(c, 'delete', 'unit', slug);
   return c.json({ data: { slug } });
 });
 
@@ -576,6 +626,7 @@ app.post('/api/customers', async (c) => {
            WHERE id = ? RETURNING *`,
         )
         .get(name, phone, address, note, codeBaru, tierRaw ?? null, id);
+      catatAudit(c, 'update', 'customer', id, { name });
       return c.json({ data: row }, 200);
     }
     const row = db
@@ -584,6 +635,7 @@ app.post('/api/customers', async (c) => {
          VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(codeBaru, tierRaw ?? 'ecer', name, phone, address, note);
+    catatAudit(c, 'create', 'customer', (row as { id: number }).id, { name });
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pelanggan' }, 400);
@@ -605,6 +657,7 @@ app.delete('/api/customers/:id', (c) => {
     );
   }
   db.prepare('DELETE FROM customers WHERE id = ?').run(id);
+  catatAudit(c, 'delete', 'customer', id);
   return c.json({ data: { id, deleted: true } });
 });
 
@@ -658,6 +711,7 @@ app.post('/api/suppliers', hanyaPemilik, async (c) => {
            WHERE id = ? RETURNING *`,
         )
         .get(name, phone, address, note, codeBaru, id);
+      catatAudit(c, 'update', 'supplier', id, { name });
       return c.json({ data: row }, 200);
     }
     const row = db
@@ -666,6 +720,7 @@ app.post('/api/suppliers', hanyaPemilik, async (c) => {
          VALUES (?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(codeBaru, name, phone, address, note);
+    catatAudit(c, 'create', 'supplier', (row as { id: number }).id, { name });
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan supplier' }, 400);
@@ -687,12 +742,63 @@ app.delete('/api/suppliers/:id', hanyaPemilik, (c) => {
     );
   }
   db.prepare('DELETE FROM suppliers WHERE id = ?').run(id);
+  catatAudit(c, 'delete', 'supplier', id);
   return c.json({ data: { id, deleted: true } });
 });
 
 // Ringkasan saldo hutang per pelanggan (tabel utama halaman #/debts).
 // `status` default 'open' = hanya yang sisa > 0; 'semua' menampilkan juga
 // riwayat yang sudah lunas (sisa 0). Urutan: sisa terbesar dulu.
+//
+// AGING (2026-10-16, pengingat pemilik): tiap baris membawa `umur_hari` =
+// berapa hari hutang PALING TUA yang masih terbuka (FIFO), dan `lewat30` =
+// jumlah pelanggan dengan umur >= 30 hari (SELURUH baris cocok filter, bukan
+// cuma halaman ini — chip header harus stabil saat pindah halaman).
+const UMUR_HARI_MS = 86_400_000;
+
+/** Umur dokumen dalam hari — created_at SQLite = UTC ("YYYY-MM-DD HH:MM:SS"). */
+function umurHari(createdAt: string): number {
+  const t = Date.parse(`${String(createdAt).replace(' ', 'T')}Z`);
+  return Number.isFinite(t) ? Math.max(0, Math.floor((Date.now() - t) / UMUR_HARI_MS)) : 0;
+}
+
+/** Umur hutang terbuka per pelanggan (pass ledger PENUH, urut per pelanggan
+ *  lalu waktu). Metode FIFO: saldo berjalan di-reset saat menyentuh <= 0 —
+ *  muatan lama lunas; charge PERTAMA setelah titik nol terakhir = outstanding
+ *  tertua yang masih hidup. Pelanggan dengan sisa <= 0 tidak masuk peta. */
+function hitungUmurHutang(): Map<number, number> {
+  const semua = db
+    .prepare(
+      `SELECT customer_id, type, amount, created_at
+         FROM customer_debts ORDER BY customer_id, created_at, id`,
+    )
+    .all() as { customer_id: number; type: 'charge' | 'payment'; amount: number; created_at: string }[];
+  const hasil = new Map<number, number>();
+  let cid = -1;
+  let jalan = 0;
+  let tertua: string | null = null;
+  const tutup = () => {
+    if (cid >= 0 && jalan > 0 && tertua) hasil.set(cid, umurHari(tertua));
+  };
+  for (const m of semua) {
+    if (m.customer_id !== cid) {
+      tutup();
+      cid = m.customer_id;
+      jalan = 0;
+      tertua = null;
+    }
+    if (m.type === 'charge') {
+      if (jalan <= 0) tertua = m.created_at;
+      jalan += m.amount;
+    } else {
+      jalan -= m.amount;
+      if (jalan <= 0) tertua = null;
+    }
+  }
+  tutup();
+  return hasil;
+}
+
 app.get('/api/customer-debts', (c) => {
   const status = c.req.query('status') ?? 'open';
   if (!['open', 'semua'].includes(status)) {
@@ -742,7 +848,16 @@ app.get('/api/customer-debts', (c) => {
        ${status === 'semua' ? '' : 'HAVING sisa > 0'}
      )`,
   ).get() as { t: number }).t;
-  return c.json({ data: rows, total: totalSisa, count });
+  // Aging dihitung dari ledger penuh (bukan per liter halaman) supaya tiap
+  // baris & chip lewat30 tidak berubah-ubah saat pindah halaman.
+  const umurPer = hitungUmurHutang();
+  let lewat30 = 0;
+  for (const u of umurPer.values()) if (u >= 30) lewat30 += 1;
+  const data = rows.map((r) => ({
+    ...r,
+    umur_hari: r.sisa > 0 ? umurPer.get(r.customer_id) ?? null : null,
+  }));
+  return c.json({ data, total: totalSisa, count, lewat30 });
 });
 
 // Rincian ledger satu pelanggan: baris mutasi + saldo berjalan per baris.
@@ -774,7 +889,7 @@ app.get('/api/customer-debts/:customerId', (c) => {
 // Catat mutasi hutang: type 'charge' = pelanggan berhutang, 'payment' = bayar.
 // Validasi pembayaran > sisa DITOLAK (400) — uang lebih dari utang memang tidak
 // ada; kalau suatu saat mau jadi saldo awal/kredit, keputusannya ke pemilik dulu.
-const simpanMutasiHutang = db.transaction(
+const simpanMutasiHutang = transaksi(
   (customerId: number, type: 'charge' | 'payment', amount: number, note: string) => {
     if (type === 'payment') {
       const s = db
@@ -806,6 +921,7 @@ app.post('/api/customer-debts', async (c) => {
     const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId) as { id: number } | undefined;
     if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
     const row = simpanMutasiHutang(customerId, type, amount, note) as Record<string, unknown>;
+    catatAudit(c, 'create', 'debt', (row as { id: number }).id, { customer_id: customerId, type, amount, note });
     return c.json({ data: row }, 201);
   } catch (e) {
     // Pesan "melebihi sisa" sengaja menyebut angka dalam rupiah polos dari
@@ -826,6 +942,7 @@ app.delete('/api/customer-debts/:id', (c) => {
   const ada = db.prepare('SELECT id FROM customer_debts WHERE id = ?').get(id) as { id: number } | undefined;
   if (!ada) return c.json({ error: 'catatan hutang tidak ada' }, 404);
   db.prepare('DELETE FROM customer_debts WHERE id = ?').run(id);
+  catatAudit(c, 'delete', 'debt', id);
   return c.json({ data: { id, deleted: true } });
 });
 
@@ -919,6 +1036,7 @@ app.delete('/api/products/:id', hanyaPemilik, (c) => {
        WHERE id=?`,
     ).run(id);
   })();
+  catatAudit(c, 'delete', 'product', p.id, { sku: p.sku, name: p.name });
   return c.json({ data: { id: p.id, sku: p.sku, deleted: true } });
 });
 
@@ -1000,7 +1118,7 @@ function simpanSatuanJual(productId: number, baseUnit: string, rows: unknown[]):
 // / 'pcs' tanpa jejak stock_moves (diuji langsung: stok 7 -> 0, price 1000 -> 0).
 // POST /api/products TETAP perilaku lamanya (field kosong -> default server)
 // sesuai kontrak AGENTS.md §3, karena form & toggle aktif mengirim payload lenkap.
-const upsertProduct = db.transaction((
+const upsertProduct = transaksi((
   input: {
     sku?: string; name: string; category_slug: string;
     barcode?: string | null; unit?: string; price?: number; price_grosir?: number;
@@ -1146,7 +1264,20 @@ app.post('/api/products', hanyaPemilik, async (c) => {
     if (!body?.name || !body?.category_slug) {
       return c.json({ error: 'name dan category_slug wajib' }, 400);
     }
+    // Audit: create vs update dibaca DULU dari SKU yang dikirim (kosong =
+    // selalu produk baru bernomor server). Tombstone dihitung 'create'
+    // karena operasinya membangkitkan kembali produk yang sudah dihapus.
+    const skuKirim = String(body?.sku ?? '').trim();
+    const sebelum = skuKirim
+      ? (db.prepare('SELECT id, deleted_at FROM products WHERE sku = ?').get(skuKirim) as
+          | { id: number; deleted_at: string | null }
+          | undefined)
+      : undefined;
     const row = upsertProduct(body);
+    const hasil = row as { id: number; sku: string };
+    catatAudit(c, sebelum && !sebelum.deleted_at ? 'update' : 'create', 'product', hasil.id, {
+      sku: hasil.sku, name: String(body?.name ?? ''),
+    });
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan produk' }, 400);
@@ -1195,6 +1326,7 @@ app.post('/api/products/:id/image', hanyaPemilik, async (c) => {
 
     if (kiriman === null || String(kiriman).trim() === '') {
       tulis(null, p.image);
+      catatAudit(c, 'update', 'product', id, { foto: null });
       return c.json({ data: { image: null } });
     }
 
@@ -1219,6 +1351,7 @@ app.post('/api/products/:id/image', hanyaPemilik, async (c) => {
       if (e !== ext) buangFileFoto(`${id}.${e}`);
     }
     tulis(nama, p.image && p.image !== nama ? p.image : null);
+    catatAudit(c, 'update', 'product', id, { foto: nama });
     return c.json({ data: { image: nama } });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan foto' }, 400);
@@ -1313,6 +1446,8 @@ app.post('/api/products/import', hanyaPemilik, async (c) => {
       db.transaction(kerjakan)();
     }
     rep.errors = rep.errors.slice(0, 50);   // jangan kirim ribuan baris error
+    // Satu entri ringkasan per import (dry_run tidak menulis apa pun -> tidak diaudit).
+    if (!dry) catatAudit(c, 'import', 'product', 'impor', { total: rep.total, baru: rep.baru, update: rep.update, gagal: rep.gagal });
     return c.json({ data: rep });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal import' }, 400);
@@ -1359,6 +1494,9 @@ app.post('/api/restock', async (c) => {
         body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir');
   });
   tx();
+  catatAudit(c, 'restock', 'stock', Number(body.product_id), {
+    qty, harga_beli: adaHarga ? Math.round(harga) : null,
+  });
   return c.json({ data: db.prepare('SELECT * FROM products WHERE id=?').get(body.product_id) });
 });
 
@@ -1398,6 +1536,7 @@ app.post('/api/stock-opname', async (c) => {
       .run(body.product_id, selisih, p.avg_cost, body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir');
   });
   tx();
+  catatAudit(c, 'opname', 'stock', Number(body.product_id), { sebelum: p.stock, sesudah: fisik, selisih });
   return c.json({ data: { product_id: body.product_id, sebelum: p.stock, sesudah: fisik, selisih } });
 });
 
@@ -1590,7 +1729,7 @@ app.post('/api/shifts/:id/close', async (c) => {
 // - unit = satuan jual TERPILIH (opsional, default = satuan dasar produk).
 //   Server yang menentukan harga & faktor stoknya — harga produk non-dinamis
 //   TIDAK boleh ditentukan dari client (lihat cabang `unitJual !== p.unit`).
-const insertSale = db.transaction((sale: {
+const insertSale = transaksi((sale: {
   id: string; shift_id: number | null; pay_method: string; discount: number;
   cash_in: number; cashier: string;
   // Pelanggan terpilih di header POS (revisi pemilik 2026-10-04); absen/null =
@@ -2005,6 +2144,7 @@ app.post('/api/expenses', hanyaPemilik, async (c) => {
          VALUES (?, ?, ?, ?, ?) RETURNING *`,
       )
       .get(kategori, jumlah, note, String(body?.cashier ?? '').trim() || 'kasir', shiftId);
+    catatAudit(c, 'create', 'expense', (row as { id: number }).id, { kategori, jumlah });
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengeluaran' }, 400);
@@ -2020,6 +2160,7 @@ app.delete('/api/expenses/:id', hanyaPemilik, (c) => {
   const ada = db.prepare('SELECT id FROM expenses WHERE id = ?').get(id) as { id: number } | undefined;
   if (!ada) return c.json({ error: 'pengeluaran tidak ada' }, 404);
   db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+  catatAudit(c, 'delete', 'expense', id);
   return c.json({ data: { id, deleted: true } });
 });
 
@@ -2037,7 +2178,7 @@ app.delete('/api/expenses/:id', hanyaPemilik, (c) => {
 //     jasa/cetak tidak punya stok untuk dikembalikan); uang kembali TETAP
 //     dihitung untuk semua baris (jasa yang dibatalkan = refund uang).
 type ReturItemIn = { sale_item_id?: number; product_id?: number; qty?: number; price?: number };
-const simpanRetur = db.transaction(
+const simpanRetur = transaksi(
   (masuk: { sale_id: string | null; items: ReturItemIn[]; note: string; cashier: string; shift_id: number | null }) => {
     // Validasi shift up-front (di luar mutasi stok, pesannya duluan).
     if (masuk.shift_id !== null) {
@@ -2218,6 +2359,7 @@ app.delete('/api/returns/:id', (c) => {
       }
       db.prepare('DELETE FROM returns WHERE id = ?').run(id);
     })();
+    catatAudit(c, 'delete', 'return', id);
     return c.json({ data: { id, deleted: true } });
   } catch (e) {
     const pesan = e instanceof Error ? e.message : 'gagal batalkan retur';
@@ -2394,6 +2536,10 @@ app.post('/api/purchases/:id/cancel', hanyaPemilik, (c) => {
 // Daftar pembelian: filter status (default semua) + limit/offset (pola
 // GET /api/shifts). Urutan id DESC (nota terbaru di atas). `sisa` computed
 // (total − terbayar) — prinsip ledger: saldo tak disimpan (pola debts).
+//
+// AGING (2026-10-16): `umur_hari` = lama nota DITERIMA-tapi-belum-lunas
+// menunggu (dari `received_at`; julianday SQLite = UTC). `lewat30` = jumlah
+// hutang PO >= 30 hari di SELURUH baris cocok filter (chip header).
 app.get('/api/purchases', hanyaPemilik, (c) => {
   const status = c.req.query('status') ?? 'semua';
   if (!['semua', 'order', 'received', 'cancel'].includes(status)) {
@@ -2406,10 +2552,18 @@ app.get('/api/purchases', hanyaPemilik, (c) => {
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM purchases p ${klausul}`).get(...params) as { n: number }).n;
   const data = db.prepare(
     `SELECT p.*, p.total - p.terbayar AS sisa,
+            CASE WHEN p.status = 'received' AND p.total - p.terbayar > 0 AND p.received_at IS NOT NULL
+                 THEN MAX(0, CAST(julianday('now') - julianday(p.received_at) AS INTEGER))
+                 ELSE NULL END AS umur_hari,
             (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS n_items
        FROM purchases p ${klausul} ORDER BY p.id DESC LIMIT ? OFFSET ?`,
   ).all(...params, limit, offset);
-  return c.json({ data, total });
+  const lewat30 = (db.prepare(
+    `SELECT COUNT(*) AS n FROM purchases p ${klausul ? `${klausul} AND` : 'WHERE'}
+        p.status = 'received' AND p.total - p.terbayar > 0 AND p.received_at IS NOT NULL
+        AND julianday('now') - julianday(p.received_at) >= 30`,
+  ).get(...params) as { n: number }).n;
+  return c.json({ data, total, lewat30 });
 });
 
 // Isi lengkap satu nota pembelian.
@@ -2499,10 +2653,49 @@ app.post('/api/settings', hanyaPemilik, async (c) => {
     }
     if (vMinus !== undefined) simpan.run(K_STOK_MINUS, vMinus ? '1' : '0');
     if (vKadaluarsa !== undefined) simpan.run(K_TOLAK_KADALUARSA, vKadaluarsa ? '1' : '0');
+    catatAudit(c, 'update', 'setting', Object.keys(body).join('+'), body);
     return c.json({ data: semuaSettings() });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengaturan' }, 400);
   }
+});
+
+// ---------- jejak audit (2026-10-16) — daftar untuk halaman #/audit ----------
+// Read-only. Khusus pemilik (memuat aktivitas semua akun). Filter: `entity`
+// persis, `q` multi-kata (pola search produk/customers), `date` YYYY-MM-DD
+// (divalidasi round-trip `SELECT date(?)` — 2026-02-31 ditolak, bukan halaman
+// kosong palsu). Tanpa date = seluruh riwayat. Urutan id DESC (terbaru dulu).
+app.get('/api/audit', hanyaPemilik, (c) => {
+  const entity = (c.req.query('entity') ?? '').trim();
+  const q = (c.req.query('q') ?? '').trim();
+  const tanggal = (c.req.query('date') ?? '').trim();
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (entity) { conds.push('entity = ?'); params.push(entity); }
+  for (const k of q.split(/\s+/).filter(Boolean)) {
+    // SEMUA kata harus cocok di gabungan kolom — tidak harus field/urutan sama.
+    conds.push(
+      `lower(username || ' ' || action || ' ' || entity || ' ' || entity_id || ' ' || detail) LIKE ?`,
+    );
+    params.push(`%${k.toLowerCase()}%`);
+  }
+  if (tanggal) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tanggal)) {
+      return c.json({ error: 'date harus format YYYY-MM-DD' }, 400);
+    }
+    const sah = db.prepare('SELECT date(?) AS d').get(tanggal) as { d: string | null };
+    if (sah.d !== tanggal) return c.json({ error: 'date harus format YYYY-MM-DD' }, 400);
+    conds.push('date(at) = date(?)');
+    params.push(tanggal);
+  }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM audit_log ${where}`).get(...params) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT * FROM audit_log ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+  ).all(...params, limit, offset);
+  return c.json({ data, total });
 });
 
 // ---------- backup DB ----------
@@ -2661,6 +2854,54 @@ app.get('/api/backup/:nama', hanyaPemilik, (c) => {
     'Content-Disposition': `attachment; filename="${nama}"`,
     'Cache-Control': 'no-store',
   });
+});
+
+// Pulihkan DB dari file backup (2026-10-16, tombol "Pulihkan" di #/settings).
+// Urutan KESELAMATAN yang tidak boleh diubah:
+//   1. nama divalidasi guard GANDA (basename + whitelist POLA_BACKUP);
+//   2. file diverifikasi READ-ONLY (integrity_check === 'ok') — file korup
+//      tidak pernah sampai menggantikan DB hidup;
+//   3. backup PENGAMAN dibuat dari state sekarang (kalau restore salah pilih,
+//      keadaan sebelumnya masih bisa diunduh/dipulihkan balik);
+//   4. baru pulihkanDari (db.ts) — salin sementara dulu, tukar file, buka ulang.
+// CATATAN PENTING: tabel `sessions` ikut ter-restore, jadi semua device (termasuk
+// pemanggil) bisa ter-logout dan harus masuk ulang — perilakunya wajar, bukan bug.
+// Baris audit 'restore' ditulis SESUDAH pulihkan supaya tersimpan di DB hasil
+// restore (kalau ditulis sebelum, ia ikut terhapus oleh pemulihan itu sendiri).
+app.post('/api/backup/restore', hanyaPemilik, async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const nama = String(body?.nama ?? '');
+  if (path.basename(nama) !== nama || !POLA_BACKUP.test(nama)) {
+    return c.json({ error: 'file backup tidak ada' }, 404);
+  }
+  const file = path.join(backupDir(), nama);
+  if (!fs.existsSync(file)) return c.json({ error: 'file backup tidak ada' }, 404);
+  try {
+    const cek = new Database(file, { readonly: true, fileMustExist: true });
+    const hasil = cek.pragma('integrity_check') as { integrity_check: string }[];
+    cek.close();
+    if (hasil.length !== 1 || hasil[0].integrity_check !== 'ok') {
+      return c.json({ error: 'file backup rusak (integrity check gagal) — tidak dipulihkan' }, 400);
+    }
+  } catch {
+    return c.json({ error: 'file backup tidak bisa dibaca — tidak dipulihkan' }, 400);
+  }
+  let pengaman: { nama: string };
+  try {
+    pengaman = await buatBackup();
+  } catch (e) {
+    return c.json(
+      { error: `gagal membuat backup pengaman sebelum restore: ${e instanceof Error ? e.message : e}` },
+      500,
+    );
+  }
+  try {
+    pulihkanDari(file);
+  } catch (e) {
+    return c.json({ error: `gagal memulihkan: ${e instanceof Error ? e.message : e}` }, 500);
+  }
+  catatAudit(c, 'restore', 'backup', nama, { pengaman: pengaman.nama });
+  return c.json({ data: { nama, pengaman: pengaman.nama } });
 });
 
 // ---------- laporan harian ----------
