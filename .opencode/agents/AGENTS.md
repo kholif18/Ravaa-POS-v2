@@ -924,7 +924,23 @@ apps/web/src/pages/audit.ts  Halaman #/audit (menu Jejak Audit, 2026-10-16,
                          cari `#audit-q` multi-kata + tanggal), klik baris =
                          modal detail read-only (pola riwayatForm — satu
                          tombol "Tutup"; baris tanpa detail aman dibuka).
-apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): DUA kartu
+apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Redesign
+                          layout 2026-10-16** (permintaan pemilik "lebih user
+                          friendly") — empat seksi berkepala `kepalaSeksi()`
+                          (label .form-sec + garis + hint cakupan "berlaku
+                          semua device" vs "tersimpan di browser ini"):
+                          Aturan transaksi (kartu saklar seragam
+                          `kartuSaklar()`: tile ikon + desc + footer "Dibaca
+                          server pada setiap penjualan" + switch; baris
+                          "Sedang berlaku." dibuang — label switch sendiri
+                          sudah Aktif/Nonaktif), Identitas toko, Perangkat ini
+                          (Tampilan perangkat + Cetak struk `xl:grid-cols-2`;
+                          Cetak struk = 3 baris berlabel: Jeda `#set-pause` /
+                          Cetak otomatis `#set-cetak` / Layout `#set-layout`),
+                          Backup & pemulihan (daftar full-width di bawah
+                          header; tombol `w-full sm:w-auto` supaya mobile
+                          tidak menghimpit teks). SEMUA id + teks kontrak test
+                          & logika TIDAK berubah. Isinya tetap: DUA kartu
                           saklar SERVER — "Stok boleh minus" + "Tolak jual
                           kadaluarsa" -> GET/POST /api/settings (update PARSIAL:
                           satu kunci per toggle, konfirmasi swal tiap
@@ -1507,7 +1523,15 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     kedua, whitelist nama file), `POST /api/users/profile` {name,email}.
     Halaman `#/profil` SEMUA peran: avatar opsional (kosong = inisial),
     username READ-ONLY (kunci login), sandi blok kondisional (lama+baru+
-    konfirmasi). Dropdown akun: satu label "Edit Profil"; header avatar+nama
+    konfirmasi). **Redesign layout 2026-10-16**: grid `lg:grid-cols-3` —
+    kartu Identitas `lg:col-span-2` (hero avatar `#pf-avatar-wadah` + nama
+    + chip role + @username mono; "Ganti foto" = `label.btn` berisi input
+    `#pf-avatar-file` sr-only; `#pf-avatar-hapus` SELALU dirender tapi
+    `hidden` saat tanpa avatar) + kartu Keamanan (kolom kanan). Upload/hapus
+    avatar TIDAK render ulang (`tampilAvatar()` ganti isi wadah + toggle
+    class hidden tombol hapus, `fileEl.value=''` sesudahnya); simpan profil
+    render ulang (hero ikut nama baru). SEMUA id `#pf-*` kontrak test tidak
+    berubah. Dropdown akun: satu label "Edit Profil"; header avatar+nama
     ikut akun (profilSaya() menyinkronkan setCashier). Blok "Perangkat ini"
     (nama toko struk thermal + tema) PINDAH ke Sistem → kartu "Tampilan
     perangkat ini" (kartuPerangkat di settings.ts, localStorage).

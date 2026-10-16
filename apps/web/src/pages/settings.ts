@@ -13,7 +13,7 @@
 
 import { apiGet, apiPost, HttpError } from '../api';
 import { confirmDialog } from '../ui/confirm';
-import { icon } from '../ui/icons';
+import { icon, type IconName } from '../ui/icons';
 import { getToko, setToko } from '../ui/user';
 import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPause, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
 import { switchHtml } from '../ui/switch';
@@ -49,8 +49,8 @@ function renderPage(): string {
       <div>
         <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
         <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-          Disimpan di <b>server</b>, jadi berlaku untuk semua device kasir — tidak
-          seperti Pengaturan Akun yang hanya untuk browser ini.
+          Aturan <b>server</b> berlaku untuk semua device kasir; preferensi
+          <b>perangkat</b> (tema & cetak) hanya menempel di browser ini.
         </p>
       </div>
     </div>
@@ -83,41 +83,76 @@ function renderBody(): string {
        menghapus tanggal yang sudah tercatat di produk.`;
 
   // Sengaja TANPA badge status di sebelah judul: label saklarnya sendiri sudah
-  // membaca "Aktif"/"Nonaktif", jadi badge hanya mengulang teks yang sama dan
-  // membuat mata membandingkan dua kolom identik untuk menemukan bedanya.
-  // Status = posisi saklar; keterangan = paragraf di bawah.
+  // membaca "Aktif"/"Nonaktif", jadi badge hanya mengulang teks yang sama.
+  // Status = posisi saklar; keterangan = paragraf di atas footer.
+  // Kartu dikelompokkan per CAKUPAN lewat kepalaSeksi: "berlaku semua device"
+  // (server) vs "tersimpan di browser ini" — konsep paling penting halaman ini.
   return `
-  <div class="space-y-3">
-    <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Stok boleh minus</h3>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiMinus}</p>
-          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            ${state.minus ? 'Sedang berlaku.' : 'Bawaan, belum diubah.'}
-            Dibaca server pada SETIAP penjualan, jadi perubahan langsung berlaku di semua kasir.
-          </p>
-        </div>
-        <div class="shrink-0">${switchHtml('set-minus', state.minus, state.minus ? 'Aktif' : 'Nonaktif')}</div>
+  <div class="space-y-4">
+    <section class="space-y-2">
+      ${kepalaSeksi('Aturan transaksi', 'berlaku semua device')}
+      <div class="grid items-stretch gap-3 lg:grid-cols-2">
+        ${kartuSaklar({
+          input: 'set-minus', judul: 'Stok boleh minus', isi: isiMinus,
+          aktif: state.minus, label: state.minus ? 'Aktif' : 'Nonaktif',
+          ikon: 'stock', tile: 'bg-primary-soft text-primary dark:bg-primary/15',
+        })}
+        ${kartuSaklar({
+          input: 'set-kadaluarsa', judul: 'Tolak jual kadaluarsa', isi: isiKadaluarsa,
+          aktif: state.kadaluarsa, label: state.kadaluarsa ? 'Aktif' : 'Nonaktif',
+          ikon: 'calendar', tile: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
+        })}
+      </div>
+    </section>
+    <section class="space-y-2">
+      ${kepalaSeksi('Identitas toko', 'berlaku semua device')}
+      ${kartuToko()}
+    </section>
+    <section class="space-y-2">
+      ${kepalaSeksi('Perangkat ini', 'tersimpan di browser ini')}
+      <div class="grid items-stretch gap-3 xl:grid-cols-2">
+        ${kartuPerangkat()}
+        ${kartuCetak()}
+      </div>
+    </section>
+    <section class="space-y-2">
+      ${kepalaSeksi('Backup & pemulihan', 'di server')}
+      ${kartuBackup()}
+    </section>
+  </div>`;
+}
+
+// Kepala kelompok kartu: label kecil uppercase + garis + keterangan cakupan
+// di kanan. Quiet (11px abu) supaya tidak bersaing dengan judul kartunya.
+function kepalaSeksi(judul: string, cakupan: string): string {
+  return `
+  <div class="flex items-center gap-2 px-0.5">
+    <p class="form-sec">${judul}</p>
+    <span class="h-px flex-1 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></span>
+    <span class="shrink-0 text-xs text-gray-400 dark:text-gray-500">${cakupan}</span>
+  </div>`;
+}
+
+// Kartu saklar aturan transaksi: ikon + judul + deskripsi, lalu footer
+// pemisah berisi keterangan singkat (kiri) & saklar (kanan) — pola baris
+// pengaturan yang seragam dengan kartu-kartu di bawahnya.
+function kartuSaklar(opt: {
+  input: string; judul: string; isi: string; aktif: boolean; label: string;
+  ikon: IconName; tile: string;
+}): string {
+  return `
+  <div class="card flex flex-col">
+    <div class="flex flex-1 items-start gap-3">
+      <span class="flex size-9 shrink-0 items-center justify-center rounded-xl ${opt.tile} [&>svg]:size-4">${icon(opt.ikon)}</span>
+      <div class="min-w-0 flex-1">
+        <h3 class="text-sm font-semibold text-gray-900 dark:text-white">${opt.judul}</h3>
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${opt.isi}</p>
       </div>
     </div>
-    <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Tolak jual kadaluarsa</h3>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiKadaluarsa}</p>
-          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            ${state.kadaluarsa ? 'Sedang berlaku.' : 'Bawaan, belum diubah.'}
-            Dibaca server pada SETIAP penjualan, jadi perubahan langsung berlaku di semua kasir.
-          </p>
-        </div>
-        <div class="shrink-0">${switchHtml('set-kadaluarsa', state.kadaluarsa, state.kadaluarsa ? 'Aktif' : 'Nonaktif')}</div>
-      </div>
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-700/60">
+      <span class="text-xs text-gray-400 dark:text-gray-500">Dibaca server pada setiap penjualan</span>
+      ${switchHtml(opt.input, opt.aktif, opt.label)}
     </div>
-    ${kartuPerangkat()}
-    ${kartuToko()}
-    ${kartuCetak()}
-    ${kartuBackup()}
   </div>`;
 }
 
@@ -127,30 +162,33 @@ function kartuPerangkat(): string {
   const toko = getToko();
   const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   return `
-    <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="card flex flex-col">
+      <div class="flex items-start gap-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('smartphone')}</span>
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Tampilan perangkat ini</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Nama toko di <b>kepala struk thermal</b> dan tema warna — tersimpan di
-            <b>browser device ini</b> (beda dengan kop INVOICE A4 di atas yang
-            berlaku semua device).
+            Nama toko di <b>kepala struk thermal</b> + tema warna. Tersimpan di
+            <b>browser device ini</b> — device lain tidak ikut berubah (beda
+            dengan kop INVOICE A4 di atas yang berlaku semua device).
           </p>
-          <div class="mt-3 grid gap-2 sm:grid-cols-2">
-            <div class="field-sm">
-              <label class="label" for="set-dev-toko">Nama toko (struk thermal)</label>
-              <input id="set-dev-toko" class="input input-sm" maxlength="32" value="${getToko() === 'RAVA POS' ? '' : getToko()}" placeholder="RAVA POS" />
-            </div>
-            <div class="field-sm">
-              <label class="label" for="set-dev-theme">Tema</label>
-              <select id="set-dev-theme" class="input input-sm">
-                <option value="light" ${theme === 'light' ? 'selected' : ''}>Terang</option>
-                <option value="dark" ${theme === 'dark' ? 'selected' : ''}>Gelap</option>
-              </select>
-            </div>
-          </div>
         </div>
-        <button type="button" id="set-dev-simpan" class="btn btn-ghost shrink-0">${icon('check')}<span>Simpan</span></button>
+      </div>
+      <div class="mt-3 grid flex-1 gap-2 sm:grid-cols-2">
+        <div class="field-sm">
+          <label class="label" for="set-dev-toko">Nama toko (struk thermal)</label>
+          <input id="set-dev-toko" class="input input-sm" maxlength="32" value="${getToko() === 'RAVA POS' ? '' : getToko()}" placeholder="RAVA POS" />
+        </div>
+        <div class="field-sm">
+          <label class="label" for="set-dev-theme">Tema</label>
+          <select id="set-dev-theme" class="input input-sm">
+            <option value="light" ${theme === 'light' ? 'selected' : ''}>Terang</option>
+            <option value="dark" ${theme === 'dark' ? 'selected' : ''}>Gelap</option>
+          </select>
+        </div>
+      </div>
+      <div class="mt-3 flex justify-end">
+        <button type="button" id="set-dev-simpan" class="btn btn-primary">${icon('check')}<span>Simpan tampilan</span></button>
       </div>
     </div>`;
 }
@@ -162,27 +200,30 @@ function kartuPerangkat(): string {
 function kartuToko(): string {
   const t = state.toko;
   const f = (id: string, label: string, nilai: string, opsional?: boolean, lebar?: boolean) => `
-    <label class="block${lebar ? ' sm:col-span-2' : ''}">
-      <span class="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">${label}${opsional ? ' <span class="font-normal">(opsional)</span>' : ''}</span>
-      <input class="input w-full" id="${id}" value="${esc(nilai)}" maxlength="300" autocomplete="off">
-    </label>`;
+    <div class="field-sm${lebar ? ' sm:col-span-2' : ''}">
+      <label class="label" for="${id}">${label}${opsional ? ' <span class="font-normal">(opsional)</span>' : ''}</label>
+      <input class="input" id="${id}" value="${esc(nilai)}" maxlength="300" autocomplete="off">
+    </div>`;
   return `
     <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="flex items-start gap-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('receipt')}</span>
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan toko</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Kop <b>INVOICE A4</b> (cetak gaya Aronium) memakai empat isian ini.
             Disimpan di <b>server</b>, jadi seluruh device mencetak kop yang sama.
           </p>
-          <div class="mt-3 grid gap-2 sm:grid-cols-2">
-            ${f('set-toko-nama', 'Nama toko', t.store_name)}
-            ${f('set-toko-telepon', 'Phone', t.store_phone, true)}
-            ${f('set-toko-alamat', 'Alamat', t.store_address, true, true)}
-            ${f('set-toko-email', 'Email', t.store_email, true)}
-          </div>
         </div>
-        <button type="button" id="set-toko-simpan" class="btn btn-primary shrink-0" ${state.tokoJalan ? 'disabled' : ''}>
+      </div>
+      <div class="mt-3 grid gap-3 sm:grid-cols-2">
+        ${f('set-toko-nama', 'Nama toko', t.store_name)}
+        ${f('set-toko-telepon', 'Phone', t.store_phone, true)}
+        ${f('set-toko-alamat', 'Alamat', t.store_address, true, true)}
+        ${f('set-toko-email', 'Email', t.store_email, true)}
+      </div>
+      <div class="mt-3 flex justify-end">
+        <button type="button" id="set-toko-simpan" class="btn btn-primary" ${state.tokoJalan ? 'disabled' : ''}>
           ${icon('check')}<span>${state.tokoJalan ? 'Menyimpan…' : 'Simpan toko'}</span>
         </button>
       </div>
@@ -199,41 +240,54 @@ function kartuCetak(): string {
   const layout = getStrukLayout();
   const jeda = getPrintPause();
   const isiSaklar = nyala
-    ? `Setiap penjualan selesai, dialog menawarkan pilihan <b>[Thermal] [A4] [Tidak]</b> —
-        kasir memilih kertas per transaksi (A4 = invoice gaya Aronium). Topup/tarik
-        langsung dicetak sesuai layout di bawah. Matikan bila device ini tanpa printer;
-        penjualan tetap berjalan (cetak tidak pernah membatalkan transaksi).`
-    : `Struk & invoice <b>tidak</b> ditawarkan otomatis. Kasir tetap bisa mencetak ulang
-        (dengan pilihan Thermal/A4) lewat menu Riwayat transaksi. Nyalakan lagi kalau
-        device ini sudah terpasang printer.`;
+    ? `Setiap penjualan selesai, dialog menawarkan <b>[Thermal] [A4] [Tidak]</b> —
+        kasir memilih kertas per transaksi. Topup/tarik langsung dicetak sesuai
+        layout. Cetak gagal tidak pernah membatalkan penjualan.`
+    : `Dialog cetak <b>tidak</b> muncul otomatis. Cetak ulang (Thermal/A4) tetap
+        bisa lewat menu Riwayat transaksi — nyalakan lagi kalau device ini sudah
+        terpasang printer.`;
   const isiLayout = layout === 'a4'
-    ? `Layout tersimpan: <b>Epson L3110 (A4)</b> — struk topup/tarik dicetak 64 kolom,
-        tanpa potong, ditutup eject supaya kertas keluar. Pilihan A4 saat penjualan
-        membuka invoice A4 (dicetak lewat browser, bukan print-agent).`
-    : `Layout tersimpan: <b>Thermal 58mm</b> — 32 kolom, diakhiri potong kertas; dipakai
-        untuk struk topup/tarik. Pilihan A4 saat penjualan tetap membuka invoice A4.`;
+    ? `<b>Epson L3110 (A4)</b> — 64 kolom, tanpa potong, ditutup eject supaya
+        kertas keluar. Dipakai struk topup/tarik via print-agent.`
+    : `<b>Thermal 58mm</b> — 32 kolom, diakhiri potong kertas. Dipakai struk
+        topup/tarik via print-agent.`;
   const isiJeda = jeda
-    ? `JEDA CETAK <b>AKTIF</b> — semua kirim ke printer (struk, label harga, kick laci)
-        ditahan di browser; nol kertas terbuang. Invoice A4 lewat browser tetap muncul
-        bila diklik manual. Matikan saklar ini hanya setelah pemilik memerintahkan.`
-    : `Jeda cetak <b>nonaktif</b> — struk/label/kick laci mengirim ke printer seperti biasa.`;
+    ? `JEDA <b>AKTIF</b> — semua kirim ke printer (struk, label, kick laci)
+        ditahan; nol kertas terbuang. Invoice A4 lewat browser tetap bisa dicetak.`
+    : `Nonaktif — struk, label harga, dan kick laci mengirim ke printer seperti biasa.`;
   return `
-    <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="card flex flex-col">
+      <div class="flex items-start gap-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 [&>svg]:size-4">${icon('print')}</span>
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Cetak struk</h3>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${isiSaklar}</p>
-          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">${isiLayout}</p>
-          <p class="mt-2 text-sm ${jeda ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-500 dark:text-gray-400'}">${isiJeda}</p>
-          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            Berlaku untuk <b>device ini saja</b> (tersimpan di browser, tidak ikut ke
-            kasir lain) — karena dua PC bisa menempel pada printer yang berbeda.
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Preferensi <b>device ini</b> — printer tiap PC kasir bisa berbeda
+            (thermal 58mm, Epson L3110, atau tanpa printer), jadi tidak ikut ke kasir lain.
           </p>
         </div>
-        <div class="flex shrink-0 flex-col items-end gap-2">
-          ${switchHtml('set-pause', !jeda, jeda ? 'Dijeda' : 'Cetak ON')}
-          ${switchHtml('set-cetak', nyala, nyala ? 'Aktif' : 'Nonaktif')}
-          <select id="set-layout" class="input input-sm" aria-label="Layout struk">
+      </div>
+      <div class="mt-2 flex-1 divide-y divide-gray-100 dark:divide-gray-700/60">
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Jeda semua cetak</p>
+            <p class="mt-0.5 text-xs ${jeda ? 'font-medium text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}">${isiJeda}</p>
+          </div>
+          <div class="shrink-0">${switchHtml('set-pause', !jeda, jeda ? 'Dijeda' : 'Cetak ON')}</div>
+        </div>
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Cetak otomatis setelah bayar</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${isiSaklar}</p>
+          </div>
+          <div class="shrink-0">${switchHtml('set-cetak', nyala, nyala ? 'Aktif' : 'Nonaktif')}</div>
+        </div>
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Layout struk</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${isiLayout}</p>
+          </div>
+          <select id="set-layout" class="input input-sm !w-auto shrink-0" aria-label="Layout struk">
             <option value="thermal"${layout === 'thermal' ? ' selected' : ''}>Thermal 58mm</option>
             <option value="a4"${layout === 'a4' ? ' selected' : ''}>Epson L3110 (A4)</option>
           </select>
@@ -253,9 +307,9 @@ function ukuranFile(n: number): string {
 // boleh diklik berulang), pola tetap kartu + tombol .btn yang sudah ada.
 function kartuBackup(): string {
   const daftar = state.backups.length
-    ? `<ul class="mt-3 divide-y divide-gray-100 dark:divide-gray-700" data-backup-list>
+    ? `<ul class="mt-2 divide-y divide-gray-100 dark:divide-gray-700" data-backup-list>
         ${state.backups.map((b) => `
-        <li class="flex items-center justify-between gap-2 py-2" data-nama="${esc(b.nama)}">
+        <li class="flex flex-wrap items-center justify-between gap-2 py-2" data-nama="${esc(b.nama)}">
           <div class="min-w-0">
             <div class="truncate text-sm text-gray-700 dark:text-gray-300">${esc(b.nama)}</div>
             <div class="text-xs text-gray-500 dark:text-gray-400">${waktu(b.waktu)} · ${ukuranFile(b.ukuran)}</div>
@@ -273,7 +327,7 @@ function kartuBackup(): string {
           </div>
         </li>`).join('')}
       </ul>`
-    : `<p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-backup-kosong>
+    : `<p class="mt-2 text-sm text-gray-500 dark:text-gray-400" data-backup-kosong>
          Belum ada file backup. Klik "Backup sekarang" untuk membuat satu —
          atau tunggu jadwal otomatis (dicek tiap jam, 1× sehari).
        </p>`;
@@ -282,23 +336,27 @@ function kartuBackup(): string {
   return `
     <div class="card">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Backup data</h3>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Salinan utuh database toko disimpan otomatis <b>1× sehari</b> (yang terbaru
-            disimpan <b>14 file</b>, sisanya dibuang sendiri). <b>Pulihkan</b> mengembalikan
-            SELURUH database ke isi file itu: server memverifikasi integritasnya lalu membuat
-            backup pengaman lebih dulu — tetapi data yang dibuat setelah backup (penjualan,
-            stok, hutang) hilang dan device bisa diminta login ulang. Dalam keadaan darurat
-            (API mati), restore manual = salin file saat API berhenti (lihat README).
-          </p>
-          ${err}
-          ${daftar}
+        <div class="flex min-w-0 flex-1 items-start gap-3">
+          <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('shieldCheck')}</span>
+          <div class="min-w-0">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Backup data</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Salinan utuh database dibuat otomatis <b>1× sehari</b> — <b>14 file</b> terbaru
+              disimpan. <b>Pulihkan</b> mengembalikan SELURUH database ke isi file itu: data
+              setelah backup (penjualan, stok, hutang) hilang dan device bisa diminta login
+              ulang; server membuat backup pengaman lebih dulu.
+            </p>
+            <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              API mati? Restore manual = salin file backup saat API berhenti (lihat README).
+            </p>
+          </div>
         </div>
-        <button type="button" id="set-backup" class="btn btn-outline shrink-0" ${state.backupJalan ? 'disabled' : ''}>
+        <button type="button" id="set-backup" class="btn btn-outline w-full shrink-0 sm:w-auto" ${state.backupJalan ? 'disabled' : ''}>
           ${icon('sync')}<span>${state.backupJalan ? 'Membuat backup…' : 'Backup sekarang'}</span>
         </button>
       </div>
+      ${err}
+      ${daftar}
     </div>`;
 }
 
