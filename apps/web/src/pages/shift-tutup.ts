@@ -30,7 +30,7 @@
 // bila keputusan berubah, ubah di situ, jangan menyebar ke tempat lain.
 // REKAP CETAK ala Z-report Aronium (2026-10-11): dialog ini + dialog pasca-
 // tutup memuat tombol [Thermal] (struk 32 kolom via print-agent, builder
-// bangunStrukRekap di bawah — objek Struk yang SAMA dipakai sesuaikanPrinter)
+// bangunStrukRekap di bawah — objek Struk yang SAMA dipakai struk())
 // dan [PDF] (dokumen A4 browser via htmlRekapShift/cetakRekapShift di
 // invoice.ts, pola cetakInvoice). X = cetak kapan pun tanpa menutup shift
 // (tanpa fisik/selisih); Z = setelah tutup (lengkap fisik + selisih).

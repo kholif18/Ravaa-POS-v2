@@ -629,26 +629,53 @@ npm run dev:api
 * **Tabel produk bisa diurutkan** (klik header: **Nama, Kategori, Harga, Stok**;
   klik lagi membalik arah, panah di header menandai kolom & arahnya). Nama selalu
   jadi tie-break, jadi dua produk berharga sama tidak berpindah-pindah tiap render.
-* **Cetak label harga — halaman sendiri** (`#/labels`, menu **Label harga** di
-  sidebar): panel **kiri 20%** berisi alat (cari, filter kategori, centang
-  massal, status print-agent) dan **pratinjau 80%** berisi kartu label per
-  produk — masing-masing menampilkan thumbnail, nama, SKU/barcode, dan label
-  yang persis akan dicetak.
-  - Yang **layak dicetak**: produk aktif, `price_dynamic ≠ 1`, harga > 0 —
-    produk harga-berubah-otomatis sengaja dilewati karena labelnya tidak bisa
-    menampilkan satu angka. Jumlah yang dilewati dilaporkan di footer alat.
-  - Semua produk layak **tercentang saat pertama buka**; pilihan tersimpan di
-    sesi (kosongkan / pilih ulang sesuai kebutuhan).
-  - Cetak butuh **print-agent hidup**: tombol mati + pesan jelas kalau
-    `${urlAgent()}/health` (default `:9100`) tidak menjawab.
-  - Byte tetap `apps/web/src/escpos.ts` (ESC/POS 32 kolom: nama/SKU bold ->
-    harga **2x2** -> barcode -> FEED -> CUT), digabung `gabungLabel()` lalu
-    `kirimPrint()`. Barcode **EAN13/UPC-A/EAN8** dikirim sebagai barcode asli,
-    selain itu dicetak angka biasa.
-  - Tombol **Label** lama di toolbar halaman Produk **dipindah ke halaman ini**
-    (satu pintu, bisa dipilih produknya, bukan cuma "yang sedang tampil").
-  - Tanpa printer, print-agent menyimpan ke `apps/print-agent/out/*.bin`
-    (bisa dicek/CUPS-kan manual), jadi alur ini bisa diuji tanpa hardware.
+* **Cetak label harga — LEMBAR A4/Folio lewat cetak browser** (`#/labels`,
+  refactor 2026-10-17 — printer label toko Epson L3110/L1210 inkjet): halaman
+  **full-page** (tanpa sidebar; tombol ← Kembali ke Produk di header). Panel
+  **kiri ±350px** = pengaturan (kertas A4/Folio/kustom + margin, kolom /
+  tinggi / jarak label, isi label: nama/harga/barcode/garis tepi/harga promo,
+  font, **salinan N kali**) + **pemilihan produk ala keranjang**
+  dan **kanan** = **pratinjau lembar** live (persis hasil cetak, zoom
+  dipaskan otomatis) + strip info "N label · N halaman · kertas · N/lembar".
+  - **Keranjang produk** (revisi pemilik 2026-10-17): kolom cari dengan
+    **dropdown hasil** (klik opsi = produk masuk daftar; opsi yang sudah
+    terdaftar diberi centang, Enter = hasil pertama, Esc menutup) dan di
+    bawahnya kotak **"Produk terpilih"** = yang akan dicetak saja, tiap baris
+    punya **ikon hapus**. Tombol "Pilih yang tampil (n)" / "Kosongkan" untuk
+    pilih massal; baris "N di luar filter" mengingatkan pilihan yang tidak
+    terlihat tapi ikut tercetak.
+  - Cetak = **dokumen `@page` ukuran mm** dibuka di tab baru lalu
+    `window.print()` browser (pola invoice A4) — **bukan print-agent/ESC/POS**
+    (jalur :9100 tetap untuk struk thermal + kick laci). Di dialog cetak
+    browser: skala **100%**, margin **None** (margin diatur halaman ini).
+  - **Ctrl+P** di halaman ini membuka dialog cetak label (tidak mencetak UI);
+    tombol Cetak **menghormati saklar "Jeda semua cetak"** (chip "Cetak
+    dijeda" + toast penolakan selama pause menyala — memori kertas).
+  - Setelan (kertas/kolom/isi/salinan) **tersimpan per device**
+    (`localStorage ravaa.label`), bukan di server — tiap PC kasir boleh beda.
+  - **Barcode** digambar sebagai SVG presisi (bisa discan) mengikuti aturan
+    pemilik 2026-10-17 *"barcode pilihan pertama, SKU bagi produk yang tidak
+    memiliki barcode"*: (1) kolom barcode EAN-13/EAN-8 (checksum dihitung
+    otomatis) → batang EAN; (2) barcode non-EAN → **Code 128**; (3) barcode
+    kosong → **SKU sebagai Code 128** (semua produk punya SKU). Kode yang tak
+    bisa di-encode (non-ASCII, > 10 karakter, atau tak muat lebar label) TIDAK
+    digambar menyesatkan — **tercetak sebagai teks** di bawah harga. Baris
+    kaki `SKU · satuan` di atas barcode **dihapus** (permintaan pemilik
+    2026-10-17) — SKU sudah tercetak di bawah batang barcode.
+  - Yang **layak dicetak**: produk aktif, `price_dynamic ≠ 1`, harga > 0.
+    Barcode 12 digit dilengkapi checksum otomatis. Keranjang "Produk terpilih"
+    **default KOSONG** saat halaman dibuka (permintaan pemilik 2026-10-17:
+    *"jangan sampai memilih semua produk, jika ada ribuan akan
+    menghambat/menyebabkan system lemot — biar user yang memilihnya sendiri"*)
+    — pilih lewat dropdown pencarian, atau tombol **"Pilih yang tampil (n)" /
+    "Kosongkan"** untuk pilih massal.
+  - Pintu masuknya = tombol **Label** di toolbar halaman Produk (di antara
+    **Sinkron** dan **Impor**); item sidebar "Label harga" **dihapus** (satu
+    pintu, halaman tetap bisa di-bookmark `#/labels`, khusus owner).
+  - Implementasi murni tanpa dependensi baru: `apps/web/src/labelsheet.ts`
+    (encoder EAN + Code 128, layout, dokumen cetak) diuji
+    `tests/labelsheet-test.ts` (80 asersi) + `tests/e2e-label.mjs`
+    (48 asersi, popup cetak browser).
 * **Modal resume + pilihan cetak setiap penjualan** (revisi pemilik
   2026-10-05, putaran 11 — sebelumnya "Cetak struk otomatis"): setiap
   **penjualan selesai** — semua jalur, termasuk **F12 Bayar pas** — membuka
@@ -701,8 +728,9 @@ npm run dev:api
     - **Epson L3110 (A4)**: 64 kolom, judul dobel lebar, **tanpa CUT**, ditutup
       **Form Feed (0x0C)**. Inkjet tidak punya pisau potong — tanpa perintah
       eject ini kertas tercetak tapi menumpuk di dalam printer (bug nyata di
-      L3110). Kini khusus struk topup/tarik (penjualan A4 = invoice browser);
-      label harga tetap memakai `sesuaikanPrinter()` (batch ditutup FF).
+      L3110). Kini khusus struk topup/tarik (penjualan A4 = invoice browser).
+      Label harga TIDAK lewat jalur ini sejak 2026-10-17 — cetak lembar A4/Folio
+      lewat browser print (lihat butir Label harga di atas).
   - Struk disusun `struk()`/`strukA4()` di `apps/web/src/escpos.ts` — INIT -> nama toko
     (bold, rata tengah) -> tanggal/no transaksi/kasir/shift -> garis 32 kolom ->
     item (`qty x nama` + line total; baris yang didiskon memunculkan baris

@@ -1079,8 +1079,96 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           (qty/harga beli/sub total) + tfoot
                           Total/Terbayar/Sisa hutang, catatan pindah ke kartu
                           header. `tests/purchase-test.mjs` 40 asersi.
-apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
-                         + pratinjau label, cetak via gabungLabel()/kirimPrint().
+apps/web/src/labelsheet.ts  **Model cetak label (baru 2026-10-17, refactor
+                         halaman Label harga)**: LEMBAR label A4/Folio lewat
+                         CETAK BROWSER (`window.print()` + `@page` mm), bukan
+                         print-agent/ESC/POS lagi. Berisi: encoder barcode SVG
+                         EAN-13/EAN-8 + **Code 128 subset B**
+                         (`checksumEan`/`kodeBarcode`/`barcodeSvg` — checksum
+                         tidak cocok = null, JANGAN digambar;
+                         `kode128`/`barcode128Svg`/`MAKS_KODE128` — tabel 107
+                         simbol diverifikasi silang dua sumber (JsBarcode +
+                         tabel Wikipedia Code 128), vektor uji checksum
+                         'PRD00001' = nilai 24 di labelsheet-test),
+                         geometri (`ukuranKertas`/`hitungTataLetak`/
+                         `hitungHalaman`), builder HTML (`labelHtml`/
+                         `lembarHtml`/`htmlLembarSemua`/`CSS_LABEL`), dokumen
+                         cetak (`htmlDokumenLabel`/`cetakLabel` — popup
+                         diblokir = throw, pemanggil men-toast), setelan
+                         PER DEVICE (`ravaa.label` via
+                         `getSetelanLabel`/`setSetelanLabel`/
+                         `normalisasiSetelan`). Aturan: `perLembar=0` bila
+                         setelan tidak sehat (halaman cetak disabled).
+                         **Barcode label (revisi pemilik 2026-10-17 kedua:
+                         *"barcode pilihan pertama, SKU bagi produk yang tidak
+                         memiliki barcode"*, helper `blokBarcode`)**: kolom
+                         `barcode` EAN-13/EAN-8 → batang EAN; barcode non-EAN →
+                         Code 128; barcode kosong → **SKU sebagai Code 128**
+                         (semua produk punya SKU); tak encodable (non-ASCII /
+                         > `MAKS_KODE128` = 10 char) atau tak muat lebar isi
+                         label (lebar label − padding 2,4 mm − border 0,6 mm) →
+                         TEKS `lb-barcode-num` seperti dulu. **SKU TIDAK pernah
+                         lewat jalur EAN** — checksum yang dihitung ulang bisa
+                         mengubah digit terakhir sehingga hasil scan tak lagi
+                         sama persis dengan SKU (POS mencocokkan persis).
+                         **Baris kaki `SKU · satuan` DIHAPUS 2026-10-17
+                         (revisi ketiga — pemilik: *"di bagian atas barcode
+                         dibawah Harga tidak perlu, bisa di hapus"*)**: opsi
+                         `isi.sku`/`isi.satuan` ikut dicabut dari `IsiLabel`
+                         + baris toggle kartu Sistem (sengaja FULL removal,
+                         bukan default-off — setelan lama device masih `true`
+                         di localStorage sehingga toggle mati akan tampak
+                         "menyala tapi tak berpengaruh"); SKU sudah terbaca
+                         di `lb-barcode-num` bawah batang barcode.
+                         Diuji `tests/labelsheet-test.ts` (80 asersi).
+apps/web/src/pages/labels.ts  Halaman #/labels — **FULL-PAGE** (di luar
+                         `AdminRoute`, shell sendiri `renderLabelShell()` di
+                         ui/shell.ts; entri sidebar DIHAPUS 2026-10-17, pintu
+                         masuk = tombol `#prod-label` di toolbar Produk antara
+                         Sinkron & Impor). Kiri ±350px = pengaturan (kertas
+                         A4/Folio/kustom + margin, kolom/tinggi/jarak, isi
+                         label nama/harga/barcode/garis tepi/harga
+                         promo, font, salinan Nx) + pemilihan produk ala
+                         KERANJANG (revisi pemilik 2026-10-17 kedua: *"ganti
+                         sebagai dropdown saja, jadi teknisnya seperti
+                         keranjang belanja"*): kolom cari `#lb-q` + dropdown
+                         `#lb-hasil` (pola dropdown `#po-hasil` purchases.ts —
+                         klik opsi = MASUK keranjang; opsi terdaftar diberi
+                         centang `aria-selected` dan klik-nya no-op; Enter =
+                         opsi pertama, Esc/blur 150ms menutup) DAN di bawahnya
+                         kotak `#lb-dipilih` = produk TERPILIH saja, tiap
+                         baris ber-ikon hapus `[data-hapus]` (pola keranjang
+                          belanja; `#lb-dipilih [data-hapus]` = hook test);
+                          **Keranjang DEFAULT KOSONG (permintaan pemilik
+                          2026-10-17: *"buat default kosong, jangan sampai
+                          memilih semua produk, jika ada ribuan akan
+                          menghambat/menyebabkan system lemot. biar user yang
+                          memilihnya sendiri"*) — TIDAK ada auto-centang semua
+                          produk layak saat mount (dulu di DUA jalur: cache
+                          IndexedDB + `load()` server; keduanya dihapus);
+                          `state.pilih` mulai `new Set()` dan hanya berubah
+                          lewat aksi user (dropdown/`#lb-pilih`/hapus); pilihan
+                          TIDAK dipersist (per kunjungan, seperti sebelumnya).**
+                          tombol `#lb-pilih` "Pilih yang tampil (n)" /
+                          `#lb-kosong` tetap; `#lb-diluar` melaporkan pilihan
+                         di luar filter. Ikon opsi WAJIB `[&>svg]:size-4`
+                         (`icon()` tanpa width/height — SVG konteks tanpa rule
+                         ukuran = 0px tak terlihat; bug nyata yang juga ada di
+                         `#po-hasil` purchases.ts, keduanya sudah diperbaiki
+                         + dijaga asersi e2e-label). Kanan = pratinjau
+                         lembar live (`#lb-zoom`, zoom fit) + strip info
+                         (`#lb-info` sinkron `#lb-head` di header shell).
+                         Cetak = `cetakLabel()` (browser print, BUKAN
+                         print-agent) tapi TETAP menghormati `getPrintPause()`
+                         (chip `#lb-jeda`, toast tolak) + Ctrl+P di-intercept.
+                         Repaint parsial (paintHasil/paintDipilih/
+                         segarkanPilihan/paintPratinjau/updateRingkas +
+                         bindHasil/bindDipilih) supaya fokus input tidak
+                          hilang; listener dokumen
+                         via pageAbort (resize + Ctrl+P). Diuji
+                         `tests/e2e-label.mjs` (48 asersi — termasuk produk
+                         uji tanpa barcode: SKU tampil sebagai Code 128, dan
+                         asersi anti-regresi keranjang default kosong).
 apps/web/src/pages/audit.ts  Halaman #/audit (menu Jejak Audit, 2026-10-16,
                          khusus owner): tabel audit_log dari GET /api/audit
                          (chip jumlah `#audit-count`, filter entity/action +
@@ -1172,7 +1260,11 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            terbuka, FIFO; merah bila >= 30, "hari ini" bila
                            <= 0). Angka = cermin API, jangan dihitung ulang
                            di klien.
-apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print-agent
+apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
+                          (**label harga DIHAPUS dari file ini 2026-10-17** —
+                          refactor halaman Label ke cetak lembar browser,
+                          lihat labelsheet.ts; jangan kembalikan
+                          labelHarga/teksLabel/gabungLabel/sesuaikanPrinter)
                           + **`bukaLaci()` (Tahap 4a 2026-10-06)** — kick
                           `ESC p 00 19 FA` (5 byte) dibuka OTOMATIS tiap
                           penjualan TUNAI sukses lewat `bukaLaciOtomatis()`
@@ -1187,14 +1279,11 @@ apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print
                           browser (`invoice.ts`), BUKAN struk ini** — `strukA4()`
                           kini hanya dipakai struk topup/tarik saat pref layout
                           `a4` dan tetap diuji unit di `escpos-test.ts`.
-                          Pemilihan: strukUntuk() (panggil dari tiap pencetakan
-                          struk) & sesuaikanPrinter() untuk stream non-struk
-                          (label), pref di ui/print-pref.ts.
-                          Berisi: label harga (labelHarga/teksLabel/gabungLabel),
-                          struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
-                          dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
-                         default :9100). Dipanggil dari halaman Label harga dan dari
-                         pay()/submitTopup() POS. PENTING: `teks()` tidak
+                           Pemilihan: strukUntuk() (panggil dari tiap pencetakan
+                           struk), pref di ui/print-pref.ts.
+                           Berisi: struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
+                           dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
+                          default :9100). Dipanggil dari pay()/submitTopup() POS. PENTING: `teks()` tidak
                          menambah baris baru — setiap baris struk HARUS diakhiri
                          LF, kalau tidak seluruh struk menempel jadi satu baris.
                          **Token PLN DOUBLE-HEIGHT (2026-10-08)**: `StrukBaris`
@@ -1240,7 +1329,25 @@ apps/web/src/escpos.ts   ESC/POS: label harga + struk DUA LAYOUT + POST ke print
                           browser/CUPS `lp -d EPSON-L3110-Series`). Lempar Error
                           bila popup diblokir (POS men-toast, penjualan TIDAK
                           dibatalkan). Dipanggil dari POS (dialog A4) & Riwayat.
- apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
+ apps/web/src/ui/auth-screen.ts  Kerangka layar auth (login & ubah-sandi):
+                          `authLayarHtml(kartu)` — SATU markup untuk dua
+                          halaman (pola shift-tutup.ts). Gradasi biru
+                          full-bleed (`.page:has(.login-bg)` p-0 di
+                          styles.css) + grid 1 kolom HP / 2 kolom >=lg
+                          (brand kiri, kartu kanan); `m-auto` = satu-satunya
+                          pemusat vertikal (rantai min-h-full bersarang lama
+                          tidak teresolusi — kartu terukur mentok atas
+                          top=28px; margin-auto juga aman saat konten lebih
+                          tinggi dari layar). Restyle 2026-10-17 (pemilik
+                          "layout halaman login jadi lebih responsif dan
+                          modern") — ID kontrak test (#login-*/#gs-*) tidak
+                          berubah. `.login-btn` (styles.css) = tombol putih
+                          solid, SENGAJA bukan .btn-primary (background-image
+                          gradiennya tak bisa ditimpa !bg-white — bug tombol
+                          "tak terlihat" biru-di-atas-biru, ditemukan &
+                          diperbaiki 2026-10-17; dulu juga diam di
+                          ubah-sandi).
+apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
                           konfirmasi destruktif), `alertDialog()` (satu tombol),
                           dan **`choiceDialog({title,message,choices,cancelLabel})`**
                           (baru 2026-10-03, resolve `key` choice | null) — SweetAlert2
@@ -1275,17 +1382,19 @@ apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                            pemilik 2026-10-06 "jangan print dulu sebelum saya
                            perintah — menghabiskan kertas")**: default **PAUSED**
                            (kunci absen = jeda; harus set false untuk nyala) →
-                           `kirimPrint()` melempar Error SEBELUM fetch: struk,
-                           label, kick laci nol request ke print-agent; nyalakan
-                           lewat saklar "Jeda semua cetak" di kartu Cetak struk
-                           (settings.ts `#set-pause`). Test yang memang mau
-                           memverifikasi payload harus set `'0'` via
+                            `kirimPrint()` melempar Error SEBELUM fetch: struk
+                            & kick laci nol request ke print-agent; halaman
+                            Label (#/labels) juga menolak klik Cetak (toast)
+                            selama jeda walau jalurnya cetak browser; nyalakan
+                            lewat saklar "Jeda semua cetak" di kartu Cetak struk
+                            (settings.ts `#set-pause`). Test yang memang mau
+                            memverifikasi payload harus set `'0'` via
                            addInitScript + route-mock `**/print` (jangan sampai
                            menyentuh :9100 — biang kertas dulu = history-test
                            klik [Thermal] menulis struk asli ke /dev/usb/lp0 tiap
                            `npm test`). SATU sumber untuk
                            panel Sistem + scan bar
-                           POS + strukUntuk()/sesuaikanPrinter() — jangan baca
+                           POS + strukUntuk() + halaman Label — jangan baca
                            localStorage langsung dari halaman lain.
 apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
                          adanya), hariIni()/geser()/tglPanjang()/tglPendek()/
@@ -1704,8 +1813,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     perangkat ini" (kartuPerangkat di settings.ts, localStorage).
   - Frontend: `ui/auth.ts` (token localStorage, profilSaya() dengan fallback
     offline ke simpanan terakhir), rute `#/login` & `#/ubah-sandi` (render
-    tanpa shell), guard `bolehBuka()` per peran (nav difilter `roles` di
-    ADMIN_NAV; kasir nyasar = toast + alih ke `#/pos`), api.ts menyuntikkan
+    tanpa shell lewat SATU kerangka `ui/auth-screen.ts` sejak 2026-10-17 —
+    lihat §2), guard `bolehBuka()` per peran (nav difilter `roles` di
+    ADMIN_NAV; kasir nyasar = toast + alih ke `#/pos`; **`labels` tidak ada
+    di nav** (owner-only lewat `bolehBuka`, dibuka dari tombol Produk), api.ts
+    menyuntikkan
     header Bearer ke semua request (termasuk flush outbox), `Pengguna` page
     khusus owner, logout = hapus sesi server + token.
 * **Jejak audit (2026-10-16) — `GET /api/audit` -> `{data:[<baris audit_log>], total}`**
@@ -2234,7 +2346,55 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-08 (Riwayat hibrida — relasi topup→sale):**
+  **Migrasi terakhir 2026-10-17 (peran `pemilik` → `owner` + akun seed
+  `owner`):** CHECK `users.role` jadi `('owner','kasir')`; akun lama
+  berperan `pemilik` DITOLAK guard baru (toast "Halaman ini khusus owner" di
+  web + 403 `"khusus owner"` di API), dan `npm run seed` TIDAK memperbaikinya
+  (seed user hanya jalan saat tabel `users` kosong). SQLite tak bisa mengubah
+  CHECK lewat ALTER → **rebuild tabel `users` in-place** (data/sesi
+  dipertahankan), sekalian rename akun `pemilik` → `owner`. Backup dulu
+  (`VACUUM INTO`, bukan `cp`):
+  ```bash
+  sqlite3 apps/api/data/data.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+  sqlite3 apps/api/data/data.db "VACUUM INTO 'apps/api/data/data.db.bak.role-owner';"
+  sqlite3 apps/api/data/data.db <<'SQL'
+  PRAGMA foreign_keys=OFF;
+  BEGIN IMMEDIATE;
+  CREATE TABLE users_baru (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('owner', 'kasir')),
+    avatar        TEXT,
+    email         TEXT NOT NULL DEFAULT '',
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    must_change   INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO users_baru (id, username, name, password_hash, role, avatar, email, is_active, must_change, created_at)
+    SELECT id,
+           CASE WHEN username = 'pemilik' THEN 'owner' ELSE username END,
+           name, password_hash,
+           CASE WHEN role = 'pemilik' THEN 'owner' ELSE role END,
+           avatar, email, is_active, must_change, created_at
+      FROM users;
+  DROP TABLE users;
+  ALTER TABLE users_baru RENAME TO users;
+  COMMIT;
+  PRAGMA foreign_keys=ON;
+  SQL
+  ```
+  `foreign_keys=OFF` WAJIB (tabel `sessions` mereferensikan `users` dengan
+  ON DELETE CASCADE — tanpa itu DROP TABLE menghapus semua sesi). Seq
+  AUTOINCREMENT ikut dijaga manual (`UPDATE sqlite_sequence SET
+  seq=<nilai lama> WHERE name='users'`). DB dev repo ini sudah dijalankan
+  2026-10-17 (backup `data.db.bak.role-owner`; login tetap `owner`/
+  `admin123`, sesi browser lama ikut pulih sendiri — token menunjuk
+  `user_id`, bukan username). Install berdata yang TIDAK boleh di-recreate
+  (mis. STB native `~/ravaa-data/data.db`) jalankan blok yang sama dengan
+  path DB-nya — API boleh hidup (DDL di WAL), tidak perlu restart.
+  **Migrasi sebelumnya 2026-10-08 (Riwayat hibrida — relasi topup→sale):**
   kolom **`topup_txns.sale_id`** (`TEXT`, **tanpa FK** — lihat kontrak
   `POST /api/topups`): penanda lembut baris topup/tarik yang dibayar bersama
   satu nota penjualan, dipakai halaman Riwayat menggabungkan transaksi hibrida

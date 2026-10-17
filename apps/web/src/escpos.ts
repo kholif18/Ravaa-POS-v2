@@ -1,4 +1,4 @@
-// ESC/POS — cetak label harga & struk. DUA layout struk (sejak 2026-10-02):
+// ESC/POS — cetak STRUK. DUA layout struk (sejak 2026-10-02):
 //
 //   * `thermal` (bawaan) — 58mm, 32 kolom, diakhiri FEED + CUT. Perangkat
 //     bawaan toko: printer termal dengan pisau potong.
@@ -7,11 +7,15 @@
 //     tapi tidak pernah keluar (bug nyata di L3110). Dipilih lewat panel
 //     Sistem -> Cetak struk (lihat ui/print-pref.ts).
 //
-// Modul ini TIDAK ADA padahal tercatat di AGENTS §2 sejak lama (dibuat ulang
-// 2026-09-27 bersama fitur label). Web tidak menulis device: cukup POST
-// `{data_base64}` ke print-agent (:9100/print) — agent (nol-dep) yang menulis
-// bytes ke PRINTER_PATH. Bila tak ada printer, agent menyimpannya sebagai file,
-// jadi alur ini tetap bisa diuji tanpa hardware.
+// Label harga TIDAK di sini lagi: sejak 2026-10-17 halaman #/labels mencetak
+// LEMBAR label A4/Folio lewat print browser (apps/web/src/labelsheet.ts) ke
+// Epson L3110/L1210 — fungsi ESC/POS label (labelHarga/gabungLabel/
+// sesuaikanPrinter dsb.) sudah dihapus bersama refactor itu.
+//
+// Modul ini TIDAK menulis device: cukup POST `{data_base64}` ke print-agent
+// (:9100/print) — agent (nol-dep) yang menulis bytes ke PRINTER_PATH. Bila tak
+// ada printer, agent menyimpannya sebagai file, jadi alur ini tetap bisa diuji
+// tanpa hardware.
 //
 // Setiap baris WAJIB <= kolom layout-nya setelah `ascii()`, karena byte di luar
 // 0x20-0x7E bisa menggeser posisi cetak di firmware printer.
@@ -81,84 +85,6 @@ function teks(s: string): number[] {
   const out: number[] = [];
   for (const ch of ascii(s)) out.push(ch.charCodeAt(0));
   return out;
-}
-
-/** Blok barcode ESC/POS (function B: GS k m n d..). HANYA untuk barcode yang
- *  bentuknya bisa divalidasi murni angka — EAN13/UPC-A/EAN8.
- *
- *  Sengaja TIDAK memakai CODE128: perintahnya butuh pemilih code-set (`{B`)
- *  yang caranya beda antar firmware, dan salah satu byte = barcode yang tidak
- *  bisa discan tanpa pemberitahuan. Kode yang tidak cocok pola di bawah akan
- *  dicetak sebagai ANGKA BIASA — tetap terbaca, cuma tidak discan. */
-function blokBarcode(kode: string): number[] | null {
-  const k = ascii(kode).replace(/\s+/g, '').toUpperCase();
-  if (!/^\d+$/.test(k)) return null;
-  const panjang = k.length;
-  let m: number;
-  if (panjang === 13 || panjang === 12) m = 67; // EAN13 (12 digit = tanpa check digit)
-  else if (panjang === 11) m = 65; // UPC-A (11 digit = tanpa check digit)
-  else if (panjang === 8 || panjang === 7) m = 68; // EAN8
-  else return null;
-  const tinggi = [0x1d, 0x68, 60]; // GS h 60 ~ 8mm
-  const lebar = [0x1d, 0x77, 3]; // GS w 3
-  const fungsiB = [0x1d, 0x6b, m, panjang, ...k.split('').map((c) => c.charCodeAt(0))];
-  return [...tinggi, ...lebar, ...fungsiB];
-}
-
-export interface ProdukLabel {
-  name: string;
-  sku: string;
-  price: number;
-  unit?: string | null;
-  barcode?: string | null;
-}
-
-/** Satu label harga: nama, SKU/satuan, harga besar, barcode bila valid.
- *  Potong per label (GS V 0) supaya label terpisah — bukan satu gulungan
- *  panjang yang harus dicabik manual. */
-export function labelHarga(p: ProdukLabel): number[] {
-  const out: number[] = [...INIT];
-  const barcode = blokBarcode(p.barcode ?? '');
-
-  out.push(...ALIGN(1), ...BOLD(true), ...teks(tengah(potong(p.name, COLS))));
-  out.push(...BOLD(false), ...teks(tengah(kolomSub(p))));
-  out.push(...FEED(1));
-  // Harga 2x2 — angka harga adalah yang paling harus terbaca dari jarak jauh.
-  out.push(...SIZE(2, 2), ...ALIGN(2), ...teks(kanan(rp(p.price), COLS / 2)), ...SIZE(1, 1));
-  out.push(...FEED(1));
-
-  if (barcode) {
-    out.push(...ALIGN(1), ...barcode, ...ALIGN(1), ...teks(tengah(ascii(p.barcode ?? ''))));
-  } else if (p.barcode) {
-    out.push(...ALIGN(1), ...teks(tengah(`[${ascii(p.barcode)}]`)));
-  }
-  out.push(...FEED(3), ...CUT);
-  return out;
-}
-
-function kolomSub(p: ProdukLabel): string {
-  const bagian = [p.sku, p.unit && p.unit !== '-' ? p.unit : ''].filter(Boolean).join(' · ');
-  return potong(bagian, COLS);
-}
-
-/** Pratinjau teks label (32 kolom) untuk dialog.
- *  Memakai helper YANG SAMA dengan `labelHarga` (tengah/kanan/kolomSub/rp)
- *  supaya isi yang dilihat kasir = isi yang keluar di kertas. Baris harga
- *  ditandai `<2x>` karena di kertas ia dicetak dua kali lebar/tinggi —
- *  menampilkan 32 kolom biasa akan berpura-pura beda dari kenyataan. */
-export function teksLabel(p: ProdukLabel): string[] {
-  const barcode = blokBarcode(p.barcode ?? '');
-  const baris = [
-    tengah(potong(p.name, COLS)),
-    tengah(kolomSub(p)),
-    '',
-    `${kanan(rp(p.price), COLS / 2)}   <2x>`,
-    '',
-  ];
-  if (barcode) baris.push('[barcode]', tengah(ascii(p.barcode ?? '')));
-  else if (p.barcode) baris.push(tengah(`[${ascii(p.barcode)}]`));
-  baris.push('', '--- potong ---');
-  return baris;
 }
 
 /* ---------- struk ---------- */
@@ -344,27 +270,6 @@ export function strukUntuk(s: Struk, layout: LayoutStruk = getStrukLayout()): nu
   return layout === 'a4' ? strukA4(s) : struk(s);
 }
 
-/** Sesuaikan stream NON-struk (label harga dsb.) dengan printer aktif:
- *  thermal = apa adanya; a4 = buang SEMUA perintah potong (inkjet tanpa pisau)
- *  lalu tutup dengan Form Feed, supaya kertas keluar setelah batch selesai. */
-export function sesuaikanPrinter(bytes: number[], layout: LayoutStruk = getStrukLayout()): number[] {
-  if (layout !== 'a4') return bytes;
-  const out: number[] = [];
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] === 0x1d && bytes[i + 1] === 0x56 && bytes[i + 2] === 0x00) {
-      i += 2; // lompati GS V 0x00
-      continue;
-    }
-    out.push(bytes[i]);
-  }
-  return [...out, ...FEED(2), ...FF];
-}
-
-/** Gabung beberapa label jadi SATU stream (dipotong per label di dalamnya). */
-export function gabungLabel(list: ProdukLabel[]): number[] {
-  return list.flatMap(labelHarga);
-}
-
 export function keBase64(bytes: number[]): string {
   // Chunked: String.fromCharCode(...besar) bikin stack overflow di ribuan byte.
   let bin = '';
@@ -402,8 +307,8 @@ export function urlAgent(): string {
  *  ke kasir (agent tidak jalan / printer tidak ketemu / CORS).
  *
  *  **JEDA CETAK (pemilik 2026-10-06)**: `getPrintPause()` true (bawaan!) →
- *  melempar Error SEBELUM fetch, jadi NOL request ke print-agent — struk,
- *  label, kick laci semua berhenti di browser. Lihat print-pref.ts. */
+ *  melempar Error SEBELUM fetch, jadi NOL request ke print-agent — struk &
+ *  kick laci berhenti di browser. Lihat print-pref.ts. */
 export async function kirimPrint(bytes: number[]): Promise<string> {
   if (getPrintPause()) {
     throw new Error('cetak sedang DIJEDA (saklar "Jeda semua cetak" menyala)');

@@ -27,6 +27,7 @@ import {
   getTheme,
   isAdminRoute,
   parseRoute,
+  renderLabelShell,
   renderPosShell,
   renderShell,
 } from './ui/shell';
@@ -87,7 +88,14 @@ async function render(): Promise<void> {
     location.hash = ruteBawaan(saya.akun.role);
     return;
   }
-  app!.innerHTML = isAdminRoute(route) ? renderShell(route, cashier(), saya.akun.role) : renderPosShell();
+  // labels (2026-10-17) = layar penuh tanpa sidebar (shell sendiri, pola POS):
+  // pratinjau lembar A4/Folio butuh lebar; masuknya lewat toolbar Produk.
+  app!.innerHTML =
+    route === 'labels'
+      ? renderLabelShell()
+      : isAdminRoute(route)
+        ? renderShell(route, cashier(), saya.akun.role)
+        : renderPosShell();
   bindShell();
   updateOutboxBadge();
   const page = document.getElementById('page');

@@ -598,7 +598,7 @@ function mountBaru(el: HTMLElement): void {
               <span class="block truncate font-semibold">${esc(pd.name)}</span>
               <span class="cell-sub">${esc(pd.sku)} · stok ${pd.stock} · beli ${rp(pd.cost || 0)}</span>
             </span>
-            <span class="shrink-0 text-gray-400">${icon('plus')}</span>
+            <span class="shrink-0 text-gray-400 [&>svg]:size-4">${icon('plus')}</span>
           </button>`).join('') || `<div class="empty">Tidak ketemu.</div>`;
         hasil.classList.remove('hidden');
         hasil.querySelectorAll<HTMLElement>('[data-po-pilih]').forEach((btn) =>

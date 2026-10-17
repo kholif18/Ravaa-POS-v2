@@ -442,6 +442,7 @@ export function renderProductsPage(): string {
               <input id="q" class="input input-sm" type="search" placeholder="Cari nama, SKU, atau barcode..." value="${esc(state.q)}" />
             </div>
             <button type="button" id="sync" class="btn btn-ghost" title="Sinkronkan master produk — Shift+klik untuk reset cache penuh">${icon('sync')}<span class="hidden sm:inline">Sinkron</span></button>
+            <a href="#/labels" id="prod-label" class="btn btn-ghost no-underline" title="Cetak label harga — lembar A4/Folio (printer lembar)">${icon('print')}<span class="hidden sm:inline">Label</span></a>
             <button type="button" id="prod-import" class="btn btn-ghost" title="Impor produk dari CSV atau tempelan Excel">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>
             <button type="button" id="prod-export" class="btn btn-ghost" title="Unduh produk yang sedang tampil (ikut filter &amp; pencarian) sebagai CSV">${icon('download')}<span class="hidden sm:inline">Ekspor</span></button>
             <button type="button" id="prod-new" class="btn btn-primary ml-auto">${icon('plus')}<span>Produk</span></button>

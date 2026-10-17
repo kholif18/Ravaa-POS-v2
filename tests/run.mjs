@@ -48,12 +48,13 @@ function cekPathAbsolut() {
 
 const SUITE = [
   ['importcsv-test.ts', 176],
-  ['escpos-test.ts', 71],
+  ['escpos-test.ts', 46],
+  ['labelsheet-test.ts', 80],
   ['sku-urut-test.mjs', 17],
   ['product-delete-test.mjs', 31],
   ['e2e-import.mjs', 43],
   ['e2e-opname.mjs', 38],
-  ['e2e-label.mjs', 21],
+  ['e2e-label.mjs', 48],
   ['e2e-struk.mjs', 143],
   ['e2e-hpp.mjs', 28],
   ['satuan-test.mjs', 44],

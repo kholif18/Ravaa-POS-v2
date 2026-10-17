@@ -95,6 +95,78 @@ butir yang sudah di-ACC pemilik.
   `shift-test.mjs` 19 → **23** asersi (2 agregat + 2 dialog), README §shift +
   kontrak §3 diperbarui, `npm test` SEMUA HIJAU.
 
+### 1.4 Refactor halaman Label harga — cetak lembar A4/Folio **[SELESAI 2026-10-17 — tersisa cetak uji nyata pemilik]**
+- **Latar (keputusan pemilik 2026-10-17):** printer label toko = **Epson
+  L3110 & L1210** (inkjet lembar), kertas **A4 + Folio (215×330 mm)** — bukan
+  printer thermal 58 mm. Halaman `#/labels` direfactor total mengikuti
+  riset Aronium (23 opsi price-tag) + pelengkap dari POS lain (live preview,
+  setelan diingat per device, satuan, harga promo opsional dari Erzap).
+- **Keputusan yang sudah lengkap:** (1) cetak = dokumen HTML `@page` mm lewat
+  `window.print()` browser (pola invoice A4 — print-agent ESC/POS TIDAK
+  dipakai lagi untuk label, tetap dipakai struk thermal); (2) halaman full
+  tanpa sidebar admin + header (tombol ← Kembali ke Produk), menu sidebar
+  "Label harga" dihapus, tombol pindah ke toolbar Produk antara
+  "Sinkron" dan "Impor"; (3) split kiri ±30% pengaturan / kanan pratinjau
+  lembar (kertas + tata letak + isi label ala Aronium, live preview).
+- **Butir 1 — modul murni `apps/web/src/labelsheet.ts` + `tests/labelsheet-test.ts`:**
+  setelan halaman (kertas/margin/kolom/tinggi label/jarak/isi/font/barcode
+  tinggi/salinan), tata letak grid (`hitungTataLetak`/`hitungHalaman`),
+  encoder barcode SVG EAN-13/EAN-8 (checksum dihitung), builder HTML lembar
+  (`labelHtml`/`lembarHtml`/`htmlDokumenLabel`), `cetakLabel()`.
+- **Butir 2 — halaman & navigasi:** tulis ulang `pages/labels.ts` (panel
+  pengaturan + pratinjau live + pemilihan produk pola lama), `renderLabelShell()`
+  di `ui/shell.ts` + plumbing rute `labels` tanpa menu nav (tetap owner-only),
+  tombol Label di `pages/products.ts` (antara `#sync` dan `#prod-import`).
+- **Butir 3 — bersih-bersih & tes:** hapus fungsi label lama di `escpos.ts`
+  (`ProdukLabel`/`labelHarga`/`kolomSub`/`teksLabel`/`gabungLabel`/
+  `blokBarcode`/`sesuaikanPrinter` — terverifikasi hanya dipakai halaman label
+  + test), sesuaikan `tests/escpos-test.ts` (ekspek turun), tulis ulang
+  `tests/e2e-label.mjs` (tanpa print-agent :9101; verifikasi shell, pratinjau,
+  popup cetak ber-`@page`), update ekspek `tests/run.mjs`, AGENTS.md §2,
+  README.
+- **Hasil:** butir 1–3 selesai; `labelsheet-test.ts` 64 asersi, `escpos-test.ts`
+  46 (blok label dihapus), `e2e-label.mjs` 34 (popup cetak browser, tanpa
+  print-agent), suite penuh **1398 hijau**. Selama jeda cetak (`getPrintPause`)
+  halaman menolak klik Cetak (chip "Cetak dijeda" + toast).
+- **Revisi 2026-10-17 (pemilihan produk — *"ganti sebagai dropdown saja, jadi
+  teknisnya seperti keranjang belanja"*):** daftar penuh di panel kiri diganti
+  **kolom cari + dropdown hasil** (klik opsi = masuk keranjang "Produk
+  terpilih", opsi terdaftar diberi centang + no-op; Enter/Esc/blur 150ms —
+  pola dropdown `#po-hasil`) + kotak **"Produk terpilih"** ber-ikon hapus per
+  baris. `e2e-label.mjs` 34 → **42**; ditemukan + diperbaiki bug ikon SVG 0px
+  yang sama di dropdown `#po-hasil` purchases.ts. Suite penuh **1406 hijau**.
+- **Revisi 2026-10-17 (barcode Code 128 + fallback SKU — pemilik: *"barcode
+  pilihan pertama, SKU bagi produk yang tidak memiliki barcode"*):** kolom
+  `barcode` EAN → batang EAN (lama); barcode non-EAN → **Code 128 subset B**;
+  barcode kosong → **SKU sebagai Code 128** (semua produk punya SKU); kode tak
+  encodable (> `MAKS_KODE128` = 10 char / non-ASCII) atau tak muat lebar label
+  (lebar isi − padding/border) tetap **teks** `lb-barcode-num` (tanpa
+  pengecilan modul). Encoder `kode128`/`barcode128Svg` di `labelsheet.ts`,
+  tabel 107 simbol diverifikasi silang JsBarcode + Wikipedia (vektor uji
+  'PRD00001' checksum 24). SKU sengaja TIDAK pernah lewat EAN (checksum ulang
+  bisa mengubah digit → scan tak lagi cocok exact-match POS). `labelsheet-test`
+  64 → **80**; `e2e-label` 42 → **46** (produk uji kedua tanpa barcode);
+  suite penuh **1426 hijau**.
+- **Revisi 2026-10-17 (kaki label — pemilik: *"di bagian atas barcode dibawah
+  Harga tidak perlu, bisa di hapus"*):** baris `SKU · satuan` (`lb-kaki`)
+  dihapus penuh dari `labelHtml` + `CSS_LABEL` + opsi `IsiLabel` + toggle kartu
+  Sistem (sengaja bukan default-off: setelan device lama masih `true` sehingga
+  toggle mati akan tampak menyala tanpa efek); SKU tetap terbaca di
+  `lb-barcode-num`. Jumlah asersi tidak berubah (guard anti-regresi mengganti
+  asersi lama) — suite tetap **1426 hijau**.
+- **Revisi 2026-10-17 (keranjang default kosong — pemilik: *"buat default
+  kosong, jangan sampai memilih semua produk, jika ada ribuan akan
+  menghambat/menyebabkan system lemot. biar user yang memilihnya sendiri"*):**
+  auto-centang SEMUA produk layak saat mount — dulu di DUA jalur (cache
+  IndexedDB + `load()` server) — DIHAPUS; `state.pilih` mulai `new Set()`,
+  pratinjau langsung empty-state, tombol Cetak mati sampai ada pilihan;
+  pemilihan hanya lewat aksi user (dropdown `#lb-hasil` / `#lb-pilih` /
+  `#lb-kosong`). `e2e-label` 46 → **48** (asersi anti-regresi "default
+  kosong" + strip info terisi setelah pilih); suite penuh **1428 hijau**.
+- **DoD:** build web lolos, suite regresi hijau dengan ekspek baru, cetak uji
+  nyata 1× (pemilik, kertas A4 & Folio, skala 100%) **termasuk scan fisik
+  Code 128** (belum pernah diuji di atas kertas).
+
 ---
 
 ## 2. Fase 2 — Analitik (setelah Fase 1)

@@ -114,6 +114,13 @@
   .page {
     @apply flex-1 overflow-y-auto p-2.5 sm:p-3;
   }
+  /* Halaman Label harga (#/labels, refactor 2026-10-17): layar penuh tanpa
+     sidebar, padding .page dibuang dan gulir pindah ke panel masing-masing
+     (kiri pengaturan, kanan pratinjau) — pola :has sama dengan
+     `.page:has(.login-bg)` / `.page:has(.pm-shell)`. */
+  .page:has(.lb-root) {
+    @apply min-h-0 overflow-hidden p-0;
+  }
   .page-title {
     @apply truncate text-sm font-semibold text-gray-900 dark:text-white;
   }

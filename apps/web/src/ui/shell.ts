@@ -2,10 +2,13 @@ import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 import { akunTersimpan, type Peran } from './auth';
 
-export type AdminRoute = 'dashboard' | 'products' | 'labels' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings' | 'users' | 'audit';
+export type AdminRoute = 'dashboard' | 'products' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings' | 'users' | 'audit';
 // login & ubah-sandi dirender TANPA shell (layar penuh) — bukan admin.
 // profil = halaman shell SEMUA peran (edit nama sendiri + pref perangkat).
-export type Route = 'pos' | 'login' | 'ubah-sandi' | 'profil' | AdminRoute;
+// labels (refactor 2026-10-17) = layar penuh TANPA sidebar ala POS: printer
+// lembar (Epson L3110/L1210) butuh pratinjau lebar, jadi ia shell sendiri
+// (`renderLabelShell`) dan tombol masuknya dari toolbar Produk — bukan nav.
+export type Route = 'pos' | 'login' | 'ubah-sandi' | 'profil' | 'labels' | AdminRoute;
 
 interface NavItem {
   route: AdminRoute;
@@ -43,7 +46,8 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
   },
   {
     // Alur barang: master produk -> stok operasional -> pemasok -> kulakan ->
-    // pendukung (satuan, label).
+    // pendukung (satuan). Label harga BUKAN nav lagi sejak 2026-10-17
+    // (refactor lembar A4/Folio): tombolnya di toolbar Produk -> #/labels.
     group: 'Barang',
     items: [
       { route: 'products', label: 'Produk', icon: 'products', roles: MILIK },
@@ -54,9 +58,6 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
       // Nota kulakan PO (Tahap 3, 2026-10-11): order -> terima -> bayar.
       { route: 'purchases', label: 'Pembelian', icon: 'download', roles: MILIK },
       { route: 'satuan', label: 'Satuan', icon: 'categories', roles: MILIK },
-      // Label harga punya layar sendiri (kiri alat, kanan pratinjau) sejak
-      // 2026-09-29 — dulu ia cuma dialog dari toolbar Produk.
-      { route: 'labels', label: 'Label harga', icon: 'print', roles: MILIK },
     ],
   },
   {
@@ -88,7 +89,6 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
 export const ROUTE_TITLES: Record<AdminRoute, string> = {
   dashboard: 'Dashboard',
   products: 'Produk',
-  labels: 'Label harga',
   satuan: 'Satuan',
   stock: 'Stok',
   suppliers: 'Supplier',
@@ -114,7 +114,6 @@ export const ROUTE_META_EXTRA: Partial<Record<Route, { title: string; crumb: str
 export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   dashboard: ['Utama', 'Dashboard'],
   products: ['Barang', 'Produk'],
-  labels: ['Barang', 'Label harga'],
   satuan: ['Barang', 'Satuan'],
   stock: ['Barang', 'Stok'],
   suppliers: ['Barang', 'Supplier'],
@@ -135,7 +134,6 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
 export const ROUTE_SUBS: Record<AdminRoute, string> = {
   dashboard: 'Ringkasan penjualan, shift, dan stok menipis.',
   products: 'Kelola produk, harga, dan stok per kategori.',
-  labels: 'Cetak label harga 32 kolom — alat di kiri, pratinjau label di kanan.',
   satuan: 'Master satuan untuk struk; form produk memilih dari daftar ini.',
   stock: 'Pantau stok menipis dan riwayat restock.',
   suppliers: 'Pemasok barang kulakan — dipakai untuk Pembelian (Tahap 3).',
@@ -172,18 +170,22 @@ export function parseRoute(hash: string): Route {
   if (slug === 'login') return 'login';
   if (slug === 'ubah-sandi') return 'ubah-sandi';
   if (slug === 'profil') return 'profil';
+  // labels di luar ADMIN_ROUTES (bukan nav) — dicocokkan eksplisit.
+  if (slug === 'labels') return 'labels';
   if (ADMIN_ROUTES.has(slug)) return slug as AdminRoute;
   return 'pos';
 }
 
 export function isAdminRoute(route: Route): route is AdminRoute {
-  return route !== 'pos' && route !== 'login' && route !== 'ubah-sandi';
+  return route !== 'pos' && route !== 'login' && route !== 'ubah-sandi' && route !== 'labels';
 }
 
 /** Bolehkah peran ini membuka rute? POS/login/ubah-sandi selalu boleh
- *  (dijaga terpisah); halaman admin ikut `roles` item nav-nya. */
+ *  (dijaga terpisah); labels khusus owner (dulu item nav MILIK); halaman
+ *  admin lain ikut `roles` item nav-nya. */
 export function bolehBuka(route: Route, peran: Peran): boolean {
   if (route === 'pos' || route === 'login' || route === 'ubah-sandi' || route === 'profil') return true;
+  if (route === 'labels') return peran === 'owner';
   for (const g of ADMIN_NAV) {
     const item = g.items.find((i) => i.route === route);
     if (item) return item.roles.includes(peran);
@@ -377,6 +379,26 @@ export function renderPosShell(): string {
   return `
   <div class="flex h-full flex-col bg-canvas dark:bg-gray-900">
     <main class="page" id="page" tabindex="-1"></main>
+  </div>`;
+}
+
+/** Shell halaman Label harga (#/labels, refactor 2026-10-17): layar penuh
+ *  TANPA sidebar (pola renderPosShell) — keputusan pemilik "buat halaman
+ *  sendiri", printer lembar Epson L3110/L1210 butuh pratinjau lebar.
+ *  Header tipis: tombol kembali ke Produk + judul + `#lb-head` (info jumlah
+ *  label/halaman) yang diisi halaman; tanpa badge outbox/tema/user karena
+ *  satu-satunya jalan keluar-masuk jelas (← Produk / hash). */
+export function renderLabelShell(): string {
+  return `
+  <div class="flex h-full flex-col bg-canvas dark:bg-gray-900">
+    <header class="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800 sm:px-4">
+      <a href="#/products" class="btn btn-ghost" title="Kembali ke halaman Produk">${icon('chevL')}<span class="hidden sm:inline">Produk</span></a>
+      <div class="min-w-0 flex-1">
+        <h1 class="page-title">Label harga</h1>
+        <p class="page-sub" id="lb-head">Memuat produk…</p>
+      </div>
+    </header>
+    <main class="page min-h-0" id="page" tabindex="-1"></main>
   </div>`;
 }
 

@@ -1,8 +1,12 @@
 // Test modul ESC/POS (apps/web/src/escpos.ts).
 // Jalankan: npx tsx escpos-test.ts
+//
+// Label harga TIDAK diuji di sini lagi: sejak 2026-10-17 halaman #/labels
+// memakai cetak lembar browser (apps/web/src/labelsheet.ts) — suite label ada
+// di labelsheet-test.ts + e2e-label.mjs. Blok ESC/POS label sudah dihapus.
 import {
-  COLS, COLS_A4, ascii, rp, potong, tengah, kanan, labelHarga, teksLabel, gabungLabel,
-  keBase64, struk, strukA4, strukUntuk, sesuaikanPrinter, bukaLaci, type ProdukLabel,
+  COLS, COLS_A4, ascii, rp, potong, tengah, kanan,
+  keBase64, struk, strukA4, strukUntuk, bukaLaci,
 } from '../apps/web/src/escpos.ts';
 
 let lolos = 0, gagal = 0;
@@ -25,8 +29,8 @@ const teksDari = (b: number[]): string => {
       i += b[i + 1] === 0x40 ? 1 : 2;
       continue;
     }
-    if (c === 0x1d) {                       // GS k m n d.. (4+n) | GS V/!/h/w n (3)
-      i += b[i + 1] === 0x6b ? 3 + (b[i + 3] ?? 0) : 2;
+    if (c === 0x1d) {                       // GS V/!/h/w n (3 byte)
+      i += 2;
       continue;
     }
     if (c === 10) { out += '\n'; continue; }   // LF = pemisah baris struk
@@ -49,78 +53,16 @@ eq('potong pendek tidak dipotong', potong('abc', COLS), 'abc');
 eq('tengah rata', JSON.stringify(tengah('ab', 6)), JSON.stringify('  ab  '));
 eq('kanan rata', JSON.stringify(kanan('ab', 6)), JSON.stringify('    ab'));
 
-console.log('=== B. semua baris pratinjau <= 32 kolom ===');
-const contoh: ProdukLabel = {
-  name: 'Sampoerna Mild (keteng/batang)', sku: 'PRD00016', price: 4000, unit: 'batang', barcode: '8991002103017',
-};
-for (const p of [
-  contoh,
-  { ...contoh, name: 'A' .repeat(80), sku: 'SANGAT-PANJANG-BANGET-UNTUK-SATU-BARIS-LABEL', barcode: null },
-  { ...contoh, name: 'Kopi Kapal Api Special Sachet 2026', unit: null, barcode: '12345' },
-] as ProdukLabel[]) {
-  const baris = teksLabel(p);
-  const panjang = baris.map((b) => b.length);
-  ok(`<= ${COLS} kolom: "${p.name.slice(0, 24)}…"`, Math.max(...panjang) <= COLS,
-    baris.filter((b) => b.length > COLS).map((b) => `${b.length}:${b}`));
-}
-ok('baris terpanjang pratinjau', Math.max(...teksLabel(contoh).map((b) => b.length)) <= COLS, teksLabel(contoh));
-
-console.log('=== C. labelHarga -> bytes ===');
+console.log('=== B. base64 (jalur kirim print-agent) ===');
 {
-  const b = labelHarga(contoh);
-  const s = teksDari(b);
-  ok('memuat nama', s.includes('Sampoerna Mild'));
-  ok('memuat SKU', s.includes('PRD00016'));
-  ok('memuat harga', s.includes('Rp4.000'));
-  ok('diawali INIT (ESC @)', b[0] === 0x1b && b[1] === 0x40);
-  ok('diakhiri CUT (GS V 0)', b[b.length - 3] === 0x1d && b[b.length - 2] === 0x56 && b[b.length - 1] === 0x00);
-  ok('ada perintah feed sebelum cut', b.some((_, i) => b[i] === 0x1b && b[i + 1] === 0x64 && b[i + 2] === 3));
-  ok('ada perintah ukuran 2x2 (GS ! 0x11)', b.includes(0x1d) && b.includes(0x21) && b.includes(0x11));
-}
-console.log('=== D. barcode ===');
-{
-  const b = labelHarga(contoh);
-  const i = b.findIndex((_, k) => b[k] === 0x1d && b[k + 1] === 0x6b);
-  ok('EAN13 13 digit -> GS k m=67', i >= 0 && b[i + 2] === 67, i >= 0 ? b.slice(i, i + 6) : 'tidak ada GS k');
-  ok('panjang data = 13', i >= 0 && b[i + 3] === 13, i >= 0 ? b[i + 3] : '-');
-}
-{
-  const b = labelHarga({ ...contoh, barcode: '012345678901' }); // 12 digit
-  const i = b.findIndex((_, k) => b[k] === 0x1d && b[k + 1] === 0x6b);
-  ok('12 digit -> EAN13 m=67', i >= 0 && b[i + 2] === 67);
-}
-{
-  const b = labelHarga({ ...contoh, barcode: '0123456' }); // 7 digit
-  const i = b.findIndex((_, k) => b[k] === 0x1d && b[k + 1] === 0x6b);
-  ok('7 digit -> EAN8 m=68', i >= 0 && b[i + 2] === 68);
-}
-{
-  const b = labelHarga({ ...contoh, barcode: 'BUKAN-ANGKA' });
-  const ada = b.some((_, k) => b[k] === 0x1d && b[k + 1] === 0x6b);
-  ok('barcode non-angka TIDAK dikirim sebagai barcode', !ada);
-  ok('tapi tetap tercetak sebagai teks', teksDari(b).includes('BUKAN-ANGKA'));
-}
-{
-  const b = labelHarga({ ...contoh, barcode: '123456789012345' }); // 15 digit
-  const ada = b.some((_, k) => b[k] === 0x1d && b[k + 1] === 0x6b);
-  ok('15 digit (di luar EAN/UPC) TIDAK dikirim', !ada);
-}
-{
-  const b = labelHarga({ ...contoh, barcode: null });
-  ok('tanpa barcode -> tanpa perintah GS k', !b.some((_, k) => b[k] === 0x1d && b[k + 1] === 0x6b));
-}
-
-console.log('=== E. gabung label & base64 ===');
-{
-  const gabung = gabungLabel([contoh, contoh, contoh]);
-  const satu = labelHarga(contoh);
-  eq('3 label = 3x panjang', gabung.length, satu.length * 3);
-  const potongCount = gabung.filter((_, i) => gabung[i] === 0x1d && gabung[i + 1] === 0x56 && gabung[i + 2] === 0x00).length;
-  eq('ada 3 potongan', potongCount, 3);
-  const b64 = keBase64(gabung);
+  const bytes = struk({
+    judul: 'T', meta: [], items: [{ name: 'X', qty: 1, price: 1000 }],
+    baris: [{ kiri: 'TOTAL', kanan: 'Rp1.000', tebal: true }],
+  });
+  const b64 = keBase64(bytes);
   ok('base64 valid', /^[A-Za-z0-9+/=]+$/.test(b64));
   const back = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  eq('base64 roundtrip', back.length, gabung.length);
+  eq('base64 roundtrip', back.length, bytes.length);
 }
 {
   // String.fromCharCode(...besar) bisa overflow stack; uji ukuran wajar
@@ -130,7 +72,7 @@ console.log('=== E. gabung label & base64 ===');
   eq('5000 byte tetap roundtrip', back.length, 5000);
 }
 
-console.log('=== F. struk ===');
+console.log('=== C. struk ===');
 const strukJual = {
   judul: 'TOKO MAJU JAYA',
   subjudul: 'Jl. Merdeka No 1',
@@ -213,7 +155,7 @@ const strukJual = {
     barisItem);
 }
 
-console.log('=== G. struk A4 (Epson L3110) & pilihan layout ===');
+console.log('=== D. struk A4 (Epson L3110) & pilihan layout ===');
 {
   const b = strukA4(strukJual);
   const s2 = teksDari(b);
@@ -242,16 +184,6 @@ console.log('=== G. struk A4 (Epson L3110) & pilihan layout ===');
   eq('strukUntuk(..., "thermal") = struk thermal', strukUntuk(strukJual, 'thermal'), struk(strukJual));
   eq('strukUntuk(..., "a4") = strukA4', strukUntuk(strukJual, 'a4'), strukA4(strukJual));
 }
-{
-  // sesuaikanPrinter (dipakai jalur label): thermal = identik, a4 = buang CUT + ekor FF.
-  const label = gabungLabel([contoh, contoh]);
-  eq('sesuaikanPrinter thermal = stream apa adanya', sesuaikanPrinter(label, 'thermal'), label);
-  const a4 = sesuaikanPrinter(label, 'a4');
-  ok('sesuaikanPrinter a4: 0 potongan', !a4.some((_, i) => a4[i] === 0x1d && a4[i + 1] === 0x56 && a4[i + 2] === 0x00));
-  ok('sesuaikanPrinter a4: ditutup Form Feed', a4[a4.length - 1] === 0x0c, a4.slice(-4));
-  ok('sesuaikanPrinter a4: isi label tetap utuh', teksDari(a4).includes('Sampoerna Mild') && teksDari(a4).includes('Rp4.000'));
-}
-
 {
   // bukaLaci (Tahap 4a, kick ESC/POS): 5 byte persis ESC p m t1 t2 —
   // 0x1B 0x70 0x00 0x19 0xFA. Dipakai POS untuk penjualan tunai OTOMATIS
