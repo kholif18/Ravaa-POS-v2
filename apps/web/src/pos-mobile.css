@@ -1,0 +1,357 @@
+/* pos-mobile.css — gaya KHUSUS tampilan MOBILE halaman POS (#/pos).
+   Lahir dari permintaan pemilik 2026-10-17: *"buat halaman POS Mobile view
+   jadi benar-benar mobile view, saya rasa bisa di pisahkan UInya jadi benar-
+   benar pisah file dan juga cssnya agar memaksimalkan tampilan pos mobile
+   view. mobile view ala mobile dengan navbar di bawah"* — markup-nya ada di
+   `apps/web/src/pages/pos-mobile.ts` (kelas ber-prefix `.pm-*`).
+
+   ATURAN (sama dengan pos.css — baca header pos.css sebelum menambah aturan):
+   - HANYA untuk markup `.pm-*` yang dirender pos-mobile.ts. Aturan desktop
+     (`.pos-*`/`.ptk*`) tetap milik pos.css; jangan pindah-pindah.
+   - `@reference "./styles.css"` WAJIB (tanpa itu build gagal "Cannot apply
+     unknown utility class" sebab @theme didefinisikan di styles.css).
+   - Token warna HANYA dari @theme styles.css — DILARANG warna/token baru;
+     utility dipakai lewat `@apply`. Kelas komponen bersama yang sudah ada
+     (.btn/.input/.chip/.card/.empty/.row-btn/.pos-qa/.pos-cartbar) DIPAKAI
+     ULANG, bukan diduplikasi.
+   - Teks minimum POS = text-sm (13px, keputusan pemilik 2026-10-09); input
+     penting (scan) memakai text-base = 14px di @theme repo. CATATAN: 14px
+     BUKAN 16px, jadi angka ini bukan solusi auto-zoom iOS — device fallback
+     toko = Android (Chrome Android tidak auto-zoom saat fokus input).
+   - Di-link di index.html SETELAH styles.css + pos.css (tie-break komponen =
+     urutan link; `.page:has(.pm-shell)` harus menang atas `.page`). */
+
+@reference "./styles.css";
+
+@layer components {
+  /* ---------- 1. Kerangka aplikasi (edge-to-edge) ----------
+     `.page` (styles.css) memberi padding 10-12px + scroll sendiri; untuk
+     tampilan ala APLIKASI, halaman POS mobile memenuhi viewport tanpa padding
+     dan scroll-nya pindah ke `.pm-body` (header + bar bayar + navbar bawah
+     selalu terlihat). `:has()` didukung semua browser target (Chrome 105+,
+     Safari 15.4+, Firefox 121+) — tanpa ini ada margin putih menyisakan
+     "bingkai halaman admin", bukan aplikasi kasir. */
+  .page:has(.pm-shell) {
+    @apply overflow-hidden p-0;
+  }
+  .pm-shell {
+    @apply flex h-full min-h-0 flex-col bg-canvas text-sm text-gray-800 dark:bg-gray-900 dark:text-gray-100;
+  }
+
+  /* ---------- 2. Header (scan + pelanggan + notif) ---------- */
+  .pm-head {
+    @apply z-20 flex shrink-0 flex-col gap-1.5 border-b border-gray-200 bg-white px-2.5 pb-2 pt-2 dark:border-gray-700 dark:bg-gray-800;
+    box-shadow: 0 2px 10px rgb(15 23 42 / 0.04);
+  }
+  .pm-headrow {
+    @apply flex items-center gap-1.5;
+  }
+  .pm-scanwrap {
+    @apply relative min-w-0 flex-1;
+  }
+  /* Input scan: 44px (target sentuh) + text-base 14px (satu langkah di atas
+     teks 13px; device fallback Android — lihat catatan font di header). */
+  .pm-scan {
+    @apply min-h-[44px] pr-3 text-base;
+  }
+  .pm-scan::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+  .pm-qtychip {
+    @apply shrink-0 whitespace-nowrap !min-h-[44px] !px-2.5;
+  }
+  .pm-custsel {
+    @apply min-h-[42px];
+  }
+  .pm-iconbtn {
+    @apply !size-[42px];
+  }
+  /* Tombol ⬅ dari tombolKembaliHtml() memakai .icon-btn bersama (32px di
+     desktop) — di header mobile naik ke target sentuh 42px. */
+  .pm-headrow > .icon-btn {
+    @apply !size-[42px];
+  }
+  .pm-tierchip {
+    @apply shrink-0 !border-primary/40 !text-primary dark:!border-primary/50;
+  }
+  /* Baris notif: chip bisa banyak — digeser horizontal, jangan menumpuk
+     header jadi tinggi. Scrollbar disembunyikan (tetap bisa digeser). */
+  .pm-notif {
+    @apply flex items-center gap-1.5 overflow-x-auto pb-0.5;
+    scrollbar-width: none;
+  }
+  .pm-notif::-webkit-scrollbar {
+    display: none;
+  }
+  .pm-notif .chip {
+    @apply shrink-0 whitespace-nowrap;
+  }
+
+  /* ---------- 3. Body + panel tab ---------- */
+  .pm-body {
+    @apply flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-2.5;
+  }
+  .pm-panel {
+    @apply flex flex-col gap-2;
+  }
+  /* Tombol bayar yang sedang disabled harus tetap terlihat seperti kontrol
+     aplikasi (redup), bukan hilang. */
+  .pm-bayar:disabled,
+  .pm-pas:disabled {
+    @apply opacity-50;
+  }
+
+  /* ---------- 4. Keranjang (kartu per baris — RAMING 2026-10-17) ----------
+     Struktur kartu: head (no ‖ nama ‖ hapus) → sub (SKU/jasa + satuan) →
+     `.pm-ctr` SATU baris kontrol (stepper qty ‖ harga ‖ diskon ‖ subtotal).
+     Label kolom dihapus (aria-label/title menggantikan) — pola aplikasi POS
+     mobile dengan rating terbaik; tinggi kartu turun ±60%. */
+  .pm-cards {
+    @apply flex flex-col gap-2;
+  }
+  .pm-card {
+    @apply min-w-0 rounded-xl border border-gray-200 bg-white p-2 shadow-card dark:border-gray-700 dark:bg-gray-800;
+  }
+  .pm-card-layanan {
+    @apply border-l-4;
+  }
+  .pm-card-layanan.is-topup {
+    @apply border-l-emerald-500;
+  }
+  .pm-card-layanan.is-tarik {
+    @apply border-l-amber-500;
+  }
+  .pm-card-head {
+    @apply flex items-center justify-between gap-2;
+  }
+  /* line-clamp-2 (bukan truncate 1 baris): nama panjang tetap terbaca, tapi
+     normalnya 1 baris — tinggi kartu tidak melebar hanya karena nama. */
+  .pm-nama {
+    @apply line-clamp-2 min-w-0 flex-1 text-sm font-semibold leading-snug text-gray-900 dark:text-white;
+  }
+  .pm-no {
+    @apply inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-gray-100 text-xs font-bold text-gray-500 dark:bg-gray-700 dark:text-gray-300;
+  }
+  .pm-sub {
+    @apply mt-0.5 flex items-center justify-between gap-2 text-sm text-gray-500 dark:text-gray-400;
+  }
+  .pm-sub-txt {
+    @apply min-w-0 truncate;
+  }
+  .pm-unitbadge {
+    @apply shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-sm text-gray-500 dark:bg-gray-700 dark:text-gray-300;
+  }
+  .pm-unitsel {
+    @apply shrink-0 !min-h-[30px] !w-auto !py-0.5 !text-sm;
+  }
+  /* Baris kontrol: flex-wrap sebagai jaring aman layar sempit — normalnya
+     semua muat satu baris (terukur 390px), elemen ekor turun bila tidak. */
+  .pm-ctr {
+    @apply mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5;
+  }
+  .pm-step {
+    @apply flex items-stretch gap-1;
+  }
+  .pm-stepbtn {
+    @apply inline-flex size-9 shrink-0 items-center justify-center rounded-[10px] border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-100 active:bg-gray-200 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-700;
+  }
+  .pm-stepbtn svg {
+    @apply size-4;
+  }
+  .pm-qtyinp {
+    @apply !min-h-[36px] w-11 !px-1 !py-0 text-center font-semibold tabular-nums;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  .pm-qtyinp::-webkit-outer-spin-button,
+  .pm-qtyinp::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  /* Harga satuan (teks, produk non-dinamis) — sengaja lebih redup dari
+     subtotal: angka utama = `.pm-net` di kanan. shrink-0 + nowrap: saat baris
+     sempit, yang turun ke baris kedua adalah `.pm-net` (flex-wrap `.pm-ctr`),
+     bukan harga yang terpecah dua baris. */
+  .pm-harga {
+    @apply shrink-0 whitespace-nowrap text-sm tabular-nums text-gray-600 dark:text-gray-300;
+  }
+  /* Nilai kanan kartu LAYANAN (topup/tarik) — .pm-net mewarnai primer. */
+  .pm-val {
+    @apply shrink-0 text-sm font-semibold tabular-nums text-gray-900 dark:text-white;
+  }
+  .pm-inp {
+    @apply !min-h-[36px] w-[76px] !px-1.5 !py-0 text-right tabular-nums;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  /* Spinner number TANPA aturan ini merampas ±15px di dalam kotak 64px —
+     placeholder "Diskon" terpotong jadi "Disko" (terbukti via screenshot
+     sebelum/sesudah 2026-10-17). Spinner juga tak berguna di layar sentuh. */
+  .pm-inp::-webkit-outer-spin-button,
+  .pm-inp::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .pm-inp-disc {
+    @apply w-[64px];
+  }
+  .pm-net {
+    @apply ml-auto shrink-0 whitespace-nowrap text-sm font-bold tabular-nums text-primary;
+  }
+  .pm-strike {
+    @apply text-sm font-normal text-gray-400 line-through dark:text-gray-500;
+  }
+  .pm-note {
+    @apply mt-1.5 !min-h-[36px];
+  }
+  .pm-empty {
+    @apply rounded-xl border border-dashed border-gray-300 py-10 dark:border-gray-600;
+  }
+  .pm-empty svg {
+    @apply size-8 text-gray-300 dark:text-gray-600;
+  }
+  .pm-badge {
+    @apply mr-1 inline-block rounded px-1.5 py-0.5 align-middle text-sm font-bold uppercase tracking-wide;
+  }
+  .pm-badge-topup {
+    @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400;
+  }
+  .pm-badge-tarik {
+    @apply bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400;
+  }
+
+  /* ---------- 5. Tab Katalog ---------- */
+  .pm-katsearch {
+    @apply relative;
+  }
+  .pm-katsearch svg {
+    @apply pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-gray-400;
+  }
+  .pm-katin {
+    @apply min-h-[42px] pl-9 text-base;
+  }
+  .pm-katin::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+  .pm-katchips {
+    @apply flex gap-1.5 overflow-x-auto pb-0.5;
+    scrollbar-width: none;
+  }
+  .pm-katchips::-webkit-scrollbar {
+    display: none;
+  }
+  .pm-katchip {
+    @apply shrink-0 whitespace-nowrap !min-h-[34px];
+  }
+  .pm-katchip.is-active {
+    @apply !border-primary !bg-primary-soft !text-primary dark:!bg-primary/15;
+  }
+  .pm-katn {
+    @apply text-gray-400 dark:text-gray-500;
+  }
+  .pm-katgrid {
+    @apply grid grid-cols-2 gap-2;
+  }
+  /* Kartu produk: 2 kolom, tinggi konten seragam (nama 2 baris dipotong).
+     `content-visibility` = hanya kartu yang terlihat yang dirender browser —
+     katalog ±ratusan produk tetap enteng di HP kelas bawah. */
+  .pm-prod {
+    @apply flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-card transition hover:border-primary/40 active:bg-primary-soft dark:border-gray-700 dark:bg-gray-800 dark:hover:border-primary/50 dark:active:bg-primary/10;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 150px;
+  }
+  .pm-prod-img {
+    @apply aspect-square w-full bg-gray-100 object-cover dark:bg-gray-700;
+  }
+  .pm-prod-img-ikon {
+    @apply flex items-center justify-center text-gray-300 dark:text-gray-600;
+  }
+  .pm-prod-img-ikon svg {
+    @apply size-10;
+  }
+  .pm-prod-nama {
+    @apply line-clamp-2 px-2 pt-1.5 text-sm font-semibold leading-snug text-gray-900 dark:text-white;
+  }
+  .pm-prod-kat {
+    @apply truncate px-2 text-sm text-gray-400 dark:text-gray-500;
+  }
+  .pm-prod-baris {
+    @apply mt-auto flex items-center justify-between gap-1 px-2 py-1.5;
+  }
+  .pm-prod-harga {
+    @apply text-sm font-bold text-primary;
+  }
+  .pm-stok {
+    @apply shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-sm font-semibold tabular-nums text-gray-500 dark:bg-gray-700 dark:text-gray-300;
+  }
+  .pm-stok.is-menipis {
+    @apply bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400;
+  }
+  .pm-stok.is-habis {
+    @apply bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-400;
+  }
+
+  /* ---------- 6. Tab Lainnya (aksi) ---------- */
+  .pm-sec {
+    @apply space-y-2 !p-3;
+  }
+  .pm-shiftinfo {
+    @apply flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-300;
+  }
+  .pm-shiftrow {
+    @apply flex items-center gap-2;
+  }
+  .pm-shiftrow svg {
+    @apply size-4 shrink-0 text-gray-400;
+  }
+  .pm-tutup {
+    @apply w-full !min-h-[44px] !border-red-200 !bg-red-50 !text-red-600 hover:!bg-red-100 dark:!border-red-500/40 dark:!bg-red-500/10 dark:!text-red-300 dark:hover:!bg-red-500/20;
+  }
+  .pm-perangkat {
+    @apply flex flex-col gap-3;
+  }
+
+  /* ---------- 7. Bar bayar + navbar bawah ---------- */
+  .pm-pay {
+    @apply z-20 flex shrink-0 flex-col gap-1.5 border-t border-gray-200 bg-white px-2.5 pb-2 pt-2 dark:border-gray-700 dark:bg-gray-800;
+    box-shadow: 0 -4px 16px rgb(15 23 42 / 0.06);
+  }
+  .pm-payrow {
+    @apply flex items-center justify-between gap-2;
+  }
+  .pm-payaksi {
+    @apply grid grid-cols-2 gap-2;
+  }
+  .pm-paylabel {
+    @apply text-sm font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500;
+  }
+  .pm-paycount {
+    @apply text-sm text-gray-500 dark:text-gray-400;
+  }
+  .pm-paygrand {
+    @apply truncate text-[26px] font-extrabold leading-none tabular-nums text-gray-900 dark:text-white;
+  }
+  .pm-bayar {
+    @apply w-full !min-h-[48px] !text-base;
+  }
+  .pm-pas {
+    @apply w-full !min-h-[48px] !py-2 bg-linear-to-r text-base font-semibold text-white from-emerald-500 to-emerald-600 shadow-md shadow-emerald-600/40 transition-all hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-700/50;
+  }
+  .pm-nav {
+    @apply z-20 flex shrink-0 items-stretch justify-around border-t border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pm-tab {
+    @apply relative flex min-h-[54px] flex-1 flex-col items-center justify-center gap-0.5 text-sm font-semibold text-gray-400 transition-colors dark:text-gray-500;
+  }
+  .pm-tab svg {
+    @apply size-5;
+  }
+  .pm-tab.is-active {
+    @apply text-primary;
+  }
+  .pm-navcount {
+    @apply absolute top-[5px] left-1/2 min-w-[18px] rounded-full bg-primary px-1 text-center text-xs font-bold leading-[18px] text-white;
+    margin-left: 6px;
+  }
+}

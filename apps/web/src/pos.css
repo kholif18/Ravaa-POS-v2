@@ -343,6 +343,32 @@
   .pos-bayar-trust > span > span {
     @apply block truncate text-xs text-gray-500 dark:text-gray-400;
   }
+  /* Layar HP (≤639px — dipakai tampilan POS MOBILE 2026-10-17): band bayar
+     ditata menumpuk — judul baris pertama, angka total jadi baris sendiri
+     berpemisah; TANPA ini judul & total bertumpuk di lebar ±390px (terbukti
+     di tangkapan layar 2026-10-17). Footer: strip trust (di-prepend
+     bukaBayar) naik ke barisnya sendiri di atas tombol — sebelumnya teksnya
+     meluber ke belakang tombol Batal/Bayar yang besar (px-10). */
+  @media (max-width: 639px) {
+    .pos-bayar-band {
+      @apply relative flex-wrap px-4 py-3;
+    }
+    .pos-bayar-band-total {
+      @apply ml-0 w-full border-t border-white/25 pt-2 text-left;
+    }
+    .pos-bayar-band-total #bayar-total {
+      @apply text-[32px];
+    }
+    .pos-bayar-band-x {
+      @apply absolute right-2 top-2;
+    }
+    .modal:has(.pos-bayar-band) .modal-footer {
+      @apply flex-wrap;
+    }
+    .pos-bayar-trust {
+      @apply w-full;
+    }
+  }
 
   /* ---------- 8. Resume pasca-bayar ala STRUK THERMAL ----------
      (2026-10-10, permintaan pemilik). Kertas struk = PUTIH paksa + mono

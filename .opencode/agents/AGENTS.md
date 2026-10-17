@@ -113,10 +113,35 @@ apps/web/src/pos.css    File gaya KHUSUS POS (baru 2026-10-09 — keputusan
                           "Cannot apply unknown utility class"). **Token tetap
                           milik styles.css — file ini DILARANG warna/token
                           baru, `@apply` utility saja.** Teks minimum POS =
-                          `text-sm` (13px via `.pos-scope .label/.chip/.th/
-                          .suggest-unit`; keputusan pemilik 2026-10-09
-                          "text-xs terlalu kecil, sementara di POS dulu") —
-                          halaman lain tetap 11px.
+                           `text-sm` (13px via `.pos-scope .label/.chip/.th/
+                           .suggest-unit`; keputusan pemilik 2026-10-09
+                           "text-xs terlalu kecil, sementara di POS dulu") —
+                           halaman lain tetap 11px.
+apps/web/src/pos-mobile.css  Gaya KHUSUS tampilan MOBILE POS (baru 2026-10-17,
+                          pasangan `pages/pos-mobile.ts`; pola sama dengan
+                          pos.css). SELURUH aturan `.pm-*`: kerangka aplikasi
+                          edge-to-edge (`.page:has(.pm-shell)` buang padding,
+                          scroll pindah ke `.pm-body` — header/bar bayar/
+                          navbar selalu terlihat), header (scan 44px +
+                          pelanggan + chip notif scroll-x), panel tab (Katalog
+                          2 kolom + chip kategori scroll-x), kartu keranjang
+                           (`pm-card-head`/`pm-sub`/`pm-ctr` — SATU baris
+                          kontrol stepper‖harga‖diskon‖subtotal, ±115px di
+                          390px), bar bayar + navbar bawah dengan
+                          `env(safe-area-inset-bottom)`. Di-link di
+                          index.html SETELAH pos.css; `@reference
+                          "./styles.css"` WAJIB; token HANYA dari @theme
+                          styles.css (DILARANG warna baru), kelas bersama
+                          (.btn/.input/.chip/.row-btn/.pos-qa/.pos-cartbar)
+                          DIPAKAI ULANG. Pelajaran terukur 2026-10-17: input
+                          number `.pm-inp` WAJIB sembunyikan spinner
+                          (`::-webkit-inner-spin-button` +
+                          `appearance:textfield`) — tanpa itu spinner
+                          merampas ±15px di dalam kotak 64px dan placeholder
+                          "Diskon" terpotong "Disko". CATATAN: `text-base` di
+                          repo = 14px (BUKAN 16px) — bukan penangkal auto-zoom
+                          iOS; device fallback toko = Android. Diuji
+                          `tests/pos-mobile-test.mjs` (28 asersi).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync)
                          + **kv `'holds'` transaksi tertahan POS** (`getHolds()`/
                          `saveHolds()` — per device, P5)
@@ -320,20 +345,28 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           panel kanan `#pos-qa-manual`), input catatan per
                           baris (produk
                           `use_note`, ikut ke struk via `items[].note`).
-                          **Tombol `#pos-mobile` "Mobile" = KANAN chip Qty**
-                          (Tahap 5, 2026-10-06 — pengganti P4 grid;
-                          *"tambahkan layout untuk berpindah ke mode mobile
-                          saja"*): toggle `mobileMode` + persist pref
-                          `ravaa.mobile-layout` ('1') — saat NYALA semua grid
-                          POS dipaksa 1 kolom (`gridUtamaCls()` keranjang‖
-                          sidebar & form topup‖panel; `gridCls`/`batas` di
-                          `infoBarHtml()` → cell info bar menumpuk border-atas),
-                          ikon `smartphone` (baru di icons.ts); listener di
-                          `paint()` (semua mode) + toast konfirmasi. Di HP
-                          asli <lg memang sudah menumpuk natural — toggle =
-                          tukar/preview layout di desktop. Kartu-list keranjang
-                          (bukan tabel) untuk HP = menyusul setelah pemilik
-                          approve tampilan.
+                           **Tampilan mobile = UI TERPISAH (2026-10-17)** —
+                           permintaan pemilik *"buat halaman POS Mobile view
+                           jadi benar-benar mobile view … mobile view ala
+                           mobile dengan navbar di bawah"*: saat `mobileMode`
+                           NYALA, `paint()` merender `pmShellHtml()` dari
+                           **`pages/pos-mobile.ts`** (navbar bawah
+                           Keranjang/Katalog/Lainnya; keranjang KARTU, bukan
+                           tabel 8 kolom) MENGGANTIKAN layout desktop — bukan
+                           lagi "grid dipaksa 1 kolom" (Tahap 5 2026-10-06);
+                           `gridUtamaCls()`/`.is-stacked` kini hanya relevan
+                           di desktop. Init `mobileMode`: pref
+                           `ravaa.mobile-layout` ('1'/'0') MENANG; tanpa pref
+                           = otomatis `window.innerWidth < 1024` (HP kasir
+                           langsung dapat tampilan mobile, test desktop
+                           viewport 1280+ aman). Tombol `#pos-mobile` di DUA
+                           tempat (id sama, SATU listener di `paint()`):
+                           desktop = scan bar label "Mobile"; mobile = tab
+                           Lainnya → kartu "Perangkat ini" label "Tampilan
+                           desktop". Toast konfirmasi tiap perpindahan; semua
+                           id/data-act lama dipertahankan (kontrak suite).
+                           Rincian → entri `pos-mobile.ts`/`pos-mobile.css`
+                           di peta ini.
                             **Panel bayar = SIDEBAR KANAN 320px** (grid
                             `lg:grid-cols-[1fr_320px]` — putaran 4 2026-10-04:
                             footer horizontal DITOLAK pemilik, "tetap jadi
@@ -829,6 +862,38 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           ~1.5x (chip 39px/16px, footer 51px/20px).
                           `e2e-struk.mjs` B-tail + C ditulis ulang ke dialog
                           (141 asersi); suite total **1003 hijau**.
+apps/web/src/pages/pos-mobile.ts  UI POS versi MOBILE (baru 2026-10-17) —
+                          satu file render + binding mobile-only, dipanggil
+                          dari pos.ts. Kontrak: (a) `PosMobileCtx` dirakit
+                          `pmCtx()` (pos.ts) SETIAP render dan berisi snapshot
+                          state + aksi (rp/esc/kartu, keranjangTerisi,
+                          cariProduk, tambahProduk, …) — pos-mobile TIDAK
+                          menyimpan state bisnis; (b) impor SATU ARAH pos.ts
+                          → pos-mobile.ts (pos-mobile hanya `import type`
+                          CartLine/TopupLine dari './pos'; jangan pernah balik
+                          — impor melingkar runtime); (c) id/data-act SAMA
+                          dengan desktop (`#pos-q`, `#pos-rows`, `#pos-bayar`,
+                          `data-act inc/dec/qty/price/disc/unit/note/del/
+                          topup-del`) — seluruh binder pos.ts (bindCart/
+                          bindSidebar/bindPintasan) bekerja apa adanya, JANGAN
+                          daftarkan ulang di sini; binding mobile-only cuma
+                          navbar `[data-pm-tab]` (`tampilTab()`, panel
+                          non-aktif `hidden` sejak render pertama) + tab
+                          Katalog (cari lokal `#pm-kat-q`, chip
+                          `[data-pm-kat]`, tap `[data-pm-prod]` → temukan di
+                          `ctx.products` → `tambahProduk()`, lompat ke tab
+                          Keranjang bila bukan layanan). Ekspor:
+                          `pmShellHtml()`/`pmCartHtml()`/`bindPosMobile()`/
+                          `posMobileSegarkan()` (badge stok katalog pasca-jual,
+                          dipanggil `segarkanStokPos()`)/`posMobileReset()`
+                          (dari `unmountPosPage()`: tab → Keranjang, filter
+                          dibuang, ctx dilepas). Keranjang mobile = KARTU
+                          ramping head/sub/`pm-ctr` (revisi pemilik
+                          2026-10-17 *"card produk pada keranjang belanja
+                          terlalu besar, bisa di perpendek tingginya"* — pola
+                          aplikasi kasir mobile: satu baris kontrol tanpa
+                          label kolom, ±115px di 390). Diuji
+                          `tests/pos-mobile-test.mjs` (28 asersi).
  apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS

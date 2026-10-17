@@ -49,6 +49,13 @@ import { dialogTutupShift, type ShiftRow } from './shift-tutup';
 // Aksi cepat memakai dialog + struk yang SAMA PERSIS — jangan ditulis ulang
 // di pos.ts (AGENTS §5: bila kemiripan ≥80% → satu modul).
 import { cetakUlang, type SaleRow } from './history';
+// UI MOBILE (2026-10-17) — seluruh render tampilan HP ada di file terpisah
+// `pos-mobile.ts` (+ `pos-mobile.css`). Arah impor SELALU satu arah
+// pos.ts -> pos-mobile.ts lewat objek PosMobileCtx; jangan pernah impor pos.ts
+// dari pos-mobile (impor melingkar runtime).
+import {
+  bindPosMobile, pmCartHtml, pmShellHtml, posMobileReset, posMobileSegarkan, type PosMobileCtx,
+} from './pos-mobile';
 
 /* ---------- tipe ---------- */
 
@@ -57,8 +64,10 @@ type Shift = {
   modal_awal: number; modal_akhir: number | null; cashier: string; status: string;
 };
 
-/** Baris keranjang. `product_id` null = item manual (jasa/cetak). */
-type CartLine = {
+/** Baris keranjang. `product_id` null = item manual (jasa/cetak).
+ *  (`export` = dipakai pos-mobile.ts lewat `import type` — dihapus compiler,
+ *  tidak ada impor melingkar runtime.) */
+export type CartLine = {
   key: string;              // `<id produk>:<unit>`, atau — untuk produk harga
                             // khusus (price_dynamic) — `<id>:<unit>:<harga>`
                             // (harga ikut di key: beda harga = baris terpisah),
@@ -123,6 +132,11 @@ const PAY_METHODS: { key: PayMethod; label: string; icon: IconName }[] = [
 let host: HTMLElement | null = null;
 let shift: Shift | null = null;
 let products: Product[] = [];
+/** Master kategori `GET /api/categories` — sumber chip filter tab Katalog
+ *  versi MOBILE (2026-10-17, pos-mobile.ts). Hanya tampilan; gagal dimuat
+ *  (offline) = array kosong dan chip dipecah dari `products.category_slug`.
+ *  TIDAK ada hubungannya dengan `KATEGORI_LAYANAN` (deteksi layanan). */
+let categories: { name: string; slug: string }[] = [];
 let cart: CartLine[] = [];
 let manualSeq = 0;
 /** Baris LAYANAN di keranjang (Opsi B hybrid — permintaan pemilik
@@ -136,7 +150,7 @@ let manualSeq = 0;
  *  (produk saja) LALU `POST /api/topups` per baris — dua record terpisah,
  *  satu struk gabungan (lihat `pay()`). Baris tarik = uang keluar: nominalnya
  *  diserahkan tunai (BUKAN tagihan), yang ditagih hanya admin. */
-type TopupLine = {
+export type TopupLine = {
   /** uuid dibuat SAAT BARIS DIBUAT — dipakai sebagai `id` POST /api/topups,
    *  jadi retry setelah gagal/timeout tetap idempotent (server menolak dobel
    *  dan membalas `duplicate:true`, pola sama dengan id penjualan). */
@@ -524,27 +538,32 @@ async function pilihCetakSelesai(
   }
 }
 
-/** Layout mobile (Tahap 5, 2026-10-06 — pengganti P4 grid, keputusan pemilik
- *  "untuk mobile nanti buat layout sendiri … tambahkan layout untuk berpindah
- *  ke mode mobile saja"): true = semua grid POS dipaksa 1 kolom (info bar
- *  menumpuk, panel bayar di bawah selebar layar — preview layout HP di
- *  desktop; di HP asli <lg memang sudah menumpuk natural). Pref per-device
- *  `ravaa.mobile-layout` ('1'), toggle lewat tombol #pos-mobile di scan bar. */
+/** Layout mobile (Tahap 5, 2026-10-06 — *"tambahkan layout untuk berpindah ke
+ *  mode mobile saja"*). **REVISI BESAR 2026-10-17** (permintaan pemilik
+ *  *"buat halaman POS Mobile view jadi benar-benar mobile view … ala mobile
+ *  dengan navbar di bawah"*): true = SELURUH halaman dirender oleh UI mobile
+ *  terpisah (`pos-mobile.ts` + `pos-mobile.css` — header ringkas, tab
+ *  Keranjang/Katalog/Lainnya, bar bayar, navbar bawah); false = layout desktop
+ *  lama (info bar + scan bar + tabel + sidebar kanan 350px) yang TIDAK
+ *  berubah. Pref per-device `ravaa.mobile-layout` ('1'/'0') menang; TANPA pref
+ *  (perangkat baru) layar < lg (1024px) langsung dibuka dalam mode mobile —
+ *  HP kasir dapat tampilan aplikasi tanpa setting apa pun. Toggle = tombol
+ *  `#pos-mobile` (scan bar desktop / tab Lainnya mobile) — listener di
+ *  `paint()`, persist pref. */
 let mobileMode = (() => {
   try {
-    return localStorage.getItem('ravaa.mobile-layout') === '1';
-  } catch {
-    return false;
-  }
+    const pref = localStorage.getItem('ravaa.mobile-layout');
+    if (pref === '1') return true;
+    if (pref === '0') return false;
+  } catch { /* private mode: pref tidak tersimpan — deteksi layar tetap jalan */ }
+  return window.innerWidth < 1024;
 })();
 
-/** Class grid utama POS (keranjang+sidebar bayar / form topup+panel):
- *  `mobileMode` → 1 kolom penuh (panel ikut di bawah selebar layar — layout
- *  mobile, pengganti P4 grid); normal → sidebar 320px di ≥lg. */
+/** Class grid utama layout DESKTOP (keranjang+sidebar bayar). Mode mobile
+ *  tidak lewat sini sama sekali (dirender pos-mobile.ts), jadi tidak ada lagi
+ *  cabang 1 kolom — sidebar 350px di ≥lg. */
 function gridUtamaCls(): string {
-  return mobileMode
-    ? 'grid min-h-0 flex-1 gap-2 grid-cols-1'
-    : 'grid min-h-0 flex-1 gap-2 lg:grid-cols-[1fr_350px]';
+  return 'grid min-h-0 flex-1 gap-2 lg:grid-cols-[1fr_350px]';
 }
 
 /** Tier admin kasir. WAJIB sama dengan `GET /api/topups/suggest-admin`
@@ -596,6 +615,21 @@ const tarikTotal = () => cartTopup.filter(isTarik).reduce((s, l) => s + l.admin,
  *  layanan sendirian tidak bisa dibayar (guard `!cart.length` lama). */
 const keranjangTerisi = () => !!(cart.length || cartTopup.length);
 const change = () => Math.max(0, cashIn - totalBayar());
+
+/** Teks label keranjang (`#pos-count`) — SATU sumber untuk render awal
+ *  (desktop: cartKiriHtml, mobile: pmShellHtml) DAN refresh bedah paintCart().
+ *  Layanan-saja (tanpa baris produk): Qty 0 — tampilkan jumlah baris layanan
+ *  supaya label tidak berbohong "Keranjang kosong" padahal berisi. */
+function teksCount(): string {
+  const nQty = count();
+  return keranjangTerisi() ? (nQty > 0 ? `${nQty} item` : `${cartTopup.length} layanan`) : 'Keranjang kosong';
+}
+
+/** Teks `#pos-owncount` ("n item (n Qty)") — SATU sumber untuk render awal
+ *  (info bar desktop + bar bayar mobile) dan paintCart(). */
+function teksOwncount(): string {
+  return keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item';
+}
 
 /** Total tagihan MODAL BAYAR = total keranjang + baris layanan (Opsi B:
  *  satu pelanggan, satu pembayaran; tarik hanya adminnya — nominalnya uang
@@ -1193,8 +1227,13 @@ function tombolKembaliHtml(): string {
   return `<a href="#/dashboard" class="icon-btn shrink-0" aria-label="Kembali ke dashboard" title="Kembali ke dashboard">${icon('chevL')}</a>`;
 }
 
-function infoBarHtml(): string {
-  const pilih = customers.length
+/** Opsi `<option>` select pelanggan — SATU sumber untuk info bar DESKTOP
+ *  (infoBarHtml) dan header MOBILE (PosMobileCtx.customerOptions); daftar
+ *  `customers` sudah dimuat `mountPosPage()`. Pelanggan terpilih ditandai
+ *  `selected` saat render; perubahan berikutnya ditangani listener
+ *  `#pos-customer` di paint() tanpa repaint. */
+function pilihanPelangganHtml(): string {
+  return customers.length
     ? customers
         .map(
           (c) =>
@@ -1202,6 +1241,10 @@ function infoBarHtml(): string {
         )
         .join('')
     : `<option value="">Pelanggan Umum</option>`;
+}
+
+function infoBarHtml(): string {
+  const pilih = pilihanPelangganHtml();
   // Info bar: kiri = tombol kembali + Waktu/Kasir/Shift/Tutup shift,
   // tengah = Pelanggan + F9, kanan = Total belanja. mode mobile = semua
   // cell menumpuk 1 kolom — grid 3 kolom sama rata + garis pemisah kini
@@ -1274,7 +1317,7 @@ function infoBarHtml(): string {
         <div class="pos-cell flex items-center justify-between gap-3">
           <div class="min-w-0 text-left">
             <div class="text-sm font-semibold uppercase tracking-wide text-white/75">Total belanja</div>
-            <div id="pos-owncount" class="text-sm text-white/70">${keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item'}</div>
+            <div id="pos-owncount" class="text-sm text-white/70">${teksOwncount()}</div>
           </div>
           <!-- text-[48px] ukuran KUSTOM (Tailwind arbitrary value) = 2x lipat
                text-2xl lama (24px) — permintaan pemilik 2026-10-04 "custom
@@ -1355,7 +1398,7 @@ function cartKiriHtml(): string {
         <!-- Label keranjang di ATAS tabel (referensi KulaPOS: "Keranjang 2 item
              ... Bersihkan [F5]" kanan-atas). Gaya = .pos-cartbar (pos.css). -->
         <div class="pos-cartbar">
-          <span id="pos-count">${keranjangTerisi() ? `${count()} item` : 'Keranjang kosong'}</span>
+          <span id="pos-count">${teksCount()}</span>
           <button type="button" id="pos-clear" class="btn btn-ghost text-red-600 !min-h-[30px] !px-2.5 !py-1 text-sm" title="Kosongkan keranjang" aria-label="Kosongkan keranjang"${keranjangTerisi() ? '' : ' disabled'}>${icon('trash')}<span class="hidden sm:inline">Bersihkan</span>${kbd('F5')}</button>
         </div>
         <div class="table-wrap table-scroll flex-1">
@@ -2076,12 +2119,61 @@ function bukaModeLayanan(p: Product): void {
   toast(`${p.name} — pilih jenis & isi nominal di dialog`, 'info');
 }
 
+/** Snapshot state + aksi untuk UI MOBILE (`pos-mobile.ts`, 2026-10-17) —
+ *  dibangun ULANG setiap render/katalog refresh supaya selalu membaca state
+ *  TERKINI (cart, products, holds, dll). Ini SATU-satunya jembatan
+ *  pos.ts → pos-mobile.ts; jangan menaruh logika bisnis di modul mobile —
+ *  semuanya lewat fungsi di sini. */
+function pmCtx(): PosMobileCtx {
+  return {
+    kasir: getCashier(),
+    shiftId: shift?.id ?? null,
+    kembali: tombolKembaliHtml(),
+    customerOptions: pilihanPelangganHtml(),
+    grosir: pelangganGrosir(),
+    qtyNext,
+    notifHtml: notifChips(),
+    stripsHtml: stripKadaluarsa(),
+    products,
+    categories,
+    cart,
+    cartTopup,
+    holdCount: holds.length,
+    diskon: discount,
+    autoPrint,
+    bisaCetakUlang: !!bacaNotaTerakhir(),
+    busy,
+    rp,
+    esc,
+    jumlahBaris,
+    diskonBaris,
+    daftarSatuan,
+    expBaris: expBarisKeranjang,
+    jenisLabel: (jenis) => jenisTopupLokal(jenis).label,
+    hargaProduk: (p) => hargaDasar(p, pelangganGrosir()),
+    teksCount,
+    teksOwncount,
+    count,
+    keranjangTerisi,
+    bisaBayar,
+    totalBayar,
+    tambahProduk: (p) => addProduct(p),
+    // queryResults dibatasi MAX_RESULTS (8) untuk dropdown; katalog butuh
+    // SELURUH hasil — batas atas = jumlah produk cache (loop-nya berhenti
+    // sendiri saat kolektor sudah >= limit).
+    cariProduk: (q) => queryResults(q, products.length),
+    layananProduk: isLayanan,
+  };
+}
+
 function paint(): void {
   // `host` bisa sudah lepas dari DOM: mountPosPage async (syncMaster, loadShift)
   // masih jalan lalu kasir pindah halaman. Tanpa guard ini, POS menimpa halaman
   // lain yang baru dirender router.
   if (!host || !host.isConnected) return;
-  host.innerHTML = shift ? cartHtml() : shiftGateHtml();
+  // DUA tampilan dari SATU state: mobile = kerangka aplikasi penuh dari
+  // pos-mobile.ts (navbar bawah), desktop = layout lama TIDAK berubah.
+  host.innerHTML = shift ? (mobileMode ? pmShellHtml(pmCtx()) : cartHtml()) : shiftGateHtml();
   // Saklar "Cetak struk otomatis" ikut diganti tiap paint() (host.innerHTML),
   // jadi listenernya WAJIB dipasang di sini — bukan di bindCart().
   host.querySelector('#pos-autoprint')?.addEventListener('change', (e) => {
@@ -2106,7 +2198,12 @@ function paint(): void {
     try {
       localStorage.setItem('ravaa.mobile-layout', mobileMode ? '1' : '0');
     } catch { /* private mode: pref sesi ini saja */ }
-    toast(mobileMode ? 'Layout MOBILE — kolom menumpuk, panel bayar di bawah' : 'Layout desktop — sidebar kanan 320px', 'info');
+    toast(
+      mobileMode
+        ? 'Tampilan MOBILE — navbar bawah: Keranjang, Katalog, Lainnya'
+        : 'Tampilan desktop — tabel keranjang + sidebar kanan 350px',
+      'info',
+    );
     paint();
   });
   if (!shift) {
@@ -2114,14 +2211,24 @@ function paint(): void {
     return;
   }
   bindCart();
-  host.querySelector<HTMLInputElement>('#pos-q')?.focus();
+  if (mobileMode) {
+    // Header/bar bayar/navbar mobile: binding mobile-only (tab + katalog) —
+    // id lain sudah diikat bindCart/bindSidebar/paint. Fokus kolom scan
+    // SENGAJA tidak dipanggil di mobile (keyboard HP langsung naik menutupi
+    // separuh layar begitu halaman dibuka).
+    bindPosMobile(host, pmCtx);
+  } else {
+    host.querySelector<HTMLInputElement>('#pos-q')?.focus();
+  }
 }
 
 function paintCart(): void {
   if (!host || !shift) return;
   // Cuma tbody + panel kanan, supaya fokus input scan tidak hilang.
+  // Mode mobile: `#pos-rows` = daftar KARTU (pmCartHtml) — id & data-act-nya
+  // sama, jadi seluruh refresh bedah di bawah tetap berlaku dua-duanya.
   const rows = host.querySelector('#pos-rows');
-  if (rows) rows.innerHTML = cartRows();
+  if (rows) rows.innerHTML = mobileMode ? pmCartHtml(pmCtx()) : cartRows();
   // Pencarian pakai `document`, BUKAN `host`: isian pembayaran kini berada
   // di MODAL form bayar (openModal menempelkannya ke document.body), sementara
   // elemen sidebar tetap ada di dalam host — keduanya menemukan id masing-
@@ -2130,10 +2237,9 @@ function paintCart(): void {
     const el = document.querySelector(sel);
     if (el) el.textContent = v;
   };
-  // Layanan-saja (tanpa baris produk): Qty tetap 0 — tampilkan jumlah baris
-  // layanan supaya label tidak berbohong "0 item" padahal keranjang berisi.
-  const nQty = count();
-  set('#pos-count', keranjangTerisi() ? (nQty > 0 ? `${nQty} item` : `${cartTopup.length} layanan`) : 'Keranjang kosong');
+  // Layanan-saja (tanpa baris produk): Qty tetap 0 — teks ("n layanan") dari
+  // teksCount() supaya label tidak berbohong "Keranjang kosong" padahal isi.
+  set('#pos-count', teksCount());
   // `#pos-subtotal` TIDAK diisi lagi — baris Subtotal sidebar dihapus putaran 7
   // 2026-04; subtotal terbaca dari TOTAL BELANJA (#pos-grand) di info bar.
   // Info bar (ala KulaPOS): TOTAL BELANJA besar + jumlah baris/Qty ikut
@@ -2143,7 +2249,7 @@ function paintCart(): void {
   // = SATU-SATUNYA angka total besar. TOTAL = keranjang + baris topup
   // (Opsi B — `totalBayar()`).
   set('#pos-grand', rp(totalBayar()));
-  set('#pos-owncount', keranjangTerisi() ? `${cart.length + cartTopup.length} item (${count()} Qty)` : '0 item');
+  set('#pos-owncount', teksOwncount());
   // Kolom uang TIDAK dirender ulang di paintCart — sinkronisasi nilai di
   // sini (render awal selalu 0 karena keranjang masih kosong).
   const cashEl = document.querySelector<HTMLInputElement>('#pos-cash');
@@ -2212,6 +2318,15 @@ function paintCart(): void {
   const holdOpen = host!.querySelector<HTMLButtonElement>('#pos-hold-open');
   if (holdOpen) holdOpen.disabled = holds.length === 0;
   set('#pos-hold-count', String(holds.length));
+  // Bubble jumlah baris di tab "Keranjang" navbar bawah (UI mobile, 2026-10-17)
+  // — ikut menyegar tiap keranjang berubah; elemen tidak ada di desktop =
+  // no-op. Isi = jumlah BARIS (produk/manual + layanan), pola yang sama
+  // dengan "n item" di `#pos-owncount`.
+  const navCount = document.querySelector<HTMLElement>('#pm-nav-count');
+  if (navCount) {
+    navCount.textContent = String(cart.length + cartTopup.length);
+    navCount.classList.toggle('hidden', !keranjangTerisi());
+  }
   // Cetak ulang: mati sampai device ini punya nota sukses (pola Pending —
   // tidak ada yang bisa dicetak = klik hanya membingungkan).
   const reprint = host!.querySelector<HTMLButtonElement>('#pos-reprint');
@@ -2251,7 +2366,7 @@ function bersihkanKeranjang(): void {
   paintAktif();
   const disc = host?.querySelector<HTMLInputElement>('#pos-discount');
   if (disc) disc.value = '';
-  host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+  focusScan();
 }
 
 /* ---------- keranjang persisten (putaran 16, 2026-10-06) ---------- */
@@ -2536,7 +2651,7 @@ async function muatHold(h: Hold): Promise<void> {
   // Hold = isi keranjang (satu-satunya mode). Muat ulang tampilan +
   // fokus scan supaya baris yang dimuat langsung terlihat.
   paintCart();
-  host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+  focusScan();
   toast('Transaksi tertahan dilanjutkan', 'success');
 }
 
@@ -2861,6 +2976,10 @@ function addActive(q: string, unitSlug?: string, qtyOverride?: number): void {
 }
 
 function focusScan(): void {
+  // Mode MOBILE: kolom scan TIDAK difokuskan otomatis — keyboard HP muncul
+  // menutupi separuh layar tiap kali keranjang berubah & setelah bayar, justru
+  // mengganggu alur ala aplikasi (kasir mengetuk kolom saat mau mengetik).
+  if (mobileMode) return;
   host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
 }
 
@@ -2895,8 +3014,10 @@ function refreshQtyChip(): void {
   if (!b) return;
   // innerHTML (bukan textContent): `<kbd>F4</kbd>` harus ikut disegarkan —
   // textContent dulu menghapus label shortcut begitu qty dipakai sekali,
-  // padahal tombol Cari/F3 di sebelahnya selalu menampilkannya.
-  b.innerHTML = `Qty ${qtyNext}${kbd('F4')}`;
+  // padahal tombol Cari/F3 di sebelahnya selalu menampilkannya. Mode MOBILE
+  // tanpa badge kbd (tidak ada keyboard F4 di HP — pos-mobile.ts merender
+  // teks polos yang sama).
+  b.innerHTML = mobileMode ? `Qty ${qtyNext}` : `Qty ${qtyNext}${kbd('F4')}`;
   b.classList.toggle('!border-primary', qtyNext > 1);
   b.classList.toggle('!text-primary', qtyNext > 1);
 }
@@ -3235,7 +3356,7 @@ function openManualItem(): void {
         simpanKeranjang();
         api.close();
         paintCart();
-        host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+        focusScan();
       };
       api.ok.addEventListener('click', submit);
       api.el.addEventListener('keydown', (e) => {
@@ -3443,7 +3564,7 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         simpanKeranjang();
         api.close();
         paintCart();
-        host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+        focusScan();
       };
       api.ok.addEventListener('click', submit);
       api.el.addEventListener('keydown', (e) => {
@@ -3567,6 +3688,10 @@ async function segarkanStokPos(): Promise<void> {
     // Chip notif + strip peringatan ikut menyegar (stok habis/menipis baru
     // terbentuk / teratasi oleh penjualan ini) — lihat segNotifPos().
     segNotifPos();
+    // Kartu produk tab Katalog MOBILE memuat angka stok yang sama — tanpa ini
+    // badge stok di katalog tetap basi sampai reload (pos-mobile.ts no-op di
+    // desktop / saat elemennya tidak ada). `paintCart()` sudah diurus pay().
+    posMobileSegarkan();
   } catch {
     /* offline: pakai cache lama sampai sync di mount berikutnya */
   }
@@ -3760,7 +3885,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       const cashTop = document.querySelector<HTMLInputElement>('#pos-cash');
       if (cashTop) cashTop.value = '';
       paintCart();
-      host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+      focusScan();
       return;
     }
 
@@ -3943,7 +4068,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     const cash = document.querySelector<HTMLInputElement>('#pos-cash');
     if (cash) cash.value = '';
     paintCart();
-    host?.querySelector<HTMLInputElement>('#pos-q')?.focus();
+    focusScan();
   } catch (e) {
     toast(`Gagal menyimpan ${tahap}: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
   } finally {
@@ -4407,6 +4532,9 @@ export function unmountPosPage(): void {
   posKeyAbort?.abort();
   posKeyAbort = null;
   stopJam();
+  // State UI mobile (tab aktif & filter katalog) dilepas — kunjungan
+  // berikutnya mulai dari tab Keranjang tanpa filter (pos-mobile.ts).
+  posMobileReset();
   // Form bayar menempel di document.body (bukan di host) — tanpa ditutup di
   // sini ia ikut tertinggal menutupi halaman berikutnya.
   tutupBayar();
@@ -4481,6 +4609,17 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
         holds = await getHolds<Hold>();
       } catch {
         holds = [];
+      }
+    })(),
+    (async () => {
+      // Master kategori untuk chip filter tab Katalog versi MOBILE
+      // (2026-10-17). Gagal/offline = [] — pos-mobile.ts memecah chip dari
+      // `products.category_slug` supaya tabnya tetap berfungsi tanpa master.
+      try {
+        const r = await apiGet<{ data: { name: string; slug: string }[] }>('/api/categories');
+        categories = r.data.map((c) => ({ name: c.name, slug: c.slug }));
+      } catch {
+        categories = [];
       }
     })(),
   ]);

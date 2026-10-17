@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#1d6df0" />
   <link rel="icon" type="image/png" href="/logo.png" />
   <!-- PWA (2026-10-16): ikon install Android/desktop dari manifest; apple-touch
@@ -16,6 +16,11 @@
        supaya aturan .pos-*/.ptk* menang atas definisi sepadan di styles.css
        (sama-sama @layer components — urutan link yang menentukan). -->
   <link rel="stylesheet" href="/src/pos.css" />
+  <!-- pos-mobile.css = gaya KHUSUS tampilan MOBILE POS (.pm-*, lihat
+       pos-mobile.ts). WAJIB SESUDAH styles.css + pos.css. `viewport-fit=cover`
+       di atas memberi akses env(safe-area-inset-bottom) untuk navbar bawah di
+       iPhone/home-indicator Android. -->
+  <link rel="stylesheet" href="/src/pos-mobile.css" />
 </head>
 <body>
   <div id="app"></div>

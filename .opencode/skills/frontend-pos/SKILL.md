@@ -176,16 +176,18 @@ panel topup/laporan, modal struk, atau styling apa pun.
 * Tailwind CSS v4 DISETUJUI user 2026-09-25 (alasan: kecepatan bangun kulit;
   hanya CSS build-time via `@tailwindcss/vite`, offline-safe, tanpa CDN).
   Tetap DILARANG: framework JS (React/Vue/Svelte/Electron), chart lib,
-  font-icon lib. File CSS = DUA: `styles.css` (token `@theme` + komponen
+  font-icon lib. File CSS = TIGA: `styles.css` (token `@theme` + komponen
   bersama `@layer components`) + `pos.css` KHUSUS POS (2026-10-09, pola
-  RPOS V1 `pos-system.css` — SELURUH aturan `.pos-*`/`.ptk*`/`.pos-scope`;
-  di-link SETELAH styles.css; `@reference "./styles.css"` WAJIB supaya
-  `@apply` mengenal token, tanpa itu build gagal "unknown utility").
+  RPOS V1 `pos-system.css` — SELURUH aturan `.pos-*`/`.ptk*`/`.pos-scope`)
+  + `pos-mobile.css` KHUSUS TAMPILAN MOBILE POS (2026-10-17 — SELURUH aturan
+  `.pm-*`, markup di `pages/pos-mobile.ts`; di-link SETELAH pos.css; aturan
+  sama: `@reference "./styles.css"` WAJIB, token hanya milik `styles.css`,
+  `@apply` utility saja, kelas bersama dipakai ulang bukan diduplikasi).
   Komponen custom via `@layer components` — dilarang deklarasi mentah
   (`justify-content:` dsb) di dalam `@apply` (build gagal); dilarang
-  duplikat rule. `pos.css` DILARANG warna/token baru (palet tetap milik
-  `styles.css`), `@apply` utility saja — sinkronkan AGENTS.md §2 bila
-  aturan cakupan ini berubah.
+  duplikat rule. Ketiga file theme-augment DILARANG warna/token baru (palet
+  tetap milik `styles.css`) — sinkronkan AGENTS.md §2 bila aturan cakupan
+  ini berubah.
 * DILARANG warna/ukuran baru di luar token tanpa update `styles.css` + daftar di sini.
 * DILARANG teks <11px di mana pun. Info penting (total, kembalian, angka stok
   di tabel) minimal **13px** (`text-sm` + bold bila perlu); 11px (`text-xs`)
