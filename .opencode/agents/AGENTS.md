@@ -75,6 +75,10 @@ apps/api/src/seed.ts     Runner seed (idempotent, INSERT OR IGNORE) +
 db/schema.sql            SUMBER KEBENARAN skema. Ubah skema = edit file ini + migrasi manual.
 db/seed.sql              Master awal (8 kategori + contoh SKU).
 apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
+                         Router hash (`render()` + guard login/peran) — di awal
+                         tiap navigasi memanggil `resetAksiBaru()`
+                         (ui/aksi-baru.ts) supaya pintasan Alt+N selalu milik
+                         halaman yang sedang tampil (2026-10-18).
                          Registrasi service worker HANYA `import.meta.env.PROD`
                          (PWA 2026-10-16) — dev TIDAK boleh di-cache SW.
 apps/web/public/sw.js    Service worker PWA (nol dependensi): shell+aset dari
@@ -115,6 +119,14 @@ apps/web/src/styles.css  Token + gaya BERSAMA Tailwind v4 (`@theme` + `@layer
                           + hover terangkat, `.btn-ghost` soft pill,
                           `.input` border halus + ring-primary 15% saat fokus,
                           `.card`/`.chip`/`.modal` ikut bayangan berlapis.
+                          **`.kbd` (2026-10-18)**: badge tombol pintasan
+                          keyboard di tombol halaman admin — `inline-flex
+                          rounded border border-current px-1 text-xs
+                          leading-4 opacity-80`; border `current` supaya
+                          menyatu di tombol putih (ghost) maupun biru
+                          (primary). Dipakai tombol buat baru `<kbd
+                          class="kbd">Alt+N</kbd>` (lihat `ui/aksi-baru.ts`)
+                          — SATU komponen, 10 halaman tidak menyalin utility.
                           Aksen teks primer DI DARK = override khusus #6aa5ff
                           (di blok setelah swal — #1d6df0 sebagai teks di kartu
                           gelap hanya ~3.7:1). **Daftar palet ini = `@theme`
@@ -1501,6 +1513,37 @@ apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
                           harus identik kondisi normal.
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                           produk, panel mode POS, dan kartu Sistem.
+apps/web/src/ui/aksi-baru.ts  **Pintasan Alt+N "buat baru" (2026-10-18,
+                           permintaan pemilik: "tambahkan shortcut setiap
+                           halaman yang ada buat baru … menggunakan Alt + N
+                           untuk membuka modal buat baru atau masuk ke halaman
+                           buat baru pada masing-masing tampilan guna
+                           mempercepat kinerja")** — REGISTRY, bukan listener
+                           per halaman: `pasangAksiBaru(fn)` didaftarkan dari
+                           `mountXPage` tepat di samping binding tombol buat
+                           barunya (closure yang SAMA supaya perilaku identik),
+                           `resetAksiBaru()` dipanggil router di baris pertama
+                           `render()` (main.ts) tiap navigasi supaya aksi
+                           halaman lama tidak bocor. SATU listener `keydown`
+                           capture di document: match `altKey && !ctrl/meta/
+                           shift` + `key==='n'` (cadangan `code==='KeyN'`),
+                           abaikan `repeat`; **guard dialog** —
+                           `.modal-overlay:not(.is-closing)` atau
+                           `.swal2-popup` terbuka = abaikan (tidak menumpuk
+                           modal kedua). Halaman terpasang: Pelanggan,
+                           Supplier, Hutang (`catatForm('charge')`),
+                           Pengeluaran, Pengguna, Satuan, Produk
+                           (`productForm('new', …)`), Retur
+                           (`dialogManual()`), Shift (`dialogBuka()`),
+                           Pembelian (`location.hash='#/purchases/baru'` —
+                           halaman penuh, bukan modal). Sengaja TIDAK
+                           didaftarkan: Dashboard/Laporan/Sistem/Audit/
+                           Riwayat/Stok/Label/POS (tidak punya "buat baru"
+                           tingkat halaman). Tombol buat baru memuat hint
+                           `<kbd class="kbd">Alt+N</kbd>` + title. Diuji
+                           `tests/altn-test.mjs` (17 asersi: hint, 9 halaman
+                           modal/halaman, guard tidak menumpuk, Esc, halaman
+                           tanpa aksi, tanpa pageerror).
 apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                            getAutoPrint/setAutoPrint (`ravaa.cetak`, default
                            nyala — matikan lewat panel Sistem -> Cetak struk

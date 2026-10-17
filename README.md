@@ -1124,6 +1124,20 @@ npm run dev:api
   ```
   `db/seed.sql` sudah disesuaikan. Gejala migrasi belum jalan: `npm run seed` gagal
   dengan `table products has no column named type`.
+* **Pintasan `Alt+N` "buat baru" (2026-10-18)** — permintaan pemilik
+  *"tambahkan shortcut setiap halaman yang ada buat baru … menggunakan
+  Alt + N untuk membuka modal buat baru atau masuk ke halaman buat baru pada
+  masing-masing tampilan guna mempercepat kinerja"*. Satu listener global
+  (`ui/aksi-baru.ts`, registry): di **Pelanggan, Supplier, Hutang (catat
+  hutang), Pengeluaran, Pengguna, Satuan, Produk, Retur (retur manual), dan
+  Shift (buka shift)** pintasan membuka modal form barunya; di **Pembelian**
+  masuk **halaman Buat PO** (`#/purchases/baru`). Tombol buat baru di
+  halaman-halaman itu memuat badge `<kbd>Alt+N</kbd>` sebagai penanda. Saat
+  modal/SweetAlert sedang terbuka pintasan diabaikan (tidak menumpuk modal
+  kedua), navigasi selalu hanya memakai aksi halaman yang sedang tampil, dan
+  halaman tanpa "buat baru" tingkat halaman (Dashboard, Laporan, Sistem,
+  Audit, Riwayat, Stok, Label, POS) sengaja tidak dipasangi. Teruji
+  `tests/altn-test.mjs` (17 asersi).
 * **Yang belum ada (celah terbuka):** impor belum mendukung `.xlsx` (pakai tempel
   dari Excel). **Varian (warna/ukuran) sengaja TIDAK dibuat** — keputusan pemilik:
   warna berbeda dibuat sebagai produk terpisah dengan nama & harga sendiri, bukan

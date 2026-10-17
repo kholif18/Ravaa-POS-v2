@@ -12,6 +12,7 @@ import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { akunTersimpan, type Peran } from '../ui/auth';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 
 type UserRow = {
   id: number;
@@ -54,7 +55,7 @@ function renderPage(): string {
             Akun kasir & owner. Kasir hanya membuka POS, Riwayat, Retur, Pelanggan, Hutang, Stok, dan shift sendiri.
           </p>
         </div>
-        <button type="button" id="usr-new" class="btn btn-primary">${icon('plus')}<span>Tambah Pengguna</span></button>
+        <button type="button" id="usr-new" class="btn btn-primary" title="Tambah pengguna baru (Alt+N)">${icon('plus')}<span>Tambah Pengguna</span><kbd class="kbd">Alt+N</kbd></button>
       </div>
     </div>
     <div id="usr-body"></div>
@@ -268,6 +269,9 @@ export async function mountUsersPage(el: HTMLElement): Promise<void> {
   host = el;
   el.innerHTML = renderPage();
   paint();
-  el.querySelector('#usr-new')?.addEventListener('click', () => formSimpan(null));
+  const bukaBaru = () => formSimpan(null);
+  el.querySelector('#usr-new')?.addEventListener('click', bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts).
+  pasangAksiBaru(bukaBaru);
   await load();
 }

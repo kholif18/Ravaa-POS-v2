@@ -12,6 +12,7 @@ import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 
 type EditUnit = { isNew: boolean; slug: string; name: string };
 
@@ -50,7 +51,7 @@ function renderPage(): string {
             Satuan untuk struk. Form produk memilih dari daftar ini.
           </p>
         </div>
-        <button type="button" id="unit-new" class="btn btn-primary">${icon('plus')}<span>Tambah Satuan</span></button>
+        <button type="button" id="unit-new" class="btn btn-primary" title="Tambah satuan baru (Alt+N)">${icon('plus')}<span>Tambah Satuan</span><kbd class="kbd">Alt+N</kbd></button>
       </div>
     </div>
 
@@ -224,8 +225,9 @@ export async function mountSatuanPage(el: HTMLElement): Promise<void> {
   host = el;
   el.innerHTML = renderPage();
   paint();
-  el.querySelector('#unit-new')?.addEventListener('click', () =>
-    unitForm({ isNew: true, slug: '', name: '' }),
-  );
+  const bukaBaru = () => unitForm({ isNew: true, slug: '', name: '' });
+  el.querySelector('#unit-new')?.addEventListener('click', bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts).
+  pasangAksiBaru(bukaBaru);
   await load();
 }

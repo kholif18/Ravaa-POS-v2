@@ -33,6 +33,7 @@ import { apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 import { toast } from '../ui/toast';
 import { getCashier } from '../ui/user';
 import { tglPendek } from '../ui/waktu';
@@ -125,7 +126,7 @@ function renderPage(): string {
                 title="Ada nota diterima dengan sisa hutang lebih dari 30 hari — klik untuk lihat semua yang belum lunas">
             ${icon('alert')}<span id="po-lewat-n">0</span><span>lewat 30 hari</span>
           </button>
-          <button type="button" id="po-new" class="btn btn-primary">${icon('plus')}<span>Buat PO</span></button>
+          <button type="button" id="po-new" class="btn btn-primary" title="Buat PO baru (Alt+N)">${icon('plus')}<span>Buat PO</span><kbd class="kbd">Alt+N</kbd></button>
         </div>
       </div>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Order dulu, barang datang baru Terima (stok masuk + kas keluar). Bawaan tunai penuh — kurangi bila hutang; sisa tiap nota disaring lewat filter <b>Belum lunas</b>.</p>
@@ -713,9 +714,13 @@ export async function mountPurchasesPage(el: HTMLElement): Promise<void> {
   }
   el.innerHTML = renderPage();
   paint();
-  el.querySelector('#po-new')?.addEventListener('click', () => {
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts) — masuk HALAMAN form
+  // PO baru (#/purchases/baru, bukan modal sejak 2026-10-17).
+  const bukaBaru = () => {
     location.hash = '#/purchases/baru';
-  });
+  };
+  el.querySelector('#po-new')?.addEventListener('click', bukaBaru);
+  pasangAksiBaru(bukaBaru);
   // Chip "lewat 30 hari" = pintu cepat ke daftar belum lunas (aging).
   el.querySelector('#po-lewat')?.addEventListener('click', () => {
     state.status = 'hutang';

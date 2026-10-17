@@ -336,6 +336,15 @@
   .chip svg {
     @apply size-4 shrink-0;
   }
+  /* Badge tombol pintasan keyboard di tombol halaman admin (mis. Alt+N pada
+     tombol buat baru — 2026-10-18). Border `current` supaya menyatu di
+     tombol putih (ghost) MAUPUN biru (primary), ukuran 11px (text-xs =
+     batas minimum teks repo halaman admin — jangan text-[10px]). Gaya
+     senada kbd POS (`pos.ts kbd()` — border-gray-300), sengaja satu
+     komponen supaya 10 halaman tidak menyalin utility yang sama. */
+  .kbd {
+    @apply inline-flex items-center rounded border border-current px-1 text-xs leading-4 opacity-80;
+  }
   /* Filter segmented (baru 2026-10-17 — permintaan pemilik: chip filter
      Pembelian & menu Laporan "seperti tidak terlihat … agar mudah dilihat";
      pola skill "tabs/pills segmented: kontainer muted, aktif kartu").

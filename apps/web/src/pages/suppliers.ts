@@ -14,6 +14,7 @@ import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 
 type Supplier = {
   id: number;
@@ -68,7 +69,7 @@ function renderPage(): string {
             Pemasok barang kulakan (nama, HP, alamat, catatan). Dipakai untuk Pembelian (Tahap 3).
           </p>
         </div>
-        <button type="button" id="sup-new" class="btn btn-primary">${icon('plus')}<span>Tambah Supplier</span></button>
+        <button type="button" id="sup-new" class="btn btn-primary" title="Buat supplier baru (Alt+N)">${icon('plus')}<span>Tambah Supplier</span><kbd class="kbd">Alt+N</kbd></button>
       </div>
       <div class="mt-3 flex items-center gap-2">
         <div class="relative w-full max-w-sm">
@@ -275,9 +276,11 @@ export async function mountSuppliersPage(el: HTMLElement): Promise<void> {
   host = el;
   el.innerHTML = renderPage();
   paint();
-  el.querySelector('#sup-new')?.addEventListener('click', () =>
-    supplierForm({ id: null, name: '', phone: '', address: '', note: '', code: '' }),
-  );
+  const bukaBaru = () =>
+    supplierForm({ id: null, name: '', phone: '', address: '', note: '', code: '' });
+  el.querySelector('#sup-new')?.addEventListener('click', bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts).
+  pasangAksiBaru(bukaBaru);
   // Debounce 250ms (pola halaman lain) — Enter mempercepat.
   el.querySelector<HTMLInputElement>('#sup-q')?.addEventListener('input', (ev) => {
     const v = (ev.target as HTMLInputElement).value;

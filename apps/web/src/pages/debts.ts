@@ -20,6 +20,7 @@ import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 
 type Ringkasan = {
   customer_id: number;
@@ -99,7 +100,7 @@ function renderPage(): string {
           {/* 2026-10-04: tombol "Catat bayar" global DIHAPUS — tiap baris
               tabel kini punya tombol Bayar sendiri (prefill nama + sisa),
               lebih cepat dan tidak mungkin salah pilih pelanggan. */}
-          <button type="button" id="hutang-charge" class="btn btn-primary">${icon('plus')}<span>Catat hutang</span></button>
+          <button type="button" id="hutang-charge" class="btn btn-primary" title="Catat hutang baru (Alt+N)">${icon('plus')}<span>Catat hutang</span><kbd class="kbd">Alt+N</kbd></button>
         </div>
       </div>
 
@@ -707,6 +708,8 @@ export async function mountDebtsPage(el: HTMLElement): Promise<void> {
   el.innerHTML = renderPage();
   paint();
   el.querySelector('#hutang-charge')?.addEventListener('click', () => void catatForm('charge'));
+  // Alt+N = pintasan tombol "Catat hutang" (ui/aksi-baru.ts).
+  pasangAksiBaru(() => void catatForm('charge'));
   el.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((b) =>
     b.addEventListener('click', () => {
       const s = b.dataset.status === 'semua' ? 'semua' : 'open';

@@ -18,6 +18,7 @@ import { toast } from '../ui/toast';
 import { getCashier } from '../ui/user';
 import { hariIni, geser, tglPanjang } from '../ui/waktu';
 import { rp } from '../escpos';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 
 type Expense = {
   id: number;
@@ -70,7 +71,7 @@ function renderPage(): string {
           <button type="button" id="exp-next" class="row-btn" title="Hari berikutnya" aria-label="Hari berikutnya">${icon('chevR')}</button>
           <span class="chip">${icon('calendar')}<span>${esc(tglPanjang(state.date))}</span></span>
         </div>
-        <button type="button" id="exp-new" class="btn btn-primary">${icon('plus')}<span>Catat Pengeluaran</span></button>
+        <button type="button" id="exp-new" class="btn btn-primary" title="Catat pengeluaran baru (Alt+N)">${icon('plus')}<span>Catat Pengeluaran</span><kbd class="kbd">Alt+N</kbd></button>
       </div>
     </div>
     <div class="card">
@@ -285,7 +286,11 @@ export async function mountExpensesPage(el: HTMLElement): Promise<void> {
   state.offset = 0;
   el.innerHTML = renderPage();
   paint();
-  el.querySelector('#exp-new')?.addEventListener('click', () => expenseForm());
+  const bukaBaru = () => expenseForm();
+  el.querySelector('#exp-new')?.addEventListener('click', bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts) — didaftarkan sekali di
+  // mount; refresh() hanya merender ulang isi, aksinya tetap closure ini.
+  pasangAksiBaru(bukaBaru);
   el.querySelector('#exp-prev')?.addEventListener('click', () => setDate(geser(state.date, -1)));
   el.querySelector('#exp-next')?.addEventListener('click', () => setDate(geser(state.date, 1)));
   el.querySelector<HTMLInputElement>('#exp-date')?.addEventListener('change', (ev) => {

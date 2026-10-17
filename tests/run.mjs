@@ -77,6 +77,7 @@ const SUITE = [
   ['retur-test.mjs', 35],
   ['purchase-test.mjs', 42],
   ['pager-test.mjs', 19],
+  ['altn-test.mjs', 17],
   ['tier-harga-test.mjs', 16],
   ['recap-test.mjs', 13],
   ['laporan-menu-test.mjs', 33],

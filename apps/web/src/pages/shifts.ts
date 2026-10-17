@@ -27,6 +27,7 @@ import { getCashier } from '../ui/user';
 import { waktu } from '../ui/waktu';
 import { rp } from '../escpos';
 import { dialogTutupShift, type ShiftRow } from './shift-tutup';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 
 /* ---------- tipe (kontrak GET /api/shifts — lihat shift-tutup.ts) ---------- */
 
@@ -83,8 +84,8 @@ function toolbar(): string {
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" id="sh-reload" class="chip" title="Muat ulang">${icon('sync')}<span>Segarkan</span></button>
-        <button type="button" id="sh-open" class="btn btn-primary !min-h-[34px] !px-3 !py-1.5">
-          ${icon('plus')}<span>Buka shift</span>
+        <button type="button" id="sh-open" class="btn btn-primary !min-h-[34px] !px-3 !py-1.5" title="Buka shift baru (Alt+N)">
+          ${icon('plus')}<span>Buka shift</span><kbd class="kbd">Alt+N</kbd>
         </button>
       </div>
     </div>
@@ -197,7 +198,12 @@ function bind(): void {
     void load();
   });
   root.querySelector('#sh-reload')?.addEventListener('click', () => void load());
-  root.querySelector('#sh-open')?.addEventListener('click', () => dialogBuka());
+  const bukaBaru = () => dialogBuka();
+  root.querySelector('#sh-open')?.addEventListener('click', bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts). Didaftarkan di bind()
+  // — bind() hanya jalan selama halaman ini hidup (paint() akhir load() dijaga
+  // host.isConnected), jadi aksi tidak bocor menimpa halaman lain.
+  pasangAksiBaru(bukaBaru);
   root.querySelectorAll<HTMLElement>('[data-tutup]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = Number(b.dataset.tutup);

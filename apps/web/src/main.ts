@@ -35,6 +35,7 @@ import { updateOutboxBadge } from './api';
 import { getCashier } from './ui/user';
 import { profilSaya, ruteBawaan } from './ui/auth';
 import { toast } from './ui/toast';
+import { resetAksiBaru } from './ui/aksi-baru';
 
 const app = document.getElementById('app');
 if (!app) throw new Error('#app tidak ditemukan');
@@ -52,6 +53,9 @@ function renderBare(judul: string, gambar: (el: HTMLElement) => void): void {
 }
 
 async function render(): Promise<void> {
+  // Setiap navigasi: buang aksi Alt+N halaman sebelumnya (masing-masing
+  // mountXPage mendaftarkan ulang aksinya — lihat ui/aksi-baru.ts).
+  resetAksiBaru();
   const route = parseRoute(location.hash);
   if (route === 'login') {
     renderBare('Masuk', renderLoginPage);

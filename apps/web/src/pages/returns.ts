@@ -19,6 +19,7 @@ import { toast } from '../ui/toast';
 import { getCashier } from '../ui/user';
 import { hariIni, geser, tglPanjang } from '../ui/waktu';
 import { rp } from '../escpos';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 
 type Retur = {
   id: number;
@@ -79,7 +80,7 @@ function renderPage(): string {
           <button type="button" id="ret-next" class="row-btn" title="Hari berikutnya" aria-label="Hari berikutnya">${icon('chevR')}</button>
           <span class="chip">${icon('calendar')}<span>${esc(tglPanjang(state.date))}</span></span>
         </div>
-        <button type="button" id="ret-new" class="btn btn-primary">${icon('plus')}<span>Retur manual</span></button>
+        <button type="button" id="ret-new" class="btn btn-primary" title="Retur manual tanpa nota (Alt+N)">${icon('plus')}<span>Retur manual</span><kbd class="kbd">Alt+N</kbd></button>
       </div>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Retur dari nota dibuat lewat tombol “Retur” di tiap nota halaman Riwayat — otomatis terisi item nota.</p>
     </div>
@@ -381,7 +382,11 @@ export async function mountReturnsPage(el: HTMLElement): Promise<void> {
   state.offset = 0;
   el.innerHTML = renderPage();
   paint();
-  el.querySelector('#ret-new')?.addEventListener('click', () => dialogManual());
+  const bukaBaru = () => dialogManual();
+  el.querySelector('#ret-new')?.addEventListener('click', bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts) — retur DARI nota tetap
+  // lewat tombol di halaman Riwayat; ini retur manual tanpa nota.
+  pasangAksiBaru(bukaBaru);
   el.querySelector('#ret-prev')?.addEventListener('click', () => setDate(geser(state.date, -1)));
   el.querySelector('#ret-next')?.addEventListener('click', () => setDate(geser(state.date, 1)));
   el.querySelector<HTMLInputElement>('#ret-date')?.addEventListener('change', (ev) => {

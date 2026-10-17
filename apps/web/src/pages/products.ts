@@ -13,6 +13,7 @@ import { openModal } from '../ui/modal';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { statusExpiry, tglExpiry } from '../ui/expiry';
+import { pasangAksiBaru } from '../ui/aksi-baru';
 import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
 
 const SIDE_KEY = 'ravaa.prodside';
@@ -445,7 +446,7 @@ export function renderProductsPage(): string {
             <a href="#/labels" id="prod-label" class="btn btn-ghost no-underline" title="Cetak label harga — lembar A4/Folio (printer lembar)">${icon('print')}<span class="hidden sm:inline">Label</span></a>
             <button type="button" id="prod-import" class="btn btn-ghost" title="Impor produk dari CSV atau tempelan Excel">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>
             <button type="button" id="prod-export" class="btn btn-ghost" title="Unduh produk yang sedang tampil (ikut filter &amp; pencarian) sebagai CSV">${icon('download')}<span class="hidden sm:inline">Ekspor</span></button>
-            <button type="button" id="prod-new" class="btn btn-primary ml-auto">${icon('plus')}<span>Produk</span></button>
+            <button type="button" id="prod-new" class="btn btn-primary ml-auto" title="Tambah produk baru (Alt+N)">${icon('plus')}<span>Produk</span><kbd class="kbd">Alt+N</kbd></button>
           </div>
         </div>
       </div>
@@ -1795,7 +1796,12 @@ function bind(): void {
     }
     await reload(true);
   });
-  find('#prod-new')?.addEventListener('click', () => productForm('new', state.categories));
+  const bukaBaru = () => productForm('new', state.categories);
+  find('#prod-new')?.addEventListener('click', bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts). Didaftarkan di bind()
+  // — bind() hanya jalan saat host masih terpasang (lihat paint()), jadi aksi
+  // halaman ini tidak bisa bocor menimpa halaman lain.
+  pasangAksiBaru(bukaBaru);
   find('#prod-import')?.addEventListener('click', () => importForm());
   // Ekspor mengikuti filter & pencarian yang sedang aktif, jadi
   // "yang saya lihat = yang saya dapat".
