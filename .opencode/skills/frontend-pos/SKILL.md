@@ -19,10 +19,13 @@ panel topup/laporan, modal struk, atau styling apa pun.
   kontras putih 13px ~4.7:1 lolos AA, `#0087ff` lama hanya ~3.1:1 GAGAL),
   hover **`#1757c8`**, primary-soft **`#e9f1ff`**, canvas **`#f2f5fa`**
   (kartu putih `#fff`, garis `border-gray-200/70`), sidebar biru tua
-  **`#0F2858`** (gradien 165deg `#143a94 → #0F2858 → #0a1c45` (dipergelapan lagi) + glow biru
-  pojok — restyle Sandik 2026-10-12, diperdalam permintaan pemilik) +
+  **`#0F2858`** (tema terang: gradien 165deg `#081533 → #0F2858 → #0a1c45` +
+  glow biru pojok — restyle Sandik 2026-10-12, diperdalam permintaan pemilik;
+  **tema gelap: gradasi netral `#090d17 → #101828 → #0a0f1b` + sheen netral,
+  senada kanvas dark `#101828` — permintaan pemilik 2026-10-18 "lebih menyatu
+  dengan tema dark"**) +
   hover **`#1a3a7e`** + aktif
-  **`#2563eb`** (pil biru solid ber-shadow) + teks **`#b9c8e4`** (naik dari
+  **`#1d6df0`** (`bg-primary`, pil biru solid ber-shadow) + teks **`#b9c8e4`** (naik dari
   #93a3bd — kontras di biru tua), teks
   `#18181b`/muted `#71717a` tidak berubah. Dua token bayangan BARU:
   **`--shadow-card`** (kartu/tabel — `.card`, `.table-wrap`, `.modal`)

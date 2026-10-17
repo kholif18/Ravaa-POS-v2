@@ -103,8 +103,12 @@ apps/web/src/styles.css  Token + gaya BERSAMA Tailwind v4 (`@theme` + `@layer
                           primer biru **#1d6df0** (dari #0087ff; kontras putih
                           13px ~4.7:1 lolos AA — #0087ff lama hanya ~3.1:1
                           GAGAL), hover #1757c8, primary-soft #e9f1ff, canvas
-                          #f2f5fa, sidebar navy #0b1220 (gradien ke #131d33)
-                          + nav aktif = pil biru #1d4ed8 ber-shadow; dua token
+                          #f2f5fa, sidebar gradasi biru Sandik (tema terang
+                          `#081533 → #0F2858 → #0a1c45` + glow; tema gelap =
+                          gradasi netral `#090d17 → #101828 → #0a0f1b` senada
+                          kanvas dark — permintaan pemilik 2026-10-18; diuji
+                          `tests/sidebar-dark-test.mjs`) + nav aktif = pil
+                          biru #1d6df0 ber-shadow; dua token
                           bayangan BARU **--shadow-card** (kartu/tabel/modal)
                           dan **--shadow-pop** (dropdown/toast/lapis melayang).
                           `.btn` radius 10 + focus ring, `.btn-primary` shadow

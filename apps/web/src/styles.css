@@ -82,9 +82,10 @@
   }
   .sidebar {
     @apply fixed inset-y-0 left-0 z-50 flex w-64 -translate-x-full flex-col border-r border-transparent bg-sidebar text-sidebar-text transition-[width,transform] duration-300 ease-out lg:translate-x-0 dark:border-gray-700;
-    /* Gradien biru modern ala Sandik (2026-10-12): dari primary -> biru tua
-       160deg, dua stop + ornamen cahaya di pojok. Token bg-sidebar tetap
-       dasar/fallback untuk dark-mode override di bawah. */
+    /* Gradien biru modern ala Sandik (2026-10-12) — tema terang: dari primary
+       -> biru tua 160deg, dua stop + ornamen cahaya di pojok. Token
+       bg-sidebar tetap dasar/fallback; tema gelap memakai gradasi netral
+       (override tepat di bawah, permintaan pemilik 2026-10-18). */
     background-image:
       radial-gradient(120% 60% at 0% 0%, rgb(59 130 246 / 0.35) 0%, transparent 60%),
       linear-gradient(165deg, #081533 0%, #0F2858 48%, #0a1c45 100%);
@@ -92,6 +93,17 @@
        pembatas. Di light mode border transparan (kontrasnya sudah jelas).
        border-box (preflight) membuat garis masuk ke dalam w-64, jadi
        lg:ml-64 di .main-col tetap pas tanpa menggeser layout. */
+  }
+  /* Tema gelap (permintaan pemilik 2026-10-18 — sidebar "lebih menyatu
+     dengan tema dark"): gradasi biru diganti permukaan gelap netral dari
+     keluarga warna yang sama dengan kanvas dark `#101828` (gray-900) —
+     glow biru -> sheen netral tipis. Aksen biru tetap hidup di hover
+     (`bg-sidebar-hover`) dan pil aktif (`bg-primary`). Garis pemisah dari
+     kanvas dipegang `dark:border-gray-700` pada aturan .sidebar di atas. */
+  [data-theme="dark"] .sidebar {
+    background-image:
+      radial-gradient(120% 60% at 0% 0%, rgb(148 163 184 / 0.07) 0%, transparent 60%),
+      linear-gradient(165deg, #090d17 0%, #101828 52%, #0a0f1b 100%);
   }
   .sidebar.is-open {
     @apply translate-x-0;
