@@ -32,7 +32,32 @@
 
 ```
 apps/api/src/index.ts    API Hono. SATU-SATUNYA yang boleh tulis DB.
+                         **Guard skema 2026-10-18** (setelah `migrate()`):
+                         `peringatkanSkema()` mencetak blok peringatan besar
+                         saat boot bila DB ketinggalan kolom (lihat db.ts) —
+                         jangan dilepas, kasus nyata: halaman 500 "no such
+                         column" tanpa petunjuk di laptop pemilik. + **`app.onError`**:
+                         error tak tertangkap dibalas **500 JSON `{error}`**
+                         (bukan "Internal Server Error" teks polos) — pesan
+                         SQLite "no such column / has no column named / no
+                         such table" diberi awalan "database tidak sinkron
+                         dengan skema (…) — … AGENTS §5", sehingga api.ts
+                         menampilkannya sebagai toast yang menjelaskan sebab +
+                         arah perbaikan; detail penuh tetap di log server.
+                         Diuji `tests/skema-guard-test.mjs` (11 asersi).
 apps/api/src/db.ts       Koneksi better-sqlite3 + migrate + seed. DB_PATH default ./data/data.db
+                         + **`kolomHilang()`/`peringatkanSkema()`** (guard
+                         skema 2026-10-18): parser mini `db/schema.sql`
+                         (sadar komentar/string/kurung) -> bandingkan dengan
+                         `pragma_table_info` tiap tabel -> daftar kolom yang
+                         tidak ada + perintah `ALTER TABLE … ADD COLUMN` siap
+                         tempel (PRIMARY KEY/UNIQUE ditandai "migrasi
+                         MANUAL"). `migrate()` TIDAK menyentuh tabel yang
+                         sudah ada (`CREATE TABLE IF NOT EXISTS`), jadi tanpa
+                         guard ini DB lama diam-diam kehilangan kolom baru;
+                         peringatan juga dipanggil `seed.ts` supaya "seed ok"
+                         tidak menyesatkan. SENGAJA tanpa auto-ALTER
+                         (kebijakan §5: migrasi manual).
                          + **`pulihkanDari(file)`** (restore 2026-10-16: copy
                          tmp -> db.close() -> rename -> buang -wal/-shm ->
                          reopen; dipakai POST /api/backup/restore) + helper
@@ -44,7 +69,9 @@ apps/api/src/db.ts       Koneksi better-sqlite3 + migrate + seed. DB_PATH defaul
                          API di-restart (bug nyata 2026-10-16; helper membuat
                          transaction per pemanggilan sehingga selalu ikut
                          koneksi aktif — jangan kembalikan ke pola lama).
-apps/api/src/seed.ts     Runner seed (idempotent, INSERT OR IGNORE)
+apps/api/src/seed.ts     Runner seed (idempotent, INSERT OR IGNORE) +
+                         `peringatkanSkema()` di akhir (2026-10-18: seed di
+                         DB lama "sukses" tapi kolom baru tak terpasang).
 db/schema.sql            SUMBER KEBENARAN skema. Ubah skema = edit file ini + migrasi manual.
 db/seed.sql              Master awal (8 kategori + contoh SKU).
 apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
@@ -2691,6 +2718,14 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
 * `node:sqlite` bawaan TIDAK dipakai di repo ini — jangan "memperbaiki" dengan menggantinya.
 * Print-agent menulis ke device: butuh grup `lp` di Linux (`sudo usermod -aG lp $USER`).
 * Tanpa sudo, `btrfs subvolume` / `/var/lib/docker` tidak terbaca — itu normal, bukan bug repo.
+* **500 "database tidak sinkron dengan skema (no such column …)"** (guard
+  2026-10-18): DB ketinggalan kolom — `migrate()` hanya `CREATE TABLE IF NOT
+  EXISTS`, tabel lama TIDAK pernah ditambah kolom otomatis. Baca blok
+  `[SKEMA DB TIDAK SINKRON]` di log saat API start (atau `npm run seed`):
+  daftarnya + perintah `ALTER TABLE … ADD COLUMN …` siap tempel ada di sana.
+  SENGAJA tanpa auto-ALTER (kebijakan §5: migrasi manual). Endpoint
+  yang TIDAK menyentuh kolom hilang tetap jalan; server tidak ikut mati.
+  Terjadi nyata di laptop pemilik 2026-10-18 (DB lama era 3-6 Okt).
 * **Restore sesudah `POST /api/backup/restore`**: sesi login ikut snapshot
   (device bisa logout — by design, didokumentasikan di dialog), tapi proses
   API TIDAK butuh restart; kalau tiba-tiba semua POST mati

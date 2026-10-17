@@ -71,6 +71,7 @@ const SUITE = [
   ['foto-tambah-test.mjs', 10],
   ['kadaluarsa-jual-test.mjs', 17],
   ['backup-test.mjs', 27],
+  ['skema-guard-test.mjs', 11],
   ['customer-debt-test.mjs', 35],
   ['expense-supplier-test.mjs', 34],
   ['retur-test.mjs', 31],

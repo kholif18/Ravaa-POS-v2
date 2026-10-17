@@ -8,9 +8,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { randomBytes } from 'node:crypto';
-import { db, dbPath, hashPassword, migrate, pulihkanDari, transaksi, verifyPassword } from './db.js';
+import { db, dbPath, hashPassword, migrate, peringatkanSkema, pulihkanDari, transaksi, verifyPassword } from './db.js';
 
 migrate();
+// Peringatan dini DB lama yang ketinggalan kolom (2026-10-18): tanpa ini,
+// baris "listening" menyembunyikan fakta bahwa sebagian endpoint akan gagal
+// 500 "no such column" (kejadian nyata: DB laptop pemilik 2026-10-18).
+peringatkanSkema();
 
 // Thumbnail foto produk disimpan di samping file DB (ikut DB_PATH, jadi Docker
 // / install native / test dengan DB_PATH khusus tidak pernah saling menimpa).
@@ -23,6 +27,26 @@ function imgDir(): string {
 
 const app = new Hono<{ Variables: { user: Pengguna } }>();
 app.use('*', cors({ origin: (process.env.CORS_ORIGIN ?? '*').split(',') }));
+
+// 500 informatif (2026-10-18): error yang lolos dari try/catch halaman —
+// terutama "no such column / has no column named" dari DB yang ketinggalan
+// migrasi — dibalas JSON {error} supaya api.ts menampilkannya sebagai toast
+// yang menjelaskan sebab + arah perbaikan, bukan "Internal Server Error"
+// bisu (kasus nyata: halaman 500 tanpa petunjuk di laptop pemilik). Detail
+// penuh tetap dicatat di log server.
+app.onError((err, c) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error('[error 500]', msg);
+  const skema = /no such column|has no column named|no such table/i.test(msg);
+  return c.json(
+    {
+      error: skema
+        ? `database tidak sinkron dengan skema (${msg}) — DB kemungkinan ketinggalan migrasi kolom; periksa peringatan skema di log API / AGENTS §5, atau pulihkan backup terbaru, lalu restart API`
+        : `kesalahan server: ${msg}`,
+    },
+    500,
+  );
+});
 
 // ---------- login & peran (2026-10-11) ----------
 // 2 role: `owner` (semua) dan `kasir` (POS + Riwayat + Stok + Pelanggan +

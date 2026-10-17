@@ -64,6 +64,138 @@ export function migrate(): void {
   db.exec(loadSql('schema.sql'));
 }
 
+/** Pisah daftar definisi di dalam CREATE TABLE per koma TERLUAR — koma di
+ *  dalam `CHECK (...)` / literal 'a, b' bukan pemisah kolom. */
+function pecahTopLevel(isi: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let buf = '';
+  let inStr = false;
+  for (const ch of isi) {
+    if (inStr) {
+      buf += ch;
+      if (ch === "'") inStr = false;
+      continue;
+    }
+    if (ch === "'") {
+      inStr = true;
+      buf += ch;
+      continue;
+    }
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      out.push(buf);
+      buf = '';
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.trim()) out.push(buf);
+  return out;
+}
+
+/** Parser mini db/schema.sql: daftar `{kolom, definisi}` per tabel. Sumber
+ *  kebenaran tetap file SQL-nya — sengaja BUKAN daftar kolom hardcode
+ *  terpisah yang bisa basi sendiri. */
+function kolomDariSchema(teks: string): Map<string, { kolom: string; definisi: string }[]> {
+  // Buang komentar `-- ...` dulu (isinya bisa memuat koma/tanda kurung).
+  const bersih = teks.replace(/--[^\n]*/g, '');
+  const hasil = new Map<string, { kolom: string; definisi: string }[]>();
+  const re = /CREATE TABLE IF NOT EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(bersih))) {
+    // Cari ')' penutup definisi tabel (sadar kurung bersarang + string).
+    let i = re.lastIndex;
+    let depth = 1;
+    let inStr = false;
+    for (; i < bersih.length && depth > 0; i++) {
+      const ch = bersih[i];
+      if (inStr) {
+        if (ch === "'") inStr = false;
+        continue;
+      }
+      if (ch === "'") inStr = true;
+      else if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+    }
+    const isi = bersih.slice(re.lastIndex, i - 1);
+    const daftar: { kolom: string; definisi: string }[] = [];
+    for (const bagian of pecahTopLevel(isi)) {
+      const t = bagian.trim().replace(/\s+/g, ' ');
+      if (!t) continue;
+      const km = /^(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))(?:\s+([\s\S]+))?$/.exec(t);
+      if (!km) continue;
+      const nama = km[1] ?? km[2] ?? km[3] ?? km[4];
+      // Baris constraint TINGKAT TABEL, bukan kolom.
+      if (['CHECK', 'FOREIGN', 'PRIMARY', 'UNIQUE', 'CONSTRAINT'].includes(nama.toUpperCase())) continue;
+      daftar.push({ kolom: nama, definisi: (km[5] ?? '').trim() });
+    }
+    hasil.set(m[1], daftar);
+    re.lastIndex = i; // lanjut dari titik setelah ')' penutup
+  }
+  return hasil;
+}
+
+export type KolomHilang = { tabel: string; kolom: string; definisi: string };
+
+/** Kolom yang dituntut db/schema.sql tapi TIDAK ada di tabelnya. DB lama yang
+ *  dibuat sebelum sebuah kolom ditambahkan tidak ikut berubah: `migrate()`
+ *  hanya `CREATE TABLE IF NOT EXISTS` yang tak menyentuh tabel yang sudah
+ *  ada, dan query yang menyebut kolom hilang gagal "no such column" (kejadian
+ *  nyata 2026-10-18: DB laptop pemilik ketinggalan products.price_grosir,
+ *  sales.invoice_no/customer_name/note, topup_txns.token/sale_id, dst —
+ *  halaman Dashboard/Riwayat/Laporan/Shift 500). */
+export function kolomHilang(): KolomHilang[] {
+  const skema = kolomDariSchema(loadSql('schema.sql'));
+  const hilang: KolomHilang[] = [];
+  for (const [tabel, daftar] of skema) {
+    const ada = new Set(
+      (db.prepare('SELECT name FROM pragma_table_info(?)').all(tabel) as { name: string }[]).map((r) => r.name),
+    );
+    if (ada.size === 0) continue; // tabel belum ada — urusan migrate(), bukan "kolom ketinggalan"
+    for (const k of daftar) if (!ada.has(k.kolom)) hilang.push({ tabel, kolom: k.kolom, definisi: k.definisi });
+  }
+  return hilang;
+}
+
+/** Peringatan BESAR saat start bila DB ketinggalan kolom + perintah ALTER
+ *  siap tempel. SENGAJA tidak auto-ALTER (kebijakan §5 AGENTS: migrasi
+ *  manual, skema ditulis di db/schema.sql — bukan ALTER senyap). Dipanggil
+ *  `index.ts` (boot API) dan `seed.ts` — tanpa ini "seed ok" menyesatkan:
+ *  pada DB lama semua CREATE TABLE no-op dan keluaran tampak sukses padahal
+ *  kolom baru tidak pernah terpasang. */
+export function peringatkanSkema(): void {
+  const hilang = kolomHilang();
+  if (hilang.length === 0) return;
+  const perTabel = new Map<string, KolomHilang[]>();
+  for (const k of hilang) perTabel.set(k.tabel, [...(perTabel.get(k.tabel) ?? []), k]);
+  const baris: string[] = [
+    '',
+    '='.repeat(76),
+    `[SKEMA DB TIDAK SINKRON] ${hilang.length} kolom db/schema.sql tidak ada di ${dbPath}:`,
+  ];
+  for (const daftar of perTabel.values()) for (const k of daftar) baris.push(`  - ${k.tabel}.${k.kolom}`);
+  baris.push('');
+  baris.push('Tabel lama tidak pernah diubah otomatis (CREATE TABLE IF NOT EXISTS).');
+  baris.push('Endpoint yang menyentuh kolom di atas akan gagal 500 sampai dimigrasi.');
+  baris.push('Perintah perbaikan (jalankan saat API mati, lalu start lagi):');
+  for (const daftar of perTabel.values()) {
+    for (const k of daftar) {
+      const manual = /\bPRIMARY KEY\b|\bUNIQUE\b/i.test(k.definisi);
+      baris.push(
+        manual
+          ? `  -- ${k.tabel}.${k.kolom}: migrasi MANUAL (PRIMARY KEY/UNIQUE tidak didukung ADD COLUMN)`
+          : `  sqlite3 "${dbPath}" "ALTER TABLE ${k.tabel} ADD COLUMN ${k.kolom} ${k.definisi};"`,
+      );
+    }
+  }
+  baris.push('');
+  baris.push('Prosedur lengkap: AGENTS §5 (migrasi manual).');
+  baris.push('='.repeat(76));
+  console.error(baris.join('\n'));
+}
+
 /** Pulihkan DB dari file backup (dipakai POST /api/backup/restore).
  *
  *  Urutan sengaja: SALIN dulu ke file sementara (kalau disk penuh/gagal
