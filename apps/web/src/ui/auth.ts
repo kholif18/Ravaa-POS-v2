@@ -5,7 +5,7 @@
 // circular). Jadi request di sini memakai fetch mentah + BASE yang sama.
 import { setCashier } from './user';
 
-export type Peran = 'pemilik' | 'kasir';
+export type Peran = 'owner' | 'kasir';
 export interface Akun {
   id: number;
   username: string;

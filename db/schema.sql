@@ -391,7 +391,7 @@ CREATE TABLE IF NOT EXISTS customer_debts (
 CREATE INDEX IF NOT EXISTS idx_customer_debts_customer
   ON customer_debts(customer_id, created_at, id);
 
--- Akun & peran (login, 2026-10-11): 2 role, `pemilik` (semua) dan `kasir`
+-- Akun & peran (login, 2026-10-11): 2 role, `owner` (semua) dan `kasir`
 -- (POS + Riwayat + Stok + Pelanggan + Hutang + Retur + shift sendiri).
 -- password_hash format `saltHex:hashHex` (scrypt node:crypto bawaan, tanpa
 -- dep baru — lihat hashPassword()/verifyPassword() di apps/api/src/db.ts).
@@ -403,7 +403,7 @@ CREATE TABLE IF NOT EXISTS users (
   username      TEXT NOT NULL UNIQUE,
   name          TEXT NOT NULL DEFAULT '',
   password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL CHECK (role IN ('pemilik', 'kasir')),
+  role          TEXT NOT NULL CHECK (role IN ('owner', 'kasir')),
   -- Avatar OPSIONAL: nama file di folder img/ sebelah DB (pola products.image),
   -- di-resize client (sisi terpanjang <=256px JPEG). NULL/'' = pakai inisial
   -- nama (atau /avatar.png bawaan). Diunggah lewat POST /api/users/me/avatar.
@@ -422,7 +422,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
--- Jejak audit (2026-10-16, halaman #/audit khusus pemilik): "siapa mengubah
+-- Jejak audit (2026-10-16, halaman #/audit khusus owner): "siapa mengubah
 -- apa" untuk mutasi yang RISIKO-nya tidak terlihat dari tabel aslinya —
 -- master (produk/kategori/satuan/pelanggan/supplier/pengguna/setting),
 -- stok (restock/opname), koreksi dokumen uang (pengeluaran/piutang/retur

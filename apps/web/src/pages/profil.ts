@@ -61,7 +61,7 @@ export function renderProfilPage(el: HTMLElement): void {
   const nama = akun?.name ?? '';
   const username = akun?.username ?? '';
   const email = akun?.email ?? '';
-  const role = akun?.role === 'pemilik' ? 'Owner' : 'Kasir';
+  const role = akun?.role === 'owner' ? 'Owner' : 'Kasir';
   const idAkun = akun?.id ?? 0;
   // Avatar tampil: file server bila ada, kalau tidak inisial nama.
   const avatarSrc = akun?.avatar ? `/api/users/${idAkun}/avatar?${Date.now()}` : '';

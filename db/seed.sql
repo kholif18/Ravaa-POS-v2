@@ -77,12 +77,12 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('tolak_jual_kadaluarsa', '0'
 
 -- Kop INVOICE A4 (cetak gaya Aronium, sejak 2026-10-03) — disimpan DI SERVER
 -- (bukan localStorage) supaya semua device mencetak kop yang sama. Default
--- diisi dari contoh pemilik (invoice Aronium "RAVAA STUDIO"); pemilik
+-- diisi dari contoh pemilik (invoice Aronium "RAVAA CREATIVE"); pemilik
 -- mengubahnya lewat kartu "Pengaturan toko" di halaman #/settings.
-INSERT OR IGNORE INTO settings (key, value) VALUES ('store_name', 'RAVAA STUDIO');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('store_name', 'RAVAA CREATIVE');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_address', 'Gedong, Ds. Ngluyu Kec. Ngluyu, 64452 NGANJUK');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_phone', '082233377661');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('store_email', 'ravaastudio@gmail.com');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('store_email', 'ravaacreative@gmail.com');
 
 -- Pelanggan bawaan POS (revisi pemilik 2026-10-04): dipilih OTOMATIS di header
 -- kasir untuk transaksi umum, dan menjadi isi "Bill to" invoice A4. Nomor urut

@@ -1,6 +1,6 @@
-// Halaman Pengguna (#/users, 2026-10-11, khusus pemilik): akun kasir &
-// pemilik — tambah, ubah peran/nama/status, reset sandi, hapus. Guard berat
-// (diri sendiri, pemilik aktif terakhir) ditegakkan SERVER (400) — halaman
+// Halaman Pengguna (#/users, 2026-10-11, khusus owner): akun kasir &
+// owner — tambah, ubah peran/nama/status, reset sandi, hapus. Guard berat
+// (diri sendiri, owner aktif terakhir) ditegakkan SERVER (400) — halaman
 // ini hanya menampilkan pesannya. Daftar TIDAK PERNAH memuat hash sandi.
 //
 // Server: GET /api/users, POST /api/users (tanpa id = baru, id = update
@@ -38,7 +38,7 @@ function errMsg(e: unknown): string {
 }
 
 function badgePeran(role: string): string {
-  return role === 'pemilik'
+  return role === 'owner'
     ? `<span class="badge-dyn">Owner</span>`
     : `<span class="chip">Kasir</span>`;
 }
@@ -51,7 +51,7 @@ function renderPage(): string {
         <div>
           <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pengguna</h2>
           <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-            Akun kasir & pemilik. Kasir hanya membuka POS, Riwayat, Retur, Pelanggan, Hutang, Stok, dan shift sendiri.
+            Akun kasir & owner. Kasir hanya membuka POS, Riwayat, Retur, Pelanggan, Hutang, Stok, dan shift sendiri.
           </p>
         </div>
         <button type="button" id="usr-new" class="btn btn-primary">${icon('plus')}<span>Tambah Pengguna</span></button>
@@ -138,7 +138,7 @@ function formSimpan(id: number | null, awal?: UserRow): void {
           <label class="label" for="u-role">Peran *</label>
           <select id="u-role" class="input">
             <option value="kasir"${(awal?.role ?? 'kasir') === 'kasir' ? ' selected' : ''}>Kasir</option>
-            <option value="pemilik"${awal?.role === 'pemilik' ? ' selected' : ''}>Owner</option>
+            <option value="owner"${awal?.role === 'owner' ? ' selected' : ''}>Owner</option>
           </select>
         </div>
         ${isNew ? '' : `

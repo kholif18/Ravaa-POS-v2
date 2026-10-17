@@ -108,15 +108,17 @@ export function verifyPassword(pw: string, hash: string): boolean {
 export function seed(): void {
   migrate();
   db.exec(loadSql('seed.sql'));
-  // Akun pemilik bawaan (login 2026-10-11): HANYA bila tabel users masih
+  // Akun owner bawaan (login 2026-10-11): HANYA bila tabel users masih
   // kosong (idempoten — seed ulang tidak mereset sandi yang sudah diganti).
   // Display name = 'kasir' supaya shift/laporan lama yang berkasir 'kasir'
   // tetap nyambung; wajib ganti sandi saat login pertama (must_change=1).
+  // Username DAN role = 'owner' (permintaan pemilik 2026-10-17 — dulu
+  // keduanya 'pemilik').
   const nUsers = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
   if (nUsers === 0) {
     db.prepare(
       `INSERT INTO users (username, name, password_hash, role, must_change)
-       VALUES ('pemilik', 'kasir', ?, 'pemilik', 1)`,
+       VALUES ('owner', 'kasir', ?, 'owner', 1)`,
     ).run(hashPassword('admin123'));
   }
 }

@@ -13,14 +13,14 @@ interface NavItem {
   icon: IconName;
   /** Peran yang boleh MELIHAT + MEMBUKA menu ini (login 2026-10-11).
    *  Kasir: POS + Riwayat + Retur + Pelanggan + Hutang + Stok + Shift
-   *  (shift sendiri); sisanya khusus pemilik (uang keluar, harga modal,
+   *  (shift sendiri); sisanya khusus owner (uang keluar, harga modal,
    *  omzet/laba, aturan, akun). Server menegakkan hal yang sama — nav ini
    *  hanya cermin agar kasir tak mengklik jalan buntu. */
   roles: Peran[];
 }
 
-const SEMUA: Peran[] = ['pemilik', 'kasir'];
-const MILIK: Peran[] = ['pemilik'];
+const SEMUA: Peran[] = ['owner', 'kasir'];
+const MILIK: Peran[] = ['owner'];
 
 export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
   {
@@ -77,9 +77,9 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     group: 'Sistem',
     items: [
       { route: 'settings', label: 'Pengaturan', icon: 'settings', roles: MILIK },
-      // Akun & peran (login 2026-10-11): khusus pemilik.
+      // Akun & peran (login 2026-10-11): khusus owner.
       { route: 'users', label: 'Pengguna', icon: 'shieldCheck', roles: MILIK },
-      // Jejak audit (2026-10-16): siapa mengubah apa — khusus pemilik.
+      // Jejak audit (2026-10-16): siapa mengubah apa — khusus owner.
       { route: 'audit', label: 'Jejak audit', icon: 'clock', roles: MILIK },
     ],
   },
@@ -149,7 +149,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   shifts: 'Riwayat shift + buka/tutup shift dengan modal awal & modal akhir.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
   users: 'Akun kasir & pemilik: tambah, atur peran, reset sandi, nonaktifkan.',
-  audit: 'Siapa mengubah apa — jejak master, stok, aturan, dan uang (khusus pemilik).',
+  audit: 'Siapa mengubah apa — jejak master, stok, aturan, dan uang (khusus owner).',
 };
 
 /** Rute yang tampil TANPA header sama sekali (keputusan pemilik 2026-10-03):
@@ -316,7 +316,7 @@ function userMenu(name: string, peran: Peran): string {
           ${avat('avatar avatar-lg', 'dd-avatar')}
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-gray-900 dark:text-white" id="dd-name">${name}</p>
-            <p class="text-xs text-gray-500 dark:text-gray-400" id="dd-role">${peran === 'pemilik' ? 'Owner' : 'Kasir'}</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400" id="dd-role">${peran === 'owner' ? 'Owner' : 'Kasir'}</p>
           </div>
         </div>
         <div class="dd-sep"></div>
@@ -399,7 +399,7 @@ function paintThemeToggle(): void {
 function paintUserMenu(): void {
   const name = getCashier();
   const ini = initials(name);
-  const peran = akunTersimpan()?.akun.role === 'pemilik' ? 'Owner' : 'Kasir';
+  const peran = akunTersimpan()?.akun.role === 'owner' ? 'Owner' : 'Kasir';
   const av = akunTersimpan()?.akun.avatar;
   const avSrc = av ? `/api/users/${akunTersimpan()!.akun.id}/avatar?${Date.now()}` : '';
   const isiAvatar = (id: string) => {

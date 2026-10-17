@@ -1,4 +1,4 @@
-// Halaman Jejak audit (#/audit, baru 2026-10-16) — khusus pemilik.
+// Halaman Jejak audit (#/audit, baru 2026-10-16) — khusus owner.
 //
 // Menampilkan `audit_log` (server: helper catatAudit di index.ts): siapa
 // (username/role snapshot), kapan, aksi apa, di entitas apa, plus detail

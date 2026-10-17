@@ -132,7 +132,7 @@ npm run dev:api
   hal yang sama untuk nota kulakan diterima-belum-lunas di `#/purchases`
   (umur sejak barang diterima). Angka dihitung server dari data asli saat
   dibaca (`umur_hari`/`lewat30`) — bukan saldo tersimpan.
-* **Jejak audit** (`#/audit`, menu **Jejak Audit**, khusus pemilik, baru
+* **Jejak audit** (`#/audit`, menu **Jejak Audit**, khusus owner, baru
   2026-10-16): catatan mutasi penting master & sistem — produk, kategori,
   satuan, pelanggan, supplier, hutang, user, pengaturan, stok, pengeluaran,
   retur, pembelian, backup/restore, plus login berhasil/gagal (dengan nama

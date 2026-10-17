@@ -1082,7 +1082,7 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
 apps/web/src/pages/audit.ts  Halaman #/audit (menu Jejak Audit, 2026-10-16,
-                         khusus pemilik): tabel audit_log dari GET /api/audit
+                         khusus owner): tabel audit_log dari GET /api/audit
                          (chip jumlah `#audit-count`, filter entity/action +
                          cari `#audit-q` multi-kata + tanggal), klik baris =
                          modal detail read-only (pola riwayatForm — satu
@@ -1663,7 +1663,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Data sudah ada sejak awal (`stock_moves` diisi oleh sale/restock/opname) —
     endpoint ini hanya MEMBUKANYA, bukan memodifikasi riwayat.
 * **Login & peran (2026-10-11)** — tabel `users` + `sessions` (db/schema.sql):
-  2 role `pemilik` (semua) | `kasir` (POS + Riwayat + Retur + Pelanggan + Hutang
+  2 role `owner` (semua) | `kasir` (POS + Riwayat + Retur + Pelanggan + Hutang
   + Stok + Shift-sendiri). Hash scrypt node:crypto `salt:hash` (db.ts
   hashPassword/verifyPassword, tanpa dep). Token acak 32 byte di header
   `Authorization: Bearer`, kedaluwarsa 30 hari.
@@ -1676,13 +1676,13 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     username tak ada & sandi salah = PESAN SAMA (401, anti-enumerasi); akun
     nonaktif = 403. `POST /api/logout` (idempotent), `GET /api/me`.
   - `GET/POST/DELETE /api/users` (+`POST /api/users/:id/password`) — SEMUA
-    `hanyaPemilik` (28 rute dilindungi: master uang/modal/laporan/aturan —
+    `hanyaOwner` (28 rute dilindungi: master uang/modal/laporan/aturan —
     daftar di index.ts). Update parsial: username TAK bisa diganti; guard 400:
-    ubah peran/nonaktifkan diri sendiri, turunkan/nonaktifkan/hapus pemilik
+    ubah peran/nonaktifkan diri sendiri, turunkan/nonaktifkan/hapus owner
     aktif terakhir. Reset sandi = must_change 1 + semua sesi target diputus.
     Ganti sandi sendiri (`/api/users/password`) = verifikasi sandi lama,
-    membersihkan must_change. Seed: `pemilik`/`admin123` (name `kasir`,
-    must_change 1) HANYA bila tabel kosong.
+    membersihkan must_change. Seed: `owner`/`admin123` (name `kasir`,
+    role `owner`, must_change 1) HANYA bila tabel kosong.
   - **Profil (2026-10-12)**: `users.avatar` (nama file di img/, pola
     products.image; dataURL <=120KB di-resize client 256px) + `users.email`
     (opsional, validasi format). `POST /api/users/me/avatar` {image} ('' =
@@ -1707,9 +1707,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     tanpa shell), guard `bolehBuka()` per peran (nav difilter `roles` di
     ADMIN_NAV; kasir nyasar = toast + alih ke `#/pos`), api.ts menyuntikkan
     header Bearer ke semua request (termasuk flush outbox), `Pengguna` page
-    khusus pemilik, logout = hapus sesi server + token.
+    khusus owner, logout = hapus sesi server + token.
 * **Jejak audit (2026-10-16) — `GET /api/audit` -> `{data:[<baris audit_log>], total}`**
-  (halaman `#/audit`, menu **Jejak Audit**, `hanyaPemilik`; tabel `audit_log`
+  (halaman `#/audit`, menu **Jejak Audit**, `hanyaOwner`; tabel `audit_log`
   di `db/schema.sql`, ditulis `catatAudit(c,…)` di dalam rute — bukan
   middleware, supaya hanya mutasi BERHASIL yang tercatat).
   - Query: `entity` (persis, mis. `product`), `q` (multi-kata — SEMUA kata

@@ -17,7 +17,7 @@ const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execFileSync('sqlite3', [DB, q], { encoding: 'utf8' }).trim();
 const API = 'http://localhost:3001';
 const WEB = 'http://localhost:5656';
-const UJI_USER = process.env.RAVAA_UJI_USER || 'pemilik';
+const UJI_USER = process.env.RAVAA_UJI_USER || 'owner';
 const UJI_PASS = process.env.RAVAA_UJI_PASS || 'admin123';
 
 const api = async (method, path, body, token) => {
@@ -90,7 +90,7 @@ const TK0 = kasirLogin.json.data.token;
 await api('POST', '/api/users/password', { old_password: 'kasir1234', password: 'kasir5678' }, TK0); // bersihkan must_change
 const TK = (await api('POST', '/api/login', { username: k1.json.data.username, password: 'kasir5678' })).json.data.token;
 const tolak = await api('GET', '/api/audit', null, TK);
-chk('kasir -> 403 khusus pemilik', tolak.status === 403 && String(tolak.json.error).includes('khusus pemilik'), tolak.json.error);
+chk('kasir -> 403 khusus owner', tolak.status === 403 && String(tolak.json.error).includes('khusus owner'), tolak.json.error);
 
 console.log('=== D. Login ikut tercatat ===');
 const gagal = await api('POST', '/api/login', { username: UJI_USER, password: 'jelas-salah' });

@@ -81,9 +81,9 @@ async function render(): Promise<void> {
     return;
   }
   if (!bolehBuka(route, saya.akun.role)) {
-    // Kasir nyasar ke halaman pemilik (ketik hash manual): kembalikan ke
+    // Kasir nyasar ke halaman owner (ketik hash manual): kembalikan ke
     // bawaan perannya SEKALI (hash berubah -> render ulang yang sah).
-    toast('Halaman ini khusus pemilik', 'warning');
+    toast('Halaman ini khusus owner', 'warning');
     location.hash = ruteBawaan(saya.akun.role);
     return;
   }
@@ -150,10 +150,10 @@ async function render(): Promise<void> {
     // Pengaturan: baca-tulis GET/POST /api/settings -> di-mount.
     void mountSettingsPage(page);
   } else if (route === 'users') {
-    // Pengguna: akun kasir & pemilik (khusus pemilik, dijaga guard + nav).
+    // Pengguna: akun kasir & owner (khusus owner, dijaga guard + nav).
     void mountUsersPage(page);
   } else if (route === 'audit') {
-    // Jejak audit: read-only, siapa mengubah apa (khusus pemilik).
+    // Jejak audit: read-only, siapa mengubah apa (khusus owner).
     void mountAuditPage(page);
   }
   // Tidak ada cabang else: parseRoute hanya menghasilkan 'pos' atau salah satu
