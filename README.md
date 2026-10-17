@@ -872,6 +872,16 @@ npm run dev:api
     menunjuk **kejadian berhutang saat nota**, sedangkan saldo piutang yang
     masih hidup tetap dibaca dari halaman **Hutang** (charge-nya memang sudah
     tercatat otomatis di sana sejak putaran 12).
+  - **Penanda RETUR** (baru 2026-10-18, permintaan pemilik *"pada Riwayat
+    transaksi, jika ada retur apakah tidak di tandai?"*): nota yang pernah
+    diretur menampilkan **chip amber `Retur RpX`** di kolom Jenis (di
+    samping chip Hutang; amber = uang KELUAR kembali ke pelanggan, senada
+    badge Tarik) dan rincian nota memuat **kotak amber Retur** + baris
+    "`n`× retur pada nota ini — stok kembali masuk, uang kembali ke
+    pelanggan (halaman Retur)". Angkanya dihitung server saat baca dari
+    baris `returns` yang menunjuk nota ini (field `n_retur`/`retur_total` di
+    `GET /api/sales` & `/:id`) — retur manual tanpa nota tidak menandai nota
+    mana pun, dan retur yang dibatalkan otomatis hilang penandanya.
   - **Cetak ulang struk** (baru 2026-10-01): kartu Pembayaran rincian penjualan
     punya tombol **Cetak ulang struk**. Setelah memilih isi nota, dialog
     menawarkan **[Thermal] [A4] [Batal]** — A4 membuka invoice A4 yang sama

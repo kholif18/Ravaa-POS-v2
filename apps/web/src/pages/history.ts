@@ -46,6 +46,11 @@ export type SaleRow = {
    *  "Pelanggan Umum") — kondisi syarat catat-hutang otomatis di POS. Ini
    *  menunjuk KEJADIAN saat nota; saldo ledger live ada di halaman Hutang. */
   sisa_hutang?: number;
+  /** Penanda RETUR (computed server, 2026-10-18): jumlah baris retur + uang
+   *  kembali yang mengattribusi nota ini (returns.sale_id). Retur manual
+   *  (tanpa nota) tidak terhitung; retur yang dibatalkan ikut hilang. */
+  n_retur?: number;
+  retur_total?: number;
 };
 
 type TopupRow = {
@@ -154,6 +159,17 @@ function chipHutang(s: SaleRow): string {
     title="Tercatat otomatis di halaman Hutang — atas nama ${esc(nama)}, nota ${esc(nota)}">${icon('alert')}<span>Hutang ${rp(sisa)}</span></span>`;
 }
 
+/** Chip penanda nota PERNAH diretur (amber — uang KELUAR kembali ke pelanggan,
+ *  senada badge Tarik; hutang merah = uang belum masuk, retur = uang kembali).
+ *  Angka = uang kembali ke pelanggan, bukan omzet baru. "" bila belum ada. */
+function chipRetur(s: SaleRow): string {
+  const tot = s.retur_total ?? 0;
+  if (tot <= 0 && !s.n_retur) return '';
+  const nota = s.invoice_no ?? s.id.slice(0, 8);
+  return `<span class="chip !border-amber-500/40 !text-amber-700 dark:!text-amber-400"
+    title="${s.n_retur ?? 0}× retur pada nota ${esc(nota)} — uang kembali ke pelanggan, tercatat di halaman Retur">${icon('sync')}<span>Retur ${rp(tot)}</span></span>`;
+}
+
 const LAYANAN: Record<string, string> = {
   'E-WALLET': 'Isi e-wallet', 'PULSA': 'Pulsa', 'PLN-TOKEN': 'PLN token', 'PLN-BILL': 'PLN tagihan',
   'TARIK-EWALLET': 'Tarik e-wallet', 'TARIK-BANK': 'Tarik bank',
@@ -250,6 +266,7 @@ function detailJual(s: SaleRow): string {
   const items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
   const discBaris = Math.max(0, s.subtotal - s.discount - s.total); // terturun dari kolom (lihat insertSale)
   const sisaH = sisaHutang(s); // penanda hutang (putaran 13)
+  const returTot = s.retur_total ?? 0; // penanda retur (2026-10-18)
   const rows = items
     .map((it) => {
       const bersih = it.amount - it.discount;
@@ -295,6 +312,14 @@ function detailJual(s: SaleRow): string {
         </div>
         <div class="text-[11px] leading-relaxed text-red-600/80 dark:text-red-400/80">
           Otomatis tercatat di halaman Hutang — Nota ${esc(s.invoice_no ?? s.id.slice(0, 8))} · ${esc((s.customer_name ?? '').trim() || 'Pelanggan Umum')}
+        </div>` : ''}
+      ${(s.n_retur ?? 0) > 0 ? `
+        <div class="mt-1 flex items-baseline justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <span class="text-xs font-semibold text-amber-700 dark:text-amber-400">Retur</span>
+          <span class="text-sm font-bold tabular-nums text-amber-700 dark:text-amber-400">${rp(returTot)}</span>
+        </div>
+        <div class="text-[11px] leading-relaxed text-amber-600/80 dark:text-amber-400/80">
+          ${s.n_retur ?? 0}× retur pada nota ini — stok kembali masuk, uang kembali ke pelanggan (halaman Retur)
         </div>` : ''}
       ${ket('Kasir', esc(s.cashier))}
       ${ket('Pelanggan', esc((s.customer_name ?? '').trim() || 'Pelanggan Umum'))}
@@ -511,7 +536,7 @@ function renderTabel(): string {
       return `
       <tr data-trx="${esc(b.key)}" class="cursor-pointer${terbuka ? ' bg-gray-50 dark:bg-gray-800/50' : ''}" aria-expanded="${terbuka}">
         <td class="td whitespace-nowrap tabular-nums">${esc(waktuCell)}</td>
-        <td class="td"><span class="flex flex-wrap items-center gap-1">${badge(b.jenis)}${b.s ? chipHutang(b.s) : ''}</span></td>
+        <td class="td"><span class="flex flex-wrap items-center gap-1">${badge(b.jenis)}${b.s ? chipHutang(b.s) + chipRetur(b.s) : ''}</span></td>
         <td class="td">${keterangan}</td>
         <td class="td whitespace-nowrap">${esc(metodeCell)}</td>
         <td class="td td-num font-semibold">${rp(total)}</td>

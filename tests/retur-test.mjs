@@ -91,6 +91,17 @@ chk('retur terikat shift -> 201', e3.status === 201);
 const sh = await api('/api/shifts?cashier=kasir&status=open');
 const bs = sh.data.find((s) => s.id === shift.data.id);
 chk('agregat n_retur/retur_total ikut', bs?.n_retur >= 1 && bs?.retur_total >= 1000, JSON.stringify({ n: bs?.n_retur, tot: bs?.retur_total }));
+// Penanda retur di NOTA (2026-10-18): field computed `n_retur`/`retur_total`
+// di GET /api/sales & /:id — dasar chip "Retur" di halaman Riwayat. Saat ini
+// r1 (2×5000) + r2 (1×5000) = 2 baris / 15000; e3 di atas MANUAL (sale_id
+// NULL) jadi sengaja tidak mengattribusi nota.
+const notaRet = await api(`/api/sales/${saleId}`);
+chk('GET /api/sales/:id menandai retur (n=2, total 15000)',
+  notaRet.data.sale.n_retur === 2 && notaRet.data.sale.retur_total === 15000,
+  JSON.stringify({ n: notaRet.data.sale.n_retur, tot: notaRet.data.sale.retur_total }));
+const rowRet = (await api(`/api/sales?date=${TODAY}`)).data.find((r) => r.id === saleId);
+chk('GET /api/sales daftar ikut membawa penanda retur',
+  rowRet?.n_retur === 2 && rowRet?.retur_total === 15000, JSON.stringify(rowRet));
 
 console.log('=== E. UI halaman returns ===');
 await p.goto('http://localhost:5656/#/returns', { waitUntil: 'networkidle' });
@@ -110,11 +121,14 @@ await p.click('.modal-footer .btn-ghost'); await p.waitForSelector('.swal2-conta
 await p.click('.swal2-container .sw-btn-danger'); await p.waitForTimeout(1500);
 chk('batalkan -> hilang dari daftar', !(await api(`/api/returns?date=${TODAY}`)).data.some((r) => r.id === idManual));
 
-console.log('=== F. UI riwayat: tombol retur per nota ===');
+console.log('=== F. UI riwayat: tombol retur per nota + penanda retur ===');
 await p.goto('http://localhost:5656/#/history', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1000);
+chk('baris nota menandai retur (chip amber)',
+  (await p.textContent(`[data-trx="sale:${saleId}"]`)).includes('Retur Rp15.000'));
 await p.click(`[data-trx="sale:${saleId}"]`); await p.waitForTimeout(1200);
 chk('detail nota memuat tombol Buat retur', await p.locator('[data-retur-nota]').count() === 1);
+chk('detail nota memuat kotak Retur', (await p.textContent('.det-row')).includes('2× retur pada nota ini'));
 await p.click('[data-retur-nota]'); await p.waitForSelector('.modal');
 await w(`#rt-${siId}`, '0'); await p.waitForTimeout(200);
 chk('dialog prefill item nota', (await p.textContent('.modal')).includes(NAMA_FISIK));

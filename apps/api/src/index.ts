@@ -2021,12 +2021,21 @@ app.get('/api/sales', (c) => {
   // angkanya setara dengan charge yang dikirim ke /api/customer-debts.
   // Sisa aktual ledger BISA berubah (dibayar/dihapus di halaman Hutang) —
   // penanda di sini sengaja menunjuk KEJADIAN saat nota, bukan saldo live.
+  // `n_retur`/`retur_total` (2026-10-18, penanda RETUR di halaman Riwayat):
+  // jumlah baris retur + uang kembali yang mengattribusi nota ini lewat
+  // `returns.sale_id` (indeks `idx_returns_sale`). Hanya retur DARI nota yang
+  // terhitung — retur manual (`sale_id` NULL, tanpa nota) memang tidak
+  // mengattribusi nota mana pun. Dihitung saat baca (bukan kolom tersimpan):
+  // baris retur bisa DIBATALKAN (DELETE /api/returns/:id = salah ketik), jadi
+  // penanda ikut hilang persis seperti hutang yang dibayar.
   const data = db.prepare(
     `SELECT s.*,
             CASE WHEN s.pay_method='tunai' AND s.total > s.cash_in
                   AND s.customer_id IS NOT NULL
                   AND s.customer_name <> 'Pelanggan Umum'
                  THEN s.total - s.cash_in ELSE 0 END AS sisa_hutang,
+            (SELECT COUNT(*) FROM returns r WHERE r.sale_id = s.id) AS n_retur,
+            (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.sale_id = s.id) AS retur_total,
             (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS n_items
        FROM sales s
       WHERE date(s.created_at)=date(?)
@@ -2038,13 +2047,16 @@ app.get('/api/sales', (c) => {
 
 app.get('/api/sales/:id', (c) => {
   // `sisa_hutang` = penanda "nota ini berhutang" — CASE yang SAMA dengan
-  // GET /api/sales (putaran 13); lihat komentar di sana untuk rasionalnya.
+  // GET /api/sales (putaran 13); `n_retur`/`retur_total` = penanda retur
+  // (2026-10-18) — subquery yang SAMA pula; lihat komentar di sana.
   const sale = db.prepare(
     `SELECT *,
             CASE WHEN pay_method='tunai' AND total > cash_in
                   AND customer_id IS NOT NULL
                   AND customer_name <> 'Pelanggan Umum'
-                 THEN total - cash_in ELSE 0 END AS sisa_hutang
+                 THEN total - cash_in ELSE 0 END AS sisa_hutang,
+            (SELECT COUNT(*) FROM returns r WHERE r.sale_id = sales.id) AS n_retur,
+            (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.sale_id = sales.id) AS retur_total
        FROM sales WHERE id=?`,
   ).get(c.req.param('id'));
   if (!sale) return c.json({ error: 'tidak ditemukan' }, 404);

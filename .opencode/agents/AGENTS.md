@@ -1047,6 +1047,19 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          (`sale_id` + shift TERBUKA KINI, bukan shift nota
                          asal) — riwayat nota lama tidak diubah, catatan baru
                          masuk `#/returns`.
+                         **Penanda RETUR (2026-10-18, permintaan pemilik
+                         *"pada Riwayat transaksi, jika ada retur apakah tidak
+                         di tandai?"*)**: baris penjualan dengan computed
+                         `n_retur > 0` (lihat GET /api/sales) menampilkan
+                         **chip amber `Retur RpX`** di kolom Jenis
+                         (`chipRetur()` — amber senada badge Tarik: uang
+                         KELUAR kembali ke pelanggan; hutang merah = uang
+                         belum masuk) + kartu Pembayaran `detailJual()`
+                         menampilkan **kotak amber Retur** + baris "`n`× retur
+                         pada nota ini — stok kembali masuk, uang kembali ke
+                         pelanggan (halaman Retur)". Tidak ada chip filter
+                         (belum diminta); retur manual `sale_id` NULL tidak
+                         menandai nota mana pun.
  apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan ala Aronium) —
                            **refactor registry 2026-10-17** (permintaan pemilik
                            "perlu refactor juga halaman report untuk menampung
@@ -2226,6 +2239,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     "nota ini berhutang", CASE komputasi **SAMA PERSIS** dengan
     `GET /api/sales` (lihat butir `sisa_hutang` di sana untuk rasional &
     batas maknanya).
+  - Sejak 2026-10-18 `sale` juga memuat **`n_retur`** + **`retur_total`** —
+    penanda RETUR, subquery komputasi **SAMA PERSIS** dengan `GET /api/sales`
+    (lihat butir `n_retur` di sana untuk rasional & batas maknanya).
   - Tiap baris `items` memuat **`base_unit`** (satuan dasar produk lewat
     `LEFT JOIN products`, `NULL` untuk item manual) sejak 2026-10-01 — dipakai
     tombol **Cetak ulang struk** di halaman Riwayat: struk hanya mencetak
@@ -2234,7 +2250,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `''` bila tanpa) lewat `SELECT si.*` — dipakai cetak ulang supaya baris
     catatan ikut tercetak persis seperti struk aslinya.
 * `GET /api/sales?date=&limit=&offset=`
-  -> `{data:[{id,shift_id,created_at,invoice_no,customer_id,customer_name,sisa_hutang,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
+  -> `{data:[{id,shift_id,created_at,invoice_no,customer_id,customer_name,sisa_hutang,n_retur,retur_total,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).
     Read-only: tidak mengubah `products.version` dan tidak perlu.
   - `date` default hari UTC (`YYYY-MM-DD`). Divalidasi round-trip
@@ -2263,6 +2279,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     dikirim oleh `GET /api/sales/:id`. Jangan mengganti ini dengan JOIN ke
     ledger: `customer_debts` tidak punya FK/relasi ke `sales` (charge hanya
     di-note `Nota <invoice_no> — sisa bayar POS`).
+  - **`n_retur` + `retur_total` (2026-10-18 — penanda RETUR di halaman
+    Riwayat)**: **computed per baris, bukan kolom tersimpan** —
+    `(SELECT COUNT(*) …)/(SELECT COALESCE(SUM(r.total),0) …)` dari `returns
+    r WHERE r.sale_id = s.id` (indeks `idx_returns_sale`). Hanya retur DARI
+    nota (`POST /api/returns` dengan `sale_id`) yang terhitung; retur manual
+    (`sale_id` NULL) tidak mengattribusi nota mana pun, dan retur yang
+    DIBATALKAN (`DELETE /api/returns/:id`) ikut hilang dari penanda — sama
+    polanya dengan hutang yang dibayar. Dasar chip amber `Retur RpX` di
+    kolom Jenis + kotak `Retur` di kartu Pembayaran `detailJual()` halaman
+    Riwayat (bukan omzet baru — uang kembali ke pelanggan). Diuji
+    `tests/retur-test.mjs` section D & F (kini 35 asersi).
   - Urutan `created_at DESC, rowid DESC` (yang terbaru di atas).
 * `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor?,token?,nominal>0,admin>=0,pay_method?,shift_id?,cashier?,sale_id?}`
   - `provider` = **kode jenis layanan** (bukan brand). Nilai yang digunakan POS:
