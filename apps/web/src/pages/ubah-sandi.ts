@@ -1,9 +1,14 @@
 // Ganti sandi (#/ubah-sandi, 2026-10-11): layar penuh tanpa shell.
 // Dipakai WAJIB saat akun baru/reset (must_change) dan sukarela lewat tombol
 // "Ganti sandi" di modal profil. Sukses -> rute bawaan peran.
+// Restyle 2026-10-17: memakai kerangka yang SAMA dengan login
+// (authLayarHtml() ui/auth-screen.ts) — satu tampilan auth di kedua rute.
+// ID #gs-form/#gs-lama/#gs-baru/#gs-ulang/#gs-err/#gs-ok tidak berubah.
 import { apiPost, HttpError } from '../api';
 import { toast } from '../ui/toast';
 import { akunTersimpan, ruteBawaan, type Peran } from '../ui/auth';
+import { icon } from '../ui/icons';
+import { authLayarHtml } from '../ui/auth-screen';
 
 function errMsg(e: unknown): string {
   if (e instanceof HttpError) return e.message;
@@ -15,37 +20,43 @@ export function renderUbahSandiPage(el: HTMLElement): void {
   const nama = tersimpan?.akun.name ?? tersimpan?.akun.username ?? '';
   const wajib = tersimpan?.wajib ?? true;
   const peran: Peran = tersimpan?.akun.role ?? 'kasir';
-  el.innerHTML = `
-  <div class="login-bg">
-    <span class="login-orb login-orb-2" aria-hidden="true"></span>
-    <span class="login-orb login-orb-3" aria-hidden="true"></span>
-    <div class="flex min-h-full items-center justify-center p-4">
-      <div class="login-card-glass w-full max-w-sm">
+  el.innerHTML = authLayarHtml(`
+    <div class="flex items-center gap-3">
+      <span class="login-logo size-11">${icon('shieldCheck')}</span>
+      <div class="min-w-0">
         <h1 class="text-sm font-semibold text-white">Ganti sandi${nama ? ` — ${nama}` : ''}</h1>
         <p class="mt-0.5 text-xs text-white/70">${
           wajib
             ? 'Akun ini wajib ganti sandi dulu sebelum memakai aplikasi.'
             : 'Isi sandi baru di bawah.'
         }</p>
-        <form id="gs-form" class="mt-5 space-y-3" autocomplete="off">
-          <div class="field">
-            <label class="label !text-white/75" for="gs-lama">Sandi lama</label>
-            <input id="gs-lama" class="input login-input" type="password" autocomplete="current-password" />
-          </div>
-          <div class="field">
-            <label class="label !text-white/75" for="gs-baru">Sandi baru (min. 4 karakter)</label>
-            <input id="gs-baru" class="input login-input" type="password" autocomplete="new-password" />
-          </div>
-          <div class="field">
-            <label class="label !text-white/75" for="gs-ulang">Ulangi sandi baru</label>
-            <input id="gs-ulang" class="input login-input" type="password" autocomplete="new-password" />
-          </div>
-          <p id="gs-err" class="hidden text-xs font-medium text-amber-200"></p>
-          <button type="submit" id="gs-ok" class="btn btn-primary w-full !bg-white !text-primary hover:!bg-white/90">Simpan sandi baru</button>
-        </form>
       </div>
     </div>
-  </div>`;
+    <form id="gs-form" class="mt-5 space-y-3" autocomplete="off">
+      <div class="field">
+        <label class="label !text-white/75" for="gs-lama">Sandi lama</label>
+        <div class="login-field">
+          ${icon('lock')}
+          <input id="gs-lama" class="input login-input pl-9" type="password" autocomplete="current-password" />
+        </div>
+      </div>
+      <div class="field">
+        <label class="label !text-white/75" for="gs-baru">Sandi baru (min. 4 karakter)</label>
+        <div class="login-field">
+          ${icon('lock')}
+          <input id="gs-baru" class="input login-input pl-9" type="password" autocomplete="new-password" />
+        </div>
+      </div>
+      <div class="field">
+        <label class="label !text-white/75" for="gs-ulang">Ulangi sandi baru</label>
+        <div class="login-field">
+          ${icon('lock')}
+          <input id="gs-ulang" class="input login-input pl-9" type="password" autocomplete="new-password" />
+        </div>
+      </div>
+      <p id="gs-err" class="login-err hidden" role="alert"></p>
+      <button type="submit" id="gs-ok" class="btn login-btn w-full">Simpan sandi baru</button>
+    </form>`);
   const form = el.querySelector<HTMLFormElement>('#gs-form')!;
   const lama = el.querySelector<HTMLInputElement>('#gs-lama')!;
   const baru = el.querySelector<HTMLInputElement>('#gs-baru')!;

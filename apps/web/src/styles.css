@@ -458,11 +458,28 @@
   transform: scale(0.97);
   transition-duration: 90ms;
 }
-  /* ---------- Login ala Sandik (2026-10-12) ----------
+  /* ---------- Layar auth ala Sandik (restyle 2026-10-17) ----------
      Latar gradasi biru 135deg + tiga ornamen lingkaran blur (glassmorphism)
-     + kartu kaca putih/10 dengan backdrop-blur. Dipakai #/login & #/ubah-sandi. */
+     + kartu kaca putih/10 dengan backdrop-blur. Dipakai #/login & #/ubah-sandi
+     lewat satu kerangka `authLayarHtml()` (ui/auth-screen.ts).
+
+     Restyle 2026-10-17 (permintaan pemilik "layout halaman login jadi lebih
+     responsif dan modern"):
+     - `.page:has(.login-bg)` = gradasi FULL-BLEED (dulu ada bingkai canvas
+       10-12px dari padding .page; pola :has sama dengan `.page:has(.pm-shell)`).
+     - `.login-wrap` = grid 1 kolom di HP (brand ringkas di atas kartu) /
+       2 kolom >=lg (brand kiri, kartu kanan). `m-auto` = SATU-satunya pemusat
+       vertikal: rantai `min-h-full` bersarang lama tidak pernah teresolusi
+       (kartu terukur mentok atas top=28px), sedangkan margin-auto pada flex
+       item tetap aman saat konten lebih tinggi dari layar (auto margin kolaps
+       ke 0 — tidak terpotong di atas seperti `justify-center`).
+     - `.login-field` = input berikon (svg absolute kiri) + tombol lihat sandi
+       (kanan); padding kiri/kanan diatur utility di template (pl-9/pr-10). */
+  .page:has(.login-bg) {
+    @apply p-0;
+  }
   .login-bg {
-    @apply relative flex min-h-full flex-col overflow-hidden bg-gradient-to-br;
+    @apply relative flex min-h-full flex-col overflow-hidden;
     background-image: linear-gradient(135deg, var(--grad-blue-from) 0%, var(--grad-blue-via) 45%, var(--grad-blue-to) 100%);
   }
   .login-orb {
@@ -479,12 +496,59 @@
   .login-orb-3 {
     @apply -bottom-28 left-1/4 size-72 opacity-60;
   }
+  .login-wrap {
+    @apply relative z-10 m-auto grid w-full max-w-5xl items-center gap-8 p-4 sm:p-6 lg:grid-cols-2 lg:gap-16 lg:p-10;
+  }
+  /* Tile ikon brand (ukuran panjang x lebar per template: size-12/size-11 —
+     kelas ini TIDAK mengunci size supaya utility tetap bisa menyesuaikan;
+     kelas unlayered menang atas utility, jadi jangan letakkan size di sini). */
+  .login-logo {
+    @apply flex shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white shadow-lg shadow-black/15 ring-1 ring-white/20;
+  }
+  .login-logo svg {
+    @apply size-6;
+  }
   .login-card-glass {
-    @apply relative z-10 rounded-2xl border border-white/15 bg-white/10 p-6 shadow-2xl backdrop-blur-md;
+    @apply relative mx-auto w-full max-w-sm rounded-2xl border border-white/15 bg-white/10 p-6 shadow-2xl backdrop-blur-md;
+  }
+  /* Hero panel kiri — satu-satunya teks >13px di layar auth (28px; pola sama
+     #pos-grand 48px: ukuran arbitrer yang disengaja, bukan token baru). */
+  .auth-judul {
+    @apply text-[28px] font-bold leading-tight tracking-tight;
+  }
+  .login-point {
+    @apply flex items-start gap-2.5 text-xs leading-relaxed text-white/75;
+  }
+  .login-point > svg {
+    @apply mt-0.5 size-4 shrink-0 text-white/50;
   }
   /* Input di atas kaca: putih solid agar kontras teks tetap AA. */
   .login-input {
     @apply border-transparent bg-white/95 text-gray-900 placeholder:text-gray-400 focus:bg-white;
+  }
+  .login-field {
+    @apply relative;
+  }
+  .login-field > svg {
+    @apply pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400;
+  }
+  .login-toggle {
+    @apply absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none;
+  }
+  .login-toggle svg {
+    @apply size-4;
+  }
+  /* Kotak galat: tetap `hidden` sampai ada pesan (teks di-set JS — kontrak
+     tests/login-test.mjs). role="alert" di template. */
+  .login-err {
+    @apply rounded-lg border border-amber-300/40 bg-amber-400/15 px-3 py-2 text-xs font-medium text-amber-100;
+  }
+  /* Tombol aksi utama DI ATAS KACA: putih solid + teks primary. Sengaja BUKAN
+     .btn-primary — varian itu memasang `background-image` gradien (260-263)
+     yang TIDAK bisa ditimpa utility `!bg-white`, sehingga tombol lama tampil
+     biru-di-atas-biru (bug nyata ditemukan 2026-10-17). */
+  .login-btn {
+    @apply bg-white text-primary shadow-lg shadow-black/15 hover:bg-primary-soft;
   }
 
   .swal2-container .sw-btn-primary {
