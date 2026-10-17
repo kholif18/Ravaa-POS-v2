@@ -15,6 +15,22 @@ const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 
+// Fixture section A — WAJIB self-contained (AGENTS §5: nama EKSAK, bukan
+// prefix, jangan andalkan data ambient): DB kasir boleh cuma punya 2
+// pelanggan / 1 supplier / 0 hutang, sedangkan asersi limit+offset butuh
+// ≥3 pelanggan, ≥2 supplier, ≥1 baris hutang. Disediakan lewat API di bawah,
+// dibersihkan inline seusai section A (agar section B/C tak bergeser), plus
+// self-heal di awal run bila run sebelumnya crash di tengah.
+const FIX_CUST = ['UjiPager Cust 01', 'UjiPager Cust 02', 'UjiPager Cust 03', 'UjiPager Hutang'];
+const FIX_SUP = ['UjiPager Sup 01', 'UjiPager Sup 02'];
+const kutip = (arr) => arr.map((n) => `'${n}'`).join(', ');
+const bersihFixture = () => sql(
+  `DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name = 'UjiPager Hutang'); ` +
+  `DELETE FROM customers WHERE name IN (${kutip(FIX_CUST)}); ` +
+  `DELETE FROM suppliers WHERE name IN (${kutip(FIX_SUP)});`,
+);
+bersihFixture(); // no-op bila bersih
+
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
 await pasangToken(p);
@@ -24,6 +40,18 @@ const api = (path) => p.evaluate((u) => fetch(u).then((r) => r.json()), path);
 
 await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
+
+// Sediakan fixture section A lewat API (token ikut terpasang via pasangToken).
+const post = (path, body) => p.evaluate(([u, b]) => fetch(u, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b),
+}), [path, body]);
+for (const name of FIX_CUST.slice(0, 3)) await post('/api/customers', { name });
+for (const name of FIX_SUP) await post('/api/suppliers', { name });
+const custHutang = await p.evaluate(() => fetch('/api/customers', {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ name: 'UjiPager Hutang' }),
+}).then((r) => r.json()));
+await post('/api/customer-debts', { customer_id: custHutang.data.id, type: 'charge', amount: 5000, note: 'Uji paginasi' });
 
 console.log('=== A. limit/offset server ===');
 const cAll = await api('/api/customers');
@@ -42,6 +70,10 @@ chk('purchases: limit=1', pHal.data.length <= 1, `${pHal.data.length}/${pHal.tot
 const rHal = await api(`/api/returns?date=${new Date().toISOString().slice(0, 10)}&limit=1`);
 chk('returns: limit=1', rHal.data.length <= 1, `${rHal.data.length}/${rHal.total}`);
 chk('offset melampaui -> data kosong', (await api('/api/customers?limit=2&offset=99999')).data.length === 0);
+
+// Fixture section A dibersihkan sekarang juga — section B/C harus melihat
+// data yang sama seperti sebelum suite ini berjalan.
+bersihFixture();
 
 console.log('=== B. Pager UI suppliers (22 baris uji) ===');
 for (let i = 1; i <= 22; i++) {

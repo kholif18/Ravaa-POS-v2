@@ -2,8 +2,20 @@
 // Stok + summary range + cashiers + products + piutang + cetak/PDF/CSV +
 // dropdown rentang tanggal (2026-10-17, revisi "jadikan dropdown saja") +
 // anti-regresi aside (kartu mandiri setinggi isinya + sticky utuh saat digulir).
+//
+// Fixture menu Stok (2026-10-18): asersi "Saran order" jangan bergantung data
+// ambient — DB sehat = daftar "Perlu dikulak" kosong dan header tabelnya tidak
+// dirender (test pernah CRASH begitu stok kasir dirapikan). Produk uji dibuat
+// nama EKSAK + self-heal sisa run gagal + dihapus langsung seusai asersi.
 import { chromium } from 'playwright-core';
+import { execSync } from 'node:child_process';
+import path0 from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { pasangToken } from './bantuan-uji.mjs';
+
+const API = 'http://localhost:3001';
+const DB = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '../apps/api/data/data.db');
+const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 
 let pass = 0, fail = 0;
 const chk = (name, ok, info = '') => {
@@ -58,6 +70,18 @@ chk('validasi: profit from>to 400', (await get('/api/reports/profit?from=2026-10
 chk('validasi: from>to 400', (await get('/api/reports/summary?from=2026-10-11&to=2026-10-01')).status === 400);
 chk('validasi: format rusak 400', (await get('/api/reports/summary?from=rabu')).status === 400);
 chk('validasi: >366 hari 400', (await get('/api/reports/summary?from=2024-01-01&to=2026-10-11')).status === 400);
+
+// Fixture deterministik menu Stok (lihat header): produk fisik stok 1 / min 5
+// => muncul di lowStock dengan saran 4. Self-heal dulu (sisa run gagal),
+// nama EKSAK — dibersihkan lagi seusai asersi "Saran order" di bawah.
+const FIX_LOW = 'UjiLapMenu Rendah';
+sql(`DELETE FROM products WHERE name='${FIX_LOW}';`);
+const rFix = await fetch(`${API}/api/products`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ name: FIX_LOW, category_slug: 'atk', unit: 'pcs', price: 1000, stock: 1, min_stock: 5 }),
+});
+if (rFix.status !== 200 && rFix.status !== 201) console.log(`  (catatan) fixture ${FIX_LOW} gagal dibuat: ${rFix.status}`);
 
 console.log('=== B. UI menu + filter ===');
 await p.goto('http://localhost:5656/#/reports', { waitUntil: 'networkidle' });
@@ -121,7 +145,12 @@ chk('menu Produk: ada cari + tabel', await p.locator('#rp-q').count() === 1);
 await p.click('[data-menu="piutang"]'); await p.waitForTimeout(1200);
 chk('menu Piutang: 3 kartu', (await p.textContent('#rp-body')).includes('Sisa berjalan kini'));
 await p.click('[data-menu="stok"]'); await p.waitForTimeout(1200);
-chk('menu Stok: saran order', (await p.textContent('#rp-body')).includes('Saran order'));
+const teksStok = await p.textContent('#rp-body');
+chk('menu Stok: saran order + fixture low tampil',
+  teksStok.includes('Saran order') && teksStok.includes(FIX_LOW));
+// Bersihkan fixture SEKARANG: halaman lain (dashboard/POS) membaca lowStock
+// yang sama — jangan biarkan menjalar ke suite berikutnya.
+sql(`DELETE FROM products WHERE name='${FIX_LOW}';`);
 await p.click('[data-menu="laba"]'); await p.waitForTimeout(1200);
 chk('menu Laba: kartu + tabel per hari & per transaksi',
   (await p.textContent('#rp-body')).includes('Laba kotor')
