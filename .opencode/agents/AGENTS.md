@@ -1141,13 +1141,17 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           = **DROPDOWN `#po-hasil`** (role=listbox, absolute;
                           klik hasil → baris masuk qty 1 + harga beli master,
                           merge produk+harga sama; Enter = hasil pertama;
-                          blur 150ms menutup) + **tabel baris editable**
+                          blur 150ms menutup; **klik-lambat 2026-10-18**:
+                          mousedown opsi `preventDefault()` — tanpa itu timer
+                          blur menyembunyikan dropdown saat tombol ditahan
+                          >150ms dan click tak pernah sampai, pola
+                          `#pos-results`) + **tabel baris editable**
                           (`data-po-qty`/`data-po-hb`/`data-po-sub`/
                           `data-po-del`, update `#po-total` live tanpa
                           re-render); (5) rincian PO = **tabel barang**
                           (qty/harga beli/sub total) + tfoot
                           Total/Terbayar/Sisa hutang, catatan pindah ke kartu
-                          header. `tests/purchase-test.mjs` 40 asersi.
+                          header. `tests/purchase-test.mjs` 42 asersi.
 apps/web/src/labelsheet.ts  **Model cetak label (baru 2026-10-17, refactor
                          halaman Label harga)**: LEMBAR label A4/Folio lewat
                          CETAK BROWSER (`window.print()` + `@page` mm), bukan
@@ -1204,7 +1208,13 @@ apps/web/src/pages/labels.ts  Halaman #/labels — **FULL-PAGE** (di luar
                          `#lb-hasil` (pola dropdown `#po-hasil` purchases.ts —
                          klik opsi = MASUK keranjang; opsi terdaftar diberi
                          centang `aria-selected` dan klik-nya no-op; Enter =
-                         opsi pertama, Esc/blur 150ms menutup) DAN di bawahnya
+                         opsi pertama, Esc/blur 150ms menutup; **klik-lambat
+                          2026-10-18** — laporan pemilik "sudah klik produk
+                          kok tidak terpilih" di laptop: mousedown opsi
+                          `preventDefault()` supaya input tidak blur (tanpa
+                          itu timer 150ms menyembunyikan dropdown saat tombol
+                          ditahan >150ms dan click tak pernah sampai; pola
+                          `#pos-results`) DAN di bawahnya
                          kotak `#lb-dipilih` = produk TERPILIH saja, tiap
                          baris ber-ikon hapus `[data-hapus]` (pola keranjang
                           belanja; `#lb-dipilih [data-hapus]` = hook test);
@@ -1235,9 +1245,10 @@ apps/web/src/pages/labels.ts  Halaman #/labels — **FULL-PAGE** (di luar
                          bindHasil/bindDipilih) supaya fokus input tidak
                           hilang; listener dokumen
                          via pageAbort (resize + Ctrl+P). Diuji
-                         `tests/e2e-label.mjs` (48 asersi — termasuk produk
+                         `tests/e2e-label.mjs` (49 asersi — termasuk produk
                          uji tanpa barcode: SKU tampil sebagai Code 128, dan
-                         asersi anti-regresi keranjang default kosong).
+                         asersi anti-regresi keranjang default kosong + klik
+                         lambat >150ms tetap memilih).
 apps/web/src/pages/audit.ts  Halaman #/audit (menu Jejak Audit, 2026-10-16,
                          khusus owner): tabel audit_log dari GET /api/audit
                          (chip jumlah `#audit-count`, filter entity/action +

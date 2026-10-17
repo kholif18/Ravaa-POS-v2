@@ -623,6 +623,14 @@ function bind(): void {
   q?.addEventListener('blur', () => {
     hideTimer = window.setTimeout(() => hasil?.classList.add('hidden'), 150);
   });
+  // Klik opsi: mousedown + preventDefault supaya input TIDAK blur — tanpa ini
+  // timer blur 150ms menyembunyikan dropdown saat tombol masih ditahan dan
+  // click-nya tidak pernah sampai (klik lambat > 150ms = "sudah diklik kok
+  // tidak terpilih", laporan pemilik 2026-10-18; pola sama dengan #pos-results
+  // di pos.ts:4511).
+  hasil?.addEventListener('mousedown', (e) => {
+    if ((e.target as HTMLElement).closest?.('[data-pilih]')) e.preventDefault();
+  });
   q?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();

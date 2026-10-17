@@ -625,6 +625,13 @@ function mountBaru(el: HTMLElement): void {
   // Sembunyikan dropdown saat fokus pindah; jeda 150ms supaya klik hasil
   // (mousedown → blur → click) tetap sampai sebelum disembunyikan.
   q.addEventListener('blur', () => setTimeout(tutupHasil, 150));
+  // Klik hasil: mousedown + preventDefault supaya input TIDAK blur — tanpa ini
+  // timer blur 150ms menyembunyikan dropdown saat tombol masih ditahan dan
+  // click-nya tidak pernah sampai (klik lambat > 150ms; pola sama dengan
+  // #pos-results di pos.ts:4511).
+  hasil.addEventListener('mousedown', (e) => {
+    if ((e.target as HTMLElement).closest?.('[data-po-pilih]')) e.preventDefault();
+  });
 
   el.querySelector('#po-simpan')?.addEventListener('click', async () => {
     if (!baris.length) { toast('Belum ada baris PO', 'warning'); q.focus(); return; }

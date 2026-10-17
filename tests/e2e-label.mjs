@@ -225,6 +225,24 @@ try {
     norm(await page.innerText('#lb-terpilih')) === '1 dipilih'
       && await page.locator('#lb-dipilih [data-hapus]').count() === 1);
 
+  // Regresi 2026-10-18 (laporan pemilik "sudah saya klik produknya kok tidak
+  // terpilih"): klik LAMBAT — tombol ditahan > 150ms — dulu timer blur
+  // menyembunyikan dropdown sebelum click sampai, jadi klik hilang. Kini
+  // mousedown opsi preventDefault (input tidak blur) sehingga tetap terpilih.
+  await page.click('#lb-kosong');
+  await page.waitForTimeout(200);
+  await page.fill('#lb-q', SKU);
+  await page.waitForTimeout(300);
+  const opsiLambat = await page.locator('#lb-hasil [data-pilih]').first().boundingBox();
+  await page.mouse.move(opsiLambat.x + opsiLambat.width / 2, opsiLambat.y + opsiLambat.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(300); // > 150ms: dulu dropdown keburu tersembunyi di sini
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  ok('klik lambat (tombol ditahan >150ms) tetap masuk keranjang',
+    norm(await page.innerText('#lb-terpilih')) === '1 dipilih'
+      && await page.locator('#lb-dipilih [data-hapus]').count() === 1);
+
   console.log('=== D. Cetak: jeda dulu, lalu popup browser ===');
   await page.click('#lb-cetak');
   await page.waitForSelector('#toast-root .toast', { timeout: 8000 });

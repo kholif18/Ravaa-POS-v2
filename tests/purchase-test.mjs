@@ -124,7 +124,17 @@ chk('dropdown cari = barang fisik saja (jasa tidak ditawarkan)', !jv.ada, JSON.s
 // Pencarian = dropdown: klik hasil → baris masuk (qty 1, harga beli master),
 // lalu qty/harga diedit di tabel baris.
 await w('#po-q', NF); await p.waitForTimeout(900);
-await p.click('[data-po-pilih]'); await p.waitForTimeout(300);
+// Klik hasil dropdown ala user yang klik LAMBAT (regresi 2026-10-18): tombol
+// ditahan > 150ms — dulu timer blur menyembunyikan dropdown sebelum click
+// sampai sehingga baris tidak masuk. Kini mousedown opsi preventDefault.
+const poOpsi = await p.locator('[data-po-pilih]').first().boundingBox();
+await p.mouse.move(poOpsi.x + poOpsi.width / 2, poOpsi.y + poOpsi.height / 2);
+await p.mouse.down();
+await p.waitForTimeout(300); // > 150ms: dulu dropdown keburu tersembunyi di sini
+await p.mouse.up();
+await p.waitForTimeout(300);
+chk('klik lambat (>150ms) hasil dropdown tetap masuk baris',
+  await p.locator('#po-baris input[data-po-qty]').count() === 1);
 await w('[data-po-qty="0"]', '3');
 await w('[data-po-hb="0"]', '1500');
 await p.click('#po-simpan');
