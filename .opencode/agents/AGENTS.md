@@ -147,7 +147,15 @@ apps/web/src/pos.css    File gaya KHUSUS POS (baru 2026-10-09 — keputusan
                            `text-sm` (13px via `.pos-scope .label/.chip/.th/
                            .suggest-unit`; keputusan pemilik 2026-10-09
                            "text-xs terlalu kecil, sementara di POS dulu") —
-                           halaman lain tetap 11px.
+                           halaman lain tetap 11px. **Tombol kembali ⬅
+                           (`tombolKembaliHtml`, `.icon-btn` bersama) di bar
+                           biru dipaksa PUTIH di kedua tema** (`.pos-ibar-biru
+                           .icon-btn`, 2026-10-18 — aturan dasar .icon-btn
+                           gray-600 di tema terang nyaris tak terlihat di atas
+                           biru; hover ikut putih/15, bukan gray-100+gray-900);
+                           diuji `tests/pos-ibar-test.mjs` (7 asersi: light/
+                           dark/hover + guard tombol ⬅ header MOBILE yang
+                           SENGAJA tidak ikut putih — latarnya putih).
 apps/web/src/pos-mobile.css  Gaya KHUSUS tampilan MOBILE POS (baru 2026-10-17,
                           pasangan `pages/pos-mobile.ts`; pola sama dengan
                           pos.css). SELURUH aturan `.pm-*`: kerangka aplikasi

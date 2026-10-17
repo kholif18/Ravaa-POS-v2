@@ -165,7 +165,11 @@ panel topup/laporan, modal struk, atau styling apa pun.
    POS = `.pos-ibar-biru` (pos.css — gradien token sidebar/grad-blue, TANPA
    hex baru) + `!bg-transparent !border-white/20`; teks putih/putih-transparan,
    Tutup shift = merah tembus pandang, chip Grosir & tombol F9 = putih/15,
-   `#pos-grand` putih (bukan primary). Layout 3 kolom TETAP.
+   `#pos-grand` putih (bukan primary). Layout 3 kolom TETAP. Tombol kembali ⬅
+   (`.icon-btn` bersama) PUTIH di kedua tema (`.pos-ibar-biru .icon-btn`,
+   2026-10-18 — gray-600 dasar di tema terang nyaris tak terlihat di atas
+   biru; hover putih/15). Header MOBILE (`.pm-head`) sengaja TIDAK ikut —
+   latarnya putih di tema terang. Diuji `pos-ibar-test.mjs` (7 asersi).
    **Jebakan**: kelas arbitrary yang MENEMPEL `${` tanpa spasi TIDAK
    di-generate scanner
    Tailwind v4 — selalu spasi sebelum interpolasi template literal.

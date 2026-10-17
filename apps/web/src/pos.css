@@ -70,6 +70,15 @@
     @apply border-transparent text-white;
     background-image: linear-gradient(120deg, var(--color-sidebar) 0%, var(--grad-blue-to) 55%, var(--grad-blue-via) 100%);
   }
+  /* Tombol kembali ⬅ (tombolKembaliHtml) memakai .icon-btn BERSAMA yang di
+     tema terang berwarna gray-600 — di atas bar biru ini chevron nyaris tak
+     terlihat (permintaan pemilik 2026-10-18: "biarkan tetap putih pada light
+     mode"). Bar biru tampil sama di KEDUA tema, jadi ikon dipaksa putih di
+     kedua tema; hover pun putih transparan (bukan gray-100 + gray-900 bawaan
+     .icon-btn — putih di atas abu terang = hilang lagi saat disentuh). */
+  .pos-ibar-biru .icon-btn {
+    @apply text-white hover:bg-white/15 hover:text-white;
+  }
   .pos-ibar-grid {
     @apply grid items-center gap-2;
   }
