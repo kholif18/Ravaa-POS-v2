@@ -44,6 +44,29 @@ export function geser(iso: string, delta: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Senin dari minggu yang memuat `iso` (minggu ala Indonesia: Senin–Minggu).
+ *  Dasar preset "Minggu ini" halaman Laporan (2026-10-17). Input rusak = hariIni(). */
+export function awalMinggu(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return hariIni();
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); // Senin = 0, Minggu = 6
+  return d.toISOString().slice(0, 10);
+}
+
+/** Hari pertama bulan `iso` (`YYYY-MM-01`) — murni potong string, tanpa Date. */
+export function awalBulan(iso: string): string {
+  return `${iso.slice(0, 7)}-01`;
+}
+
+/** Hari terakhir bulan `iso`. Dipakai preset "Bulan lalu" halaman Laporan:
+ *  `akhirBulan(geser(awalBulan(hariIni()), -1))` = akhir bulan sebelumnya. */
+export function akhirBulan(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return hariIni();
+  d.setUTCMonth(d.getUTCMonth() + 1, 0); // hari ke-0 bulan berikutnya = akhir bulan ini
+  return d.toISOString().slice(0, 10);
+}
+
 /** "30 September 2026" untuk judul pemilih hari. Input rusak dikembalikan apa adanya. */
 export function tglPanjang(iso: string): string {
   const d = new Date(`${iso}T00:00:00Z`);

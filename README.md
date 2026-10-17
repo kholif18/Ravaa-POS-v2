@@ -886,22 +886,40 @@ npm run dev:api
     mutasi stok. Koreksi lewat stok opname + transaksi baru.
   - Endpoint baru: `GET /api/sales` dan `GET /api/topups`, keduanya berparameter
     `date` / `limit` / `offset` (kontrak lengkap di AGENTS §3).
-* **Laporan** (`#/reports`, menu **Laporan** di sidebar) — laporan harian pemilik
-  toko, seluruh angka diambil **utuh** dari `GET /api/reports/daily?date=`
-  (satu sumber data; halaman ini tidak menghitung ulang apa pun, jadi angkanya
-  mustahil beda dengan ringkasan halaman Riwayat transaksi / Dashboard):
-  - **Pemilih hari**: tanggal + tombol sebelumnya/berikutnya + **Hari ini**,
-    aturan hari UTC yang sama dengan server.
-  - **4 kartu ringkasan**: Omzet (dengan jumlah transaksi), Laba, HPP, Diskon.
-  - **Rekap metode bayar** (tunai/QRIS/transfer + baris Jumlah), **Topup &
-    tarik** (nominal vs admin, dengan catatan bahwa keduanya di luar omzet),
-    **Produk terlaris** 10 teratas (dikelompokkan per nama + satuan, jadi
-    "2 pack" dan "3 btl" tidak tercampur), **Stok menipis** (tautan ke halaman
-    Stok).
-  - **Ekspor CSV** `laporan-YYYY-MM-DD.csv` (BOM UTF-8, ISO/Excel-friendly)
-    dari data yang sedang tampil — tiga blok berurutan: Ringkasan, Metode
-    bayar, Produk terlaris.
-  - **Tanpa endpoint baru**: memakai `GET /api/reports/daily` yang sudah ada.
+* **Laporan** (`#/reports`, menu **Laporan** di sidebar) — laporan pemilik
+  toko ala Aronium. **Refactor 2026-10-17** (permintaan pemilik *"perlu
+  refactor juga halaman report untuk menampung seluruh menu laporan"*): menu
+  pindah ke kolom KIRI (grup Penjualan/Keuangan/Stok, label grup berwarna
+  aksen; kartu menu **sticky utuh** saat digulir, setinggi isinya, dan
+  perilaku/layout IDENTIK di semua menu — riset pemilik *"jadikan template
+  untuk semua laporan … sama persis"*) dan
+  SETIAP laporan = satu objek
+  di registry `MENUS` — menambah laporan baru cukup menambah satu objek.
+  - **Harian** — laporan harian lama (kartu ringkasan, metode bayar, topup &
+    tarik, produk terlaris dengan **kolom HPP/Laba**, stok menipis) +
+    **grafik batang penjualan per jam** (`byHour`, 24 ember UTC). Pemilih
+    satu hari tetap (tanggal + prev/next + Hari ini).
+  - **Laba** — laba **per hari** + **per transaksi/nota** dari
+    `GET /api/reports/profit` (HPP per nota dihitung server dengan rumus
+    yang sama dengan laba per produk; 200 nota terbaru).
+  - **Kasir** — omzet/diskon per kasir (`GET /api/reports/cashiers`).
+  - **Produk** — qty/omzet/HPP/**laba** per produk (laba dihitung server,
+    `GET /api/reports/products`).
+  - **Piutang** — kartu hutang terbentuk / terbayar / sisa berjalan (live
+    dari ledger, tautan ke halaman Hutang).
+  - **Stok** — saran order kulakan (`min_stock − stock`, tautan Buat PO).
+  - **Filter rentang tanggal** = tombol yang membuka **dropdown date-range**
+    (bukan modal — revisi pemilik *"jadikan dropdown saja jangan seperti
+    modal"*): preset Hari ini..Tahun lalu + **Kustom** di kiri, dua kalender
+    (kepala Senin–Minggu) di kanan, batas server **366 hari divalidasi di
+    panel** (Terapkan mati + peringatan merah), tutup via klik luar / Esc /
+    Batal. Nilai masuk hanya saat Terapkan.
+  - **Ekspor CSV** per menu (dari data yang sedang tampil; BOM UTF-8) +
+    **Cetak/PDF** lewat popup browser `cetakLaporan()` (simpan PDF dari
+    dialog cetak) — kop dari pengaturan toko yang sama dengan invoice A4.
+  - **Satu sumber data**: seluruh angka dari endpoint server (`daily`,
+    `summary`, `profit`, `cashiers`, `products`, `customer-debts`) — klien
+    tidak menghitung ulang (rumus laba produk/hari/nota milik server).
 * **Shift Kasir** (`#/shifts`, menu **Shift Kasir** di sidebar, baru 2026-10-01)
   — riwayat shift + buka/tutup shift dari satu layar:
   - **Tabel riwayat** dari endpoint baru `GET /api/shifts?status=…` — tiap baris

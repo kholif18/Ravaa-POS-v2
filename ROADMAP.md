@@ -167,16 +167,66 @@ butir yang sudah di-ACC pemilik.
   nyata 1× (pemilik, kertas A4 & Folio, skala 100%) **termasuk scan fisik
   Code 128** (belum pernah diuji di atas kertas).
 
+### 1.5 Refactor halaman Laporan + byHour + Laba per transaksi **[SELESAI 2026-10-17]**
+- **Latar (permintaan pemilik 2026-10-17):** *"kerjakan byHour, laba per
+  produk, laba transaksi perhari, kemudian baru kerjakan laporan yang kamu
+  list. perlu refactor juga halaman report untuk menampung seluruh menu
+  laporan"*.
+- **Butir server (`apps/api/src/index.ts`):** `laporanRentang()` (satu fungsi,
+  daily = rentang 1 hari) + **`byHour`** (24 ember UTC zero-fill); `topItems`
+  + kolom **`hpp`/`laba`** (server — rumus = products); `reports/products`
+  + **`laba`** per baris (klien tidak menghitung ulang lagi); endpoint BARU
+  **`GET /api/reports/profit`** `{total, days, trx}` — `days` HANYA hari yang
+  ada penjualan (rentang kosong = `[]`), `trx` = 200 nota terbaru dengan HPP
+  per nota lewat subquery (join langsung menggandakan `s.total`).
+- **Butir web (`reports.ts` ditulis ulang):** registry **`MENUS`** — 6 menu
+  (Harian/Laba/Kasir/Produk/Piutang/Stok) di sidebar kiri grup
+  Penjualan/Keuangan/Stok; tiap menu satu objek (`label/grup/filter/cari/
+  muat/isi/csv/cetak`); `cetakLaporan()` (popup + `window.print`, builder
+  `DokLaporan` di invoice.ts); grafik batang per jam `[data-jam]` (DIV
+  sengaja bukan tabel — urutan DOM kontrak `laporan-test` tidak bergeser).
+  Menu Harian tetap pemilih satu hari (prev/next + chip Hari ini).
+- **Revisi (filter rentang, 2 putaran):** putaran 1 *"date filter seperti
+  downloadan"* (referensi Blueprint) — dialog date-range; putaran 2 pemilik
+  *"jadikan dropdown saja jangan seperti modal"* — panel `#rp-pop` melayang
+  di bawah tombol: 8 preset + Kustom kiri, dua kalender (kepala Senin–
+  Minggu, select bulan/tahun + panah) kanan, highlight+hover satu rumus
+  (`kelasHari()`/`bulanHtml()` di `ui/waktu.ts`), batas 366 hari divalidasi
+  di panel, tutup klik luar/Esc/Batal/Terapkan (`AbortController`, pola
+  shell.ts; `tutupPopRentang()` juga dipanggil `paint()`). `#rp-from`/
+  `#rp-to` kini hidden (kontrak test membaca rentang berlaku dari situ).
+- **Revisi (aside, 4 putaran):** *"tingginya tidak sama dengan yang kanan"*
+  → sempat di-stretch penuh setinggi kolom; *"aside jadi tidak sticky lagi"*
+  → sticky dipindah ke blok isi; lalu *"cardnya mengikuti tinggi kolom
+  kanan … yang full hanya Harian/Laba … hanya textnya yang sticky"* + label
+  *"beri warna atau tambahkan gap dari atasnya"* → KARTU MANDIRI setinggi
+  isinya + SELURUH kartu sticky; lalu *"jadikan template untuk semua laporan,
+  agar perilaku dan layout sama persis — di setiap halaman laporan seperti
+  berbeda"* → inset `top-4` **diganti `top-0`**: inset positif membuat kartu
+  tergeser turun hanya di menu yang kolom kanannya memberi ruang geser
+  (terukur Harian/Laba/Produk y=72 vs Kasir/Piutang/Stok y=56); kini posisi
+  kartu identik di KEENAM menu (y=56, sejajar tepi kolom kanan) dan menempel
+  di posisi itu saat digulir (56 → 56). `<aside>` pembungkus tanpa visual yang
+  stretch sebagai containing block sticky; label grup `text-primary` +
+  `pt-4` vs item `text-sm text-gray-700`.
+- **Tes:** `laporan-test.mjs` 16 → **20** (byHour + kolom HPP/Laba);
+  `laporan-menu-test.mjs` 16 → **33** (registry 6 menu + dropdown: 8 preset
+  + 2 kalender + bukan modal + klik-luar + Esc; CSV/cetak per menu;
+  3 asersi anti-regresi aside: kartu mandiri, sticky utuh, template identik
+  6 menu termasuk sejajar kolom kanan). Suite penuh **1449 hijau**.
+- **Bersih-bersih:** `bukaDialogRentang`/`openModal` dihapus dari reports.ts;
+  docs diperbarui (AGENTS §2/§3 + README).
+
 ---
 
 ## 2. Fase 2 — Analitik (setelah Fase 1)
 
 | # | Butir | Catatan |
 |---|-------|---------|
-| 2.1 | **Laporan penjualan per jam** | `GET /api/reports/daily` tambah `byHour` (`strftime('%H', created_at)`, aturan UTC sama) + grafik batang di `#/reports`. Tren 2026: "4 laporan wajib" = per jam salah satunya. Endpoint lama diperluas (bukan baru) — update §3. |
+| 2.1 | **Laporan penjualan per jam** **[SELESAI 2026-10-17 — lihat §1.5]** | `GET /api/reports/daily` tambah `byHour` (`strftime('%H', created_at)`, aturan UTC sama) + grafik batang di `#/reports`. Tren 2026: "4 laporan wajib" = per jam salah satunya. Endpoint lama diperluas (bukan baru) — update §3. |
 | 2.2 | **Laporan penjualan per kategori** | `byCategory` = `sale_items` -> `products` -> `categories`, grup per kategori (jasa/cetak vs barang fisik terlihat beda sumbangsihnya). |
 | 2.3 | **Tahan nota (transaksi tertunda)** | Simpan keranjang sementara (IndexedDB, per device) + tombol Recall; meniru Aronium "named order"/Erzap "F3 pending". Gap: grep `hold\|tunda\|pending` = 0 di `pos.ts`. Tanpa skema baru (belum tentu sinkron antar device — cukup per kasir). |
-| 2.4 | **Margin (laba) per produk di laporan** | `topItems` sudah ada qty/amount; tambah `hpp` & `laba` per baris (angka `cost` sudah di-snapshot per baris — cukup `SUM(qty*cost)`). |
+| 2.4 | **Margin (laba) per produk di laporan** **[SELESAI 2026-10-17 — lihat §1.5; termasuk laba per hari + per transaksi]** | `topItems` sudah ada qty/amount; tambah `hpp` & `laba` per baris (angka `cost` sudah di-snapshot per baris — cukup `SUM(qty*cost)`). |
 
 ## 3. Fase 3 — Fitur relasional (butuh ACC pemilik per butir)
 

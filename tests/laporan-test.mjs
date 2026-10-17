@@ -30,7 +30,8 @@ try {
   ok('200 + kunci lengkap', r.status === 200 && l
     && 'date' in l && 'sales' in l && 'hpp' in l && 'laba' in l
     && Array.isArray(l.byMethod) && Array.isArray(l.topup)
-    && Array.isArray(l.topItems) && Array.isArray(l.lowStock),
+    && Array.isArray(l.topItems) && Array.isArray(l.lowStock)
+    && Array.isArray(l.byHour),
     JSON.stringify(Object.keys(l ?? {})));
   ok('laba = omzet − hpp', l.laba === l.sales.omzet - l.hpp,
     `${l.laba} != ${l.sales.omzet} - ${l.hpp}`);
@@ -42,6 +43,19 @@ try {
   ok('topItems punya satuan (tidak mencampur pack & pcs)',
     l.topItems.every((t) => typeof t.unit === 'string' && t.unit !== ''),
     JSON.stringify(l.topItems.slice(0, 2)));
+  const jamN = l.byHour.reduce((a, b) => a + b.n, 0);
+  const jamOmzet = l.byHour.reduce((a, b) => a + b.omzet, 0);
+  ok('byHour: 24 ember 0..23 (zero-fill server)',
+    l.byHour.length === 24 && l.byHour.every((b, i) => b.jam === i), `len=${l.byHour.length}`);
+  ok('byHour: Σ n & omzet = sales', jamN === l.sales.n && jamOmzet === l.sales.omzet,
+    `${jamN}/${jamOmzet} vs ${l.sales.n}/${l.sales.omzet}`);
+  const pr = await get(`/api/reports/products?from=${l.date}&to=${l.date}&limit=200`);
+  const cocokProduk = l.topItems.every((t) => {
+    const m = pr.body.data.rows.find((x) => x.name === t.name && x.unit === t.unit);
+    return m && m.hpp === t.hpp && m.laba === t.laba && m.amount === t.amount;
+  });
+  ok('topItems.hpp/laba = angka menu Produk (satu rumus server)', cocokProduk,
+    JSON.stringify(l.topItems.slice(0, 1)));
 
   console.log('=== B. Halaman #/reports menampilkan angka yang sama ===');
   const browser = await chromium.launch({
@@ -71,6 +85,9 @@ await pasangToken(page);
     const barisTop = await page.locator('#rp-body table').nth(2).locator('tbody tr').count();
     ok(`baris produk terlaris (${l.topItems.length})`, barisTop === l.topItems.length,
       `ada=${barisTop} harap=${l.topItems.length}`);
+
+    const jamBatang = await page.locator('[data-jam]').count();
+    ok('grafik per jam: 24 batang tampil', jamBatang === 24, `ada=${jamBatang}`);
 
     if (l.byMethod.length) {
       ok('baris metode menampilkan nama & total yang benar',

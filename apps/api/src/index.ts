@@ -2944,11 +2944,30 @@ function laporanRentang(dari: string, sampai: string) {
   ).all(...ps);
   // Dikelompokkan per (name, unit) — tanpa `unit`, penjualan "2 pack" dan
   // "3 btl" produk sama jadi satu baris qty=5 campur satuan.
+  // `hpp`/`laba` per baris DIHITUNG SERVER (2026-10-17): rumus laba per produk
+  // hanya boleh hidup di satu tempat, supaya kartu Harian dan menu Produk
+  // tidak bisa menampilkan angka berbeda. laba = Σ(amount − diskon baris) − HPP
+  // baris; diskon TRANSAKSI tidak dialokasikan ke baris (tidak diketahui porsi
+  // per produknya) — jadi Σ laba baris ≥ laba rekap saat ada diskon transaksi.
   const topItems = db.prepare(
-    `SELECT si.name, si.unit, SUM(si.qty) AS qty, SUM(si.amount) AS amount
+    `SELECT si.name, si.unit, SUM(si.qty) AS qty, SUM(si.amount) AS amount,
+            CAST(ROUND(SUM(si.qty * si.cost)) AS INTEGER) AS hpp,
+            CAST(ROUND(SUM(si.amount - si.discount) - SUM(si.qty * si.cost)) AS INTEGER) AS laba
      FROM sale_items si JOIN sales s ON s.id=si.sale_id
      WHERE ${dl('s.created_at')} GROUP BY si.name, si.unit ORDER BY amount DESC LIMIT 10`,
   ).all(...ps);
+  // Penjualan per JAM (menu Harian + grafik 24 batang, 2026-10-17). 24 ember
+  // 0..23 SELALU terisi — server yang menambal jam kosong (klien/chart tidak
+  // perlu menghitung ulang). Jam = UTC apa adanya, aturan waktu repo
+  // (ui/waktu.ts): laporan, riwayat, dan struk membaca jam yang sama.
+  const petaJam = new Map(
+    (db.prepare(
+      `SELECT CAST(strftime('%H', created_at) AS INTEGER) AS jam,
+              COUNT(*) AS n, COALESCE(SUM(total),0) AS omzet
+         FROM sales WHERE ${dl('created_at')} GROUP BY jam`,
+    ).all(...ps) as { jam: number; n: number; omzet: number }[]).map((b) => [b.jam, b]),
+  );
+  const byHour = Array.from({ length: 24 }, (_, jam) => petaJam.get(jam) ?? { jam, n: 0, omzet: 0 });
   const lowStock = db.prepare(
     `SELECT p.sku, p.name, p.stock, p.min_stock FROM products p
      JOIN categories c ON c.id=p.category_id
@@ -2997,7 +3016,7 @@ function laporanRentang(dari: string, sampai: string) {
      WHERE type = 'payment' AND ${dl('created_at')}`,
   ).get(...ps) as { t: number }).t;
   return {
-    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase,
+    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase, byHour,
     piutang: { baru: piutangBaru, bayar: piutangBayar },
   };
 }
@@ -3059,9 +3078,11 @@ app.get('/api/reports/cashiers', hanyaOwner, (c) => {
   return c.json({ data: { from: r.dari, to: r.sampai, rows, total } });
 });
 
-/** Produk dalam rentang (menu Produk): per (nama, satuan) qty + omzet + HPP.
- *  Laba = amount − hpp dihitung klien dari dua angka server (tampilan saja,
- *  preseden Omzet bersih). `q` multi-kata pola customers; limit 50/200. */
+/** Produk dalam rentang (menu Produk): per (nama, satuan) qty + omzet + HPP +
+ *  laba. `laba` DIHITUNG SERVER sejak 2026-10-17 dengan rumus yang sama
+ *  persis dengan topItems kartu Harian (Σ(amount − diskon baris) − HPP baris;
+ *  diskon transaksi tidak dialokasikan ke baris) — jangan dihitung ulang di
+ *  klien. `q` multi-kata pola customers; limit 50/200. */
 app.get('/api/reports/products', hanyaOwner, (c) => {
   const r = bacaRentang((k) => c.req.query(k));
   if (!r.ok) return c.json({ error: r.error }, 400);
@@ -3076,7 +3097,8 @@ app.get('/api/reports/products', hanyaOwner, (c) => {
   const dl = `date(s.created_at) BETWEEN date(?) AND date(?)`;
   const rows = db.prepare(
     `SELECT si.name, si.unit, SUM(si.qty) AS qty, SUM(si.amount) AS amount,
-            COALESCE(SUM(si.qty * si.cost),0) AS hpp
+            CAST(ROUND(SUM(si.qty * si.cost)) AS INTEGER) AS hpp,
+            CAST(ROUND(SUM(si.amount - si.discount) - SUM(si.qty * si.cost)) AS INTEGER) AS laba
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
       WHERE ${dl} ${qcari} GROUP BY si.name, si.unit ORDER BY amount DESC LIMIT ? OFFSET ?`,
   ).all(r.dari, r.sampai, ...params, limit, offset);
@@ -3085,6 +3107,38 @@ app.get('/api/reports/products', hanyaOwner, (c) => {
       WHERE ${dl} ${qcari} GROUP BY si.name, si.unit)`,
   ).get(r.dari, r.sampai, ...params) as { n: number };
   return c.json({ data: { from: r.dari, to: r.sampai, rows, total: total.n } });
+});
+
+/** Laba per hari + per transaksi (menu Laba, 2026-10-17). HPP per NOTA dihitung
+ *  lewat subquery agregat per `s.id` DULU — join sale_items langsung ke sales
+ *  akan menggandakan `s.total` per baris produk sehingga "omzet per transaksi"
+ *  salah. `days` selalu memuat SELURUH hari berisi penjualan di rentang (dasar
+ *  angka kartu total); `trx` sengaja dibatasi 200 nota terbaru (layar, bukan
+ *  arsip — arsipnya menu Riwayat) dan `total.n` memberi tahu bila terpotong. */
+app.get('/api/reports/profit', hanyaOwner, (c) => {
+  const r = bacaRentang((k) => c.req.query(k));
+  if (!r.ok) return c.json({ error: r.error }, 400);
+  const dasar = `
+    SELECT s.id, s.created_at, s.invoice_no, s.cashier, s.total,
+           CAST(ROUND(COALESCE(SUM(si.qty * si.cost), 0)) AS INTEGER) AS hpp
+      FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id
+     WHERE date(s.created_at) BETWEEN date(?) AND date(?)
+     GROUP BY s.id`;
+  const days = db.prepare(
+    `SELECT date(created_at) AS date, COUNT(*) AS n,
+            COALESCE(SUM(total),0) AS omzet, COALESCE(SUM(hpp),0) AS hpp,
+            COALESCE(SUM(total) - SUM(hpp),0) AS laba
+       FROM (${dasar}) GROUP BY date(created_at) ORDER BY date ASC`,
+  ).all(r.dari, r.sampai) as { date: string; n: number; omzet: number; hpp: number; laba: number }[];
+  const trx = db.prepare(
+    `SELECT id, created_at, invoice_no, cashier, total, hpp, total - hpp AS laba
+       FROM (${dasar}) ORDER BY created_at DESC, id DESC LIMIT 200`,
+  ).all(r.dari, r.sampai);
+  const total = days.reduce(
+    (a, d) => ({ n: a.n + d.n, omzet: a.omzet + d.omzet, hpp: a.hpp + d.hpp, laba: a.laba + d.laba }),
+    { n: 0, omzet: 0, hpp: 0, laba: 0 },
+  );
+  return c.json({ data: { from: r.dari, to: r.sampai, total, days, trx } });
 });
 
 const port = Number(process.env.PORT ?? 3001);

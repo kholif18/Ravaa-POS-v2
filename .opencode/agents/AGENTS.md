@@ -1008,18 +1008,87 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          (`sale_id` + shift TERBUKA KINI, bukan shift nota
                          asal) — riwayat nota lama tidak diubah, catatan baru
                          masuk `#/returns`.
- apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan ala Aronium,
-                          2026-10-11): chip menu Harian | Kasir | Produk |
-                          Piutang | Stok + filter tanggal (satu/rentang) + cari
-                          produk. Harian = tampilan lama (DOM dipertahankan).
-                          Tiap menu: CSV sendiri + tombol Cetak/PDF lewat
-                          `cetakLaporan()` (popup + window.print, simpan PDF
-                          dari browser — builder generik `DokLaporan` di
-                          invoice.ts: judul + periode + tabel + ringkasan).
-                          Piutang = kartu Terbentuk/Terbayar/Sisa live (link
-                          Hutang); Stok = reorder (saran = min−stok, link Buat
-                          PO — TANPA grup supplier, menyusul bila ada mapping
-                          produk→supplier).
+ apps/web/src/pages/reports.ts  Halaman #/reports (menu Laporan ala Aronium) —
+                           **refactor registry 2026-10-17** (permintaan pemilik
+                           "perlu refactor juga halaman report untuk menampung
+                           seluruh menu laporan"): menu pindah ke sidebar KIRI
+                           (grup Penjualan/Keuangan/Stok) dan SETIAP laporan =
+                           satu objek `MenuDef` di registry `MENUS` (label/
+                           grup/filter/cari/muat/isi/csv/cetak) — tambah menu
+                           baru = tambah SATU objek, bukan cabang if di lima
+                           tempat. Enam menu: **Harian | Laba | Kasir | Produk |
+                           Piutang | Stok**. Filter menu "rentang" = **TOMBOL
+                           rentang tanggal** yang membuka **dropdown
+                           date-range 2026-10-17** (permintaan pemilik "date
+                           filter seperti downloadan", referensi Blueprint;
+                           REVISI pemilik kedua "jadikan dropdown saja jangan
+                           seperti modal" — panel `#rp-pop` melayang menempel
+                           di bawah tombol, BUKAN overlay modal):
+                           preset Hari ini..Tahun lalu + **Kustom** di KIRI,
+                           dua kalender (select bulan/tahun + panah; kepala
+                           Senin–Minggu) di KANAN, highlight rentang + hover,
+                           batas server **366 hari divalidasi di panel**
+                           (Terapkan mati + peringatan merah), nilai masuk
+                           `state.from/to` hanya saat Terapkan; tutup via
+                           klik luar / Esc / Batal / Terapkan (listener
+                           document pakai AbortController, pola shell.ts;
+                           `tutupPopRentang()` dipanggil juga di `paint()`).
+                           Input
+                           `#rp-from`/`#rp-to` kini **hidden** (kontrak test
+                           membaca rentang berlaku dari situ — jangan
+                           dihapus). Aritmetika + sel kalender lewat
+                           `ui/waktu.ts`; `kelasHari()`/`bulanHtml()` SATU
+                           rumus untuk render & hover. Menu Harian tetap
+                           pemilih satu hari (prev/next + chip Hari ini).
+                           Kartu menu kiri = KARTU MANDIRI setinggi isinya
+                           yang SELURUH kartunya `lg:sticky lg:top-0` —
+                           `<aside>` hanya pembungkus tanpa visual yang
+                           stretch sebagai CONTAINING BLOCK sticky. Riwayat
+                           2026-10-17 (EMPAT putaran): sempat di-stretch
+                           setinggi kolom ("tingginya tidak sama dengan yang
+                           kanan"); sticky lalu dipindah ke blok isi ("aside
+                           jadi tidak sticky lagi"); lalu pemilik menegaskan
+                           kartu jangan ikut tinggi kolom (kentara "yang full
+                           hanya Harian/Laba") dan "hanya textnya yang sticky"
+                           itu salah -> sticky dikembalikan ke KARTUNYA; dan
+                           terakhir *"jadikan template untuk semua laporan,
+                           agar perilaku dan layout sama persis"* -> inset
+                           `top-4` DIGANTI `top-0`. Sebabnya terukur:
+                           inset sticky positif membuat kartu tergeser turun
+                           `inset` px HANYA bila kolom kanan memberi ruang
+                           geser (Harian/Laba/Produk y=72 vs Kasir/Piutang/
+                           Stok y=56 — keluhan "di setiap halaman laporan
+                           seperti berbeda"); dengan `top-0` posisi kartu
+                           identik di KEENAM menu (y=56, sejajar tepi kolom
+                           kanan) dan tetap menempel di posisi itu saat
+                           digulir (56 -> 56, tanpa lompatan). Diuji 3 asersi
+                           `laporan-menu-test.mjs` (kartu mandiri < kolom;
+                           sticky utuh; template identik 6 menu atas+tinggi+
+                           sejajar kolom kanan). Label grup menu
+                           dibedakan dari tombol: label `text-[10px]
+                           uppercase tracking-widest text-primary pt-4`
+                           vs item `text-sm` (permintaan pemilik "beri
+                           warna atau tambahkan gap dari atasnya"). Harian =
+                           tampilan
+                           lama (DOM dipertahankan) + **grafik batang per jam**
+                           (`byHour` 24 ember UTC; DIV `[data-jam]` —
+                           SENGAJA bukan tabel supaya urutan tabel kontrak
+                           laporan-test tidak bergeser) + kolom **HPP/Laba di
+                           "Produk terlaris"** (angka SERVER). **Laba** =
+                           kartu omzet/HPP/laba + tabel per hari + per
+                           transaksi (200 nota terbaru; `GET /api/reports/
+                           profit`). Tiap menu: CSV sendiri + Cetak/PDF lewat
+                           `cetakLaporan()` (popup + window.print, simpan PDF
+                           dari browser — builder generik `DokLaporan` di
+                           invoice.ts: judul + periode + tabel + ringkasan).
+                           **SATU-SUMBER DATA**: rumus laba (per produk/per
+                           hari/per transaksi) milik SERVER — klien tidak
+                           menghitung ulang (dulu Laba produk = amount−hpp di
+                           klien, dipindah 2026-10-17). Piutang = kartu
+                           Terbentuk/Terbayar/Sisa live (link Hutang); Stok =
+                           reorder (saran = min−stok, link Buat PO — TANPA
+                           grup supplier, menyusul bila ada mapping
+                           produk→supplier).
  apps/web/src/pages/returns.ts  Halaman #/returns (Tahap 2, 2026-10-11):
                           linimasa retur per hari (toolbar tanggal pola
                           expenses.ts) + kartu uang kembali + tabel (klik baris
@@ -1398,9 +1467,12 @@ apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                            localStorage langsung dari halaman lain.
 apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
                          adanya), hariIni()/geser()/tglPanjang()/tglPendek()/
-                         hariPendek() — SATU aturan hari UTC untuk Riwayat,
-                         Laporan, dan Dashboard (jangan tulis ulang di halaman
-                         baru: aritmetika tanggal harus lewat file ini).
+                         hariPendek() + **awalMinggu()/awalBulan()/akhirBulan()**
+                         (2026-10-17 — dasar preset dialog rentang halaman
+                         Laporan: minggu ala Indonesia Senin–Minggu) — SATU
+                         aturan hari UTC untuk Riwayat, Laporan, dan Dashboard
+                         (jangan tulis ulang di halaman baru: aritmetika
+                         tanggal harus lewat file ini).
 apps/print-agent/server.js  HTTP :9100 -> tulis bytes ke PRINTER_PATH|/dev/usb/lp0|file. TANPA deps.
 tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        run.mjs MENOLAK file hilang / crash / 0 asersi / jumlah
@@ -2189,19 +2261,40 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
-  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
+  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byHour,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
   - Bentuk dihitung SATU fungsi `laporanRentang(dari,sampai)` (2026-10-11) —
     daily = rentang 1 hari. `piutang` = hutang TERBENTUK (CASE sisa_hutang) +
     TERBAYAR (ledger payment), butir credit Z-report.
+  - **`byHour` (2026-10-17)**: array **24 ember 0..23 zero-fill** (jam tanpa
+    penjualan = `n:0, omzet:0`), grup `strftime('%H', created_at)` — jam UTC,
+    aturan hari sama dengan filter `date(created_at)`. Jam `'00'..'09'` dikirim
+    SQL sebagai string lalu `Number()`, jadi JSON berisi angka. Sumber grafik
+    per jam halaman Laporan (DIV `[data-jam]`, bukan tabel — urutan tabel
+    Harian adalah kontrak test).
 * `GET /api/reports/summary?from=&to=` -> `{data:{from,to,...sama dengan daily}}`
   (menu laporan ala Aronium, 2026-10-11). Validasi: format YYYY-MM-DD
   round-trip, `from<=to`, maks 366 hari (selain itu 400). `lowStock` snapshot
   kini (stok = keadaan sekarang, bukan per tanggal).
+* `GET /api/reports/profit?from=&to=` -> `{data:{from,to,total:{n,omzet,hpp,laba},
+  days:[{date,n,omzet,hpp,laba}],trx:[{id,created_at,invoice_no,cashier,total,
+  hpp,laba}]}}` (menu **Laba**, 2026-10-17; validasi rentang = `bacaRentang`
+  sama dengan summary, maks 366 hari).
+  - HPP per NOTA dihitung **subquery agregat per `s.id` DULU** — join
+    `sale_items` langsung ke `sales` menggandakan `s.total` per baris produk
+    sehingga omzet per transaksi salah. `days` = hari **BERISI penjualan**
+    saja (`GROUP BY date(created_at)`, ASC) — bukan zero-fill seluruh rentang:
+    rentang kosong = `days:[]`/`trx:[]` (halaman menampilkan empty-state, bukan
+    baris nol); `total` = agregat `days` (angka kartu). `trx` dibatasi **200
+    nota terbaru** (urutan `created_at DESC, id DESC`; `total.n` = jumlah nota
+    sesungguhnya — penanda "x dari y nota"); arsip penuh tetap menu Riwayat.
 * `GET /api/reports/cashiers?from=&to=` -> `{data:{from,to,rows:[{cashier,n,omzet,diskon}],total}}`
   (menu Kasir; diskon = transaksi + per baris, konsisten sales.diskon).
-* `GET /api/reports/products?from=&to=&q=&limit=` -> `{data:{from,to,rows:[{name,unit,qty,amount,hpp}],total}}`
-  (menu Produk; `q` multi-kata nama, limit 50/200; laba = amount−hpp dihitung
-  klien untuk tampilan, preseden Omzet bersih).
+* `GET /api/reports/products?from=&to=&q=&limit=` -> `{data:{from,to,rows:[{name,unit,qty,amount,hpp,laba}],total}}`
+  (menu Produk; `q` multi-kata nama, limit 50/200). **`laba` DIHITUNG SERVER
+  sejak 2026-10-17** (dulu klien menghitung amount−hpp — dipindah supaya satu
+  rumus dengan `topItems` daily/summary): `laba` = `Σ(amount − diskon baris) −
+  hpp` (net diskon PER BARIS; diskon transaksi tidak dialokasikan per baris,
+  jadi Σ laba baris ≥ laba rekap — catatan tampil di footer tabel halaman).
   - `hpp = ROUND(SUM(sale_items.qty * sale_items.cost))` untuk penjualan hari itu.
   - `laba = sales.omzet - hpp` (omzet sudah **setelah** semua diskon).
   - `expense` (Tahap 1, 2026-10-11) = COUNT + SUM `expenses` hari itu —
@@ -2212,7 +2305,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     dan `omzet - diskon != subtotal` jadi tidak terjawab.
   - `topItems` dikelompokkan per `(name, unit)` dan tiap baris memuat `unit` —
     tanpa pemisahan ini penjualan "2 pack" dan "3 btl" produk sama tercampur
-    jadi satu baris qty=5 campur satuan.
+    jadi satu baris qty=5 campur satuan. Sejak 2026-10-17 tiap baris juga
+    memuat **`hpp` + `laba` DIHITUNG SERVER** — rumus sama persis dengan
+    `/api/reports/products` (satu sumber; klien tidak menghitung ulang) dan
+    dipakai kolom HPP/Laba tabel "Produk terlaris" kartu Harian.
   - Jasa/cetak/desain punya `cost = 0` (tidak ada persediaan) -> penjualannya
     seluruhnya dihitung laba. Topup/tarik TIDAK masuk omzet (lihat §domain).
 * **Backup DB (fitur 1.2, sejak 2026-10-02)** — file backup disimpan di folder
