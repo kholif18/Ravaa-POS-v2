@@ -2542,13 +2542,23 @@ app.post('/api/purchases/:id/cancel', hanyaPemilik, (c) => {
 // hutang PO >= 30 hari di SELURUH baris cocok filter (chip header).
 app.get('/api/purchases', hanyaPemilik, (c) => {
   const status = c.req.query('status') ?? 'semua';
-  if (!['semua', 'order', 'received', 'cancel'].includes(status)) {
-    return c.json({ error: 'status harus order|received|cancel|semua' }, 400);
+  if (!['semua', 'order', 'received', 'cancel', 'hutang'].includes(status)) {
+    return c.json({ error: 'status harus order|received|cancel|hutang|semua' }, 400);
   }
   const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
-  const klausul = status === 'semua' ? '' : 'WHERE p.status = ?';
-  const params: unknown[] = status === 'semua' ? [] : [status];
+  // `hutang` = nota DITERIMA yang masih bersisa (computed, sejalan dengan
+  // kolom `sisa` — bukan status tersimpan; permintaan pemilik 2026-10-17
+  // "kebingungan mencari purchasing yang belum lunas"). Klausul literal tanpa
+  // parameter supaya query `lewat30` di bawah bisa tetap memakai pola yang sama.
+  let klausul = '';
+  const params: unknown[] = [];
+  if (status === 'hutang') {
+    klausul = `WHERE p.status = 'received' AND p.total - p.terbayar > 0`;
+  } else if (status !== 'semua') {
+    klausul = 'WHERE p.status = ?';
+    params.push(status);
+  }
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM purchases p ${klausul}`).get(...params) as { n: number }).n;
   const data = db.prepare(
     `SELECT p.*, p.total - p.terbayar AS sisa,

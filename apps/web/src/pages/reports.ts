@@ -127,7 +127,7 @@ function toolbar(): string {
   const hariIniKah = state.date === hariIni();
   const chips = (Object.keys(MENU_LABEL) as Menu[])
     .map(
-      (m) => `<button type="button" data-menu="${m}" class="chip${state.menu === m ? ' !border-primary !text-primary' : ''}">${MENU_LABEL[m]}</button>`,
+      (m) => `<button type="button" data-menu="${m}" class="chip-tab${state.menu === m ? ' is-active' : ''}">${MENU_LABEL[m]}</button>`,
     )
     .join('');
   const filterHarian = `
@@ -151,7 +151,7 @@ function toolbar(): string {
       </div>`;
   return `
   <div class="card">
-    <div class="mb-2 flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Menu laporan">${chips}</div>
+    <div class="chip-tabs mb-2" role="tablist" aria-label="Menu laporan">${chips}</div>
     <div class="flex flex-wrap items-center justify-between gap-2">
       ${state.menu === 'harian' ? filterHarian : filterRentang}
       <div class="flex flex-wrap items-center gap-2">

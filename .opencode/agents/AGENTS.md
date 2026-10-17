@@ -128,7 +128,19 @@ apps/web/src/pos-mobile.css  Gaya KHUSUS tampilan MOBILE POS (baru 2026-10-17,
                            (`pm-card-head`/`pm-sub`/`pm-ctr` — SATU baris
                           kontrol stepper‖harga‖diskon‖subtotal, ±115px di
                           390px), bar bayar + navbar bawah dengan
-                          `env(safe-area-inset-bottom)`. Di-link di
+                          `env(safe-area-inset-bottom)`. **Seksi 8 lapisan
+                          bayar (2026-10-17)**: `.pm-bayarlayer` (fixed
+                          inset-0 z-40 — DI BAWAH toast z-60 supaya toast
+                          barrier uang terlihat), header ⬅+total, kartu
+                          metode `.pm-paypick*` (aktif = utility
+                          `!bg-primary !text-white !border-primary` + `.cek`),
+                          kolom uang `.pm-cash*`, chip `.pm-cashchip`, ledger
+                          `.pm-ledger*`, footer safe-area-bottom. WAJIB:
+                          aturan eksplisit `.pm-bayarlayer[hidden]
+                          {display:none}` — `@apply flex` mengalahkan UA rule
+                          `[hidden]` (tanpa itu lapisan tampil sepanjang
+                          waktu). Kelas `.pm-bayar*` DILARANG bocor ke
+                          pos.css. Di-link di
                           index.html SETELAH pos.css; `@reference
                           "./styles.css"` WAJIB; token HANYA dari @theme
                           styles.css (DILARANG warna baru), kelas bersama
@@ -141,7 +153,7 @@ apps/web/src/pos-mobile.css  Gaya KHUSUS tampilan MOBILE POS (baru 2026-10-17,
                           "Diskon" terpotong "Disko". CATATAN: `text-base` di
                           repo = 14px (BUKAN 16px) — bukan penangkal auto-zoom
                           iOS; device fallback toko = Android. Diuji
-                          `tests/pos-mobile-test.mjs` (28 asersi).
+                          `tests/pos-mobile-test.mjs` (43 asersi).
 apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync)
                          + **kv `'holds'` transaksi tertahan POS** (`getHolds()`/
                          `saveHolds()` — per device, P5)
@@ -367,6 +379,40 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            id/data-act lama dipertahankan (kontrak suite).
                            Rincian → entri `pos-mobile.ts`/`pos-mobile.css`
                            di peta ini.
+                            **Lapisan bayar MOBILE (2026-10-17, lanjutan
+                            pemisahan UI)**: saat `mobileMode`, `bukaBayar()`
+                            TIDAK membuka modal — ia menampilkan **lapisan
+                            fullscreen `#pm-bayar`** milik pos-mobile.ts
+                            (`fixed inset-0 z-40` DI DALAM shell, "seperti
+                            bukan modal"; elemen PERSISTEN, toggle atribut
+                            `hidden` — sebab `@apply flex` menang atas UA
+                            rule, css menulis `.pm-bayarlayer[hidden]
+                            {display:none}` eksplisit). Nilai yang tak
+                            disentuh paintCart diisi saat buka: `#pos-cash`
+                            dari `cashIn`, `#bayar-note`+counter, `#bayar-cust`
+                            dari select info bar (label = teks opsi, mis.
+                            "Pelanggan Umum · CUS-000001" — sama desktop);
+                            lalu `paintCart()` + `paintFormBayar()` (satu
+                            sumber, bukan render kedua). Hook id & logika =
+                            PERSIS modal desktop lewat helper **`bayarEl()`**
+                            (modal desktop ATAU `#pm-bayar`; dipakai
+                            `bukaBayar()`/`paintFormBayar()`);
+                            `tutupBayar()` menyembunyikan lapisan; fungsi
+                            baru **`bindBayarMobile()`** (dipanggil `paint()`
+                            cabang mobile setelah `bindPosMobile`) =
+                            `bindFormBayar(layar)` +
+                            `[data-pm-bayar-tutup]`→`tutupBayar()` +
+                            `#pos-pay`→`pay()` + Enter di `#pos-cash`→`pay()`
+                            (Enter-on-input desktop dulu kerja modal.ts —
+                            lapisan bukan modal). `pmCtx()` menambah
+                            metodeAktif/metode/infoBayar/pelangganNama/
+                            uangCepat/cashIn/catatan/formatRibu/change/
+                            teksKembalian/kelasChange; `PayMethod`
+                            di-export (dipakai `import type` pos-mobile).
+                            Barrier uang kurang/hutang & `pilihCetakSelesai()`
+                            TIDAK berubah — tetap satu jalur `pay()`.
+                            Diuji seksi E `tests/pos-mobile-test.mjs`
+                            (E1 "bukan .modal-overlay" + E2 rect = viewport).
                             **Panel bayar = SIDEBAR KANAN 320px** (grid
                             `lg:grid-cols-[1fr_320px]` — putaran 4 2026-10-04:
                             footer horizontal DITOLAK pemilik, "tetap jadi
@@ -892,8 +938,18 @@ apps/web/src/pages/pos-mobile.ts  UI POS versi MOBILE (baru 2026-10-17) —
                           2026-10-17 *"card produk pada keranjang belanja
                           terlalu besar, bisa di perpendek tingginya"* — pola
                           aplikasi kasir mobile: satu baris kontrol tanpa
-                          label kolom, ±115px di 390). Diuji
-                          `tests/pos-mobile-test.mjs` (28 asersi).
+                           label kolom, ±115px di 390). **(d) Lapisan bayar
+                           fullscreen `#pm-bayar` (2026-10-17)** — dirender
+                           `pmBayarHtml()` di akhir `pmShellHtml` (fungsi
+                           internal; TIDAK diimpor pos.ts — markup kelas
+                           `.pm-bayar*` gaya di pos-mobile.css), elemen
+                           PERSISTEN di-toggle `hidden` oleh
+                           `bukaBayar()`/`tutupBayar()` pos.ts; hook id
+                           PERSIS modal desktop sehingga `bindFormBayar`/
+                           `paintFormBayar`/`pay` berlaku tanpa cabang
+                           (binding-nya `bindBayarMobile` pos.ts).
+                           Diuji
+                           `tests/pos-mobile-test.mjs` (43 asersi).
  apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           omzet/laba/topup/outbox, grafik 7 hari murni CSS
@@ -973,14 +1029,56 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
  apps/web/src/pages/purchases.ts  Halaman #/purchases (Tahap 3, 2026-10-11):
                           nota PO kulakan — filter status (Semua/Order/
                           Diterima/Batal) + tabel (badge Order/Lunas/Hutang/
-                          Batal, klik = rincian) + dialog buat PO (supplier
-                          select + cari produk + qty/harga per baris) + dialog
-                          Terima (`dibayar` prefill total) + dialog Bayar sisa
-                          + Batalkan (order saja). **Pengingat aging
+                          Batal). **SUB-HALAMAN, bukan modal (2026-10-17 —
+                          permintaan pemilik "PO purchasing buat halaman saja
+                          jangan modal, rawan terklik di luar modal dan
+                          hilang")**: klik baris = `#/purchases/<id>`
+                          (rincian HALAMAN penuh: Terima `#pt-bayar` prefill
+                          total + `#pt-ok`, Bayar sisa `#pb-amount`/`#pb-ok`
+                          INLINE, Batalkan tetap `confirmDialog` swal) dan
+                          `#po-new` = `#/purchases/baru` (form PO halaman
+                          penuh: `#po-sup`/`#po-q`/`#po-hasil`/`#po-baris`/
+                          `#po-note` + `#po-simpan`/`#po-batal`; sukses →
+                          toast + `keDaftar()`). `parseRoute` (ui/shell.ts)
+                          mencocokkan SEGMEN PERTAMA hash sehingga route induk
+                          tetap `purchases` (nav tetap aktif; `subRute()`
+                          halaman yang membaca sisa hash). Tombol
+                          `[data-po-kembali]` di semua sub-halaman. JANGAN
+                          kembalikan ke `openModal` — alasan eksplisit di
+                          header file. **Pengingat aging
                           (2026-10-16)**: chip kuning `#po-lewat` ("n lewat 30
                           hari", dari `lewat30` GET /api/purchases) + badge
                           umur per baris (`umur_hari` sejak `received_at`,
                           hanya nota diterima-belum-lunas; "baru" bila <= 0).
+                          **Revisi layout 2026-10-17 kedua** (permintaan
+                          pemilik "refactor desain layout purchasing, PO, dan
+                          /#/purchases/190 agar lebih mudah dibaca" + chip
+                          filter "seperti tidak terlihat, begitu juga di
+                          laporan" + "pencarian produk buat dropdown saja" +
+                          "kebingungan mencari purchasing yang belum lunas"):
+                          (1) filter status = segmented **`.chip-tabs`/
+                          `.chip-tab`** (+`.is-active`, ditambahkan ke
+                          `styles.css` — kontainer muted pil, aktif kartu
+                          putih shadow; dipakai juga chip menu `reports.ts`)
+                          kini **5 chip termasuk "Belum lunas"**
+                          (`[data-pstatus="hutang"]` → server
+                          **`?status=hutang`** = received bersisa, computed —
+                          bukan status tersimpan); (2) chip `#po-lewat` jadi
+                          **`<button>` yang klik = saring "Belum lunas"**
+                          (id + logika `hidden` dipertahankan — aging-test
+                          bergantung); (3) daftar dapat **kolom Sisa** (merah
+                          bila bersisa, `—` bila bukan received) + tanggal
+                          `tglPendek` di bawah nomor; (4) form PO: hasil cari
+                          = **DROPDOWN `#po-hasil`** (role=listbox, absolute;
+                          klik hasil → baris masuk qty 1 + harga beli master,
+                          merge produk+harga sama; Enter = hasil pertama;
+                          blur 150ms menutup) + **tabel baris editable**
+                          (`data-po-qty`/`data-po-hb`/`data-po-sub`/
+                          `data-po-del`, update `#po-total` live tanpa
+                          re-render); (5) rincian PO = **tabel barang**
+                          (qty/harga beli/sub total) + tfoot
+                          Total/Terbayar/Sisa hutang, catatan pindah ke kartu
+                          header. `tests/purchase-test.mjs` 40 asersi.
 apps/web/src/pages/labels.ts  Halaman #/labels (menu Label harga): pilih produk
                          + pratinjau label, cetak via gabungLabel()/kirimPrint().
 apps/web/src/pages/audit.ts  Halaman #/audit (menu Jejak Audit, 2026-10-16,
@@ -1340,9 +1438,13 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       Kas susulan diatribusikan ke `shift_id` PO (satu PO satu laci).
     - `POST /api/purchases/:id/cancel` -> 200 (hanya `order`; received tak bisa
       batal — koreksi stok via opname). Tak ada DELETE (nota PO = arsip).
-    - `GET /api/purchases?status=order|received|cancel|semua&limit=&offset=`
+    - `GET /api/purchases?status=order|received|cancel|hutang|semua&limit=&offset=`
       -> `{data:[{...,sisa, n_items, umur_hari}], total, lewat30}` (`sisa = total−terbayar`
       computed, prinsip ledger; `id DESC`).
+      **`status=hutang` (2026-10-17)** = nota `received` bersisa > 0 —
+      klausul `p.status = 'received' AND p.total - p.terbayar > 0` (computed,
+      bukan status tersimpan; sumber chip "Belum lunas" halaman Pembelian).
+      Error 400 `"status harus order|received|cancel|hutang|semua"`.
       **Aging (2026-10-16)**: `umur_hari` = lama hutang sejak `received_at`
       (julianday SQLite = UTC; hanya `received` sisa>0 — null untuk
       order/batal/lunas); `lewat30` = jumlah baris sisa>0 berumur >= 30 hari

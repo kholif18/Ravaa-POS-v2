@@ -77,11 +77,16 @@ chk('shift ngawur -> 400', (await post(`/api/purchases/${oH.json.data.purchase.i
 console.log('=== C. Hutang + cicil + cancel ===');
 const vH = await post(`/api/purchases/${oH.json.data.purchase.id}/receive`, { dibayar: 1000 });
 chk('hutang 7000 tercatat (sisa)', vH.status === 200 && vH.json.data.terbayar === 1000, JSON.stringify(vH.json.data));
+const gh1 = await api('/api/purchases?status=hutang');
+chk('filter hutang: hanya received bersisa + PO bersisa ikut',
+  gh1.data.some((o) => o.id === oH.json.data.purchase.id && o.sisa === 7000)
+  && gh1.data.every((o) => o.status === 'received' && o.sisa > 0), `n=${gh1.total}`);
 const y1 = await post(`/api/purchases/${oH.json.data.purchase.id}/pay`, { amount: 3000 });
 chk('cicil 3000 -> sisa 4000', y1.status === 200 && y1.json.data.terbayar === 4000, JSON.stringify(y1.json.data));
 chk('bayar melebihi sisa -> 400', (await post(`/api/purchases/${oH.json.data.purchase.id}/pay`, { amount: 99999 })).status === 400);
 const y2 = await post(`/api/purchases/${oH.json.data.purchase.id}/pay`, { amount: 4000 });
 chk('lunasi -> sisa 0', y2.status === 200 && (y2.json.data.total - y2.json.data.terbayar) === 0);
+chk('lunasi -> keluar dari filter hutang', !(await api('/api/purchases?status=hutang')).data.some((o) => o.id === oH.json.data.purchase.id));
 chk('bayar setelah lunas -> 400', (await post(`/api/purchases/${oH.json.data.purchase.id}/pay`, { amount: 100 })).status === 400);
 const oC = await post('/api/purchases', { items: [{ product_id: prodId, qty: 1, harga_beli: 100 }] });
 chk('cancel order -> cancel', (await post(`/api/purchases/${oC.json.data.purchase.id}/cancel`, {})).json.data.status === 'cancel');
@@ -99,19 +104,42 @@ chk('agregat purchase_total = terbayar shift', bs?.n_purchase >= 1 && bs?.purcha
 const dl = await api(`/api/reports/daily?date=${new Date().toISOString().slice(0, 10)}`);
 chk('daily purchase ikut', dl.data.purchase.n >= 2, JSON.stringify(dl.data.purchase));
 
-console.log('=== E. UI halaman purchases ===');
+console.log('=== E. UI halaman purchases (sub-halaman, bukan modal) ===');
 await p.goto('http://localhost:5656/#/purchases', { waitUntil: 'networkidle' });
 await p.waitForSelector('#po-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Pembelian" aktif', await p.locator('a[href="#/purchases"].is-active').count() === 1);
-await p.click('#po-new'); await p.waitForSelector('.modal');
+await p.click('#po-new');
+await p.waitForSelector('#po-q', { timeout: 10000 });
+chk('Buat PO = HALAMAN #/purchases/baru (bukan modal)',
+  p.url().includes('#/purchases/baru') && await p.locator('.modal-overlay').count() === 0, p.url());
+// Dropdown disaring barang fisik (2026-10-17): jasa/cetak ditolak server,
+// jadi tidak boleh bisa diklik dari hasil cari.
+await w('#po-q', `UjiPO Jasa ${TS}`); await p.waitForTimeout(900);
+const jv = await p.evaluate(() => {
+  const h = document.querySelector('#po-hasil');
+  return { ada: !!h?.querySelector('[data-po-pilih]'), teks: (h?.textContent ?? '').trim().slice(0, 60) };
+});
+chk('dropdown cari = barang fisik saja (jasa tidak ditawarkan)', !jv.ada, JSON.stringify(jv));
+// Pencarian = dropdown: klik hasil → baris masuk (qty 1, harga beli master),
+// lalu qty/harga diedit di tabel baris.
 await w('#po-q', NF); await p.waitForTimeout(900);
-await w('[data-po-qty]', '3');
-await w('[data-po-hb]', '1500');
-await p.click('[data-po-add]'); await p.waitForTimeout(300);
-await p.click('.modal [data-ok]'); await p.waitForTimeout(1500);
-const bodyPo = await p.textContent('#po-body');
-chk('buat PO via dialog -> baris muncul', bodyPo.includes('PO-') && bodyPo.includes('Rp4.500'), bodyPo.replace(/\s+/g, ' ').slice(0, 140));
+await p.click('[data-po-pilih]'); await p.waitForTimeout(300);
+await w('[data-po-qty="0"]', '3');
+await w('[data-po-hb="0"]', '1500');
+await p.click('#po-simpan');
+// Kembali ke daftar (hash #/purchases); poll sampai baris PO hasil simpan muncul.
+let barisBaru = { ok: false, teks: '' };
+for (let i = 0; i < 40; i++) {
+  await p.waitForTimeout(250);
+  barisBaru = await p.evaluate(() => {
+    const t = (document.querySelector('#po-body')?.textContent ?? '').replace(/\s+/g, ' ');
+    return { ok: t.includes('Rp4.500'), teks: t.slice(0, 120) };
+  });
+  if (barisBaru.ok) break;
+}
+chk('simpan PO via halaman -> baris muncul di daftar',
+  barisBaru.ok && !p.url().includes('/baru'), barisBaru.teks);
 await p.click('[data-pstatus="received"]');
 // Poll kondisi terminal (bukan timeout buta): tabel terisi ATAU pesan
 // kosong/error — diukur atomik dalam satu evaluate supaya tak kena jendela
@@ -127,12 +155,42 @@ for (let i = 0; i < 40; i++) {
   if (hasil.tr >= 1 || /Belum ada|Gagal/.test(hasil.teks)) break;
 }
 chk('filter Diterima', hasil.tr >= 1, JSON.stringify(hasil));
+// Filter "Belum lunas" (baru 2026-10-17): tiap baris yang tampil wajib
+// received bersisa → badge-nya selalu "Hutang Rp…" (atau daftar kosong sah).
+await p.click('[data-pstatus="hutang"]');
+let zh = { ok: false, n: 0, teks: '' };
+for (let i = 0; i < 40; i++) {
+  await p.waitForTimeout(250);
+  zh = await p.evaluate(() => {
+    const root = document.querySelector('#po-body');
+    const rows = [...(root?.querySelectorAll('tbody tr') ?? [])];
+    const teks = (root?.textContent ?? '').replace(/\s+/g, ' ');
+    if (/Gagal/.test(teks)) return { ok: false, n: -1, teks: teks.slice(0, 100) };
+    if (/Belum ada/.test(teks)) return { ok: true, n: 0, teks: teks.slice(0, 100) };
+    if (rows.length === 0) return { ok: false, n: 0, teks: teks.slice(0, 100) };
+    return { ok: rows.every((r) => (r.textContent ?? '').includes('Hutang Rp')), n: rows.length, teks: teks.slice(0, 100) };
+  });
+  if (zh.ok) break;
+}
+chk('filter Belum lunas: hanya baris bersisa hutang', zh.ok, JSON.stringify(zh));
 const poUi = (await api('/api/purchases?status=order')).data[0];
 await p.click('[data-pstatus="semua"]'); await p.waitForTimeout(900);
-await p.click(`[data-po-buka="${poUi.id}"]`); await p.waitForSelector('.modal');
-await p.click('[data-po-act="terima"]'); await p.waitForSelector('#pt-bayar');
-await p.click('.modal [data-ok]'); await p.waitForTimeout(1500);
-chk('terima lunas via UI -> badge Lunas', (await api(`/api/purchases/${poUi.id}`)).data.purchase.status === 'received');
+await p.click(`[data-po-buka="${poUi.id}"]`);
+await p.waitForSelector('#pt-bayar', { timeout: 10000 });
+chk('rincian PO = HALAMAN detail (bukan modal)',
+  p.url().includes(`#/purchases/${poUi.id}`) && await p.locator('.modal-overlay').count() === 0, p.url());
+await p.click('#pt-ok');
+// Poll sampai receive selesai (kondisi terminal lewat API, bukan timeout buta).
+let poStatus = '';
+for (let i = 0; i < 40; i++) {
+  await p.waitForTimeout(250);
+  poStatus = (await api(`/api/purchases/${poUi.id}`)).data.purchase.status;
+  if (poStatus === 'received') break;
+}
+chk('terima lunas via halaman -> status received', poStatus === 'received', poStatus);
+await p.click('[data-po-kembali]');
+await p.waitForSelector('#po-body', { timeout: 10000 });
+chk('tombol Kembali -> daftar', /#\/purchases$/.test(p.url()), p.url());
 
 chk('tidak ada pageerror', err.length === 0, err.join(' ~ '));
 

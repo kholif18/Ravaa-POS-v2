@@ -162,9 +162,12 @@ const TANPA_HEADER: readonly AdminRoute[] = ['products', 'stock'];
 
 const ADMIN_ROUTES = new Set<string>(ADMIN_NAV.flatMap((g) => g.items.map((i) => i.route)));
 
-/** Hash router: '#/products' -> 'products'. Default & route POS = 'pos'. */
+/** Hash router: '#/products' -> 'products'. Default & route POS = 'pos'.
+ *  Sub-segmen diabaikan di sini ('#/purchases/baru' -> 'purchases'): rute induk
+ *  = segmen pertama, sisa hash di-parse halaman sendiri (pola sub-halaman
+ *  Pembelian 2026-10-17 — alur PO jadi halaman, bukan modal). */
 export function parseRoute(hash: string): Route {
-  const slug = hash.replace(/^#\/?/, '').split('?')[0] ?? '';
+  const slug = (hash.replace(/^#\/?/, '').split('?')[0] ?? '').split('/')[0] ?? '';
   if (slug === 'pos' || slug === 'kasir') return 'pos';
   if (slug === 'login') return 'login';
   if (slug === 'ubah-sandi') return 'ubah-sandi';

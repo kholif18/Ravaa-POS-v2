@@ -354,4 +354,126 @@
     @apply absolute top-[5px] left-1/2 min-w-[18px] rounded-full bg-primary px-1 text-center text-xs font-bold leading-[18px] text-white;
     margin-left: 6px;
   }
+
+  /* ---------- 8. Lapisan bayar fullscreen (2026-10-17) ----------
+     Pengganti modal di tampilan mobile (permintaan pemilik "full screen
+     seperti bukan modal"): `#pm-bayar` dirender sekali oleh pmBayarHtml()
+     di dalam shell, ditampilkan/disembunyikan lewat atribut `hidden` oleh
+     bukaBayar()/tutupBayar() pos.ts. Hook id = PERSIS modal desktop
+     (bindFormBayar + paintFormBayar + pay berlaku apa adanya). Seluruh
+     kelas `.pm-bayar*`/`.pm-paypick*`/`.pm-cash*`/`.pm-ledger*` hidup di
+     sini — jangan bocorkan ke pos.css. */
+  .pm-bayarlayer {
+    /* z-40: DI ATAS bar bayar/navbar (z-20) tapi DI BAWAH toast (z-60) dan
+       modal desktop (z-50) — toast error barrier uang harus terlihat di
+       atas lapisan ini. */
+    @apply fixed inset-0 z-40 flex flex-col bg-canvas text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+    padding-top: env(safe-area-inset-top);
+  }
+  /* WAJIB: `@apply flex` menulis `display: flex` ke utilitas yang menang atas
+     UA rule `[hidden] { display:none }` — tanpa aturan eksplisit ini lapisan
+     tampil sepanjang waktu. Peta `hidden` = display none + precedence sama
+     dengan .pm-panel di bagian 4. */
+  .pm-bayarlayer[hidden] {
+    display: none;
+  }
+  .pm-bayar-head {
+    @apply flex shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-2.5 py-2 dark:border-gray-700 dark:bg-gray-800;
+  }
+  .pm-bayar-headinfo {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+  .pm-bayar-headlabel {
+    @apply text-sm font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500;
+  }
+  .pm-bayar-headcust {
+    @apply flex min-w-0 items-center gap-1 text-sm text-gray-600 dark:text-gray-300;
+  }
+  .pm-bayar-headcust svg {
+    @apply size-4 shrink-0 text-gray-400;
+  }
+  .pm-bayar-headcust > span {
+    @apply truncate;
+  }
+  .pm-bayar-headtotal {
+    /* Angka total selalu utuh (truncate = angka terpotong = kasir salah
+       tangkap); padding kanan kecil biar tidak menempel tepi layar. */
+    @apply shrink-0 pr-1 text-[26px] font-extrabold leading-none tabular-nums text-gray-900 dark:text-white;
+  }
+  .pm-bayar-scroll {
+    @apply min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5;
+    -webkit-overflow-scrolling: touch;
+  }
+  .pm-bayar-kartu {
+    @apply flex flex-col items-stretch gap-2 !p-3;
+  }
+  .pm-paypickgrid {
+    @apply grid grid-cols-3 gap-2;
+  }
+  /* Opsi metode — aktif = BIRU SOLID + badge cek lewat utility dari render
+     ([!bg-primary !text-white !border-primary] + .cek un-hidden), toggle
+     PERSIS paintFormBayar() pos.ts. */
+  .pm-paypick {
+    @apply relative flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-xl border-2 border-gray-200 bg-white px-1 py-2 text-sm font-semibold text-gray-700 transition hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200;
+  }
+  .pm-paypick svg {
+    @apply size-6 shrink-0;
+  }
+  .pm-paypick .cek {
+    @apply absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-white/25;
+  }
+  .pm-paypick .cek svg {
+    @apply size-3;
+  }
+  .pm-bayar-hint {
+    @apply text-sm leading-snug text-gray-500 dark:text-gray-400;
+  }
+  .pm-cashwrap {
+    @apply relative;
+  }
+  .pm-cashrp {
+    @apply pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-semibold text-gray-400 dark:text-gray-500;
+  }
+  .pm-cash {
+    @apply !min-h-[56px] !pl-11 !pr-14 !text-[26px] font-bold tabular-nums;
+  }
+  .pm-cashx {
+    @apply absolute right-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition hover:bg-gray-200 hover:text-gray-700 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600;
+  }
+  .pm-cashx svg {
+    @apply size-4;
+  }
+  .pm-cashchips {
+    @apply grid grid-cols-4 gap-2;
+  }
+  .pm-cashchip {
+    @apply flex min-h-[40px] items-center justify-center rounded-lg border border-gray-200 bg-white px-1 text-sm font-semibold tabular-nums text-gray-700 transition hover:border-primary dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200;
+  }
+  /* Ledger kembalian — BG hidup (merah kurang / hijau lebih) dipasang kelas
+     dari render pmBayarHtml + paintCart (daftar SAMA dengan formBayarHtml). */
+  .pm-ledger {
+    @apply flex flex-col items-end gap-0.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/60;
+  }
+  .pm-ledgerlabel {
+    @apply self-start text-sm text-gray-500 dark:text-gray-400;
+  }
+  .pm-ledgerctx {
+    @apply self-start text-sm text-gray-500 dark:text-gray-400;
+  }
+  .pm-bayar-note {
+    @apply resize-none;
+  }
+  .pm-bayar-count {
+    @apply self-end text-sm text-gray-400 dark:text-gray-500;
+  }
+  .pm-bayar-foot {
+    @apply flex shrink-0 items-center gap-2 border-t border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-800;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 0.625rem);
+  }
+  .pm-bayar-batal {
+    @apply !min-h-[48px] !px-5;
+  }
+  .pm-bayar-ok {
+    @apply flex-1 !min-h-[48px] !text-base;
+  }
 }

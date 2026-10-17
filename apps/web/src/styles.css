@@ -87,7 +87,7 @@
        dasar/fallback untuk dark-mode override di bawah. */
     background-image:
       radial-gradient(120% 60% at 0% 0%, rgb(59 130 246 / 0.35) 0%, transparent 60%),
-      linear-gradient(165deg, #143a94 0%, #0F2858 48%, #0a1c45 100%);
+      linear-gradient(165deg, #081533 0%, #0F2858 48%, #0a1c45 100%);
     /* Dark mode #101828 vs halaman #111827 nyaris sama -> butuh garis
        pembatas. Di light mode border transparan (kontrasnya sudah jelas).
        border-box (preflight) membuat garis masuk ke dalam w-64, jadi
@@ -316,6 +316,22 @@
      .row-btn svg, dan .strip-low svg. */
   .chip svg {
     @apply size-4 shrink-0;
+  }
+  /* Filter segmented (baru 2026-10-17 — permintaan pemilik: chip filter
+     Pembelian & menu Laporan "seperti tidak terlihat … agar mudah dilihat";
+     pola skill "tabs/pills segmented: kontainer muted, aktif kartu").
+     BUKAN pengganti .chip: chip statis/notif (POS, Riwayat, Hutang) tetap
+     .chip apa adanya — yang ini khusus BARIS FILTER yang butuh tab aktif.
+     Aktif = kartu putih + shadow-card + teks primer (dark: gray-700 + putih,
+     aman kontras — lihat blok override .text-primary di bawah). */
+  .chip-tabs {
+    @apply inline-flex flex-wrap items-center gap-1 rounded-full border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-900/60;
+  }
+  .chip-tab {
+    @apply inline-flex cursor-pointer items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-gray-600 transition hover:text-gray-900 focus-visible:outline-2 focus-visible:outline-primary dark:text-gray-300 dark:hover:text-white;
+  }
+  .chip-tab.is-active {
+    @apply bg-white font-bold text-primary shadow-card dark:bg-gray-700 dark:text-white;
   }
   /* Ikon label di info bar POS (Waktu/Kasir) — pola .chip svg yang sama:
      `icon()` sengaja tidak menulis width/height (kebijakan repo, dikontrol

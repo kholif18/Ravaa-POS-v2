@@ -60,7 +60,11 @@ panel topup/laporan, modal struk, atau styling apa pun.
   `.modal-overlay(.is-open/.is-closing) > .modal(.wide)` (spring-in 180ms,
   keluar 120ms — node dilepas modal.ts setelah 160ms),
   sidebar `#sidebar` 240px (`.collapsed` 72px, drawer HP ≤860px) + `.nav-dropdown(.open)`,
-  tabs/pills segmented (kontainer muted, aktif kartu shadow-sm).
+  **`.chip-tabs`/`.chip-tab`** (segmented tabs — kontainer pil muted
+  `p-1`, `role=tablist`; `.chip-tab` pil teks 11px semibold abu, `.is-active`
+  kartu putih + `shadow-card` + teks primer bold, dark `bg-gray-700` +
+  `text-white`; dipakai chip filter Pembelian + chip menu Laporan — `.chip`
+  tetap untuk chip aksi/info, jangan disamakan).
   **Tinggi lain (super-compact)**: header halaman `.app-header` **44px**
   (h-11), brand sidebar 44px, `.sw-btn` (tombol swal) **tetap 40px**
   (target sentuh, dijaga test `satuan-test.mjs`), `.icon-btn` **32px**,
@@ -179,8 +183,12 @@ panel topup/laporan, modal struk, atau styling apa pun.
   font-icon lib. File CSS = TIGA: `styles.css` (token `@theme` + komponen
   bersama `@layer components`) + `pos.css` KHUSUS POS (2026-10-09, pola
   RPOS V1 `pos-system.css` — SELURUH aturan `.pos-*`/`.ptk*`/`.pos-scope`)
-  + `pos-mobile.css` KHUSUS TAMPILAN MOBILE POS (2026-10-17 — SELURUH aturan
-  `.pm-*`, markup di `pages/pos-mobile.ts`; di-link SETELAH pos.css; aturan
+   + `pos-mobile.css` KHUSUS TAMPILAN MOBILE POS (2026-10-17 — SELURUH aturan
+  `.pm-*` termasuk lapisan bayar fullscreen `.pm-bayar*`/`.pm-cash*`/
+  `.pm-paypick*`/`.pm-ledger*` `#pm-bayar` — "seperti bukan modal", bukan
+  `.modal-overlay`; WAJIB tulis `.pm-bayarlayer[hidden]{display:none}` karena
+  `@apply flex` mengalahkan UA rule `[hidden]`; markup di `pages/pos-mobile.ts`;
+  di-link SETELAH pos.css; aturan
   sama: `@reference "./styles.css"` WAJIB, token hanya milik `styles.css`,
   `@apply` utility saja, kelas bersama dipakai ulang bukan diduplikasi).
   Komponen custom via `@layer components` — dilarang deklarasi mentah

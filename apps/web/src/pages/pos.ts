@@ -108,8 +108,9 @@ export type CartLine = {
   note: string;
 };
 
-type PayMethod = 'tunai' | 'qris' | 'transfer';
-
+/** Metode bayar. (`export` = dipakai pos-mobile.ts lewat `import type` —
+ *  dihapus compiler, tidak ada impor melingkar runtime.) */
+export type PayMethod = 'tunai' | 'qris' | 'transfer';
 
 /** Jenis layanan. Tidak ada provider terpisah: kasir pilih jenis, lalu nominal.
  *  Kode jenis ini yang mengisi kolom `provider` di /api/topups. */
@@ -1543,6 +1544,20 @@ let bayarApi: ModalHandle | null = null;
 
 const formBayarTerbuka = (): boolean => !!bayarApi?.el.isConnected;
 
+/** Elemen form bayar yang SEDANG terbuka — modal desktop (`bayarApi`) ATAU
+ *  lapisan fullscreen mobile `#pm-bayar` (pos-mobile.ts, 2026-10-17). SATU
+ *  sumber supaya fokus kolom uang & `paintFormBayar()` bekerja setara di dua
+ *  tampilan; `null` = tidak ada form terbuka. Keduanya tidak pernah hidup
+ *  bersamaan: shell hanya salah satu per mode, dan `bukaBayar()` memilih
+ *  tampilan berdasarkan `mobileMode`. */
+function bayarEl(): HTMLElement | null {
+  if (formBayarTerbuka()) return bayarApi!.el;
+  const pm = document.getElementById('pm-bayar');
+  return pm && !pm.hidden ? pm : null;
+}
+
+const bayarTerbuka = (): boolean => bayarEl() !== null;
+
 /** Judul modal (`Bayar — Rp…`) ikut total tagihan TERKINI — dipanggil
  *  paintCart() — satu-satunya repaint (mode tunggal sejak Topup/Tarik
  *  dihapus 2026-10-08). */
@@ -1737,8 +1752,9 @@ function bukaBayar(): void {
   // Proses sendiri di panel kanan). Guard = shift + tidak sedang proses;
   // syarat isi transaksi = bisaBayar() (keranjang / nominal terisi).
   if (!shift || busy) return;
-  if (formBayarTerbuka()) {
-    bayarApi!.el.querySelector<HTMLInputElement>('#pos-cash')?.focus();
+  const sudah = bayarEl();
+  if (sudah) {
+    sudah.querySelector<HTMLInputElement>('#pos-cash')?.focus();
     return;
   }
   if (!bisaBayar()) return;
@@ -1751,6 +1767,36 @@ function bukaBayar(): void {
   cashIn = 0;
   cashTouched = false;
   catatanBayar = '';
+  // Tampilan MOBILE (2026-10-17): bukan modal — LAPISAN FULLSCREEN milik
+  // pos-mobile.ts (`#pm-bayar`, fixed inset-0, "seperti bukan modal") dengan
+  // hook id yang PERSIS modal desktop. Elemennya persisten di shell (tidak
+  // dirender ulang per buka), jadi nilai yang tidak ikut refresh paintCart
+  // (kolom uang, catatan + counter, nama pelanggan) disegarkan eksplisit di
+  // sini; sisa tampilan lewat paintCart() + paintFormBayar() supaya tetap
+  // satu sumber — bukan render kedua yang bisa menyimpang.
+  if (mobileMode) {
+    const layar = document.getElementById('pm-bayar');
+    if (layar) {
+      const cash = layar.querySelector<HTMLInputElement>('#pos-cash');
+      if (cash) cash.value = formatRibu(cashIn);
+      const note = layar.querySelector<HTMLTextAreaElement>('#bayar-note');
+      if (note) note.value = catatanBayar;
+      const cnt = layar.querySelector('#bayar-note-count');
+      if (cnt) cnt.textContent = String(catatanBayar.length);
+      // Nama pelanggan dibaca dari select info bar SAAT BUKA (pola sama
+      // formBayarHtml desktop) — select bisa berubah tanpa repaint.
+      const cust = layar.querySelector('#bayar-cust');
+      const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
+      if (cust && sel) cust.textContent = sel.selectedOptions[0]?.text.trim() || 'Pelanggan Umum';
+      layar.hidden = false;
+      paintCart();
+      paintFormBayar();
+      // Fokus kolom uang HANYA untuk tunai (auto-focus kolom kosong sudah
+      // disepakati; QRIS/transfer tak butuh keyboard naik menutupi layar).
+      if (payMethod === 'tunai') cash?.focus();
+    }
+    return;
+  }
   bayarApi = openModal({
     title: `Bayar — ${rp(totalBayar())}`,
     body: formBayarHtml(),
@@ -1798,13 +1844,21 @@ function bukaBayar(): void {
 function tutupBayar(): void {
   if (bayarApi?.el.isConnected) bayarApi.close();
   bayarApi = null;
+  // Lapisan bayar MOBILE (#pm-bayar, pos-mobile.ts) — elemen persisten di
+  // shell mobile, jadi cukup disembunyikan (bukan dibuang); dibuka lagi =
+  // segar, sebab bukaBayar() me-reset state payment-scoped & menulis ulang
+  // isiannya.
+  const layar = document.getElementById('pm-bayar');
+  if (layar) layar.hidden = true;
 }
 
 /** Sinkronkan tampilan form bayar dengan state (dipanggil saat ganti metode):
  *  toggle blok tunai/non-tunai + sorot chip metode. */
 function paintFormBayar(): void {
-  if (!formBayarTerbuka()) return;
-  const el = bayarApi!.el;
+  // Satu sumber elemen untuk DUA tampilan (modal desktop / lapisan mobile) —
+  // lihat bayarEl().
+  const el = bayarEl();
+  if (!el) return;
   const tunai = payMethod === 'tunai';
   // Blok tunai + ledger kembalian di-toggle BERSAMA (hint hutang kini DI
   // DALAM #bayar-tunai, ikut hidden otomatis).
@@ -1909,6 +1963,34 @@ function bindFormBayar(overlay: HTMLElement): void {
     catatanBayar = (e.target as HTMLTextAreaElement).value.slice(0, 200);
     const hit = overlay.querySelector('#bayar-note-count');
     if (hit) hit.textContent = String(catatanBayar.length);
+  });
+}
+
+/** Binding LAPISAN BAYAR MOBILE (`#pm-bayar` — pos-mobile.ts, 2026-10-17).
+ *  Dipanggil `paint()` SETIAP shell mobile dirender ulang; innerHTML diganti =
+ *  elemen baru, jadi listener tidak pernah menumpuk (pola yang sama dengan
+ *  bindFormBayar untuk modal). Form-nya memakai hook id PERSIS modal desktop
+ *  (#pos-cash, [data-pay], [data-cash], #bayar-clear, #bayar-note) sehingga
+ *  bindFormBayar() + paintFormBayar() + pay() berlaku tanpa cabang kedua.
+ *  Klik "Bayar" TIDAK lewat modal.ts di sini — dituju langsung ke pay()
+ *  (validasi/barrier tetap di dalamnya, satu sumber). */
+function bindBayarMobile(): void {
+  const layar = document.getElementById('pm-bayar');
+  if (!layar) return;
+  bindFormBayar(layar);
+  // Tombol ⬅ header + "Batal" footer menutup lapisan (pola Esc modal).
+  layar.querySelectorAll<HTMLElement>('[data-pm-bayar-tutup]').forEach((b) =>
+    b.addEventListener('click', () => tutupBayar()),
+  );
+  layar.querySelector('#pos-pay')?.addEventListener('click', () => void pay());
+  // Enter di kolom uang = bayar — di modal desktop ini kerja modal.ts
+  // ("Enter-on-input → ok.click()"); lapisan mobile bukan modal, jadi
+  // dipasang eksplisit supaya jalur cepat tetap ada (HP + keyboard eksternal).
+  layar.querySelector('#pos-cash')?.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') {
+      e.preventDefault();
+      void pay();
+    }
   });
 }
 
@@ -2145,6 +2227,21 @@ function pmCtx(): PosMobileCtx {
     busy,
     rp,
     esc,
+    // Snapshot form bayar untuk LAPISAN mobile (#pm-bayar). Nilai yang
+    // di-refresh otomatis (paintCart/paintFormBayar: #bayar-total,
+    // #pos-change, ledger, chip) TIDAK diduplikasi — di sini hanya nilai
+    // render awal + yang tidak pernah disentuh refresh.
+    metodeAktif: payMethod,
+    metode: PAY_METHODS,
+    infoBayar: INFO_BAYAR[payMethod],
+    pelangganNama: customers.find((c) => c.id === customerId)?.name ?? 'Pelanggan Umum',
+    uangCepat: QUICK_CASH,
+    cashIn,
+    catatan: catatanBayar,
+    formatRibu,
+    change,
+    teksKembalian,
+    kelasChange: kelasPosChange(),
     jumlahBaris,
     diskonBaris,
     daftarSatuan,
@@ -2217,6 +2314,8 @@ function paint(): void {
     // SENGAJA tidak dipanggil di mobile (keyboard HP langsung naik menutupi
     // separuh layar begitu halaman dibuka).
     bindPosMobile(host, pmCtx);
+    // Lapisan bayar fullscreen (#pm-bayar) — modal-form milik mobile.
+    bindBayarMobile();
   } else {
     host.querySelector<HTMLInputElement>('#pos-q')?.focus();
   }

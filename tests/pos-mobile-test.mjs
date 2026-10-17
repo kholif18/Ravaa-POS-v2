@@ -13,7 +13,13 @@
 //      tombol "Tampilan desktop"), toggle kembali ke desktop di 390;
 //   B. pref '0' MENANG atas deteksi lebar (390 = desktop);
 //   C. 1440 pref '0': layout desktop tidak berubah (tabel + sidebar);
-//   D. tanpa pref + 390 = otomatis mobile.
+//   D. tanpa pref + 390 = otomatis mobile;
+//   E. lapisan bayar MOBILE (#pm-bayar, 2026-10-17) — pengganti modal yang
+//      fullscreen "seperti bukan modal": bukan .modal-overlay, ukuran penuh
+//      viewport, total + pelanggan di header, metode default tunai, chip
+//      nominal mengisi kolom uang, kembalian + ledger hidup, pindah QRIS,
+//      catatan + counter, Batal/dibuka ulang segar, barrier uang kosong
+//      ditolak (toast, TANPA penjualan).
 //
 // TIDAK ada mutasi server: suite hanya menambah ke keranjang (client-side,
 // localStorage per konteks browser) — tidak menjual, tidak menyentuh stok.
@@ -222,6 +228,121 @@ async function buka(lebar, pref) {
   } catch (e) {
     gagal++;
     console.log(`  GAGAL crash seksi D: ${String(e).slice(0, 300)}`);
+  } finally { await ctx.close(); }
+}
+
+// ---------- E. lapisan bayar mobile (#pm-bayar) ----------
+{
+  const { ctx, page: p, errs } = await buka(390, '1');
+  try {
+    await p.waitForSelector('.pm-shell', { timeout: 15000 });
+    await p.fill('#pos-q', 'PRD00001');
+    await p.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });
+    await p.keyboard.press('Enter');
+    await p.waitForSelector('#pos-rows .pm-card', { timeout: 8000 });
+
+    // buka form bayar — lapisan fullscreen, BUKAN modal
+    await p.click('#pos-bayar');
+    await p.waitForSelector('#pm-bayar:not([hidden])', { timeout: 5000 });
+    chk('E1 #pos-bayar membuka lapisan #pm-bayar — bukan .modal-overlay',
+      (await p.locator('#pm-bayar').isVisible())
+      && (await p.locator('.modal-overlay').count()) === 0);
+    const geo = await p.evaluate(() => {
+      const el = document.getElementById('pm-bayar');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return {
+        pos: getComputedStyle(el).position,
+        w: Math.round(r.width), h: Math.round(r.height),
+        top: Math.round(r.top), left: Math.round(r.left),
+        vw: innerWidth, vh: innerHeight,
+      };
+    });
+    chk('E2 lapisan menutup SELURUH viewport (fixed inset-0)',
+      geo && geo.pos === 'fixed' && geo.w === geo.vw && geo.h === geo.vh
+      && geo.top === 0 && geo.left === 0, JSON.stringify(geo));
+    chk(`E3 header menampilkan total tagihan (${rp(p1.price)})`,
+      (await p.locator('#bayar-total').textContent())?.trim() === rp(p1.price));
+    chk('E4 header menampilkan pelanggan terpilih (label opsi select, default Umum)',
+      await p.evaluate(() => {
+        const sel = document.querySelector('#pos-customer');
+        const label = sel?.selectedOptions[0]?.text.trim() || 'Pelanggan Umum';
+        return document.getElementById('bayar-cust')?.textContent?.trim() === label
+          && label.startsWith('Pelanggan Umum');
+      }));
+    chk('E5 metode default tunai (blok tunai tampil, non-tunai sembunyi, tile aktif + cek)',
+      await p.evaluate(() => {
+        const tunai = document.getElementById('bayar-tunai');
+        const non = document.getElementById('bayar-non-tunai');
+        const pick = document.querySelector('[data-pay="tunai"]');
+        return !!tunai && !tunai.hidden && !!non && non.hidden
+          && !!pick && pick.className.includes('!bg-primary')
+          && !!pick.querySelector('.cek:not(.hidden)');
+      }));
+
+    // chip nominal cepat -> kolom uang + kembalian hidup
+    await p.click('[data-cash="20000"]');
+    await p.waitForTimeout(200);
+    chk('E6 chip Rp20.000 mengisi kolom uang (20.000, fokus balik ke kolom)',
+      (await p.locator('#pos-cash').inputValue()) === '20.000'
+      && await p.evaluate(() => document.activeElement?.id === 'pos-cash'));
+    const changeTxt = (await p.locator('#pos-change').textContent())?.trim();
+    chk(`E7 kembalian Rp17.000 + ledger hijau (uang lebih)`,
+      changeTxt === rp(20000 - p1.price)
+      && await p.evaluate(() => document.getElementById('bayar-tunai-ledger')?.className.includes('bg-green-50')));
+
+    // pindah QRIS: blok tunai sembunyi + hint non-tunai tampil
+    await p.click('[data-pay="qris"]');
+    await p.waitForTimeout(200);
+    chk('E8 pindah QRIS menyembunyikan blok tunai (non-tunai tampil)',
+      await p.evaluate(() => {
+        const tunai = document.getElementById('bayar-tunai');
+        const non = document.getElementById('bayar-non-tunai');
+        const pick = document.querySelector('[data-pay="qris"]');
+        return !!tunai && tunai.hidden && !!non && !non.hidden
+          && !!pick && pick.className.includes('!bg-primary');
+      }));
+    // balik tunai: kolom uang ikut kosong (state uang per pembayaran)
+    await p.click('[data-pay="tunai"]');
+    await p.waitForTimeout(200);
+    chk('E9 balik ke tunai mengosongkan kolom uang (state per pembayaran)',
+      (await p.locator('#pos-cash').inputValue()) === ''
+      && await p.evaluate(() => {
+        const tunai = document.getElementById('bayar-tunai');
+        return !!tunai && !tunai.hidden;
+      }));
+
+    // catatan transaksi + counter
+    await p.fill('#bayar-note', 'titip ojek');
+    await p.waitForTimeout(150);
+    chk('E10 catatan transaksi + counter huruf',
+      (await p.locator('#bayar-note-count').textContent())?.trim() === '10');
+
+    // Batal menutup, buka ulang = segar (uang & catatan kosong)
+    await p.click('.pm-bayar-foot [data-pm-bayar-tutup]');
+    await p.waitForTimeout(200);
+    chk('E11 tombol Batal menutup lapisan', await p.locator('#pm-bayar').isHidden());
+    await p.click('#pos-bayar');
+    await p.waitForTimeout(300);
+    chk('E12 buka ulang = form segar (uang & catatan kosong, tetap tunai)',
+      await p.locator('#pm-bayar').isVisible()
+      && (await p.locator('#pos-cash').inputValue()) === ''
+      && (await p.locator('#bayar-note').inputValue()) === ''
+      && await p.evaluate(() => !document.getElementById('bayar-tunai')?.hidden));
+
+    // barrier: uang kosong + pelanggan umum -> ditolak dengan toast, TANPA jual
+    await p.click('#pos-pay');
+    await p.waitForSelector('.toast.toast-error', { timeout: 4000 });
+    chk('E13 bayar uang kosong ditolak — toast error "Uang diterima"',
+      /Uang diterima/i.test((await p.locator('.toast.toast-error').first().innerText())));
+    chk('E14 lapisan tetap terbuka + keranjang utuh, tidak ada penjualan',
+      await p.locator('#pm-bayar').isVisible()
+      && (await p.locator('#pos-rows .pm-card').count()) === 1
+      && (await p.locator('.swal2-popup').count()) === 0);
+    chk('E15 alur pembayaran mobile tanpa pageerror', errs.length === 0, errs.join(' | '));
+  } catch (e) {
+    gagal++;
+    console.log(`  GAGAL crash seksi E: ${String(e).slice(0, 300)}`);
   } finally { await ctx.close(); }
 }
 

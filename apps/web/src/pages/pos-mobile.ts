@@ -20,8 +20,8 @@
 //  * `import type` dari './pos' HANYA tipe (dihapus compiler) supaya tidak ada
 //    impor melingkar runtime; arah runtime selalu pos.ts → pos-mobile.ts.
 import type { Product } from '../store';
-import type { CartLine, TopupLine } from './pos';
-import { icon } from '../ui/icons';
+import type { CartLine, PayMethod, TopupLine } from './pos';
+import { icon, type IconName } from '../ui/icons';
 import { switchHtml } from '../ui/switch';
 
 /* ---------- kontrak ctx (snapshot render + aksi dari pos.ts) ---------- */
@@ -60,6 +60,29 @@ export interface PosMobileCtx {
   bisaCetakUlang: boolean;
   /** true = sedang menyimpan penjualan (tombol bayar mati). */
   busy: boolean;
+
+  /* snapshot form bayar — lapisan fullscreen `#pm-bayar` (2026-10-17). Nilai
+     yang di-refresh otomatis (total/kembalian/ledger/chip oleh paintCart &
+     paintFormBayar pos.ts) TIDAK ada di sini — hanya render awal + nilai yang
+     tidak pernah disentuh refresh (kolom uang & catatan ditulis ulang oleh
+     `bukaBayar()` saat lapisan dibuka). */
+  metodeAktif: PayMethod;
+  /** Daftar metode (PAY_METHODS pos.ts — satu sumber label & ikon). */
+  metode: { key: PayMethod; label: string; icon: IconName }[];
+  /** Teks panduan metode aktif (INFO_BAYAR pos.ts). */
+  infoBayar: string;
+  /** Nama pelanggan terpilih (select info bar) — penanda alur hutang. */
+  pelangganNama: string;
+  /** Chip nominal cepat (QUICK_CASH pos.ts). */
+  uangCepat: number[];
+  cashIn: number;
+  /** Catatan transaksi per nota (state payment-scoped pos.ts). */
+  catatan: string;
+  formatRibu(n: number): string;
+  change(): number;
+  teksKembalian(): string;
+  /** Kelas CSS angka kembalian (`kelasPosChange()` pos.ts — SATU sumber). */
+  kelasChange: string;
 
   /* helper format & hitung — SATU sumber dengan desktop (pos.ts) */
   rp(n: number): string;
@@ -292,6 +315,92 @@ function aksiPanelHtml(ctx: PosMobileCtx): string {
   </div>`;
 }
 
+/* ---------- lapisan bayar fullscreen ---------- */
+
+/** Lapisan BAYAR fullscreen (2026-10-17) — pengganti modal di tampilan
+ *  mobile, permintaan pemilik: *"untuk mobile bisa buat modal sendiri yang
+ *  full screen seperti bukan modal"*. Memenuhi seluruh layar
+ *  (`position: fixed; inset: 0`, header ⬅ + total, isi bisa digulir, footer
+ *  Batal | Bayar) — TANPA backdrop/kartu/animasi modal.
+ *
+ *  KONTRAK: elemennya PERSISTEN di dalam shell (sekali render, lalu
+ *  ditampilkan/disembunyikan lewat atribut `hidden` oleh `bukaBayar()`/
+ *  `tutupBayar()` pos.ts) — sengaja BUKAN render per buka seperti modal
+ *  desktop, supaya listener `bindBayarMobile()` tidak perlu dipasang ulang.
+ *  Hook id WAJIB persis modal desktop (`bindFormBayar()` + `paintFormBayar()`
+ *  + `pay()` berlaku apa adanya): `#pos-cash`, `#bayar-clear`, `[data-cash]`,
+ *  `#bayar-tunai-ledger`, `#pos-change`, `#pos-change-ctx`, `[data-pay]` ×3
+ *  (+ `.cek`), `#bayar-info`, `#bayar-tunai`, `#bayar-non-tunai`,
+ *  `#bayar-note` + `#bayar-note-count`, `#bayar-total`, `#bayar-cust`,
+ *  `#pos-pay`. Template ini hanya render AWAL — nilai segar ditulis
+ *  `bukaBayar()`/paintCart saat lapisan dibuka. */
+function pmBayarHtml(ctx: PosMobileCtx): string {
+  const tot = ctx.totalBayar();
+  const tunai = ctx.metodeAktif === 'tunai';
+  // BG ledger hidup (merah kurang, hijau lebih) — daftar kelas SAMA dengan
+  // render awal formBayarHtml() + toggle paintCart(): jangan tulis ulang
+  // nilainya di sini (state cashIn hampir selalu 0 saat shell dirender).
+  const kurang = tunai && ctx.cashIn > 0 && ctx.cashIn < tot;
+  const lebih = tunai && ctx.cashIn > tot;
+  const teksCtx = ctx.teksKembalian();
+  const bayarMati = !ctx.bisaBayar() || ctx.busy;
+  return `
+  <div id="pm-bayar" class="pm-bayarlayer" hidden aria-label="Form pembayaran">
+    <header class="pm-bayar-head">
+      <button type="button" class="icon-btn" data-pm-bayar-tutup aria-label="Kembali ke keranjang">${icon('chevL')}</button>
+      <div class="pm-bayar-headinfo">
+        <span class="pm-bayar-headlabel">Pembayaran</span>
+        <span class="pm-bayar-headcust">${icon('users')}<span id="bayar-cust">${ctx.esc(ctx.pelangganNama)}</span></span>
+      </div>
+      <span id="bayar-total" class="pm-bayar-headtotal">${ctx.rp(tot)}</span>
+    </header>
+    <div class="pm-bayar-scroll">
+      <div class="card pm-bayar-kartu">
+        <span class="label">Metode pembayaran</span>
+        <div class="pm-paypickgrid">
+          ${ctx.metode
+            .map((m) => {
+              const aktif = ctx.metodeAktif === m.key;
+              // Kelas aktif + .cek = daftar toggle PERSIS paintFormBayar()
+              // (3 kelas important + badge cek) — jangan ubah salah satu.
+              return `<button type="button" data-pay="${m.key}" class="pm-paypick${aktif ? ' !bg-primary !text-white !border-primary' : ''}">${icon(m.icon)}<span>${m.label}</span><span class="cek${aktif ? '' : ' hidden'}">${icon('check')}</span></button>`;
+            })
+            .join('')}
+        </div>
+        <p class="pm-bayar-hint" id="bayar-info">${ctx.esc(ctx.infoBayar)}</p>
+      </div>
+      <div class="card pm-bayar-kartu" id="bayar-tunai"${tunai ? '' : ' hidden'}>
+        <span class="label">Uang diterima</span>
+        <div class="pm-cashwrap">
+          <span class="pm-cashrp">Rp</span>
+          <input id="pos-cash" class="input pm-cash" type="text" inputmode="numeric" autocomplete="off" value="${ctx.formatRibu(ctx.cashIn)}" />
+          <button type="button" id="bayar-clear" class="pm-cashx" aria-label="Kosongkan uang diterima">${icon('close')}</button>
+        </div>
+        <span class="label">Nominal cepat</span>
+        <div class="pm-cashchips">
+          ${ctx.uangCepat.map((c) => `<button type="button" data-cash="${c}" class="pm-cashchip${ctx.cashIn > 0 && ctx.cashIn === c ? ' !border-primary !text-primary' : ''}">${ctx.rp(c)}</button>`).join('')}
+        </div>
+        <div id="bayar-tunai-ledger" class="pm-ledger${kurang ? ' bg-red-50 dark:bg-red-500/10' : lebih ? ' bg-green-50 dark:bg-green-500/10' : ''}"${tunai ? '' : ' hidden'}>
+          <span class="pm-ledgerlabel">Kembalian</span>
+          <div id="pos-change" class="${ctx.kelasChange}">${ctx.rp(ctx.change())}</div>
+          <p id="pos-change-ctx" class="pm-ledgerctx${teksCtx ? '' : ' hidden '}${kurang ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}">${ctx.esc(teksCtx)}</p>
+        </div>
+        <p class="pm-bayar-hint">Uang kurang otomatis jadi <b>hutang</b> — asal pelanggan bukan "Pelanggan Umum".</p>
+      </div>
+      <p id="bayar-non-tunai" class="pm-bayar-hint"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
+      <div class="card pm-bayar-kartu">
+        <span class="label">Catatan transaksi <span class="font-normal normal-case text-gray-400 dark:text-gray-500">(opsional)</span></span>
+        <textarea id="bayar-note" class="input pm-bayar-note" rows="2" maxlength="200" placeholder="Contoh: titip ke ojek, ambil nanti">${ctx.esc(ctx.catatan)}</textarea>
+        <div class="pm-bayar-count"><span id="bayar-note-count">${ctx.catatan.length}</span>/200</div>
+      </div>
+    </div>
+    <footer class="pm-bayar-foot">
+      <button type="button" class="btn btn-ghost pm-bayar-batal" data-pm-bayar-tutup>Batal</button>
+      <button type="button" id="pos-pay" class="btn btn-primary pm-bayar-ok"${bayarMati ? ' disabled' : ''}>${icon('check')}<span>Bayar</span></button>
+    </footer>
+  </div>`;
+}
+
 /* ---------- shell mobile ---------- */
 
 /** Seluruh kerangka halaman POS versi mobile: header (scan + pelanggan +
@@ -373,6 +482,8 @@ export function pmShellHtml(ctx: PosMobileCtx): string {
       <button type="button" data-pm-tab="katalog" class="pm-tab${tab('katalog')}" aria-selected="${pmTab === 'katalog'}">${icon('products')}<span>Katalog</span></button>
       <button type="button" data-pm-tab="aksi" class="pm-tab${tab('aksi')}" aria-selected="${pmTab === 'aksi'}">${icon('menu')}<span>Lainnya</span></button>
     </nav>
+
+    ${pmBayarHtml(ctx)}
   </div>`;
 }
 
