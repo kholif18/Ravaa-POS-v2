@@ -239,13 +239,16 @@ butir yang sudah di-ACC pemilik.
 | # | Butir | Sumber ide | Keputusan yang dibutuhkan |
 |---|-------|-----------|---------------------------|
 | 3.1 | **Pelanggan (tabel `customers`)** — nama/no HP di nota, riwayat belanja | Kasir Pintar "Manajemen Pelanggan" (free), semua app Indonesia | Wajib opsional? integrasi ke struk? |
-| 3.2 | **Loyalty poin** | Kasir Pintar (plugin), Moka CRM, tren 2026 | Rumus poin (Rp1000=1pt?) + nilai tukar |
+| 3.2 | **Loyalty poin** — **DIBATALKAN pemilik 2026-10-18 ("tidak butuh")** | Kasir Pintar (plugin), Moka CRM, tren 2026 | — (tidak dikerjakan) |
 | 3.3 | **Hutang/piutang tempo** | Kasir Pintar free "Hutang/Piutang", Aronium "credit payments" | Siapa yang boleh nyicil (langganan kantor?) |
-| 3.4 | **Split payment** (tunai+QRIS satu nota) | Tren 2026, Erzap/Moka | Skema `sale_payments` baru + laporan byMethod |
-| 3.5 | **Harga bertingkat per jumlah qty** (`min_qty` di `product_units`) **[DIMINTA PEMILIK 2026-10-18]** | Kasir Pintar "Tipe Harga", Olsera harga grosir + pertanyaan pemilik 2026-10-18 saat membedah form "Satuan jual" (*"jika qty tercapai harga juga berubah?"*) | Rincian di bawah tabel — bentuk tingkatan, interaksi satuan alternatif & grosir, perilaku keranjang, penjaga harga server |
+| 3.4 | **Split payment** (tunai+QRIS satu nota) — **DIPERTIMBANGKAN pemilik 2026-10-18 (belum di-ACC)** | Tren 2026, Erzap/Moka | Skema `sale_payments` baru + laporan byMethod |
+| 3.5 | **Harga bertingkat per jumlah qty** (`min_qty` di `product_units`) **[ACC PEMILIK 2026-10-18 — tunggu jawaban 4 keputusan di bawah]** | Kasir Pintar "Tipe Harga", Olsera harga grosir + pertanyaan pemilik 2026-10-18 saat membedah form "Satuan jual" (*"jika qty tercapai harga juga berubah?"*) | Rincian di bawah tabel — bentuk tingkatan, interaksi satuan alternatif & grosir, perilaku keranjang, penjaga harga server |
 | 3.6 | **Supplier & riwayat pembelian (PO)** | Kasir Pintar free, Loyverse purchase order | Cukup nama supplier di `restock`? |
 
-### 3.5 Harga bertingkat per jumlah qty **[DIMINTA PEMILIK 2026-10-18 — butuh aturan sebelum dikerjakan]**
+### 3.5 Harga bertingkat per jumlah qty **[ACC PEMILIK 2026-10-18 — tunggu jawaban 4 keputusan di bawah]**
+- **Status 2026-10-18:** pemilik (setelah membaca ringkasan butir Fase 3) menyetujui
+  butir ini — *"harga bertingkat OK"*. Fitur ACC; **4 keputusan di bawah masih
+  menunggu jawaban** sebelum dikembangkan.
 - **Latar:** pemilik bertanya saat membedah form produk bagian "Satuan jual"
   (*"Tambah satuan untuk apa? apakah bukan untuk menentukan harga qty tertentu
   harga jadi berubah? di POS nanti juga bergantung pada pengaturan ini, jika
