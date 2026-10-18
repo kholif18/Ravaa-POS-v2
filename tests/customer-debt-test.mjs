@@ -81,6 +81,8 @@ await p.waitForSelector('#hutang-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Hutang" aktif', await p.locator('a[href="#/debts"].is-active').count() === 1);
 chk('judul halaman benar', (await p.textContent('h2')).includes('Hutang'), await p.textContent('h2'));
+chk('tidak ada teks JSX bocor "{/*" di layar (regresi 2026-10-19)',
+  !(await p.evaluate(() => document.body.innerText)).includes('{/*'));
 await p.click('#hutang-charge'); await p.waitForSelector('.modal');
 const opts = await p.locator('#h-cust').evaluate((e) => [...e.options].map((o) => o.textContent));
 chk('select pelanggan terisi master', opts.some((t) => t.includes('UjiHutang Papa Baru')), JSON.stringify(opts));

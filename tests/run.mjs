@@ -72,7 +72,7 @@ const SUITE = [
   ['kadaluarsa-jual-test.mjs', 17],
   ['backup-test.mjs', 27],
   ['skema-guard-test.mjs', 11],
-  ['customer-debt-test.mjs', 35],
+  ['customer-debt-test.mjs', 36],
   ['expense-supplier-test.mjs', 34],
   ['retur-test.mjs', 44],
   ['purchase-test.mjs', 42],

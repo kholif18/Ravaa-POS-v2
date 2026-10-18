@@ -85,6 +85,12 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : 'terjadi kesalahan';
 }
 
+// Catatan (2026-10-04): tombol "Catat bayar" GLOBAL pernah ada di blok aksi
+// halaman ini — DIHAPUS; tiap baris tabel kini punya tombol Bayar sendiri
+// (prefill nama + sisa), lebih cepat dan tidak mungkin salah pilih pelanggan.
+// JANGAN menulis catatan ini sebagai `{/* … */}` di dalam template — di
+// template literal TS itu bukan komentar, tapi BOCOR sebagai teks di layar
+// (nyata 2026-10-19, dilaporkan pemilik "perbaiki agar lebih rapi").
 function renderPage(): string {
   return `
   <div class="space-y-3">
@@ -97,9 +103,6 @@ function renderPage(): string {
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          {/* 2026-10-04: tombol "Catat bayar" global DIHAPUS — tiap baris
-              tabel kini punya tombol Bayar sendiri (prefill nama + sisa),
-              lebih cepat dan tidak mungkin salah pilih pelanggan. */}
           <button type="button" id="hutang-charge" class="btn btn-primary" title="Catat hutang baru (Alt+N)">${icon('plus')}<span>Catat hutang</span><kbd class="kbd">Alt+N</kbd></button>
         </div>
       </div>

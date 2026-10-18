@@ -1445,6 +1445,15 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            terbuka, FIFO; merah bila >= 30, "hari ini" bila
                            <= 0). Angka = cermin API, jangan dihitung ulang
                            di klien.
+                           **Teks bocor dibuang (2026-10-19)**: catatan
+                           riwayat tombol "Catat bayar" GLOBAL (DIHAPUS
+                           2026-10-04) dulu ditulis gaya komentar JSX
+                           `{/* … */}` DI DALAM template literal — bukan
+                           komentar, tapi TAMPIL sebagai teks di layar
+                           (laporan pemilik "perbaiki agar lebih rapi");
+                           kini komentar `//` di atas `renderPage()`,
+                           dijaga asersi anti-regresi `customer-debt-test.mjs`
+                           ("tidak ada teks JSX bocor").
 apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                           (**label harga DIHAPUS dari file ini 2026-10-17** —
                           refactor halaman Label ke cetak lembar browser,
