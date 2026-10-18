@@ -23,6 +23,7 @@ const chk = (name, ok, info = '') => {
   else { fail++; console.log('  GAGAL', name, '|', info); }
 };
 const hariIni = () => new Date().toISOString().slice(0, 10);
+const rp = (n) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
@@ -156,6 +157,18 @@ chk('menu Laba: kartu + tabel per hari & per transaksi',
   (await p.textContent('#rp-body')).includes('Laba kotor')
   && (await p.textContent('#rp-body')).includes('Laba per hari')
   && (await p.textContent('#rp-body')).includes('Laba per transaksi'));
+// Baris "Jumlah" bawah tabel "Laba per transaksi" (permintaan pemilik
+// 2026-10-18) = total RENTANG filter yang berlaku — angka wajib sama dengan
+// kartu + tabel per hari (bukan cuma penjumlahan baris yang tampil).
+const labaDari = await p.locator('#rp-from').inputValue();
+const labaSampai = await p.locator('#rp-to').inputValue();
+const pfR = (await api(`/api/reports/profit?from=${labaDari}&to=${labaSampai}`)).data;
+const teksJumlah = (await p.locator('#rp-body table').filter({ has: p.locator('th', { hasText: /^Nota$/ }) })
+  .locator('tbody tr').last().textContent()) ?? '';
+chk('menu Laba: baris Jumlah bawah tabel transaksi = total rentang',
+  teksJumlah.includes('Jumlah') && teksJumlah.includes(rp(pfR.total.omzet))
+  && teksJumlah.includes(rp(pfR.total.hpp)) && teksJumlah.includes(rp(pfR.total.laba)),
+  teksJumlah.replace(/\s+/g, ' ').slice(0, 130));
 // Anti-regresi aside (revisi pemilik 2026-10-17): kartu menu JANGAN ikut
 // tinggi kolom kanan (kentara "full hanya Harian/Laba") dan SELURUH kartu
 // (bukan hanya teksnya) harus menempel saat digulir.

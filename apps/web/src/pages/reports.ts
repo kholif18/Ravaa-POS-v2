@@ -473,6 +473,12 @@ function labaView(): string {
       </tr>`,
     )
     .join('');
+  // Baris "Jumlah" (permintaan pemilik 2026-10-18) = total RENTANG filter
+  // (sama dengan kartu atas + baris Jumlah tabel per hari). Saat daftar nota
+  // terpotong batas 200, label ditulis "Jumlah periode" supaya angka itu tidak
+  // terbaca sebagai penjumlahan 200 baris yang tampil (paragraf di bawah
+  // tabelnya sudah menjelaskan pemotongan ini).
+  const terpotong = d.total.n > d.trx.length;
   return `
   <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
     ${kartu
@@ -511,7 +517,14 @@ function labaView(): string {
       </div>
       <table class="mt-2 w-full text-left text-sm">
         <thead><tr><th class="th">Waktu</th><th class="th">Nota</th><th class="th">Kasir</th><th class="th text-right">Omzet</th><th class="th text-right">HPP</th><th class="th text-right">Laba</th></tr></thead>
-        <tbody>${trx}</tbody>
+        <tbody>${trx}
+          <tr>
+            <td class="td font-semibold" colspan="3">Jumlah${terpotong ? ' periode' : ''}</td>
+            <td class="td td-num font-semibold">${rp(d.total.omzet)}</td>
+            <td class="td td-num font-semibold">${rp(d.total.hpp)}</td>
+            <td class="td td-num font-semibold">${rp(d.total.laba)}</td>
+          </tr>
+        </tbody>
       </table>
       ${
         d.total.n > d.trx.length
