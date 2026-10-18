@@ -2585,6 +2585,14 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   (termasuk efek sampingnya — stok/mutasi) supaya suite tetap hijau walau
   run sebelumnya crash; helper `sql()` menyapa `apps/api/data/data.db`
   langsung (CLI `sqlite3` TIDAK menegakkan foreign_keys — jangan andalkan).
+  **DILARANG `DELETE FROM` tanpa WHERE di DB bersama** — itu menghapus data
+  PEMILIK, bukan artefak suite. Nyata 2026-10-18: `product-delete-test.mjs`
+  menjalankan `DELETE FROM sale_items; DELETE FROM sales;` + invarian hitung
+  sales GLOBAL; setiap run suite penuh menghapus seluruh riwayat penjualan
+  dev (nota asli pemilik `261018-000019` hilang, retur #75 jadi yatim).
+  Setiap hapus + invarian WAJIB ber-scope id/sku milik suite; buktikan
+  dengan **baris penjaga** — data "pihak lain" harus selamat dari cleanup
+  (pola `cleanupDB()` + nota penjaga di `tests/product-delete-test.mjs`).
 * **PWA**: service worker HANYA boleh meng-cache shell + aset statis — data
   `/api/*` TIDAK PERNAH (angka kasir basi > layar error; outbox tetap jalur
   tulis offline). Ubah isi `apps/web/public/sw.js` = NAIKKAN versi

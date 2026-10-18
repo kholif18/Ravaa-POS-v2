@@ -7,6 +7,12 @@
  *   C. cache kasir (POS) benar-benar MEMBUANG produk tsb setelah sync
  *   D. guard: produk yang pernah terjual -> 400, produk tetap utuh
  *   E. POST ulang SKU tombstone -> bangkit kembali (deleted_at dikosongkan)
+ *
+ * Cleanup DB: HANYA artefak suite ini (id sale tetap + SKU `UJI-%`, lihat
+ * cleanupDB) + nota "penjaga" sebagai bukti sales lain TIDAK disentuh.
+ * Regresi 2026-10-18: dulu cleanup menghapus SELURUH tabel sale_items/sales
+ * (tanpa WHERE) sehingga tiap run suite penuh membuang riwayat penjualan
+ * DB dev — nota asli pemilik 261018-000019 hilang, retur #75 jadi yatim.
  */
 import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
@@ -16,18 +22,25 @@ import { pasangToken } from './bantuan-uji.mjs';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
-/** Hapus keras artefak uji lewat sqlite3 langsung (test-only, bukan jalur API). */
+/** Hapus keras artefak uji lewat sqlite3 langsung (test-only, bukan jalur API).
+ *  WAJIB ter-scope ke artefak suite INI (satu id sale tetap + SKU `UJI-%`).
+ *  Regresi 2026-10-18: versi lama menjalankan `DELETE FROM sale_items; DELETE
+ *  FROM sales;` (SELURUH tabel!) + invarian hitung sales GLOBAL — akibatnya
+ *  setiap run suite penuh menghapus seluruh riwayat penjualan DB dev; nyata:
+ *  nota asli pemilik 261018-000019 hilang & retur #75 jadi yatim. JANGAN
+ *  pernah kembali ke DELETE tanpa WHERE pada DB bersama (AGENTS §5). */
 const cleanupDB = () => {
   try {
     execFileSync('sqlite3', [DB,
-      "DELETE FROM sale_items; DELETE FROM sales; " +
+      "DELETE FROM sale_items WHERE sale_id = 'uuid-uji-hapus-dua'; " +
+      "DELETE FROM sales WHERE id = 'uuid-uji-hapus-dua'; " +
       "DELETE FROM stock_moves WHERE product_id IN (SELECT id FROM products WHERE sku LIKE 'UJI-%'); " +
       "DELETE FROM products WHERE sku LIKE 'UJI-%';"]);
     const n = execFileSync('sqlite3', [DB,
-      // Invarian suite ini: sisa produk UJI-% harus 0, sales 0, tombstone 0.
-      // BUKAN total produk — suite lain (impor) boleh meninggalkan artefaknya
-      // sendiri, dan menghitung total membuat suite ini gagal karena urutan run.
-      "SELECT (SELECT COUNT(*) FROM products WHERE sku LIKE 'UJI-%')||'|'||(SELECT COUNT(*) FROM sales)||'|'||(SELECT COUNT(*) FROM products WHERE deleted_at IS NOT NULL)"],
+      // Invarian suite ini (semua ber-scope): sisa produk UJI-% = 0, sale uji
+      // = 0, tombstone UJI-% = 0. BUKAN hitungan global — data pihak lain
+      // (produk/sales asli pemilik) TIDAK boleh dihitung/dihapus suite ini.
+      "SELECT (SELECT COUNT(*) FROM products WHERE sku LIKE 'UJI-%')||'|'||(SELECT COUNT(*) FROM sales WHERE id = 'uuid-uji-hapus-dua')||'|'||(SELECT COUNT(*) FROM products WHERE sku LIKE 'UJI-%' AND deleted_at IS NOT NULL)"],
       { encoding: 'utf8' }).trim();
     return n;
   } catch (e) { return 'gagal: ' + String(e).slice(0, 120); }
@@ -45,6 +58,16 @@ const jpost = async (p, b, m = 'POST') => {
   const r = await fetch(API + p, { method: m, headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
   return { s: r.status, j: await r.json().catch(() => ({})) };
 };
+
+// Self-heal (AGENTS §5): buang sisa artefak suite bila run sebelumnya crash.
+// Sale `uuid-uji-hapus-dua` yang tertinggal WAJIB dibuang duluan — kalau
+// tidak, POST idempotent memakai sale lama yang menunjuk produk lama dan
+// guard D lolos palsu (tidak benar-benar menguji produk baru). Nota penjaga
+// (dibuat sesudah cleanup, jadi tidak ikut cleanupDB) juga dibuang di sini.
+const sisaAwal = cleanupDB();
+execFileSync('sqlite3', [DB,
+  "DELETE FROM sale_items WHERE sale_id = 'uuid-uji-hapus-penjaga'; DELETE FROM sales WHERE id = 'uuid-uji-hapus-penjaga';"]);
+if (sisaAwal !== '0|0|0') console.log(`self-heal: sisa run sebelumnya dibuang (${sisaAwal})`);
 
 // ---------- setup ----------
 const mk = async (sku, name, extra = {}) =>
@@ -203,10 +226,24 @@ try {
 
 async function jdelete(id) { return jpost(`/api/products/${id}`, undefined, 'DELETE'); }
 
-// ---------- cleanup: DB dev harus kembali bersih ----------
+// ---------- cleanup: artefak SUITE INI harus bersih ----------
+// Regresi 2026-10-18: pasang dulu nota "penjaga" milik pihak lain; cleanup
+// yang benar TIDAK boleh menyentuhnya (versi lama `DELETE FROM sale_items;
+// DELETE FROM sales;` membuang seluruh riwayat DB dev — nota asli pemilik
+// 261018-000019 hilang). Baris penjaga dihapus lagi di akhir blok ini.
+const PENJAGA = 'uuid-uji-hapus-penjaga';
+const penjaga = await jpost('/api/sales', {
+  id: PENJAGA, shift_id: shift?.id ?? 1,
+  items: [{ product_id: p2.id, qty: 1, price: 1000 }], pay_method: 'tunai',
+});
 const akhir = cleanupDB();
 const [nProd, nSales, nTomb] = akhir.split('|').map(Number);
-console.log(`\ncleanup DB: sisa UJI-% = ${nProd}, sales = ${nSales}, tombstone = ${nTomb} (harus 0|0|0)`);
-chk('cleanup DB: 0 sisa UJI-% / 0 sales / 0 tombstone', nProd === 0 && nSales === 0 && nTomb === 0, akhir);
+console.log(`\ncleanup DB: sisa UJI-% = ${nProd}, sales uji = ${nSales}, tombstone uji = ${nTomb} (harus 0|0|0)`);
+chk('cleanup DB: artefak suite bersih (0 produk / 0 sales uji / 0 tombstone)', nProd === 0 && nSales === 0 && nTomb === 0, akhir);
+const sisaPenjaga = execFileSync('sqlite3', [DB,
+  `SELECT COUNT(*) FROM sales WHERE id = '${PENJAGA}';`], { encoding: 'utf8' }).trim();
+chk('cleanup TIDAK menyentuh sales lain (nota penjaga selamat)', (penjaga.s === 201 || penjaga.s === 200) && sisaPenjaga === '1', `create=${penjaga.s} sisa=${sisaPenjaga}`);
+execFileSync('sqlite3', [DB,
+  `DELETE FROM sale_items WHERE sale_id = '${PENJAGA}'; DELETE FROM sales WHERE id = '${PENJAGA}';`]);
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);
 process.exit(gagal === 0 ? 0 : 1);

@@ -51,7 +51,7 @@ const SUITE = [
   ['escpos-test.ts', 46],
   ['labelsheet-test.ts', 80],
   ['sku-urut-test.mjs', 17],
-  ['product-delete-test.mjs', 31],
+  ['product-delete-test.mjs', 32],
   ['e2e-import.mjs', 43],
   ['e2e-opname.mjs', 38],
   ['e2e-label.mjs', 49],
