@@ -79,6 +79,18 @@ apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
                          tiap navigasi memanggil `resetAksiBaru()`
                          (ui/aksi-baru.ts) supaya pintasan Alt+N selalu milik
                          halaman yang sedang tampil (2026-10-18).
+                         **Posisi gulir menu sidebar disimpan per device
+                         (2026-10-19, laporan pemilik "sidebar tambahkan
+                         localstorage agar menyimpan lokasi menu yang di
+                         pilih … karena menu bawah yang di pilih akan reload
+                         kembali ke posisi atas")**: `render()` menimpa shell
+                         tiap navigasi sehingga `.nav-scroll` selalu kembali
+                         ke atas; `bindShell()` (ui/shell.ts) kini memulihkan
+                         `scrollTop` dari localStorage kunci `ravaa.nav-scroll`
+                         saat mount + menulisnya rAF-throttled (1×/frame) saat
+                         menggulir (listener pasif ikut signal AbortController
+                         `sig` shell). Diuji `tests/sidebar-scroll-test.mjs`
+                         (5 asersi).
                          Registrasi service worker HANYA `import.meta.env.PROD`
                          (PWA 2026-10-16) — dev TIDAK boleh di-cache SW.
 apps/web/public/sw.js    Service worker PWA (nol dependensi): shell+aset dari

@@ -237,6 +237,9 @@ export function applySidebarState(): void {
   setCollapsed(isCollapsed());
 }
 
+/** Kunci penyimpanan posisi gulir menu sidebar (per device, 2026-10-19). */
+const NAV_SCROLL_KEY = 'ravaa.nav-scroll';
+
 /* ---------- Render shell ---------- */
 
 function navHtml(active: AdminRoute | 'profil', peran: Peran): string {
@@ -472,6 +475,39 @@ export function bindShell(): void {
 
   const sidebar = document.getElementById('sidebar');
   const backdrop = document.getElementById('sidebar-backdrop');
+
+  /* Posisi gulir menu (2026-10-19 — permintaan pemilik: *"sidebar tambahkan
+     localstorage agar menyimpan lokasi menu yang di pilih … karena menu bawah
+     yang di pilih akan reload kembali ke posisi atas"*): shell di-render ulang
+     tiap navigasi sehingga `.nav-scroll` selalu kembali ke atas dan menu yang
+     baru diklik hilang dari pandangan. Simpan per device, pulihkan tiap bind;
+     tulis di-throttle 1x/frame lewat rAF. */
+  const navScroll = document.querySelector<HTMLElement>('.nav-scroll');
+  if (navScroll) {
+    try {
+      const pos = Number(localStorage.getItem(NAV_SCROLL_KEY)) || 0;
+      if (pos > 0) navScroll.scrollTop = pos;
+    } catch {
+      /* private mode: abaikan */
+    }
+    let terjadwal = false;
+    navScroll.addEventListener(
+      'scroll',
+      () => {
+        if (terjadwal) return;
+        terjadwal = true;
+        requestAnimationFrame(() => {
+          terjadwal = false;
+          try {
+            localStorage.setItem(NAV_SCROLL_KEY, String(navScroll.scrollTop));
+          } catch {
+            /* private mode: abaikan */
+          }
+        });
+      },
+      { passive: true, signal: sig },
+    );
+  }
 
   const setMenu = (open: boolean) => {
     sidebar?.classList.toggle('is-open', open);
