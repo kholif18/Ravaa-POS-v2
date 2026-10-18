@@ -95,7 +95,7 @@ butir yang sudah di-ACC pemilik.
   `shift-test.mjs` 19 → **23** asersi (2 agregat + 2 dialog), README §shift +
   kontrak §3 diperbarui, `npm test` SEMUA HIJAU.
 
-### 1.4 Refactor halaman Label harga — cetak lembar A4/Folio **[SELESAI 2026-10-17 — tersisa cetak uji nyata pemilik]**
+### 1.4 Refactor halaman Label harga — cetak lembar A4/Folio **[SELESAI 2026-10-18 — termasuk uji cetak fisik pemilik]**
 - **Latar (keputusan pemilik 2026-10-17):** printer label toko = **Epson
   L3110 & L1210** (inkjet lembar), kertas **A4 + Folio (215×330 mm)** — bukan
   printer thermal 58 mm. Halaman `#/labels` direfactor total mengikuti
@@ -166,6 +166,9 @@ butir yang sudah di-ACC pemilik.
 - **DoD:** build web lolos, suite regresi hijau dengan ekspek baru, cetak uji
   nyata 1× (pemilik, kertas A4 & Folio, skala 100%) **termasuk scan fisik
   Code 128** (belum pernah diuji di atas kertas).
+- **Uji cetak fisik — SELESAI 2026-10-18:** pemilik menguji cetak label
+  langsung di kertas dan memindai barcode hasil cetaknya: *"sudah saya uji
+  coba dan hasilnya sempurna, saya anggap cetak label selesai"*.
 
 ### 1.5 Refactor halaman Laporan + byHour + Laba per transaksi **[SELESAI 2026-10-17]**
 - **Latar (permintaan pemilik 2026-10-17):** *"kerjakan byHour, laba per
@@ -224,9 +227,9 @@ butir yang sudah di-ACC pemilik.
 | # | Butir | Catatan |
 |---|-------|---------|
 | 2.1 | **Laporan penjualan per jam** **[SELESAI 2026-10-17 — lihat §1.5]** | `GET /api/reports/daily` tambah `byHour` (`strftime('%H', created_at)`, aturan UTC sama) + grafik batang di `#/reports`. Tren 2026: "4 laporan wajib" = per jam salah satunya. Endpoint lama diperluas (bukan baru) — update §3. |
-| 2.2 | **Laporan penjualan per kategori** | `byCategory` = `sale_items` -> `products` -> `categories`, grup per kategori (jasa/cetak vs barang fisik terlihat beda sumbangsihnya). |
-| 2.3 | **Tahan nota (transaksi tertunda)** | Simpan keranjang sementara (IndexedDB, per device) + tombol Recall; meniru Aronium "named order"/Erzap "F3 pending". Gap: grep `hold\|tunda\|pending` = 0 di `pos.ts`. Tanpa skema baru (belum tentu sinkron antar device — cukup per kasir). |
-| 2.4 | **Margin (laba) per produk di laporan** **[SELESAI 2026-10-17 — lihat §1.5; termasuk laba per hari + per transaksi]** | `topItems` sudah ada qty/amount; tambah `hpp` & `laba` per baris (angka `cost` sudah di-snapshot per baris — cukup `SUM(qty*cost)`). |
+| 2.2 | **Laporan penjualan per kategori** **[SELESAI 2026-10-18]** | `byCategory` di `laporanRentang()` = `sale_items` -> `products` -> `categories` (ikut `GET /api/reports/daily` + `/summary`), rumus amount/hpp/laba sama persis dengan menu Produk, baris manual tanpa produk -> "Tanpa kategori". Menu **Kategori** (grup Penjualan) di `#/reports`: tabel + baris Jumlah + catatan + CSV + Cetak; `laporan-menu-test` 33 -> **38** asersi. |
+| 2.3 | **Tahan nota (transaksi tertunda)** **[SELESAI 2026-10-04 — P5]** | Keranjang sementara per device (IndexedDB kv `holds` — `getHolds()`/`saveHolds()` di `store.ts`, tanpa skema/endpoint API) + tombol **Tahan (F7)** / **Pending n (F8)** + modal split antrean‖pratinjau (`bukaTertahan()`); meniru Aronium "named order"/Erzap "F3 pending". |
+| 2.4 | **Margin (laba) per produk di laporan** **[SELESAI 2026-10-17 — lihat §1.5; termasuk laba per hari + per transaksi]** | `topItems` sudah ada qty/amount; tambah `hpp` & `laba` per baris (angka `cost` sudah di-snapshot per baris — cukup `SUM(qty*cost)`). Revisi 2026-10-18: baris **"Jumlah"** di bawah tabel **Laba per transaksi** (total rentang; label "Jumlah periode" saat daftar terpotong 200) — permintaan pemilik *"berikan total jumlah di bawah tabel"*. |
 
 ## 3. Fase 3 — Fitur relasional (butuh ACC pemilik per butir)
 
