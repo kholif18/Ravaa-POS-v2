@@ -72,6 +72,10 @@ type ItemRow = {
   /** Catatan per baris (sale_items.note) — ikut tercetak ulang persis seperti
    *  struk asli dari POS. '' = tanpa catatan. */
   note?: string;
+  /** Qty yang SUDAH diretura untuk baris ini (GET /api/sales/:id, 2026-10-18;
+   *  satuan jual — seunit dengan `qty`). Sumber penanda "sudah retur N · sisa
+   *  M" + batas input di dialog "Buat retur" halaman Riwayat. */
+  qty_retur?: number;
 };
 
 type Ringkas = {
@@ -341,7 +345,13 @@ function detailJual(s: SaleRow): string {
  *  mengisi qty kembali per baris (0 = tidak ikut). Server menjaga sisa
  *  (qty ≤ terjual − sudah diretura, 400 bila lebih) + mengembalikan stok
  *  fisik + mencatat uang keluar. Uang terikat shift TERBUKA KINI (laci yang
- *  keluar uangnya sekarang), bukan shift nota asal yang bisa sudah tutup. */
+ *  keluar uangnya sekarang), bukan shift nota asal yang bisa sudah tutup.
+ *  Penanda per baris (permintaan pemilik 2026-10-18 — "tidak mendetail retur
+ *  produk mana dan qty berapa pada modalnya"): baris yang pernah diretur
+ *  membawa badge "sudah retur N · sisa M" (qty_retur dari server) dan batas
+ *  input = sisa (bukan qty terjual); baris yang sudah diretur penuh inputnya
+ *  mati. Pengaman sisa di klien ini hanyalah UX — penjaga sebenarnya tetap
+ *  guard `sisaBaris` server (400 bila lebih). */
 async function dialogReturNota(s: SaleRow): Promise<void> {
   let items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
   if (!items.length) {
@@ -364,22 +374,30 @@ async function dialogReturNota(s: SaleRow): Promise<void> {
     );
     shiftId = r.data?.id ?? null;
   } catch { /* di luar shift = NULL, bukan error */ }
+  const barisHtml = items.map((it) => {
+    const sudah = it.qty_retur ?? 0;
+    const sisa = it.qty - sudah;
+    const habis = sisa <= 1e-9;
+    return `
+          <div class="flex items-center justify-between gap-2 border-b border-gray-100 py-1.5 last:border-0 dark:border-gray-800">
+            <span class="min-w-0 text-sm"><b>${it.qty}${it.unit ? ` ${esc(it.unit)}` : ''} ×</b> ${esc(it.name)}
+              <span class="cell-sub">(${rp(it.price)}${it.product_id === null ? ' · tanpa stok' : ''})</span>
+              ${sudah > 0 ? `<span class="chip !border-amber-500/40 !text-amber-700 dark:!text-amber-400" title="Baris ini sudah diretur ${sudah}${it.unit ? ` ${esc(it.unit)}` : ''} — sisa yang bisa dikembalikan ${sisa}">${icon('sync')}<span>sudah retur ${sudah} · sisa ${sisa}</span></span>` : ''}
+            </span>
+            <span class="flex shrink-0 items-center gap-1.5">
+              <label class="text-xs text-gray-500 dark:text-gray-400" for="rt-${it.id}">kembali</label>
+              <input id="rt-${it.id}" data-rt-qty="${it.id}" data-rt-max="${sisa}" class="input input-sm !w-24 text-right tabular-nums" type="number" min="0" max="${sisa}" step="any" value="0"${habis ? ' disabled title="Sudah diretur penuh"' : ''} />
+            </span>
+          </div>`;
+  }).join('');
+  const adaSisa = items.some((it) => it.qty - (it.qty_retur ?? 0) > 1e-9);
   openModal({
     title: `Retur — Nota ${s.invoice_no ?? s.id.slice(0, 8)}`,
     okLabel: 'Simpan retur',
     wide: true,
     body: `
-      <div class="space-y-1">
-        ${items.map((it) => `
-          <div class="flex items-center justify-between gap-2 border-b border-gray-100 py-1.5 last:border-0 dark:border-gray-800">
-            <span class="min-w-0 text-sm"><b>${it.qty}${it.unit ? ` ${esc(it.unit)}` : ''} ×</b> ${esc(it.name)}
-              <span class="cell-sub">(${rp(it.price)}${it.product_id === null ? ' · tanpa stok' : ''})</span></span>
-            <span class="flex shrink-0 items-center gap-1.5">
-              <label class="text-xs text-gray-500 dark:text-gray-400" for="rt-${it.id}">kembali</label>
-              <input id="rt-${it.id}" data-rt-qty="${it.id}" data-rt-max="${it.qty}" class="input input-sm !w-24 text-right tabular-nums" type="number" min="0" max="${it.qty}" step="any" value="0" />
-            </span>
-          </div>`).join('')}
-      </div>
+      <div class="space-y-1">${barisHtml}</div>
+      ${adaSisa ? '' : `<p class="mt-2 text-xs text-amber-700 dark:text-amber-400">Semua baris nota ini sudah diretur penuh — tidak ada sisa untuk dikembalikan.</p>`}
       <div class="field mt-3">
         <label class="label" for="rt-note">Catatan</label>
         <input id="rt-note" class="input" maxlength="200" placeholder="cth: dus rusak saat dibuka" />
@@ -392,10 +410,13 @@ async function dialogReturNota(s: SaleRow): Promise<void> {
     onMount: ({ el, ok, close }) => {
       ok.addEventListener('click', async () => {
         const baris: { sale_item_id: number; qty: number }[] = [];
+        let lewat = false;
         el.querySelectorAll<HTMLInputElement>('[data-rt-qty]').forEach((inp) => {
           const q = Number(inp.value || 0);
+          if (q > Number(inp.max) + 1e-9) lewat = true;
           if (q > 0) baris.push({ sale_item_id: Number(inp.dataset.rtQty), qty: q });
         });
+        if (lewat) { toast('Qty melebihi sisa yang bisa diretur — sisa tampil di baris bertanda', 'warning'); return; }
         if (!baris.length) { toast('Isi dulu qty kembali minimal 1 baris', 'warning'); return; }
         try {
           const r = await apiPost<{ data: { retur: { id: number; total: number } } }>('/api/returns', {

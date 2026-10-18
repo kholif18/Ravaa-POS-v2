@@ -56,6 +56,9 @@ chk('POST retur 2/3 -> 201 total 10000', r1.status === 201 && r1.json.data.retur
 const stok1 = (await api(`/api/products?q=${QFISIK}`)).data[0]?.stock;
 chk('stok 10-3+2=9', stok1 === 9, `stok=${stok1}`);
 chk('stock_moves reason=retur qty=2', sql(`SELECT COUNT(*) FROM stock_moves WHERE reason='retur' AND product_id=${prodId} AND qty=2;`) === '1');
+// Qty per baris sudah diretura (2026-10-18): dasar penanda "sudah retur N ·
+// sisa M" di dialog "Buat retur" halaman Riwayat (GET /api/sales/:id.items).
+chk('items bawa qty_retur baris (2/3 baru diretur)', (await api(`/api/sales/${saleId}`)).data.items[0].qty_retur === 2);
 chk('retur 2 lagi -> 400 melebihi sisa', (await post('/api/returns', { sale_id: saleId, items: [{ sale_item_id: siId, qty: 2 }] })).status === 400);
 const r2 = await post('/api/returns', { sale_id: saleId, items: [{ sale_item_id: siId, qty: 1 }] });
 chk('retur pas sisa 1 -> 201', r2.status === 201);
@@ -99,6 +102,7 @@ const notaRet = await api(`/api/sales/${saleId}`);
 chk('GET /api/sales/:id menandai retur (n=2, total 15000)',
   notaRet.data.sale.n_retur === 2 && notaRet.data.sale.retur_total === 15000,
   JSON.stringify({ n: notaRet.data.sale.n_retur, tot: notaRet.data.sale.retur_total }));
+chk('items qty_retur per baris = 3 (penuh)', notaRet.data.items[0].qty_retur === 3);
 const rowRet = (await api(`/api/sales?date=${TODAY}`)).data.find((r) => r.id === saleId);
 chk('GET /api/sales daftar ikut membawa penanda retur',
   rowRet?.n_retur === 2 && rowRet?.retur_total === 15000, JSON.stringify(rowRet));
@@ -122,6 +126,13 @@ await p.click('.swal2-container .sw-btn-danger'); await p.waitForTimeout(1500);
 chk('batalkan -> hilang dari daftar', !(await api(`/api/returns?date=${TODAY}`)).data.some((r) => r.id === idManual));
 
 console.log('=== F. UI riwayat: tombol retur per nota + penanda retur ===');
+// Nota kedua khusus penanda PARTIAL (sisa > 0) di dialog "Buat retur":
+// jual 2, retur 1 — sisa 1 yang bisa dikembalikan.
+const sale2 = `uji-retur2-${Date.now()}`;
+await post('/api/sales', { id: sale2, shift_id: shift.data.id, pay_method: 'tunai', cash_in: 10000, cashier: 'kasir', items: [{ product_id: prodId, qty: 2 }] });
+const si2 = (await api(`/api/sales/${sale2}`)).data.items[0].id;
+chk('nota kedua: retur 1/2 -> qty_retur 1', (await post('/api/returns', { sale_id: sale2, items: [{ sale_item_id: si2, qty: 1 }], cashier: 'kasir' })).status === 201
+  && (await api(`/api/sales/${sale2}`)).data.items[0].qty_retur === 1);
 await p.goto('http://localhost:5656/#/history', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1000);
 chk('baris nota menandai retur (chip amber)',
@@ -130,8 +141,25 @@ await p.click(`[data-trx="sale:${saleId}"]`); await p.waitForTimeout(1200);
 chk('detail nota memuat tombol Buat retur', await p.locator('[data-retur-nota]').count() === 1);
 chk('detail nota memuat kotak Retur', (await p.textContent('.det-row')).includes('2× retur pada nota ini'));
 await p.click('[data-retur-nota]'); await p.waitForSelector('.modal');
-await w(`#rt-${siId}`, '0'); await p.waitForTimeout(200);
+await p.waitForTimeout(200);
 chk('dialog prefill item nota', (await p.textContent('.modal')).includes(NAMA_FISIK));
+// Penanda per baris (permintaan pemilik 2026-10-18 — "tidak mendetail retur
+// produk mana dan qty berapa pada modalnya"): baris penuh diretur -> badge
+// "sudah retur 3 · sisa 0" + input mati; sisa sebagian -> badge + max input
+// = sisa (input tetap aktif).
+chk('dialog: baris penuh -> badge + input mati (max 0)',
+  (await p.textContent('.modal')).includes('sudah retur 3 · sisa 0')
+  && await p.locator(`#rt-${siId}[disabled]`).count() === 1
+  && (await p.locator(`#rt-${siId}`).getAttribute('max')) === '0');
+chk('dialog: catatan semua baris sudah penuh', (await p.textContent('.modal')).includes('sudah diretur penuh'));
+await p.click('.modal [data-x]'); await p.waitForTimeout(300);
+await p.click(`[data-trx="sale:${sale2}"]`); await p.waitForTimeout(1200);
+await p.click('[data-retur-nota]'); await p.waitForSelector('.modal');
+await p.waitForTimeout(200);
+chk('dialog: sisa sebagian -> badge + max = sisa, input aktif',
+  (await p.textContent('.modal')).includes('sudah retur 1 · sisa 1')
+  && (await p.locator(`#rt-${si2}`).getAttribute('max')) === '1'
+  && await p.locator(`#rt-${si2}[disabled]`).count() === 0);
 await p.click('.modal [data-x]'); await p.waitForTimeout(300);
 
 console.log('=== G. DELETE validasi ===');

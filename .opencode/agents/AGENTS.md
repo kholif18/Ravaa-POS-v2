@@ -1059,6 +1059,17 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          (`sale_id` + shift TERBUKA KINI, bukan shift nota
                          asal) — riwayat nota lama tidak diubah, catatan baru
                          masuk `#/returns`.
+                         **Penanda per baris di dialog (2026-10-18, permintaan
+                         pemilik — penanda lama hanya di baris linimasa,
+                         *"tidak mendetail retur produk mana dan qty berapa
+                         pada modalnya"*)**: tiap baris prefill memakai
+                         `items[].qty_retur` (lihat GET /api/sales/:id) —
+                         badge amber **"sudah retur N · sisa M"** bila baris
+                         sudah pernah diretur, input qty `max` = sisa +
+                         **MATI** saat sisa 0, catatan "Semua baris nota ini
+                         sudah diretur penuh…" bila tak ada sisa; guard klien
+                         (toast) saat submit melebihi sisa, di atas guard
+                         server `sisaBaris` (`simpanRetur`).
                          **Penanda RETUR (2026-10-18, permintaan pemilik
                          *"pada Riwayat transaksi, jika ada retur apakah tidak
                          di tandai?"*)**: baris penjualan dengan computed
@@ -2299,6 +2310,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Sejak 2026-10-03 tiap baris juga memuat **`note`** (catatan per baris,
     `''` bila tanpa) lewat `SELECT si.*` — dipakai cetak ulang supaya baris
     catatan ikut tercetak persis seperti struk aslinya.
+  - Sejak 2026-10-18 tiap baris juga memuat **`qty_retur`** — jumlah yang
+    sudah diretura untuk baris ini: subquery `COALESCE(SUM(return_items.qty),0)`
+    per `sale_item_id` (satuan jual yang SAMA dengan `si.qty`, jadi bisa
+    dibandingkan langsung; subquery identik dengan guard sisa di `simpanRetur`).
+    Dipakai dialog **"Buat retur"** halaman Riwayat: badge amber
+    **"sudah retur N · sisa M"** per baris + `max` input qty = sisa (input
+    MATI saat sisa 0). Retur yang dibatalkan (`DELETE /api/returns/:id`) ikut
+    hilang dari penjumlahan ini.
 * `GET /api/sales?date=&limit=&offset=`
   -> `{data:[{id,shift_id,created_at,invoice_no,customer_id,customer_name,sisa_hutang,n_retur,retur_total,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).

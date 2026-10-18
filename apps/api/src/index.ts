@@ -2065,8 +2065,14 @@ app.get('/api/sales/:id', (c) => {
   // jualnya BUKAN satuan dasar, dan sale_items hanya menyimpan satuan jual —
   // tanpa satuan dasar saat ini, riwayat tidak bisa memutuskan sama persis
   // seperti yang dilakukan POS. Produk terhapus pun tetap ikut (LEFT JOIN).
+  // `qty_retur` per baris (2026-10-18): jumlah yang SUDAH diretura untuk baris
+  // ini — subquery yang SAMA dengan guard sisa di simpanRetur, satuan jual
+  // (return_items.qty seunit dengan sale_items.qty). Dipakai dialog "Buat
+  // retur" halaman Riwayat: penanda "sudah retur N · sisa M" + clamp max qty.
+  // Retur yang dibatalkan (DELETE) hilang dari penjumlahan.
   const items = db.prepare(
-    `SELECT si.*, p.unit AS base_unit
+    `SELECT si.*, p.unit AS base_unit,
+            (SELECT COALESCE(SUM(ri.qty),0) FROM return_items ri WHERE ri.sale_item_id = si.id) AS qty_retur
        FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
       WHERE si.sale_id=?`,
   ).all(c.req.param('id'));

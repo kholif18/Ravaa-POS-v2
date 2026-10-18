@@ -882,6 +882,13 @@ npm run dev:api
     baris `returns` yang menunjuk nota ini (field `n_retur`/`retur_total` di
     `GET /api/sales` & `/:id`) — retur manual tanpa nota tidak menandai nota
     mana pun, dan retur yang dibatalkan otomatis hilang penandanya.
+  - **Penanda per baris di dialog "Buat retur"** (2026-10-18, permintaan
+    pemilik — *"tidak mendetail retur produk mana dan qty berapa pada
+    modalnya"*): tiap baris prefill memuat badge amber **"sudah retur N ·
+    sisa M"** (dari `items[].qty_retur` `GET /api/sales/:id`), input qty
+    dibatasi `max` = sisa dan **mati** bila baris sudah diretur penuh;
+    catatan "Semua baris nota ini sudah diretur penuh…" muncul bila tak ada
+    sisa, dan submit yang melebihi sisa ditolak toast (di atas guard server).
   - **Cetak ulang struk** (baru 2026-10-01): kartu Pembayaran rincian penjualan
     punya tombol **Cetak ulang struk**. Setelah memilih isi nota, dialog
     menawarkan **[Thermal] [A4] [Batal]** — A4 membuka invoice A4 yang sama
