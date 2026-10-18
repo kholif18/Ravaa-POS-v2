@@ -182,6 +182,13 @@ panel topup/laporan, modal struk, atau styling apa pun.
    `#bayar-tunai`, `#bayar-non-tunai`) tetap dipertahankan supaya pintasan &
    suite test tidak patah.
 
+10. Dropdown hasil cari `.suggest-item` (scan POS `#pos-results`, cari produk
+    `#pc-list`, cari pelanggan): hover & `is-active` = tint primer
+    `bg-primary/25 dark:bg-primary/30` (dipertajam 2026-10-19 — `bg-gray-100`
+    lama nyaris tak terbaca di panel LCD; permintaan pemilik *"pada hover
+    silakan di pertajam warnanya"*). Jangan kembalikan ke abu; diuji
+    `tests/suggest-hover-test.mjs` (5 asersi).
+
 ## Larangan UI
 
 * Tailwind CSS v4 DISETUJUI user 2026-09-25 (alasan: kecepatan bangun kulit;

@@ -85,6 +85,7 @@ const SUITE = [
   ['harga-dinamis-test.mjs', 18],
   ['pos-notif-test.mjs', 6],
   ['pos-ibar-test.mjs', 7],
+  ['suggest-hover-test.mjs', 5],
   ['pos-mobile-test.mjs', 43],
   ['profil-test.mjs', 18],
   ['login-test.mjs', 26],

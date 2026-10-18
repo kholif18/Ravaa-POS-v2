@@ -127,6 +127,16 @@ apps/web/src/styles.css  Token + gaya BERSAMA Tailwind v4 (`@theme` + `@layer
                           (primary). Dipakai tombol buat baru `<kbd
                           class="kbd">Alt+N</kbd>` (lihat `ui/aksi-baru.ts`)
                           — SATU komponen, 10 halaman tidak menyalin utility.
+                          **`.suggest-item` hover/aktif DIPERTAJAM
+                          (2026-10-19)** — dropdown hasil cari (scan POS,
+                          cari produk `#pc-list`, cari pelanggan): sub-abu
+                          `bg-gray-100` lama nyaris tak terbaca di panel LCD
+                          (laporan pemilik: *"pada hover silakan di pertajam
+                          warnanya, di LCD kurang terlihat"*); kini tint
+                          primer `bg-primary/25 dark:bg-primary/30` untuk
+                          hover DAN `is-active` (satu aturan); diuji
+                          `tests/suggest-hover-test.mjs` (5 asersi: light/
+                          dark + item netral tetap transparan).
                           Aksen teks primer DI DARK = override khusus #6aa5ff
                           (di blok setelah swal — #1d6df0 sebagai teks di kartu
                           gelap hanya ~3.7:1). **Daftar palet ini = `@theme`

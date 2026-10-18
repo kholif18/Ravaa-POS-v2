@@ -837,9 +837,13 @@
   .suggest-item {
     @apply flex w-full cursor-pointer items-center gap-2 px-2.5 py-1 text-left transition;
   }
+  /* Hover/aktif DIPERTAJAM (2026-10-19, laporan pemilik: *"pada hover silakan
+     di pertajam warnanya, di LCD kurang terlihat"*): gray-100 (#f3f4f6) dan
+     gray-700/60 nyaris tak terbaca di panel LCD; kini tint primer dari token
+     `--color-primary` — light 25%, dark 30%. */
   .suggest-item:hover,
   .suggest-item.is-active {
-    @apply bg-gray-100 dark:bg-gray-700/60;
+    @apply bg-primary/25 dark:bg-primary/30;
   }
   /* Chip satuan alternatif di bawah baris hasil (fitur #3 Multi satuan).
      Baris utama = satuan dasar; chip = pack/dus/dsb. Sengaja TIDAK diberi
