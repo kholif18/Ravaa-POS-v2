@@ -160,6 +160,32 @@ chk('dialog: sisa sebagian -> badge + max = sisa, input aktif',
   (await p.textContent('.modal')).includes('sudah retur 1 · sisa 1')
   && (await p.locator(`#rt-${si2}`).getAttribute('max')) === '1'
   && await p.locator(`#rt-${si2}[disabled]`).count() === 0);
+
+console.log('=== F2. Regresi 2026-10-18: segar setelah retur tanpa reload ===');
+// Laporan pemilik (nota 261018-000019): sesudah retur 1 btl, buka ulang
+// "Buat retur" masih tampil max qty penuh tanpa badge — dialog dulu memakai
+// cache item detail yang di-fetch SEBELUM retur. Sekarang dialog SELALU
+// fetch item segar + sesudah submit linimasa/rincian disegarkan otomatis.
+await p.fill(`#rt-${si2}`, '1');
+await p.click('.modal [data-ok]');
+await p.waitForFunction(
+  (sel) => document.querySelector(sel)?.textContent?.includes('Retur Rp10.000'),
+  `[data-trx="sale:${sale2}"]`,
+  { timeout: 8000 },
+);
+chk('sesudah retur: chip baris sale2 segar (Retur Rp10.000)', true);
+await p.waitForFunction(
+  () => document.querySelector('.det-row')?.textContent?.includes('2× retur pada nota ini'),
+  null,
+  { timeout: 8000 },
+);
+chk('sesudah retur: kotak retur rincian segar (2× retur)', true);
+await p.click('[data-retur-nota]'); await p.waitForSelector('.modal');
+await p.waitForTimeout(200);
+chk('buka ulang TANPA reload: badge & sisa segar (2/2, input mati)',
+  (await p.textContent('.modal')).includes('sudah retur 2 · sisa 0')
+  && await p.locator(`#rt-${si2}[disabled]`).count() === 1
+  && (await p.locator(`#rt-${si2}`).getAttribute('max')) === '0');
 await p.click('.modal [data-x]'); await p.waitForTimeout(300);
 
 console.log('=== G. DELETE validasi ===');

@@ -351,17 +351,22 @@ function detailJual(s: SaleRow): string {
  *  membawa badge "sudah retur N · sisa M" (qty_retur dari server) dan batas
  *  input = sisa (bukan qty terjual); baris yang sudah diretur penuh inputnya
  *  mati. Pengaman sisa di klien ini hanyalah UX — penjaga sebenarnya tetap
- *  guard `sisaBaris` server (400 bila lebih). */
+ *  guard `sisaBaris` server (400 bila lebih).
+ *  Item SELALU di-fetch segar dari server (bug nyata 2026-10-18, laporan
+ *  pemilik nota 261018-000019: retur 1 btl lalu buka dialog lagi masih max
+ *  qty penuh tanpa badge — cache `state.det` di-fetch SEBELUM retur). Gagal
+ *  fetch = dialog tidak dibuka dengan angka basi; sesudah submit sukses
+ *  linimasa + rincian ikut disegarkan (lihat handler ok). */
 async function dialogReturNota(s: SaleRow): Promise<void> {
-  let items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
-  if (!items.length) {
-    try {
-      const j = await apiGet<{ data: { items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
-      items = j.data.items;
-    } catch (e) {
-      toast(`Gagal memuat nota: ${errMsg(e)}`, 'error');
-      return;
-    }
+  let items: ItemRow[];
+  try {
+    const j = await apiGet<{ data: { items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
+    items = j.data.items;
+    // Cache rincian ikut disegarkan supaya tidak ada pembaca lain yang basi.
+    if (state.det?.key === `sale:${s.id}`) state.det.items = items;
+  } catch (e) {
+    toast(`Gagal memuat nota: ${errMsg(e)}`, 'error');
+    return;
   }
   if (!items.length) {
     toast('Nota ini tanpa baris item — tidak ada yang bisa diretura', 'warning');
@@ -428,6 +433,13 @@ async function dialogReturNota(s: SaleRow): Promise<void> {
           });
           close();
           toast(`Retur #${r.data.retur.id} tersimpan · kembali ${rp(r.data.retur.total)}`, 'success');
+          // Segarkan linimasa (chip "Retur" per baris + kotak retur rincian
+          // ikut data list) dan cache item yang sedang terbuka — tanpa ini
+          // buka ulang "Buat retur" masih memakai sisa lama (bug nyata
+          // 2026-10-18). Gagal refresh bukan error transaksi — toast retur
+          // sudah tampil; load()/bukaDetail() menangani errornya sendiri.
+          await load();
+          if (state.buka === `sale:${s.id}`) await bukaDetail(s.id);
         } catch (e) {
           toast(`Gagal: ${errMsg(e)}`, 'error');
         }

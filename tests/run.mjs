@@ -74,7 +74,7 @@ const SUITE = [
   ['skema-guard-test.mjs', 11],
   ['customer-debt-test.mjs', 35],
   ['expense-supplier-test.mjs', 34],
-  ['retur-test.mjs', 41],
+  ['retur-test.mjs', 44],
   ['purchase-test.mjs', 42],
   ['pager-test.mjs', 19],
   ['altn-test.mjs', 17],

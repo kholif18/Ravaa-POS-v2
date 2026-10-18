@@ -889,6 +889,9 @@ npm run dev:api
     dibatasi `max` = sisa dan **mati** bila baris sudah diretur penuh;
     catatan "Semua baris nota ini sudah diretur penuh…" muncul bila tak ada
     sisa, dan submit yang melebihi sisa ditolak toast (di atas guard server).
+    Dialog selalu mengambil item segar dari server, dan sesudah retur sukses
+    linimasa + rincian yang terbuka ikut tersegarkan otomatis (perbaikan
+    2026-10-18 — dulu memakai item cache lama sehingga sisa/badge bisa basi).
   - **Cetak ulang struk** (baru 2026-10-01): kartu Pembayaran rincian penjualan
     punya tombol **Cetak ulang struk**. Setelah memilih isi nota, dialog
     menawarkan **[Thermal] [A4] [Batal]** — A4 membuka invoice A4 yang sama

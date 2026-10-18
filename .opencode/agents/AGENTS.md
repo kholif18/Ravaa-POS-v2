@@ -1070,6 +1070,19 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          sudah diretur penuh…" bila tak ada sisa; guard klien
                          (toast) saat submit melebihi sisa, di atas guard
                          server `sisaBaris` (`simpanRetur`).
+                         **Dialog SELALU fetch item segar + refresh sesudah
+                         submit (bugfix 2026-10-18, laporan pemilik nota
+                         261018-000019)**: dulu `dialogReturNota()` memakai
+                         cache `state.det` yang di-fetch SEBELUM retur →
+                         buka ulang menampilkan max qty penuh tanpa badge;
+                         kini item di-fetch ulang dari `GET /api/sales/:id`
+                         tiap dialog dibuka (gagal fetch = dialog tidak
+                         dibuka dengan angka basi) dan sesudah retur sukses
+                         `load()` + `bukaDetail()` menyegarkan chip baris +
+                         kotak retur rincian otomatis (tanpa reload halaman).
+                         Anti-regresi: section F2 `tests/retur-test.mjs`
+                         (buka ulang tanpa reload → badge "sudah retur 2 ·
+                         sisa 0" + input mati).
                          **Penanda RETUR (2026-10-18, permintaan pemilik
                          *"pada Riwayat transaksi, jika ada retur apakah tidak
                          di tandai?"*)**: baris penjualan dengan computed
