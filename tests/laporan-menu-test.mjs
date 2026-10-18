@@ -67,6 +67,16 @@ chk('profit: days & total konsisten', pf.days.reduce((a, h) => a + h.n, 0) === p
 chk('profit: trx <= 200 + field nota', pf.trx.length <= 200
   && pf.trx.every((t) => 'invoice_no' in t && typeof t.cashier === 'string' && t.laba === t.total - t.hpp),
   `trx=${pf.trx.length}`);
+// byCategory (roadmap 2.2, 2026-10-18): Σ amount tiap kategori WAJIB menutup
+// jumlah SELURUH baris penjualan hari itu — baris manual tanpa produk masuk
+// "Tanpa kategori", jadi tidak boleh ada uang yang hilang dari tabel.
+const sumKat = (d.byCategory ?? []).reduce((a, r) => a + r.amount, 0);
+const sumBaris = Number(sql(`SELECT COALESCE(SUM(si.amount),0) FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE date(s.created_at)=date('now');`));
+chk('byCategory: shape + Σ amount = seluruh baris penjualan hari ini',
+  Array.isArray(d.byCategory)
+  && d.byCategory.every((r) => typeof r.name === 'string' && typeof r.hpp === 'number' && typeof r.laba === 'number')
+  && sumKat === sumBaris,
+  `Σ=${sumKat} vs sql=${sumBaris}`);
 chk('validasi: profit from>to 400', (await get('/api/reports/profit?from=2026-10-11&to=2026-10-01')).status === 400);
 chk('validasi: from>to 400', (await get('/api/reports/summary?from=2026-10-11&to=2026-10-01')).status === 400);
 chk('validasi: format rusak 400', (await get('/api/reports/summary?from=rabu')).status === 400);
@@ -88,7 +98,7 @@ console.log('=== B. UI menu + filter ===');
 await p.goto('http://localhost:5656/#/reports', { waitUntil: 'networkidle' });
 await p.waitForSelector('#rp-body', { timeout: 15000 });
 await p.waitForTimeout(1200);
-chk('6 menu (Harian/Laba/Kasir/Produk/Piutang/Stok), Harian aktif', await p.locator('[data-menu]').count() === 6
+chk('7 menu (Harian/Laba/Kasir/Produk/Kategori/Piutang/Stok), Harian aktif', await p.locator('[data-menu]').count() === 7
   && await p.locator('[data-menu="harian"]').count() === 1);
 chk('harian: 24 batang jam + chip jam teramai', await p.locator('[data-jam]').count() === 24
   && (await p.textContent('#rp-body')).includes('Jam teramai'));
@@ -201,15 +211,32 @@ await gulir(0); await p.waitForTimeout(250);
 // ruang geser (Harian/Laba/Produk 72 vs Kasir/Piutang/Stok 56); `top-0` kini
 // seragam + sejajar tepi kolom kanan.
 const pola = [];
-for (const m of ['harian', 'laba', 'kasir', 'produk', 'piutang', 'stok']) {
+for (const m of ['harian', 'laba', 'kasir', 'produk', 'kategori', 'piutang', 'stok']) {
   await p.click(`[data-menu="${m}"]`);
   await p.waitForTimeout(1200);
   const u = await ukurAside();
   pola.push(`${m}=${u.top}/${u.tinggi}/${u.kananTop}`);
 }
-chk('aside: template identik di 6 menu (atas+tinggi kartu, sejajar kolom kanan)',
+chk('aside: template identik di 7 menu (atas+tinggi kartu, sejajar kolom kanan)',
   new Set(pola.map((s) => s.split('=')[1])).size === 1,
   pola.join(' '));
+// Menu Kategori (roadmap 2.2): baris "Jumlah" = Σ baris byCategory server.
+// Diletakkan SETELAH pengukuran aside — asersi aside sengaja mengukur pada
+// menu ber-konten panjang (Laba), sedangkan menu Kategori kontennya pendek
+// sehingga `tinggi kartu < tinggi kolom` tidak bermakna di sana.
+await p.click('[data-menu="kategori"]'); await p.waitForTimeout(1200);
+const kc = (await api(`/api/reports/summary?from=${labaDari}&to=${labaSampai}`)).data;
+const kcRows = kc.byCategory ?? [];
+const teksKat = await p.textContent('#rp-body');
+const tabelKat = p.locator('#rp-body table').filter({ has: p.locator('th', { hasText: /^Kategori$/ }) });
+const teksJumlahKat = kcRows.length ? (await tabelKat.locator('tbody tr').last().textContent()) ?? '' : '';
+chk('menu Kategori: tabel + Jumlah = Σ angka byCategory server',
+  kcRows.length
+    ? teksKat.includes('Penjualan per kategori') && teksJumlahKat.includes('Jumlah')
+      && teksJumlahKat.includes(rp(kcRows.reduce((a, r) => a + r.amount, 0)))
+      && teksJumlahKat.includes(rp(kcRows.reduce((a, r) => a + r.laba, 0)))
+    : teksKat.includes('Belum ada penjualan'),
+  teksJumlahKat.replace(/\s+/g, ' ').slice(0, 130) || `rows=${kcRows.length}`);
 // Kembali ke Stok: section C menguji popup + CSV menu Stok dulu (urutan lama).
 await p.click('[data-menu="stok"]'); await p.waitForTimeout(1200);
 
@@ -246,6 +273,24 @@ const [dlLaba] = await Promise.all([
 ]);
 chk('CSV laba: nama berkas menu', /^laporan-laba-\d{4}-\d{2}-\d{2}_sd_\d{4}-\d{2}-\d{2}\.csv$/.test(dlLaba.suggestedFilename() ?? ''),
   dlLaba.suggestedFilename());
+
+// Menu Kategori (roadmap 2.2, 2026-10-18): popup + CSV seperti menu lain.
+await p.click('[data-menu="kategori"]'); await p.waitForTimeout(1200);
+const [popKat] = await Promise.all([
+  p.waitForEvent('popup'),
+  p.click('#rp-print'),
+]);
+await popKat.waitForLoadState('domcontentloaded');
+chk('popup cetak Kategori: judul + ringkasan total', (await popKat.title()).includes('KATEGORI')
+  && (await popKat.content()).includes('Total laba')
+  && (await popKat.content()).includes('Dicetak dari Ravaa POS'));
+await popKat.close().catch(() => {});
+const [dlKat] = await Promise.all([
+  p.waitForEvent('download'),
+  p.click('#rp-csv'),
+]);
+chk('CSV kategori: nama berkas menu', /^laporan-kategori-\d{4}-\d{2}-\d{2}_sd_\d{4}-\d{2}-\d{2}\.csv$/.test(dlKat.suggestedFilename() ?? ''),
+  dlKat.suggestedFilename());
 
 chk('tidak ada pageerror', err.length === 0, err.join(' ~ '));
 await b.close();

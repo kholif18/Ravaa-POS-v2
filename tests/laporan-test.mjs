@@ -31,7 +31,7 @@ try {
     && 'date' in l && 'sales' in l && 'hpp' in l && 'laba' in l
     && Array.isArray(l.byMethod) && Array.isArray(l.topup)
     && Array.isArray(l.topItems) && Array.isArray(l.lowStock)
-    && Array.isArray(l.byHour),
+    && Array.isArray(l.byHour) && Array.isArray(l.byCategory),
     JSON.stringify(Object.keys(l ?? {})));
   ok('laba = omzet − hpp', l.laba === l.sales.omzet - l.hpp,
     `${l.laba} != ${l.sales.omzet} - ${l.hpp}`);

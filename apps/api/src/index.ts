@@ -2992,6 +2992,24 @@ function laporanRentang(dari: string, sampai: string) {
      FROM sale_items si JOIN sales s ON s.id=si.sale_id
      WHERE ${dl('s.created_at')} GROUP BY si.name, si.unit ORDER BY amount DESC LIMIT 10`,
   ).all(...ps);
+  // Penjualan per KATEGORI (roadmap 2.2, 2026-10-18 — menu "Kategori" halaman
+  // Laporan): sumbangsih tiap kategori dalam rentang (jasa/cetak vs barang
+  // fisik terlihat beda). Rumus amount/hpp/laba SAMA PERSIS dengan topItems/
+  // menu Produk (laba = Σ(amount − diskon baris) − HPP baris; diskon TRANSAKSI
+  // tidak dialokasikan ke baris). Baris manual (product_id NULL) tidak punya
+  // kategori → dikelompokkan "Tanpa kategori" supaya Σ tabel tetap menutup
+  // seluruh baris penjualan. `GROUP BY c.id` (bukan nama) + tanpa LIMIT —
+  // kategori master terbatas.
+  const byCategory = db.prepare(
+    `SELECT COALESCE(c.name, 'Tanpa kategori') AS name,
+            SUM(si.amount) AS amount,
+            CAST(ROUND(SUM(si.qty * si.cost)) AS INTEGER) AS hpp,
+            CAST(ROUND(SUM(si.amount - si.discount) - SUM(si.qty * si.cost)) AS INTEGER) AS laba
+     FROM sale_items si JOIN sales s ON s.id=si.sale_id
+     LEFT JOIN products p ON p.id=si.product_id
+     LEFT JOIN categories c ON c.id=p.category_id
+     WHERE ${dl('s.created_at')} GROUP BY c.id ORDER BY amount DESC`,
+  ).all(...ps);
   // Penjualan per JAM (menu Harian + grafik 24 batang, 2026-10-17). 24 ember
   // 0..23 SELALU terisi — server yang menambal jam kosong (klien/chart tidak
   // perlu menghitung ulang). Jam = UTC apa adanya, aturan waktu repo
@@ -3052,7 +3070,7 @@ function laporanRentang(dari: string, sampai: string) {
      WHERE type = 'payment' AND ${dl('created_at')}`,
   ).get(...ps) as { t: number }).t;
   return {
-    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase, byHour,
+    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase, byHour, byCategory,
     piutang: { baru: piutangBaru, bayar: piutangBayar },
   };
 }

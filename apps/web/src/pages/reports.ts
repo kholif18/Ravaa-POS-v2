@@ -5,11 +5,16 @@
 // kolom kiri (grup Penjualan/Keuangan/Stok) dan SETIAP menu = satu objek
 // MenuDef di registry MENUS — menambah laporan baru cukup menambah satu objek
 // (label/grup/filter/muat/isi/csv/cetak), bukan menambah cabang if di lima
-// tempat. Menu saat ini: Harian | Laba | Kasir | Produk | Piutang | Stok.
+// tempat. Menu saat ini: Harian | Laba | Kasir | Produk | Kategori | Piutang | Stok.
 //   - Harian = tampilan lama + grafik per jam (2026-10-17; jam UTC) + kolom
 //     HPP/Laba di "Produk terlaris" (`topItems[].hpp/laba` dihitung SERVER).
 //   - Laba = laba per hari + per transaksi (GET /api/reports/profit; 200 nota
-//     terbaru) — menampung permintaan "laba transaksi perhari".
+//     terbaru) — menampung permintaan "laba transaksi perhari". Kedua tabel
+//     berbaris "Jumlah" (total rentang; label jadi "Jumlah periode" saat trx
+//     terpotong 200 — permintaan pemilik 2026-10-18).
+//   - Kategori = omzet/HPP/laba per kategori produk (roadmap 2.2, 2026-10-18;
+//     `byCategory` di daily/summary) — jasa/cetak vs barang fisik terlihat
+//     sumbangannya.
 //   - Rentang tanggal dipilih lewat DROPDOWN (2026-10-17; permintaan pemilik
 //     "date filter seperti downloadan" lalu direvisi "jadikan dropdown saja
 //     jangan seperti modal"): panel melayang menempel di bawah tombol rentang,
@@ -55,6 +60,11 @@ type TopupBaris = { kind: string; n: number; nominal: number; admin: number };
 type TopItem = { name: string; unit: string; qty: number; amount: number; hpp: number; laba: number };
 type LowStock = { sku: string; name: string; stock: number; min_stock: number };
 type JamBaris = { jam: number; n: number; omzet: number };
+/** Baris penjualan per kategori (roadmap 2.2, 2026-10-18) — server yang
+ *  mengagregasi + menghitung hpp/laba (rumus sama dengan menu Produk);
+ *  klien menampilkan apa adanya (hanya Σ baris untuk baris "Jumlah"). */
+type KategoriRow = { name: string; amount: number; hpp: number; laba: number };
+type KategoriData = { from: string; to: string; rows: KategoriRow[] };
 
 type Laporan = {
   date: string;
@@ -68,6 +78,10 @@ type Laporan = {
   /** Penjualan per jam — 24 ember 0..23, zero-fill server, jam UTC. Opsional
    *  supaya halaman tetap jalan melawan server lama yang belum mengirimnya. */
   byHour?: JamBaris[];
+  /** Penjualan per kategori (roadmap 2.2, 2026-10-18) — menu Kategori
+   *  membaca ini lewat `GET /api/reports/summary`. Opsional dengan alasan
+   *  yang sama dengan byHour (server lama). */
+  byCategory?: KategoriRow[];
   /** Pengeluaran kas hari itu (Tahap 1, 2026-10-11) — opsional supaya halaman
    *  tetap jalan melawan server lama yang belum mengirimkannya. */
   expense?: { n: number; total: number };
@@ -108,7 +122,7 @@ type ProfitData = {
 
 /* ---------- state ---------- */
 
-type MenuId = 'harian' | 'laba' | 'kasir' | 'produk' | 'piutang' | 'stok';
+type MenuId = 'harian' | 'laba' | 'kasir' | 'produk' | 'kategori' | 'piutang' | 'stok';
 type GrupMenu = 'Penjualan' | 'Keuangan' | 'Stok';
 
 /** Satu menu laporan = satu objek ini. `ada()` menggerakkan disabled tombol
@@ -137,6 +151,7 @@ const state = {
   sumData: null as (Omit<Laporan, 'date'> & { from: string; to: string }) | null,
   kasir: null as KasirData | null,
   produk: null as ProdukData | null,
+  kategori: null as KategoriData | null,
   laba: null as ProfitData | null,
   sisaPiutang: 0,
   loading: true,
@@ -624,6 +639,50 @@ function produkView(): string {
   </div>`;
 }
 
+/* ---------- render: KATEGORI (roadmap 2.2, 2026-10-18) ---------- */
+
+function kategoriView(): string {
+  const d = state.kategori;
+  if (!d) return '';
+  const rows = d.rows
+    .map(
+      (t) => `<tr>
+        <td class="td"><div class="cell-strong">${esc(t.name)}</div></td>
+        <td class="td td-num">${rp(t.amount)}</td>
+        <td class="td td-num">${rp(t.hpp)}</td>
+        <td class="td td-num font-semibold ${t.laba < 0 ? 'text-red-600 dark:text-red-400' : ''}">${rp(t.laba)}</td>
+      </tr>`,
+    )
+    .join('');
+  const totOmzet = d.rows.reduce((a, t) => a + t.amount, 0);
+  const totHpp = d.rows.reduce((a, t) => a + t.hpp, 0);
+  const totLaba = d.rows.reduce((a, t) => a + t.laba, 0);
+  return `
+  <div class="card">
+    <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Penjualan per kategori — ${esc(periode())}</h2>
+    ${
+      d.rows.length
+        ? `<table class="mt-2 w-full text-left text-sm">
+        <thead><tr><th class="th">Kategori</th><th class="th text-right">Omzet</th><th class="th text-right">HPP</th><th class="th text-right">Laba</th></tr></thead>
+        <tbody>${rows}
+          <tr>
+            <td class="td font-semibold">Jumlah (${d.rows.length} kategori)</td>
+            <td class="td td-num font-semibold">${rp(totOmzet)}</td>
+            <td class="td td-num font-semibold">${rp(totHpp)}</td>
+            <td class="td td-num font-semibold">${rp(totLaba)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+        Dikelompokkan per kategori produk — jasa/cetak vs barang fisik terlihat sumbangannya.
+        Laba dihitung server = omzet − diskon baris − HPP (snapshot saat jual; diskon transaksi
+        tidak dialokasikan per baris). Baris manual tanpa produk masuk “Tanpa kategori”.
+      </p>`
+        : `<div class="empty">Belum ada penjualan pada rentang ini.</div>`
+    }
+  </div>`;
+}
+
 /* ---------- render: PIUTANG ---------- */
 
 function piutangView(): string {
@@ -786,6 +845,21 @@ function csvProduk(): (string | number)[][] {
   ];
 }
 
+function csvKategori(): (string | number)[][] {
+  const d = state.kategori!;
+  const totOmzet = d.rows.reduce((a, t) => a + t.amount, 0);
+  const totHpp = d.rows.reduce((a, t) => a + t.hpp, 0);
+  const totLaba = d.rows.reduce((a, t) => a + t.laba, 0);
+  return [
+    ['Laporan kategori', 'Ravaa POS'],
+    ['Periode', `${d.from} s/d ${d.to}`],
+    [],
+    ['Kategori', 'Omzet', 'HPP', 'Laba'],
+    ...d.rows.map((t) => [t.name, t.amount, t.hpp, t.laba] as [string, number, number, number]),
+    ['Jumlah', totOmzet, totHpp, totLaba],
+  ];
+}
+
 function csvPiutang(): (string | number)[][] {
   const l = state.sumData!;
   return [
@@ -902,6 +976,21 @@ async function cetakProduk(): Promise<void> {
   });
 }
 
+async function cetakKategori(): Promise<void> {
+  const d = state.kategori;
+  if (!d) return;
+  const totLaba = d.rows.reduce((a, t) => a + t.laba, 0);
+  await cetakLaporan({
+    judul: 'LAPORAN KATEGORI',
+    periode: `${d.from} s/d ${d.to}`,
+    meta: [],
+    kolom: [{ label: 'Kategori' }, { label: 'Omzet', kanan: true }, { label: 'HPP', kanan: true }, { label: 'Laba', kanan: true }],
+    baris: d.rows.map((t) => [t.name, rp(t.amount), rp(t.hpp), rp(t.laba)]),
+    ringkas: [['Total laba', rp(totLaba)]],
+    catatan: 'Laba dihitung server = omzet − diskon baris − HPP (snapshot saat jual).',
+  });
+}
+
 async function cetakPiutang(): Promise<void> {
   const l = state.sumData;
   if (!l) return;
@@ -1000,6 +1089,26 @@ const defProduk: MenuDef = {
   cetak: cetakProduk,
 };
 
+/** Menu Kategori (roadmap 2.2, 2026-10-18) — `byCategory` ikut di
+ *  `GET /api/reports/summary` (satu laporanRentang dengan daily); tanpa
+ *  pencarian/paginasi karena kategori master selalu sedikit. */
+const defKategori: MenuDef = {
+  id: 'kategori',
+  label: 'Kategori',
+  grup: 'Penjualan',
+  filter: 'rentang',
+  ada: () => !!state.kategori,
+  muat: async () => {
+    const j = await apiGet<{ data: Omit<Laporan, 'date'> & { from: string; to: string } }>(
+      `/api/reports/summary?from=${encodeURIComponent(state.from)}&to=${encodeURIComponent(state.to)}`,
+    );
+    state.kategori = { from: j.data.from, to: j.data.to, rows: j.data.byCategory ?? [] };
+  },
+  isi: kategoriView,
+  csv: csvKategori,
+  cetak: cetakKategori,
+};
+
 const defPiutang: MenuDef = {
   id: 'piutang',
   label: 'Piutang',
@@ -1037,7 +1146,7 @@ const defStok: MenuDef = {
   cetak: cetakStok,
 };
 
-const MENUS: MenuDef[] = [defHarian, defLaba, defKasir, defProduk, defPiutang, defStok];
+const MENUS: MenuDef[] = [defHarian, defLaba, defKasir, defProduk, defKategori, defPiutang, defStok];
 const defAktif = (): MenuDef => MENUS.find((m) => m.id === state.menu) ?? defHarian;
 
 /* ---------- preset & kalender dialog rentang ----------

@@ -911,10 +911,17 @@ npm run dev:api
     satu hari tetap (tanggal + prev/next + Hari ini).
   - **Laba** — laba **per hari** + **per transaksi/nota** dari
     `GET /api/reports/profit` (HPP per nota dihitung server dengan rumus
-    yang sama dengan laba per produk; 200 nota terbaru).
+    yang sama dengan laba per produk; 200 nota terbaru) + baris
+    **`Jumlah`** di bawah tabel transaksi = total **rentang filter** yang
+    berlaku (label `Jumlah periode` saat daftar terpotong 200 nota — jadi
+    tidak pernah menyamar sebagai total satu hari).
   - **Kasir** — omzet/diskon per kasir (`GET /api/reports/cashiers`).
   - **Produk** — qty/omzet/HPP/**laba** per produk (laba dihitung server,
     `GET /api/reports/products`).
+  - **Kategori** — omzet/HPP/**laba per kategori** produk (`byCategory` dari
+    `daily`/`summary`; item tanpa produk masuk baris "Tanpa kategori",
+    laba = Σ(amount − diskon baris) − HPP — satu rumus dengan menu Produk)
+    + baris Jumlah.
   - **Piutang** — kartu hutang terbentuk / terbayar / sisa berjalan (live
     dari ledger, tautan ke halaman Hutang).
   - **Stok** — saran order kulakan (`min_stock − stock`, tautan Buat PO).

@@ -1080,8 +1080,15 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                            satu objek `MenuDef` di registry `MENUS` (label/
                            grup/filter/cari/muat/isi/csv/cetak) — tambah menu
                            baru = tambah SATU objek, bukan cabang if di lima
-                           tempat. Enam menu: **Harian | Laba | Kasir | Produk |
-                           Piutang | Stok**. Filter menu "rentang" = **TOMBOL
+                           tempat. **Tujuh menu** (2026-10-18, +**Kategori**):
+                           **Harian | Laba | Kasir | Produk | Kategori |
+                           Piutang | Stok**. Menu Kategori = omzet/HPP/laba
+                           per kategori produk (`byCategory` dari
+                           `/api/reports/summary`, roadmap 2.2) berbaris
+                           Jumlah; tabel "Laba per transaksi" (menu Laba) juga
+                           berbaris **Jumlah** = total rentang, label "Jumlah
+                           periode" saat trx terpotong 200 (2026-10-18).
+                           Filter menu "rentang" = **TOMBOL
                            rentang tanggal** yang membuka **dropdown
                            date-range 2026-10-17** (permintaan pemilik "date
                            filter seperti downloadan", referensi Blueprint;
@@ -2381,7 +2388,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
-  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byHour,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
+  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byHour,byCategory,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
   - Bentuk dihitung SATU fungsi `laporanRentang(dari,sampai)` (2026-10-11) —
     daily = rentang 1 hari. `piutang` = hutang TERBENTUK (CASE sisa_hutang) +
     TERBAYAR (ledger payment), butir credit Z-report.
@@ -2391,6 +2398,13 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     SQL sebagai string lalu `Number()`, jadi JSON berisi angka. Sumber grafik
     per jam halaman Laporan (DIV `[data-jam]`, bukan tabel — urutan tabel
     Harian adalah kontrak test).
+  - **`byCategory` (2026-10-18 — roadmap 2.2, menu Kategori)**: penjualan per
+    kategori (`sale_items` -> `products` -> `categories`); item manual
+    (tanpa `product_id`) masuk baris ber-`name` **"Tanpa kategori"**; rumus
+    `amount`/`hpp`/`laba` SAMA PERSIS dengan `topItems`/menu Produk (laba =
+    Σ(amount − diskon baris) − HPP; diskon transaksi TIDAK dialokasikan per
+    baris). Tanpa LIMIT; halaman klien yang meringkas baris "Jumlah" (Σ).
+    Ikut terkirim juga oleh `GET /api/reports/summary`.
 * `GET /api/reports/summary?from=&to=` -> `{data:{from,to,...sama dengan daily}}`
   (menu laporan ala Aronium, 2026-10-11). Validasi: format YYYY-MM-DD
   round-trip, `from<=to`, maks 366 hari (selain itu 400). `lowStock` snapshot

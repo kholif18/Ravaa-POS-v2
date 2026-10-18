@@ -80,7 +80,7 @@ const SUITE = [
   ['altn-test.mjs', 17],
   ['tier-harga-test.mjs', 16],
   ['recap-test.mjs', 13],
-  ['laporan-menu-test.mjs', 34],
+  ['laporan-menu-test.mjs', 38],
   ['sidebar-dark-test.mjs', 12],
   ['harga-dinamis-test.mjs', 18],
   ['pos-notif-test.mjs', 6],
