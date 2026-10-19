@@ -86,6 +86,7 @@ const SUITE = [
   ['recap-test.mjs', 13],
   ['logo-test.mjs', 21],
   ['laporan-menu-test.mjs', 38],
+  ['analitik-test.mjs', 26],
   ['sidebar-dark-test.mjs', 12],
   ['sidebar-scroll-test.mjs', 5],
   ['harga-dinamis-test.mjs', 18],

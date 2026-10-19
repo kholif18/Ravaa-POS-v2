@@ -5,7 +5,7 @@
 // kolom kiri (grup Penjualan/Keuangan/Stok) dan SETIAP menu = satu objek
 // MenuDef di registry MENUS — menambah laporan baru cukup menambah satu objek
 // (label/grup/filter/muat/isi/csv/cetak), bukan menambah cabang if di lima
-// tempat. Menu saat ini: Harian | Laba | Kasir | Produk | Kategori | Piutang | Stok.
+// tempat. Menu saat ini: Harian | Laba | Kasir | Produk | Kategori | Piutang | Stok | Analitik.
 //   - Harian = tampilan lama + grafik per jam (2026-10-17; jam UTC) + kolom
 //     HPP/Laba di "Produk terlaris" (`topItems[].hpp/laba` dihitung SERVER).
 //   - Laba = laba per hari + per transaksi (GET /api/reports/profit; 200 nota
@@ -15,6 +15,11 @@
 //   - Kategori = omzet/HPP/laba per kategori produk (roadmap 2.2, 2026-10-18;
 //     `byCategory` di daily/summary) — jasa/cetak vs barang fisik terlihat
 //     sumbangannya.
+//   - Analitik (butir ROADMAP 1.6.7, 2026-10-19) = valuasi persediaan
+//     SNAPSHOT KINI per kategori (Σ stok × modal tertimbang vs Σ stok × harga
+//     jual) + daftar barang TIDAK LAKU dalam rentang terpilih ("tidak laku N
+//     hari" = preset rentang; urut modal menganggur terbesar). Satu endpoint
+//     `GET /api/reports/analytics`; hpp/jual/nilai dihitung server.
 //   - Rentang tanggal dipilih lewat DROPDOWN (2026-10-17; permintaan pemilik
 //     "date filter seperti downloadan" lalu direvisi "jadikan dropdown saja
 //     jangan seperti modal"): panel melayang menempel di bawah tombol rentang,
@@ -123,9 +128,35 @@ type ProfitData = {
   trx: ProfitTrx[];
 };
 
+/** GET /api/reports/analytics (menu Analitik, butir ROADMAP 1.6.7, 2026-10-19):
+ *  `valuasi` = snapshot stok KINI per kategori barang fisik (`hpp` = Σ stok ×
+ *  modal tertimbang, `jual` = Σ stok × harga jual); `dead` = barang berstok > 0
+ *  tanpa penjualan dalam rentang from..to (`rows` urut nilai stok DESC,
+ *  `last_sold` = penjualan terakhir all-time / null = belum pernah). `n`/`nilai`
+ *  mencakup SELURUH baris sedangkan `rows` dibatasi 200 server + `terpotong`. */
+type AnalitikValuasiRow = { category: string; n_items: number; qty: number; hpp: number; jual: number };
+type AnalitikDeadRow = {
+  id: number;
+  sku: string;
+  name: string;
+  unit: string;
+  stock: number;
+  min_stock: number;
+  avg_cost: number;
+  price: number;
+  nilai: number;
+  last_sold: string | null;
+};
+type AnalitikData = {
+  from: string;
+  to: string;
+  valuasi: { rows: AnalitikValuasiRow[]; total: { n_items: number; qty: number; hpp: number; jual: number } };
+  dead: { n: number; nilai: number; rows: AnalitikDeadRow[]; terpotong: boolean };
+};
+
 /* ---------- state ---------- */
 
-type MenuId = 'harian' | 'laba' | 'kasir' | 'produk' | 'kategori' | 'piutang' | 'stok';
+type MenuId = 'harian' | 'laba' | 'kasir' | 'produk' | 'kategori' | 'piutang' | 'stok' | 'analitik';
 type GrupMenu = 'Penjualan' | 'Keuangan' | 'Stok';
 
 /** Satu menu laporan = satu objek ini. `ada()` menggerakkan disabled tombol
@@ -156,6 +187,7 @@ const state = {
   produk: null as ProdukData | null,
   kategori: null as KategoriData | null,
   laba: null as ProfitData | null,
+  analitik: null as AnalitikData | null,
   sisaPiutang: 0,
   loading: true,
   error: '',
@@ -761,6 +793,121 @@ function stokView(): string {
   </div>`;
 }
 
+/* ---------- render: ANALITIK (valuasi + tidak laku, roadmap 1.6.7) ---------- */
+
+function analitikView(): string {
+  const d = state.analitik;
+  if (!d) return '';
+  const v = d.valuasi;
+  // Turunan tampilan dari angka server (aturan SATU-SUMBER DATA): jumlah hari
+  // rentang = jendela "tidak laku N hari"; nilai modal/jual TIDAK dihitung
+  // ulang (server mengirim valuasi.total).
+  const hari = Math.round((Date.parse(d.to) - Date.parse(d.from)) / 86400000) + 1;
+  const kartu = [
+    { label: 'Nilai modal (HPP)', nilai: rp(v.total.hpp), sub: `${v.total.n_items} item berstok · Σ stok × modal tertimbang` },
+    { label: 'Nilai jual', nilai: rp(v.total.jual), sub: 'Σ stok × harga jual (sebelum diskon)' },
+    { label: 'Margin potensial', nilai: rp(v.total.jual - v.total.hpp), sub: 'jual − modal bila habis di harga penuh' },
+    { label: 'Modal menganggur', nilai: rp(d.dead.nilai), sub: `${d.dead.n} item tak laku dalam ${hari} hari` },
+  ];
+  const valRows = v.rows
+    .map(
+      (t) => `<tr>
+        <td class="td"><div class="cell-strong">${esc(t.category)}</div></td>
+        <td class="td td-num">${t.n_items}</td>
+        <td class="td td-num">${t.qty}</td>
+        <td class="td td-num">${rp(t.hpp)}</td>
+        <td class="td td-num">${rp(t.jual)}</td>
+      </tr>`,
+    )
+    .join('');
+  const deadRows = d.dead.rows
+    .map(
+      (p) => `<tr>
+        <td class="td">
+          <div class="cell-strong">${esc(p.name)}</div>
+          <div class="cell-sub">${esc(p.sku)} · ${esc(p.unit)}</div>
+        </td>
+        <td class="td td-num font-semibold">${p.stock}</td>
+        <td class="td td-num">${rp(p.nilai)}</td>
+        <td class="td">${
+          p.last_sold
+            ? esc(tglPanjang(String(p.last_sold).slice(0, 10)))
+            : '<span class="text-gray-400 dark:text-gray-500">belum pernah</span>'
+        }</td>
+      </tr>`,
+    )
+    .join('');
+  return `
+  <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
+    ${kartu
+      .map(
+        (k) => `
+      <div class="card">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${k.label}</p>
+        <p class="mt-1 text-sm font-semibold tabular-nums text-gray-900 dark:text-white">${esc(k.nilai)}</p>
+        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${esc(k.sub)}</p>
+      </div>`,
+      )
+      .join('')}
+  </div>
+  <div class="card">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Valuasi persediaan — snapshot saat ini</h2>
+      <span class="chip">${icon('stock')}<span>${v.total.n_items} item · ${v.total.qty} qty</span></span>
+    </div>
+    ${
+      v.rows.length
+        ? `<table class="mt-2 w-full text-left text-sm">
+        <thead><tr><th class="th">Kategori</th><th class="th text-right">Item</th><th class="th text-right">Qty</th><th class="th text-right">Nilai HPP</th><th class="th text-right">Nilai jual</th></tr></thead>
+        <tbody>${valRows}
+          <tr>
+            <td class="td font-semibold">Jumlah</td>
+            <td class="td td-num font-semibold">${v.total.n_items}</td>
+            <td class="td td-num font-semibold">${v.total.qty}</td>
+            <td class="td td-num font-semibold">${rp(v.total.hpp)}</td>
+            <td class="td td-num font-semibold">${rp(v.total.jual)}</td>
+          </tr>
+        </tbody>
+      </table>`
+        : `<div class="empty">Belum ada barang fisik berstok.</div>`
+    }
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+      Barang fisik saja (kategori track stok) — jasa/cetak/desain/topup tidak punya stok.
+      Snapshot saat ini, tidak terpengaruh rentang tanggal.
+    </p>
+  </div>
+  <div class="card">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Tidak laku — ${esc(periode())}</h2>
+      <span class="chip">${icon('clock')}<span>${hari} hari · ${d.dead.n} item · ${rp(d.dead.nilai)}</span></span>
+    </div>
+    ${
+      d.dead.rows.length
+        ? `<table class="mt-2 w-full text-left text-sm">
+        <thead><tr><th class="th">Produk</th><th class="th text-right">Stok</th><th class="th text-right">Nilai HPP</th><th class="th">Terakhir laku</th></tr></thead>
+        <tbody>${deadRows}
+          <tr>
+            <td class="td font-semibold">Jumlah${d.dead.terpotong ? ' (seluruh)' : ''}</td>
+            <td class="td"></td>
+            <td class="td td-num font-semibold">${rp(d.dead.nilai)}</td>
+            <td class="td"></td>
+          </tr>
+        </tbody>
+      </table>
+      ${
+        d.dead.terpotong
+          ? `<p class="mt-2 text-xs text-amber-600 dark:text-amber-400">Menampilkan ${d.dead.rows.length} dari ${d.dead.n} item (nilai modal terbesar). Persempit rentang untuk daftar yang lebih pendek.</p>`
+          : ''
+      }`
+        : `<div class="empty">Semua barang berstok bergerak dalam rentang ini.</div>`
+    }
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+      Barang fisik berstok &gt; 0 tanpa penjualan sejak ${esc(tglPendek(d.from))} s/d ${esc(tglPendek(d.to))};
+      urut nilai stok (stok × modal tertimbang). Terakhir laku = penjualan terakhir kapan pun.
+    </p>
+  </div>`;
+}
+
 /* ---------- CSV per menu ---------- */
 
 function csvHarian(): (string | number)[][] {
@@ -898,6 +1045,37 @@ function csvStok(): (string | number)[][] {
   ];
 }
 
+function csvAnalitik(): (string | number)[][] {
+  const d = state.analitik!;
+  return [
+    ['Laporan analitik persediaan', 'Ravaa POS'],
+    ['Periode tidak laku', `${d.from} s/d ${d.to}`],
+    [],
+    ['Valuasi persediaan (snapshot saat ini)'],
+    ['Kategori', 'Item', 'Qty', 'Nilai HPP', 'Nilai jual'],
+    ...d.valuasi.rows.map(
+      (v) => [v.category, v.n_items, v.qty, v.hpp, v.jual] as [string, number, number, number, number],
+    ),
+    ['Jumlah', d.valuasi.total.n_items, d.valuasi.total.qty, d.valuasi.total.hpp, d.valuasi.total.jual],
+    [],
+    ['Tidak laku dalam rentang'],
+    ['SKU', 'Nama', 'Satuan', 'Stok', 'Nilai HPP', 'Terakhir laku'],
+    ...d.dead.rows.map(
+      (p) =>
+        [p.sku, p.name, p.unit, p.stock, p.nilai, p.last_sold ? String(p.last_sold).slice(0, 10) : ''] as [
+          string,
+          string,
+          string,
+          number,
+          number,
+          string,
+        ],
+    ),
+    ['Jumlah', '', '', '', d.dead.nilai, ''],
+    ...(d.dead.terpotong ? [['Menampilkan', `${d.dead.rows.length} dari ${d.dead.n} item (nilai modal terbesar)`]] : []),
+  ];
+}
+
 /* ---------- cetak / PDF per menu ---------- */
 
 async function cetakHarian(): Promise<void> {
@@ -1028,6 +1206,64 @@ async function cetakStok(): Promise<void> {
   });
 }
 
+async function cetakAnalitik(): Promise<void> {
+  const d = state.analitik;
+  if (!d) return;
+  const v = d.valuasi;
+  const hari = Math.round((Date.parse(d.to) - Date.parse(d.from)) / 86400000) + 1;
+  await cetakLaporan({
+    judul: 'LAPORAN ANALITIK PERSEDIAAN',
+    periode: `${d.from} s/d ${d.to}`,
+    meta: [
+      ['Item berstok', String(v.total.n_items)],
+      ['Tidak laku', `${d.dead.n} item`],
+    ],
+    kolom: [
+      { label: 'Kategori' },
+      { label: 'Item', kanan: true },
+      { label: 'Qty', kanan: true },
+      { label: 'Nilai HPP', kanan: true },
+      { label: 'Nilai jual', kanan: true },
+    ],
+    baris: [
+      ...v.rows.map((r) => [r.category, String(r.n_items), String(r.qty), rp(r.hpp), rp(r.jual)]),
+      ['Jumlah', String(v.total.n_items), String(v.total.qty), rp(v.total.hpp), rp(v.total.jual)],
+    ],
+    ringkas: [
+      ['Nilai modal (HPP)', rp(v.total.hpp)],
+      ['Nilai jual', rp(v.total.jual)],
+      ['Margin potensial', rp(v.total.jual - v.total.hpp)],
+      ['Modal menganggur', rp(d.dead.nilai)],
+    ],
+    catatan: 'Valuasi = snapshot stok saat ini (barang fisik). Tidak laku = berstok > 0 tanpa penjualan dalam periode.',
+    bagian: [
+      {
+        judul: `TIDAK LAKU DALAM ${hari} HARI (${d.dead.n} item)`,
+        kolom: [
+          { label: 'Produk' },
+          { label: 'Stok', kanan: true },
+          { label: 'Nilai HPP', kanan: true },
+          { label: 'Terakhir laku' },
+        ],
+        baris: d.dead.rows.length
+          ? [
+              ...d.dead.rows.map((p) => [
+                `${p.name} (${p.sku})`,
+                String(p.stock),
+                rp(p.nilai),
+                p.last_sold ? String(p.last_sold).slice(0, 10) : 'belum pernah',
+              ]),
+              ['Jumlah' + (d.dead.terpotong ? ' (seluruh)' : ''), '', rp(d.dead.nilai), ''],
+            ]
+          : [['Semua barang berstok bergerak dalam rentang ini.', '', '', '']],
+        catatan: d.dead.terpotong
+          ? `Menampilkan ${d.dead.rows.length} dari ${d.dead.n} item (nilai modal terbesar).`
+          : '',
+      },
+    ],
+  });
+}
+
 /* ---------- registry menu (SATU tempat untuk seluruh katalog) ---------- */
 
 const defHarian: MenuDef = {
@@ -1153,7 +1389,26 @@ const defStok: MenuDef = {
   cetak: cetakStok,
 };
 
-const MENUS: MenuDef[] = [defHarian, defLaba, defKasir, defProduk, defKategori, defPiutang, defStok];
+/** Menu Analitik (butir ROADMAP 1.6.7, 2026-10-19): valuasi persediaan
+ *  snapshot + barang tidak laku dalam rentang. Satu endpoint, angka server. */
+const defAnalitik: MenuDef = {
+  id: 'analitik',
+  label: 'Analitik',
+  grup: 'Stok',
+  filter: 'rentang',
+  ada: () => !!state.analitik,
+  muat: async () => {
+    const j = await apiGet<{ data: AnalitikData }>(
+      `/api/reports/analytics?from=${encodeURIComponent(state.from)}&to=${encodeURIComponent(state.to)}`,
+    );
+    state.analitik = j.data;
+  },
+  isi: analitikView,
+  csv: csvAnalitik,
+  cetak: cetakAnalitik,
+};
+
+const MENUS: MenuDef[] = [defHarian, defLaba, defKasir, defProduk, defKategori, defPiutang, defStok, defAnalitik];
 const defAktif = (): MenuDef => MENUS.find((m) => m.id === state.menu) ?? defHarian;
 
 /* ---------- preset & kalender dialog rentang ----------

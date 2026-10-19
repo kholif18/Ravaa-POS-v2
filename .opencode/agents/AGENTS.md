@@ -1318,14 +1318,23 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                            satu objek `MenuDef` di registry `MENUS` (label/
                            grup/filter/cari/muat/isi/csv/cetak) — tambah menu
                            baru = tambah SATU objek, bukan cabang if di lima
-                           tempat. **Tujuh menu** (2026-10-18, +**Kategori**):
+                           tempat. **Delapan menu** (2026-10-19, +**Analitik**):
                            **Harian | Laba | Kasir | Produk | Kategori |
-                           Piutang | Stok**. Menu Kategori = omzet/HPP/laba
+                           Piutang | Stok | Analitik**. Menu Kategori =
+                           omzet/HPP/laba
                            per kategori produk (`byCategory` dari
                            `/api/reports/summary`, roadmap 2.2) berbaris
                            Jumlah; tabel "Laba per transaksi" (menu Laba) juga
                            berbaris **Jumlah** = total rentang, label "Jumlah
                            periode" saat trx terpotong 200 (2026-10-18).
+                           Menu **Analitik** (butir 1.6.7) = valuasi
+                           persediaan snapshot per kategori barang fisik
+                           (hpp/jual dari server) + barang tidak laku rentang
+                           (`GET /api/reports/analytics`); 4 kartu (nilai
+                           modal/nilai jual/margin potensial/modal menganggur)
+                           + tabel valuasi + tabel tidak laku; CSV = dua
+                           seksi, Cetak = satu dokumen dua tabel
+                           (`DokLaporan.bagian`, invoice.ts).
                            Filter menu "rentang" = **TOMBOL
                            rentang tanggal** yang membuka **dropdown
                            date-range 2026-10-17** (permintaan pemilik "date
@@ -1372,7 +1381,7 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                            kanan) dan tetap menempel di posisi itu saat
                            digulir (56 -> 56, tanpa lompatan). Diuji 3 asersi
                            `laporan-menu-test.mjs` (kartu mandiri < kolom;
-                           sticky utuh; template identik 6 menu atas+tinggi+
+                           sticky utuh; template identik **8 menu** atas+tinggi+
                            sejajar kolom kanan). Label grup menu
                            dibedakan dari tombol: label `text-[10px]
                            uppercase tracking-widest text-primary pt-4`
@@ -1850,6 +1859,13 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           rumus laci sama dengan `kasSeharusnya()`); nota
                           take dibaca `cetakInvoice` jalur biasa (order_no
                           ada di `sale`).
+                          **Seksi tabel tambahan (butir 1.6.7, 2026-10-19)**:
+                          `DokLaporan.bagian?: {judul,kolom,baris,catatan?}[]`
+                          = tabel TAMBAHAN setelah tabel utama (judul seksi
+                          CSS `.seksi`) — menu Analitik memakai ini supaya
+                          valuasi + TIDAK LAKU keluar sebagai SATU dokumen
+                          (satu popup). Opsional: pemanggil lama tanpa
+                          `bagian` menghasilkan HTML persis sama.
  apps/web/src/ui/auth-screen.ts  Kerangka layar auth (login & ubah-sandi):
                           `authLayarHtml(kartu)` — SATU markup untuk dua
                           halaman (pola shift-tutup.ts). Gradasi biru
@@ -3089,6 +3105,42 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     baris nol); `total` = agregat `days` (angka kartu). `trx` dibatasi **200
     nota terbaru** (urutan `created_at DESC, id DESC`; `total.n` = jumlah nota
     sesungguhnya — penanda "x dari y nota"); arsip penuh tetap menu Riwayat.
+* `GET /api/reports/analytics?from=&to=` (butir ROADMAP 1.6.7, 2026-10-19,
+  menu **Analitik**; `hanyaOwner`) -> `{data:{from,to,valuasi:{rows,total},
+  dead:{n,nilai,rows,terpotong}}}`; validasi = `bacaRentang` sama dengan
+  profit (format round-trip, `from<=to`, maks 366 hari; `from`/`to` absen =
+  hari ini).
+  - **`valuasi`** = snapshot stok KINI per kategori barang fisik
+    (`categories.track_stock=1` — jasa/cetak/desain/topup tidak berstok),
+    `rows:[{category,n_items,qty,hpp,jual}]` urut `hpp DESC`:
+    `hpp = Σ stock × avg_cost` (modal tertimbang — angka HPP yang sama
+    dengan saat jual), `jual = Σ stock × price` (satuan dasar; harga
+    grosir/pack sengaja tidak dikira-kira). Kategori tampil hanya bila ada
+    item berstok `<> 0` (`HAVING`), `n_items` menghitung item berstok-nonzero
+    saja (item berstok MINUS ikut apa adanya); produk `is_active=0` /
+    tombstone TIDAK ikut (stoknya sudah tidak di rak). `total` = Σ baris
+    (dihitung server — klien tidak menjumlah ulang; snapshot, **tidak**
+    terpengaruh rentang).
+  - **`dead`** = barang fisik **berstok > 0** yang TIDAK punya penjualan
+    dalam rentang (`NOT EXISTS` `sale_items` JOIN `sales`
+    `date(created_at) BETWEEN`): "tidak laku N hari" = pilih preset rentang.
+    `rows:[{id,sku,name,unit,stock,min_stock,avg_cost,price,nilai,last_sold}]`
+    urut `nilai DESC` (`nilai = stock × avg_cost` — modal menganggur terbesar
+    di atas); `last_sold` = `MAX(sales.created_at)` **all-time** (`null` =
+    belum pernah laku) supaya terlihat musiman vs mati. `rows` dibatasi
+    **200** baris (konstanta `BARIS_ANALITIK_MAKS`); `n`/`nilai` dihitung
+    dari SELURUH baris cocok-filter (COUNT/SUM terpisah) + `terpotong =
+    n > rows.length` — angka kartu selalu utuh. Klausul `WHERE` dipakai
+    bersama oleh query baris & query ringkasan (satu variabel).
+  - **UI**: menu ke-8 registry `MENUS` halaman `#/reports` (grup Stok,
+    filter rentang) — `state.analitik`, `analitikView` (4 kartu + 2 tabel),
+    `csvAnalitik` (dua seksi), `cetakAnalitik` (`DokLaporan.bagian` = satu
+    popup dua tabel). Seluruh angka dari server; hanya jumlah hari rentang
+    yang dihitung klien untuk kalimat "N hari". Diuji
+    `tests/analitik-test.mjs` (26 asersi: valuasi.total vs SQL, urutan hpp/
+    nilai DESC, fixture laku-hari-ini/musiman/mati, `last_sold`,
+    validasi 400, UI 8 menu + CSV + popup dua tabel, tanpa pageerror;
+    fixture nama eksak + self-heal, cleanup hapus anak dulu).
 * `GET /api/reports/cashiers?from=&to=` -> `{data:{from,to,rows:[{cashier,n,omzet,diskon}],total}}`
   (menu Kasir; diskon = transaksi + per baris, konsisten sales.diskon).
 * `GET /api/reports/products?from=&to=&q=&limit=` -> `{data:{from,to,rows:[{name,unit,qty,amount,hpp,laba}],total}}`

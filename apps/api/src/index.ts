@@ -3972,6 +3972,93 @@ app.get('/api/reports/profit', hanyaOwner, (c) => {
   return c.json({ data: { from: r.dari, to: r.sampai, total, days, trx } });
 });
 
+/* Menu Analitik (butir ROADMAP 1.6.7, ACC pemilik 2026-10-19) — LAPORAN
+ * PERSEDIAAN, dua bagian dalam SATU endpoint:
+ *   (1) `valuasi` = snapshot stok KINI per kategori barang fisik
+ *       (`categories.track_stock=1`; jasa/cetak/desain/topup tidak berstok):
+ *       `hpp` = Σ stok × avg_cost (modal tertimbang — angka yang sama dengan
+ *       HPP jual) dan `jual` = Σ stok × price (satuan dasar; harga grosir/
+ *       pack sengaja tidak dikira-kira di sini). Produk nonaktif & tombstone
+ *       TIDAK ikut: stoknya sudah tidak di rak. Kategori dihitung hanya bila
+ *       ada item berstok ≠ 0 supaya "n item" bermakna (bukan ratusan SKU
+ *       berstok 0); item berstok MINUS (allow_negative_stock) ikut apa adanya.
+ *   (2) `dead` = barang fisik berstok > 0 yang TIDAK ada penjualan dalam
+ *       rentang from..to — "tidak laku N hari" = pilih preset rentang.
+ *       `rows` urut nilai stok (stok × avg_cost) DESC (modal menganggur
+ *       terbesar di atas), `last_sold` = penjualan terakhir ALL-TIME
+ *       (null = belum pernah laku) supaya terlihat musiman vs mati. `n`/
+ *       `nilai` dihitung dari SELURUH baris sedangkan `rows` dibatasi
+ *       BARIS_ANALITIK_MAKS + `terpotong` — angka kartu selalu penuh. */
+const BARIS_ANALITIK_MAKS = 200;
+app.get('/api/reports/analytics', hanyaOwner, (c) => {
+  const r = bacaRentang((k) => c.req.query(k));
+  if (!r.ok) return c.json({ error: r.error }, 400);
+
+  const valuasiRows = db.prepare(
+    `SELECT c.name AS category,
+            SUM(CASE WHEN p.stock <> 0 THEN 1 ELSE 0 END) AS n_items,
+            COALESCE(SUM(p.stock), 0) AS qty,
+            COALESCE(SUM(p.stock * p.avg_cost), 0) AS hpp,
+            COALESCE(SUM(p.stock * p.price), 0) AS jual
+       FROM products p JOIN categories c ON c.id = p.category_id
+      WHERE p.is_active = 1 AND p.deleted_at IS NULL AND c.track_stock = 1
+      GROUP BY c.id
+     HAVING SUM(CASE WHEN p.stock <> 0 THEN 1 ELSE 0 END) > 0
+      ORDER BY hpp DESC, c.name COLLATE NOCASE`,
+  ).all() as { category: string; n_items: number; qty: number; hpp: number; jual: number }[];
+  const valuasiTotal = valuasiRows.reduce(
+    (a, v) => ({ n_items: a.n_items + v.n_items, qty: a.qty + v.qty, hpp: a.hpp + v.hpp, jual: a.jual + v.jual }),
+    { n_items: 0, qty: 0, hpp: 0, jual: 0 },
+  );
+
+  // Klausul WHERE dipakai DUA query (baris + ringkasan) — satu variabel,
+  // jangan disalin ulang (salinan pernah jadi sumber selisih di laporan lain).
+  const whereTidakLaku = `
+      FROM products p JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active = 1 AND p.deleted_at IS NULL AND c.track_stock = 1
+       AND p.stock > 0
+       AND NOT EXISTS (SELECT 1 FROM sale_items si JOIN sales s ON s.id = si.sale_id
+                        WHERE si.product_id = p.id
+                          AND date(s.created_at) BETWEEN date(?) AND date(?))`;
+  const deadRows = db.prepare(
+    `SELECT p.id, p.sku, p.name, p.unit, p.stock, p.min_stock, p.avg_cost, p.price,
+            p.stock * p.avg_cost AS nilai,
+            (SELECT MAX(s2.created_at) FROM sale_items si2 JOIN sales s2 ON s2.id = si2.sale_id
+              WHERE si2.product_id = p.id) AS last_sold
+       ${whereTidakLaku}
+      ORDER BY nilai DESC, p.name COLLATE NOCASE
+      LIMIT ${BARIS_ANALITIK_MAKS}`,
+  ).all(r.dari, r.sampai) as {
+    id: number;
+    sku: string;
+    name: string;
+    unit: string;
+    stock: number;
+    min_stock: number;
+    avg_cost: number;
+    price: number;
+    nilai: number;
+    last_sold: string | null;
+  }[];
+  const deadRingkas = db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(p.stock * p.avg_cost), 0) AS nilai ${whereTidakLaku}`,
+  ).get(r.dari, r.sampai) as { n: number; nilai: number };
+
+  return c.json({
+    data: {
+      from: r.dari,
+      to: r.sampai,
+      valuasi: { rows: valuasiRows, total: valuasiTotal },
+      dead: {
+        n: deadRingkas.n,
+        nilai: deadRingkas.nilai,
+        rows: deadRows,
+        terpotong: deadRingkas.n > deadRows.length,
+      },
+    },
+  });
+});
+
 const port = Number(process.env.PORT ?? 3001);
 const server = serve({ fetch: app.fetch, port });
 

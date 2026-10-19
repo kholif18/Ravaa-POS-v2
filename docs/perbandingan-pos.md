@@ -298,7 +298,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Absensi karyawan | · | · | ✓ | ✓ | ✓ (add-on) | ✗ kandidat 4.14 (belum dibahas) |
 | Laporan + export (CSV/Excel) | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** (7 menu) |
 | Laporan terjadwal email/WA | · | ✓ (berbayar) | · | ✓ | · | ✗ sengaja (§5) |
-| Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ⟳ ACC 19 Okt 2026 (4.10) |
+| Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ✓ selesai 19 Okt 2026 (4.10) |
 | Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | **✓** |
 | Tanpa langganan (server sendiri) | ✗ | ✓ (Lite) | ✗ | ✗ | ~ (inti gratis) | **✓** |
 | Scan barcode kamera HP | · | · | · | · | ✓ | **✓** (selesai 19 Okt 2026; 4.4) |
@@ -324,7 +324,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.7 | **Price list per pelanggan** | **❌ tidak perlu** ("sepertinya tidak butuh") | Aronium (plugin) | Tier ecer/grosir + borongan qty dianggap cukup |
 | 4.8 | **Bundling / paket produk** | **❌ tidak perlu** ("sepertinya tidak butuh") | Kasir Pintar (paket/bahan baku) | — |
 | 4.9 | **Varian produk** | **❌ tidak perlu** | KP, Olsera, Loyverse | Pola SKU terpisah (bungkus/ketengan) dipertahankan |
-| 4.10 | **Analitik lanjutan** (valuasi stok, dead stock) | **✅ dikerjakan** — §1.6.7 | Olsera "Analisa Bisnis", Loyverse add-on | Menu laporan baru + endpoint server |
+| 4.10 | **Analitik lanjutan** (valuasi stok, dead stock) | **✅ selesai 2026-10-19** — §1.6.7 | Olsera "Analisa Bisnis", Loyverse add-on | Menu laporan Analitik + endpoint `GET /api/reports/analytics` (valuasi per kategori + tidak laku dalam rentang; CSV/Cetak) |
 | 4.11 | **Logo di struk thermal** | **✅ selesai 2026-10-19** — §1.6.4 | KP iOS, Aronium custom receipts | Raster ESC/POS (`GS v 0`) — uji kertas oleh pemilik |
 | 4.12 | **Pengingat hutang via WA** | **— belum dibahas** | kebiasaan pasar | Use-case beda dari WA rekap yang dicoret 2026-10-01 |
 | 4.13 | **Akses dari luar LAN** | **❌ tidak perlu** | semua cloud | Opsi Tailscale/tunnel ditolak; tetap self-hosted LAN |

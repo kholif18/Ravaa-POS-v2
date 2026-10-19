@@ -937,6 +937,15 @@ npm run dev:api
   - **Piutang** — kartu hutang terbentuk / terbayar / sisa berjalan (live
     dari ledger, tautan ke halaman Hutang).
   - **Stok** — saran order kulakan (`min_stock − stock`, tautan Buat PO).
+  - **Analitik** (butir 1.6.7, 2026-10-19) — valuasi persediaan **snapshot
+    stok KINI** per kategori barang fisik (nilai HPP = Σ stok × modal
+    tertimbang vs nilai jual = Σ stok × harga; jasa tanpa stok tidak ikut)
+    + daftar barang **tidak laku** dalam rentang terpilih (berstok > 0 tanpa
+    penjualan; urut nilai modal menganggur terbesar; kolom terakhir-laku =
+    penjualan all-time, "belum pernah" bila nol). Empat kartu ringkas (nilai
+    modal, nilai jual, margin potensial, modal menganggur) + baris Jumlah.
+    Satu endpoint `GET /api/reports/analytics`; CSV = dua seksi, Cetak/PDF =
+    satu dokumen dua tabel (seksi TIDAK LAKU di bawah valuasi).
   - **Filter rentang tanggal** = tombol yang membuka **dropdown date-range**
     (bukan modal — revisi pemilik *"jadikan dropdown saja jangan seperti
     modal"*): preset Hari ini..Tahun lalu + **Kustom** di kiri, dua kalender
@@ -947,7 +956,8 @@ npm run dev:api
     **Cetak/PDF** lewat popup browser `cetakLaporan()` (simpan PDF dari
     dialog cetak) — kop dari pengaturan toko yang sama dengan invoice A4.
   - **Satu sumber data**: seluruh angka dari endpoint server (`daily`,
-    `summary`, `profit`, `cashiers`, `products`, `customer-debts`) — klien
+    `summary`, `profit`, `cashiers`, `products`, `analytics`,
+    `customer-debts`) — klien
     tidak menghitung ulang (rumus laba produk/hari/nota milik server).
 * **Shift Kasir** (`#/shifts`, menu **Shift Kasir** di sidebar, baru 2026-10-01)
   — riwayat shift + buka/tutup shift dari satu layar:

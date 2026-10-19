@@ -98,7 +98,7 @@ console.log('=== B. UI menu + filter ===');
 await p.goto('http://localhost:5656/#/reports', { waitUntil: 'networkidle' });
 await p.waitForSelector('#rp-body', { timeout: 15000 });
 await p.waitForTimeout(1200);
-chk('7 menu (Harian/Laba/Kasir/Produk/Kategori/Piutang/Stok), Harian aktif', await p.locator('[data-menu]').count() === 7
+chk('8 menu (Harian/Laba/Kasir/Produk/Kategori/Piutang/Stok/Analitik), Harian aktif', await p.locator('[data-menu]').count() === 8
   && await p.locator('[data-menu="harian"]').count() === 1);
 chk('harian: 24 batang jam + chip jam teramai', await p.locator('[data-jam]').count() === 24
   && (await p.textContent('#rp-body')).includes('Jam teramai'));
@@ -211,13 +211,13 @@ await gulir(0); await p.waitForTimeout(250);
 // ruang geser (Harian/Laba/Produk 72 vs Kasir/Piutang/Stok 56); `top-0` kini
 // seragam + sejajar tepi kolom kanan.
 const pola = [];
-for (const m of ['harian', 'laba', 'kasir', 'produk', 'kategori', 'piutang', 'stok']) {
+for (const m of ['harian', 'laba', 'kasir', 'produk', 'kategori', 'piutang', 'stok', 'analitik']) {
   await p.click(`[data-menu="${m}"]`);
   await p.waitForTimeout(1200);
   const u = await ukurAside();
   pola.push(`${m}=${u.top}/${u.tinggi}/${u.kananTop}`);
 }
-chk('aside: template identik di 7 menu (atas+tinggi kartu, sejajar kolom kanan)',
+chk('aside: template identik di 8 menu (atas+tinggi kartu, sejajar kolom kanan)',
   new Set(pola.map((s) => s.split('=')[1])).size === 1,
   pola.join(' '));
 // Menu Kategori (roadmap 2.2): baris "Jumlah" = Σ baris byCategory server.

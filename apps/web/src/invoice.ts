@@ -22,6 +22,15 @@ export interface DokLaporan {
   baris: string[][];
   ringkas: [string, string][];
   catatan?: string;
+  /** Seksi tabel TAMBAHAN setelah tabel utama — dipakai menu Analitik
+   *  (valuasi + tidak laku dalam SATU dokumen cetak). Opsional: pemanggil
+   *  lama tanpa `bagian` menghasilkan HTML yang persis sama. */
+  bagian?: {
+    judul: string;
+    kolom: { label: string; kanan?: boolean; tengah?: boolean }[];
+    baris: string[][];
+    catatan?: string;
+  }[];
 }
 
 export function htmlLaporan(d: DokLaporan, toko: Toko): string {
@@ -56,6 +65,7 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
   table.items th.r, table.items td.r { text-align: right; }
   table.items th.c, table.items td.c { text-align: center; }
   table.items td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
+  .seksi { font-size: 12px; font-weight: 700; margin: 18px 0 6px; }
   .ringkas { width: 55%; margin-left: auto; margin-top: 14px; }
   .kotak { display: flex; justify-content: space-between; border: 1px solid #444; padding: 5px 9px; margin-bottom: 7px; }
   .kotak .lbl { font-weight: 700; }
@@ -86,6 +96,17 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
     <thead><tr>${d.kolom.map((k) => `<th${cls(k)}>${esc(k.label)}</th>`).join('')}</tr></thead>
     <tbody>${d.baris.map((r) => `<tr>${r.map((v, i) => sel(v, !!d.kolom[i]?.kanan)).join('')}</tr>`).join('')}</tbody>
   </table>
+  ${(d.bagian ?? [])
+    .map(
+      (b) => `
+  <div class="seksi">${esc(b.judul)}</div>
+  <table class="items">
+    <thead><tr>${b.kolom.map((k) => `<th${cls(k)}>${esc(k.label)}</th>`).join('')}</tr></thead>
+    <tbody>${b.baris.map((r) => `<tr>${r.map((v, i) => sel(v, !!b.kolom[i]?.kanan)).join('')}</tr>`).join('')}</tbody>
+  </table>
+  ${b.catatan ? `<div class="catat">${esc(b.catatan)}</div>` : ''}`,
+    )
+    .join('')}
   ${d.ringkas.length ? `<div class="ringkas">${d.ringkas.map(([k, v]) => `<div class="kotak"><span class="lbl">${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>` : ''}
   ${d.catatan ? `<div class="catat">${esc(d.catatan)}</div>` : ''}
   <div class="foot">Dicetak dari Ravaa POS</div>
