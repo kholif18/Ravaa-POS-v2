@@ -79,21 +79,34 @@ await pasangToken(page);
     ok('kartu HPP = angka server', teks.includes(`HPP ${rp(l.hpp)}`));
     ok('tanggal terpilih = hari ini', (await page.locator('#rp-date').inputValue()) === hariIni());
 
-    const barisMethod = await page.locator('#rp-body table').first().locator('tbody tr').count();
-    ok(`baris metode bayar (${l.byMethod.length} + jumlah)`, barisMethod === l.byMethod.length + 1,
-      `ada=${barisMethod} harap=${l.byMethod.length + 1}`);
-    const barisTop = await page.locator('#rp-body table').nth(2).locator('tbody tr').count();
+    // Hitung baris PER-KARTU lewat judul h2-nya, BUKAN indeks `table` ke-N:
+    // kartu "Topup & tarik" tidak dirender (empty-state) saat hari itu tanpa
+    // topup sehingga indeks bergeser dan `nth(2)` membaca tabel yang salah
+    // (bug nyata 2026-10-19: hari tanpa topup -> asersi produk terlaris 0).
+    const barisKartu = (judul) =>
+      page.evaluate((j) => {
+        const kartu = [...document.querySelectorAll('#rp-body .card')].find(
+          (c) => c.querySelector(':scope > h2')?.textContent.trim() === j,
+        );
+        return kartu ? kartu.querySelectorAll('table tbody tr').length : 0;
+      }, judul);
+    const barisMethod = await barisKartu('Rekap per metode bayar');
+    const harapMethod = l.byMethod.length ? l.byMethod.length + 1 : 0; // hari kosong = empty-state
+    ok(`baris metode bayar (${l.byMethod.length ? `${l.byMethod.length} + jumlah` : 'hari kosong'})`,
+      barisMethod === harapMethod, `ada=${barisMethod} harap=${harapMethod}`);
+    const barisTop = await barisKartu('Produk terlaris');
     ok(`baris produk terlaris (${l.topItems.length})`, barisTop === l.topItems.length,
       `ada=${barisTop} harap=${l.topItems.length}`);
 
     const jamBatang = await page.locator('[data-jam]').count();
     ok('grafik per jam: 24 batang tampil', jamBatang === 24, `ada=${jamBatang}`);
 
-    if (l.byMethod.length) {
-      ok('baris metode menampilkan nama & total yang benar',
+    // SELALU satu asersi (tanpa `if` tanpa else) supaya hari kosong tidak
+    // mengurangi jumlah asersi yang diharapkan runner (run.mjs: 20).
+    ok('baris metode menampilkan nama & total yang benar',
+      !l.byMethod.length ||
         teks.includes(l.byMethod.map((m) => rp(m.total)).join(' ')) || teks.includes(rp(l.byMethod[0].total)),
-        rp(l.byMethod[0].total));
-    }
+      l.byMethod.length ? rp(l.byMethod[0].total) : 'hari kosong');
 
     console.log('=== C. Navigasi tanggal + ekspor CSV ===');
     const [dl] = await Promise.all([

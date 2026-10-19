@@ -1664,6 +1664,18 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        asersi != `ekspek` — angka `ekspek` wajib diperbarui bila
                        asersi memang sengaja ditambah. Prasyarat: API :3001
                        hidup + ada shift terbuka (runner membukanya sendiri).
+                       Pilih elemen per-KARTU (judul h2), jangan indeks tabel
+                       ke-N — kartu empty-state tidak dirender saat data kosong
+                       sehingga indeks bergeser (pelajaran 2026-10-19: kartu
+                       "Topup & tarik" absen di hari tanpa topup membuat
+                       `nth(2)` laporan-test membaca tabel salah -> palsu-gagal;
+                       kini per-kartu via judul). Asersi data-bergantung jangan
+                       `if` tanpa jalur `ok()` lain: jumlah asersi wajib stabil
+                       di hari kosong (runner menandai "suite bermasalah" walau
+                       tak ada regresi). Run yang tepat melewati 00:00 UTC
+                       pernah merah karena ini — history-test 22/27 BELUM
+                       diperkuat (hindari mulai suite dalam ±4 menit dari
+                       tengah malam UTC bila ingin pasti hijau).
 infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + Caddyfile
 ```
 
