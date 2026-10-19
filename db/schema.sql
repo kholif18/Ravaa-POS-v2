@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS sales (
   -- dalam transaksi yang sama — retry idempotent tidak menghitung ulang
   -- (cek duplikat dijalankan sebelum perhitungan nomor).
   invoice_no  TEXT,
-  pay_method  TEXT NOT NULL DEFAULT 'tunai', -- tunai | qris | transfer
+  pay_method  TEXT NOT NULL DEFAULT 'tunai', -- tunai | qris | transfer | campuran (split 1.6.5)
   subtotal    INTEGER NOT NULL,
   discount    INTEGER NOT NULL DEFAULT 0,
   total       INTEGER NOT NULL,
@@ -192,6 +192,30 @@ CREATE TABLE IF NOT EXISTS sale_items (
   note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
+
+-- Split payment / pembayaran 2+ metode (butir ROADMAP 1.6.5, ACC pemilik
+-- 19 Okt 2026): rincian ATRIBUSI pembayaran per metode untuk SATU nota —
+-- Σ `amount` per nota SELALU = `sales.total` (satu-satunya sumber angka per
+-- metode untuk laporan byMethod & agregat tunai/qris/transfer shift).
+--   - Nota satu metode (termasuk nota lama yang belum punya baris — dibaca
+--     lewat fallback `(pay_method, total)` di query): satu baris =
+--     (pay_method, total). Nota hutang ikut penuh di metode tunai — porsi
+--     yang belum dibayar memang ditampilkan TERPISAH sebagai `hutang_baru`/
+--     `sisa_hutang` (perilaku lama dipertahankan; rumus laci =
+--     omzet − hutang_baru, bukan dari tabel ini).
+--   - Nota campuran (`sales.pay_method = 'campuran'`, POS modal bayar 2
+--     metode): satu baris per metode, porsi = uang yang diterapkan ke total
+--     (untuk tunai = uang fisik − kembalian), Σ = total.
+--   - Server menulis baris untuk SETIAP nota baru; baris lama sengaja TIDAK
+--     di-backfill (query punya fallback) — jangan tambah backfill diam-diam.
+CREATE TABLE IF NOT EXISTS sale_payments (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_id  TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  method   TEXT NOT NULL,                       -- tunai | qris | transfer
+  amount   INTEGER NOT NULL CHECK (amount >= 0), -- 0 hanya mungkin di nota total 0
+  UNIQUE (sale_id, method)
+);
+CREATE INDEX IF NOT EXISTS idx_sale_payments_sale ON sale_payments(sale_id);
 
 -- Retur penjualan (Tahap 2, 2026-10-11, halaman #/returns + tombol per nota
 -- di #/history): barang kembali dari pelanggan, uang kembali ke pelanggan.

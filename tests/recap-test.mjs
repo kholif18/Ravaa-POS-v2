@@ -146,6 +146,10 @@ try {
   const sales = sql(`SELECT id FROM sales WHERE id LIKE 'uji-rekap-%';`).split('\n').filter(Boolean);
   for (const sid of sales) {
     sql(`DELETE FROM stock_moves WHERE ref_id = '${sid}';`);
+    // sale_payments harus eksplisit: sqlite3 CLI TIDAK menegakkan FK
+    // (ON DELETE CASCADE tak jalan) — sisa baris yatim walau tak terlihat
+    // oleh query (selalu JOIN sales), biar DB uji tetap bersih.
+    sql(`DELETE FROM sale_payments WHERE sale_id = '${sid}';`);
     sql(`DELETE FROM sales WHERE id = '${sid}';`);
   }
   sql(`DELETE FROM shifts WHERE cashier LIKE 'rekap-uji-%';`);

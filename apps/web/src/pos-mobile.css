@@ -428,6 +428,33 @@
   .pm-bayar-hint {
     @apply text-sm leading-snug text-gray-500 dark:text-gray-400;
   }
+  /* --- SPLIT PEMBAYARAN (1.6.5) di lapisan bayar mobile ------------------
+     Toggle datar + panel metode kedua & kolom Nominal (sisi non-tunai).
+     Kelas `.pm-paypick*` dipakai ulang untuk chip (chip dirender
+     splitChipsHtml('pm-paypick') dari pos.ts — SATU sumber). */
+  .pm-splittgl {
+    @apply flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-600 transition hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300;
+  }
+  .pm-splittgl svg {
+    @apply size-5 shrink-0;
+  }
+  .pm-splittgl.is-aktif {
+    @apply border-solid border-primary bg-primary-soft text-primary dark:bg-primary/15;
+  }
+  .pm-splittgl .cek {
+    @apply flex size-5 items-center justify-center text-primary;
+  }
+  .pm-splittgl .cek svg {
+    @apply size-3.5;
+  }
+  .pm-splitgrid {
+    @apply grid grid-cols-2 gap-2;
+  }
+  .pm-splitinp {
+    /* Angka nominal sisi non-tunai: kanan + tebal, satu bahasa dengan
+       #pos-cash (.pm-cash) di atasnya. */
+    @apply !min-h-[48px] text-right !text-xl font-bold tabular-nums;
+  }
   .pm-cashwrap {
     @apply relative;
   }

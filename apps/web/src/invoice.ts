@@ -166,20 +166,32 @@ const LABEL_METODE: Record<string, string> = {
  * milik pelanggan nota ini (`GET /api/customer-debts/:customerId` -> `sisa`)
  * — ditampilkan sebagai baris "Sisa hutang (semua nota)" bila > 0 DAN berbeda
  * dari hutang nota ini. Nota berhutang sendiri memakai snapshot
- * `sale.sisa_hutang` (deterministik, ikut walau ledger gagal dimuat). */
-export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piutang = 0): string {
+ * `sale.sisa_hutang` (deterministik, ikut walau ledger gagal dimuat).
+ * `payments` (opsional, split 1.6.5 2026-10-19) = baris ATRIBUSI per metode
+ * (`GET /api/sales/:id` -> `payments`): >1 baris = rincian Payment method
+ * ditulis per metode (tunai = uang diserahkan, non-tunai = porsi). Absen /
+ * ≤1 baris = keluaran invoice PERSIS seperti sebelum fitur. */
+export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piutang = 0, payments: { method: string; amount: number }[] = []): string {
   // Diskon agregat = diskon transaksi + seluruh diskon per baris (persis rumus
   // laporan: sales.diskon). Dipakai untuk baris "Discount (...%)" ala Aronium.
   const discItem = items.reduce((a, i) => a + (i.discount || 0), 0);
   const discTotal = Math.max(0, sale.discount) + discItem;
   const pct = sale.subtotal > 0 && discTotal > 0 ? Math.round((discTotal / sale.subtotal) * 100) : 0;
-  const metode = LABEL_METODE[sale.pay_method] ?? sale.pay_method.toUpperCase();
+  // Split payment (1.6.5): >1 baris `payments` = nota dibayar dua metode —
+  // rincian menampilkan baris PER metode (tunai = uang diserahkan = porsi +
+  // kembalian, non-tunai = porsi; pola struk). Satu metode / data lama =
+  // jalur lama PERSIS (satu baris `metode: total`).
+  const split = payments.length > 1 ? payments : [];
+  const labelM = (m: string) => (m === 'tunai' ? 'TUNAI' : (LABEL_METODE[m] ?? m.toUpperCase()));
+  const metode = split.length
+    ? split.map((p) => labelM(p.method)).join(' + ')
+    : LABEL_METODE[sale.pay_method] ?? sale.pay_method.toUpperCase();
   // Lunas di muka = tunai cukup / QRIS / transfer. Uang kurang (putaran 12 POS:
   // uang kurang/0 otomatis jadi hutang) membuat nota INI belum lunas ->
   // Payment status "Belum lunas" + baris Hutang di rincian pembayaran.
   const sisaNota = sale.sisa_hutang ?? 0;
-  const paid = sale.pay_method === 'tunai' ? sale.cash_in : sale.total;
-  const tampilKembalian = sale.pay_method === 'tunai';
+  const paid = split.length ? sale.total - sisaNota : sale.pay_method === 'tunai' ? sale.cash_in : sale.total;
+  const tampilKembalian = split.length ? split.some((p) => p.method === 'tunai') : sale.pay_method === 'tunai';
 
   const barisItem = items.map((it, i) => {
     const qtyTampil = it.unit && it.base_unit && it.unit !== it.base_unit
@@ -284,7 +296,14 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
     <div class="kotak"><span class="lbl">Total</span><span>${rpNum(sale.total)}</span></div>
     <div class="bayar">
       <div class="ttl">Payment method:</div>
-      <div class="baris"><span class="lbl">${metode}:</span><span>${rpNum(sale.total)}</span></div>
+      ${split.length
+        ? split
+            .map(
+              (p) =>
+                `<div class="baris"><span class="lbl">${labelM(p.method)}:</span><span>${rpNum(p.method === 'tunai' ? p.amount + sale.change : p.amount)}</span></div>`,
+            )
+            .join('\n      ')
+        : `<div class="baris"><span class="lbl">${metode}:</span><span>${rpNum(sale.total)}</span></div>`}
       <div class="baris"><span class="lbl">Paid amount:</span><span>${rpNum(paid)}</span></div>
       ${sisaNota > 0
         ? `<div class="baris hutang"><span class="lbl">Hutang:</span><span>${rpNum(sisaNota)}</span></div>`
@@ -443,7 +462,7 @@ export async function cetakRekapShift(s: ShiftRow, fisik: number | null): Promis
  *  Melempar Error bila API tidak terjangkau / popup diblokir — pemanggil
  *  (pos.ts / history.ts) hanya memberi toast; penjualan TIDAK dibatalkan. */
 export async function cetakInvoice(saleId: string): Promise<void> {
-  const nota = await apiGet<{ data: { sale: SaleNota; items: ItemNota[] } }>(
+  const nota = await apiGet<{ data: { sale: SaleNota; items: ItemNota[]; payments?: { method: string; amount: number }[] } }>(
     `/api/sales/${encodeURIComponent(saleId)}`,
   );
   // Piutang = pelengkap (putaran 14): sisa ledger halaman Hutang untuk
@@ -459,7 +478,7 @@ export async function cetakInvoice(saleId: string): Promise<void> {
           .catch(() => 0)
       : Promise.resolve(0),
   ]);
-  const html = htmlInvoice(nota.data.sale, nota.data.items, set.data, piutang);
+  const html = htmlInvoice(nota.data.sale, nota.data.items, set.data, piutang, nota.data.payments ?? []);
   const w = window.open('', '_blank');
   if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak invoice A4');
   w.document.open();

@@ -218,14 +218,22 @@
   .modal:has(.pos-bayar-band) .modal-header {
     display: none;
   }
+  /* Revisi pemilik 2026-10-19 ("bayar split jadi memakan tempat … atur
+     layout barunya agar tidak perlu scroll pada layar kecil"): tinggi boleh
+     memakai hampir seluruh viewport (overlay p-3 = 12px tiap sisi) —
+     sebelumnya `max-h-[90vh]` dari styles.css memaksa form split digulir di
+     layar 1366x720 (terukur body scrollH 801 vs clientH 579). */
+  .modal:has(.pos-bayar-band) {
+    max-height: calc(100vh - 1.5rem);
+  }
   .pos-bayar-band {
-    @apply -mx-2.5 -mt-2 flex items-center gap-3 bg-linear-to-r from-primary to-[#1757c8] px-5 py-4 text-white;
+    @apply -mx-2.5 -mt-2 flex items-center gap-3 bg-linear-to-r from-primary to-[#1757c8] px-5 py-3.5 text-white;
   }
   .pos-bayar-band-ikon {
-    @apply flex size-16 shrink-0 items-center justify-center rounded-full bg-white/20;
+    @apply flex size-14 shrink-0 items-center justify-center rounded-full bg-white/20;
   }
   .pos-bayar-band-ikon svg {
-    @apply size-8;
+    @apply size-7;
   }
   .pos-bayar-band-judul {
     @apply block text-2xl font-bold leading-tight;
@@ -258,9 +266,11 @@
   .pos-bayar-grid2 {
     @apply grid grid-cols-1 gap-5 sm:grid-cols-2;
   }
-  /* Kartu kiri & kanan: h-full agar dua kolom sama tinggi. */
+  /* Kartu kiri & kanan: h-full agar dua kolom sama tinggi. space-y-2 =
+     gap 8px (revisi 2026-10-19 — 10px masih menyisakan 9px gulir di layar
+     640px; 8px menjaga hierarki tetap terbaca). */
   .pos-bayar-kartu {
-    @apply h-full space-y-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800;
+    @apply h-full space-y-2 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800;
   }
   /* Kanan: satu kartu tunai langsung tanpa wrapper tambahan. */
   .pos-bayar-kanan {
@@ -271,6 +281,15 @@
   }
   .pos-bayar-sub2 {
     @apply mt-0.5 block text-sm text-gray-500 dark:text-gray-400;
+  }
+  /* Judul + elemen kanan SEBARIS (revisi 2026-10-19 — memadatkan tinggi
+     modal: dua baris bertumpuk per kartu membuang ±50px). Kiri = judul,
+     kanan = helper/pil toggle; ikut membungkus di lebar sempit. */
+  .pos-bayar-headline {
+    @apply flex flex-wrap items-center justify-between gap-x-3 gap-y-1;
+  }
+  .pos-bayar-headline .pos-bayar-sub2 {
+    @apply mt-0;
   }
   .pos-bayar-judulrow {
     @apply flex items-center gap-1.5 text-[15px] font-bold text-gray-900 dark:text-white;
@@ -298,9 +317,56 @@
   .pos-pay-pick .cek svg {
     @apply size-3;
   }
+  /* --- SPLIT PEMBAYARAN (1.6.5): pil toggle + panel metode kedua ---------
+     Toggle = PIL kompak di baris judul `.pos-bayar-headline` (revisi pemilik
+     2026-10-19 "bayar split … memakan tempat … atur layout barunya": tombol
+     full-width selebar kartu dulu menghabiskan satu baris 44px); border
+     putus-putus = aksi sekunder, bukan metode; `.is-aktif` di-toggle
+     paintFormBayar(). Chip metode kedua = 2 kolom.
+     Panel = grid DUA KOLOM: [Metode Kedua + chip] ‖ [Nominal + input],
+     catatan komposisi membentang penuh di bawah. Versi menumpuk (5 baris =
+     214px) membuat modal harus digulir di layar 1366x720. */
+  .pos-bayar-splittgl {
+    @apply flex shrink-0 items-center gap-1.5 rounded-lg border-2 border-dashed border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-600 transition hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300;
+  }
+  .pos-bayar-splittgl svg {
+    @apply size-4.5 shrink-0;
+  }
+  .pos-bayar-splittgl.is-aktif {
+    @apply border-solid border-primary bg-primary-soft text-primary dark:bg-primary/15;
+  }
+  .pos-bayar-splittgl .cek {
+    @apply flex size-4 items-center justify-center text-primary;
+  }
+  .pos-bayar-splittgl .cek svg {
+    @apply size-3.5;
+  }
+  .pos-bayar-splitoff {
+    @apply mt-0;
+  }
+  .pos-bayar-splitpanel {
+    @apply grid gap-x-4 gap-y-2 sm:grid-cols-2;
+  }
+  .pos-bayar-splitcol {
+    @apply space-y-2;
+  }
+  .pos-bayar-splitgrid {
+    @apply grid grid-cols-2 gap-2;
+  }
+  /* Chip metode kedua = tombol RAMPING ala tombol sekunder — bukan replika
+     kartu metode utama 64px; cukup besar untuk diklik (±53px). */
+  .pos-bayar-splitgrid .pos-pay-pick {
+    @apply min-h-[48px] gap-0.5 py-1.5;
+  }
+  .pos-bayar-splitgrid .pos-pay-pick svg {
+    @apply size-5;
+  }
+  .pos-bayar-splitnote {
+    @apply sm:col-span-2;
+  }
   /* Kotak info per metode (teks #bayar-info diganti paintFormBayar). */
   .pos-bayar-info {
-    @apply flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2.5 text-sm leading-snug text-sky-900 dark:bg-sky-500/10 dark:text-sky-200;
+    @apply flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2 text-sm leading-snug text-sky-900 dark:bg-sky-500/10 dark:text-sky-200;
   }
   .pos-bayar-info > svg {
     @apply mt-0.5 size-5 shrink-0 text-sky-600 dark:text-sky-400;
@@ -308,21 +374,27 @@
   .pos-bayar-note {
     @apply resize-y;
   }
-  .pos-bayar-count {
-    @apply mt-1 text-right text-sm tabular-nums text-gray-400 dark:text-gray-500;
+  /* Counter n/200 menempel KANAN baris label catatan (revisi 2026-10-19 —
+     dulu baris sendiri di bawah textarea, memakan ±30px tinggi modal). */
+  .pos-bayar-count-inline {
+    @apply ml-auto text-sm font-normal tabular-nums text-gray-400 dark:text-gray-500;
   }
   /* Blok tunai = tumpukan judul → input → judul → pills → ledger → hint. */
-  .pos-bayar-tunai {
-    /* 24px — spasi cukup agar komponen terstruktur, bukan megah. */
-    @apply space-y-6;
-  }
   .pos-bayar-cashwrap {
     @apply relative mt-1;
   }
   /* Pills nominal (fully rounded ala mockup); aktif = 2 utility yang
-     di-toggle paintCart() pada [data-cash] (pola lama, tak berubah). */
+     di-toggle paintCart() pada [data-cash] (pola lama, tak berubah).
+     ≥1024px (modal max-w-5xl penuh, kartu ≥448px): 4 kolom SATU baris —
+     hemat ±50px; teks Rp200.000 (13px) + px-3 ±84px masih lapang. Di bawah
+     itu 2x2 supaya label tidak berdesakan. */
   .pos-bayar-pills {
     @apply grid grid-cols-2 gap-2;
+  }
+  @media (min-width: 1024px) {
+    .pos-bayar-pills {
+      @apply grid-cols-4;
+    }
   }
   .pos-bayar-pill {
     @apply rounded-full border border-gray-300 bg-white px-3 py-2 text-center text-sm font-semibold text-gray-700 transition hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200;
@@ -331,7 +403,7 @@
      di paintFormBayar). BG hidup via 4 utility (toggle paintCart + render
      awal): merah saat kurang, hijau saat ada kembalian. */
   .pos-bayar-change {
-    @apply rounded-lg border border-dashed border-gray-300 bg-white p-3 text-center dark:border-gray-600 dark:bg-gray-800;
+    @apply rounded-lg border border-dashed border-gray-300 bg-white p-2.5 text-center dark:border-gray-600 dark:bg-gray-800;
   }
   .pos-bayar-hint {
     @apply text-center text-sm text-gray-500 dark:text-gray-400;

@@ -84,6 +84,29 @@ export interface PosMobileCtx {
   /** Kelas CSS angka kembalian (`kelasPosChange()` pos.ts — SATU sumber). */
   kelasChange: string;
 
+  /* split pembayaran (1.6.5) — pengelolaan state & binding tetap di pos.ts
+     (bindFormBayar/paintFormBayar); di sini hanya nilai render awal. */
+  splitAktif: boolean;
+  /** Metode KEDUA pilihan (selalu ≠ metode utama; null saat split mati). */
+  splitMethod: PayMethod | null;
+  /** Porsi sisi NON-TUNAI (`#bayar-split-nominal`), Rp. */
+  splitNominal: number;
+  /** false = keranjang berisi topup/tarik → tombol split mati. */
+  splitTersedia: boolean;
+  /** Label kolom nominal (`Nominal <metode non-tunai>` — sisiInputSplit()). */
+  splitLabel: string;
+  /** Catatan komposisi (`teksSplitNote()` — '' saat split mati). */
+  splitNote: string;
+  /** Ada sisi tunai (metode utama ATAU metode kedua) — blok uang diterima. */
+  adaTunai: boolean;
+  /** Target uang fisik = porsi tunai (`tunaiDiterapkan()`; tanpa split =
+   *  total tagihan). Ledger "kurang/lebih" dibandingkan ke angka INI, bukan
+   *  total mentah. */
+  tunaiTarget: number;
+  /** Render chip metode kedua — kelas tombol mengikuti lapisan
+   *  (`pm-paypick` di sini; satu sumber dengan desktop di pos.ts). */
+  splitChips(kelas: string): string;
+
   /* helper format & hitung — SATU sumber dengan desktop (pos.ts) */
   rp(n: number): string;
   esc(s: unknown): string;
@@ -332,16 +355,21 @@ function aksiPanelHtml(ctx: PosMobileCtx): string {
  *  `#bayar-tunai-ledger`, `#pos-change`, `#pos-change-ctx`, `[data-pay]` ×3
  *  (+ `.cek`), `#bayar-info`, `#bayar-tunai`, `#bayar-non-tunai`,
  *  `#bayar-note` + `#bayar-note-count`, `#bayar-total`, `#bayar-cust`,
- *  `#pos-pay`. Template ini hanya render AWAL — nilai segar ditulis
+ *  `#pos-pay`, plus **split 1.6.5**: `#bayar-split-toggle`,
+ *  `#bayar-split-panel`, `#bayar-split-chips`, `[data-split]`,
+ *  `#bayar-split-label`, `#bayar-split-nominal`, `#bayar-split-note`.
+ *  Template ini hanya render AWAL — nilai segar ditulis
  *  `bukaBayar()`/paintCart saat lapisan dibuka. */
 function pmBayarHtml(ctx: PosMobileCtx): string {
   const tot = ctx.totalBayar();
-  const tunai = ctx.metodeAktif === 'tunai';
+  // Sisi tunai (metode utama ATAU metode kedua split 1.6.5) — blok uang
+  // diterima + ledger; targetnya porsi tunai (`ctx.tunaiTarget`), bukan total.
+  const tunai = ctx.adaTunai;
   // BG ledger hidup (merah kurang, hijau lebih) — daftar kelas SAMA dengan
   // render awal formBayarHtml() + toggle paintCart(): jangan tulis ulang
   // nilainya di sini (state cashIn hampir selalu 0 saat shell dirender).
-  const kurang = tunai && ctx.cashIn > 0 && ctx.cashIn < tot;
-  const lebih = tunai && ctx.cashIn > tot;
+  const kurang = tunai && ctx.cashIn > 0 && ctx.cashIn < ctx.tunaiTarget;
+  const lebih = tunai && ctx.cashIn > ctx.tunaiTarget;
   const teksCtx = ctx.teksKembalian();
   const bayarMati = !ctx.bisaBayar() || ctx.busy;
   return `
@@ -368,6 +396,22 @@ function pmBayarHtml(ctx: PosMobileCtx): string {
             .join('')}
         </div>
         <p class="pm-bayar-hint" id="bayar-info">${ctx.esc(ctx.infoBayar)}</p>
+      </div>
+      <!-- SPLIT PEMBAYARAN (1.6.5) — dua kartu terpisah ala aplikasi mobile:
+           toggle + panel metode kedua & kolom Nominal (sisi non-tunai; sisi
+           tunai diisi #pos-cash = sisa). Id PERSIS modal desktop. -->
+      <div class="card pm-bayar-kartu">
+        <button type="button" id="bayar-split-toggle" class="pm-splittgl${ctx.splitAktif ? ' is-aktif' : ''}" aria-pressed="${ctx.splitAktif ? 'true' : 'false'}"${ctx.splitTersedia ? '' : ' disabled'}>
+          ${icon('sync')}<span>Bayar 2 metode (split)</span><span class="cek${ctx.splitAktif ? '' : ' hidden'}">${icon('check')}</span>
+        </button>
+        ${ctx.splitTersedia ? '' : '<p class="pm-bayar-hint">Split tidak tersedia saat keranjang berisi topup/tarik.</p>'}
+      </div>
+      <div class="card pm-bayar-kartu" id="bayar-split-panel"${ctx.splitAktif ? '' : ' hidden'}>
+        <span class="label">Metode kedua</span>
+        <div class="pm-splitgrid" id="bayar-split-chips">${ctx.splitChips('pm-paypick')}</div>
+        <label class="label" for="bayar-split-nominal"><span id="bayar-split-label">${ctx.esc(ctx.splitLabel)}</span></label>
+        <input id="bayar-split-nominal" class="input pm-splitinp" type="text" inputmode="numeric" autocomplete="off" value="${ctx.formatRibu(ctx.splitNominal)}" />
+        <p id="bayar-split-note" class="pm-bayar-hint">${ctx.esc(ctx.splitNote)}</p>
       </div>
       <div class="card pm-bayar-kartu" id="bayar-tunai"${tunai ? '' : ' hidden'}>
         <span class="label">Uang diterima</span>

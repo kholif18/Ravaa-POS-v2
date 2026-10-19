@@ -51,6 +51,11 @@ export type SaleRow = {
    *  (tanpa nota) tidak terhitung; retur yang dibatalkan ikut hilang. */
   n_retur?: number;
   retur_total?: number;
+  /** Split payment (1.6.5, server GET /api/sales): CSV metode yang
+   *  menyusun nota, mis. "tunai,qris" — ada saat `pay_method='campuran'`.
+   *  Sumber label linimasa ("Tunai + QRIS"); rincian nominal per metode
+   *  ada di `GET /api/sales/:id.payments`. */
+  pay_methods?: string | null;
 };
 
 type TopupRow = {
@@ -120,7 +125,7 @@ const state = {
   loading: true,
   error: '',
   buka: '',
-  det: null as { key: string; items: ItemRow[] } | null,
+  det: null as { key: string; items: ItemRow[]; payments: PayRow[] } | null,
   detMuat: false,
   detErr: '',
   /** Filter "hutang saja" (putaran 13) — chip #h-hutang di kepala(). */
@@ -147,6 +152,24 @@ function errMsg(e: unknown): string {
 
 const METODE: Record<string, string> = { tunai: 'Tunai', qris: 'QRIS', transfer: 'Transfer' };
 const metode = (m: string) => METODE[m] ?? m;
+
+/** Baris pembayaran ATRIBUSI satu nota (GET /api/sales/:id.payments, 1.6.5):
+ *  Σ amount per nota SELALU = `sales.total` (baris tunai = uang diserahkan
+ *  − kembalian; aturan server — jangan dihitung ulang dari pay_method). */
+type PayRow = { method: string; amount: number };
+
+/** Label metode untuk BARIS LINIMASA & rincian: nota `campuran` (split
+ *  1.6.5) membentuk "Tunai + QRIS" dari CSV `pay_methods`; tanpa CSV
+ *  (seharusnya tak terjadi) jatuh ke "Campuran". Metode tunggal =
+ *  perilaku lama persis. */
+const metodeBaris = (s: { pay_method: string; pay_methods?: string | null }) =>
+  s.pay_method === 'campuran'
+    ? (s.pay_methods ?? '')
+        .split(',')
+        .filter(Boolean)
+        .map((m) => metode(m))
+        .join(' + ') || 'Campuran'
+    : metode(s.pay_method);
 
 /** Sisa hutang yang tercatat pada nota ini (field computed `sisa_hutang` dari
  *  GET /api/sales — putaran 13). 0 / absen = lunas / baris lama. */
@@ -268,6 +291,9 @@ function detailJual(s: SaleRow): string {
   if (state.detMuat) return `<div class="card"><div class="skel h-6 w-64"></div></div>`;
   if (state.detErr) return `<div class="card"><div class="empty">${icon('alert')}<span>${esc(state.detErr)}</span></div></div>`;
   const items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
+  // Baris pembayaran per metode (split 1.6.5) — dari muatan detail yang sama;
+  // nota lama / satu metode = [] / 1 baris -> jalur tampilan lama persis.
+  const bayar = state.det?.key === `sale:${s.id}` ? state.det.payments : [];
   const discBaris = Math.max(0, s.subtotal - s.discount - s.total); // terturun dari kolom (lihat insertSale)
   const sisaH = sisaHutang(s); // penanda hutang (putaran 13)
   const returTot = s.retur_total ?? 0; // penanda retur (2026-10-18)
@@ -307,8 +333,20 @@ function detailJual(s: SaleRow): string {
       ${s.discount > 0 ? ket('Diskon transaksi', `− ${rp(s.discount)}`) : ''}
       <div class="my-1 border-t border-gray-200 dark:border-gray-700"></div>
       ${ket('Total', rp(s.total), true)}
-      ${ket('Metode', metode(s.pay_method))}
-      ${s.pay_method === 'tunai' ? ket('Uang diterima', rp(s.cash_in)) + ket('Kembali', rp(s.change)) : ''}
+      ${ket('Metode', bayar.length > 1 ? bayar.map((p) => (p.method === 'tunai' ? 'Tunai' : metode(p.method))).join(' + ') : metodeBaris(s))}
+      ${bayar.length > 1
+        ? bayar
+            .map((p) =>
+              p.method === 'tunai'
+                ? // Tunai split = uang DISERAHKAN (porsi atribusi + kembalian) —
+                  // pola sama dengan struk/resume POS; non-tunai = porsi.
+                  ket('Uang diterima', rp(p.amount + s.change)) + (s.change > 0 ? ket('Kembali', rp(s.change)) : '')
+                : ket(metode(p.method), rp(p.amount)),
+            )
+            .join('')
+        : s.pay_method === 'tunai'
+          ? ket('Uang diterima', rp(s.cash_in)) + ket('Kembali', rp(s.change))
+          : ''}
       ${sisaH > 0 ? `
         <div class="mt-1 flex items-baseline justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1 dark:border-red-500/30 dark:bg-red-500/10">
           <span class="text-xs font-semibold text-red-700 dark:text-red-400">Hutang</span>
@@ -545,7 +583,7 @@ function renderTabel(): string {
       const terbuka = state.buka === b.key;
       const waktuCell = b.s ? jam(b.s.created_at) : jam(b.t!.created_at);
       const total = b.s ? b.s.total : b.t!.total;
-      const metodeCell = b.s ? metode(b.s.pay_method) : metode(b.t!.pay_method);
+      const metodeCell = b.s ? metodeBaris(b.s) : metode(b.t!.pay_method);
       // Hitung layanan yang dibayar bersama nota ini — ditandai di baris induk
       // lewat sub-teks (bukan di kolom Total, yang = omzet penjualan saja).
       const nSub = b.sub?.length ?? 0;
@@ -706,8 +744,8 @@ async function bukaDetail(id: string): Promise<void> {
   state.detMuat = true;
   paint();
   try {
-    const j = await apiGet<{ data: { sale: unknown; items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(id)}`);
-    state.det = { key: `sale:${id}`, items: j.data.items };
+    const j = await apiGet<{ data: { sale: unknown; items: ItemRow[]; payments?: PayRow[] } }>(`/api/sales/${encodeURIComponent(id)}`);
+    state.det = { key: `sale:${id}`, items: j.data.items, payments: j.data.payments ?? [] };
     state.detErr = '';
   } catch (e) {
     state.detErr = errMsg(e);
@@ -740,9 +778,15 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
     // Item dipakai kalau rincian nota ini sudah termuat; kalau belum (klik
     // kilat selesai GET), ambil sendiri — struk tanpa baris item = struk bohong.
     let items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
-    if (!items.length) {
-      const j = await apiGet<{ data: { items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
-      items = j.data.items;
+    // Baris pembayaran per metode (split 1.6.5): hanya nota `campuran` yang
+    // butuh data ini — nota satu metode mempertahankan jalur lama PERSIS
+    // (tanpa fetch tambahan / perubahan struktur struk).
+    const perluBayar = s.pay_method === 'campuran';
+    let bayar = state.det?.key === `sale:${s.id}` ? state.det.payments : [];
+    if (!items.length || (perluBayar && !bayar.length)) {
+      const j = await apiGet<{ data: { items: ItemRow[]; payments?: PayRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
+      if (!items.length) items = j.data.items;
+      if (perluBayar) bayar = j.data.payments ?? [];
     }
     // Pilihan gaya Aronium: invoice A4 (window.print) atau struk thermal
     // (print-agent) — pola sama dengan dialog selesai bayar di POS.
@@ -792,12 +836,25 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
         ...(discBaris > 0 ? [{ kiri: 'Diskon item', kanan: `-${rp(discBaris)}` }] : []),
         ...(s.discount > 0 ? [{ kiri: 'Diskon', kanan: `-${rp(s.discount)}` }] : []),
         { kiri: 'TOTAL', kanan: rp(s.total), tebal: true },
-        ...(s.pay_method === 'tunai' && s.cash_in > 0
+        ...(bayar.length > 1
           ? [
-              { kiri: 'Tunai', kanan: rp(s.cash_in) },
-              { kiri: 'Kembalian', kanan: rp(s.change) },
+              // Split (1.6.5): baris PER metode — tunai = uang DISERAHKAN
+              // (porsi atribusi + kembalian; pola struk POS), non-tunai =
+              // porsi atribusi. Kembalian hanya bila ada sisi tunai & > 0.
+              ...bayar.map((p) => ({
+                kiri: p.method === 'tunai' ? 'Tunai' : metode(p.method),
+                kanan: rp(p.method === 'tunai' ? p.amount + s.change : p.amount),
+              })),
+              ...(bayar.some((p) => p.method === 'tunai') && s.change > 0
+                ? [{ kiri: 'Kembalian', kanan: rp(s.change) }]
+                : []),
             ]
-          : [{ kiri: metode(s.pay_method), kanan: rp(s.total) }]),
+          : s.pay_method === 'tunai' && s.cash_in > 0
+            ? [
+                { kiri: 'Tunai', kanan: rp(s.cash_in) },
+                { kiri: 'Kembalian', kanan: rp(s.change) },
+              ]
+            : [{ kiri: metodeBaris(s), kanan: rp(s.total) }]),
       ],
       kaki: ['Terima kasih sudah berbelanja'],
     };

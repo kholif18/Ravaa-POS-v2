@@ -1686,6 +1686,27 @@ app.get('/api/shifts/open', (c) => {
 // shift lewat subquery — satu kali baca, bukan N+1. Agregat berasal dari baris
 // yang memang terikat `shift_id` (penjualan offline yang masuk lewat outbox
 // ikut terhitung setelah tersimpan, karena ikut membawa shift_id).
+
+/**
+ * Nilai atribusi satu metode pembayaran untuk agregat shift (split 1.6.5).
+ * Membaca `sale_payments` (Σ amount per nota selalu = sales.total); nota LAMA
+ * yang belum punya baris jatuh ke fallback `(pay_method, total)`. Karena tiap
+ * nota teratribusi penuh ke metodenya, Σ tunai+qris+transfer per shift SELALU
+ * = omzet shift — invariant yang dijaga shift-test & recap-test (jangan
+ * diganti jadi membaca `sales.pay_method` saja; nota split tercatat
+ * 'campuran' dan porsinya akan hilang).
+ */
+const nilaiMetodeShift = (m: string) =>
+  `(SELECT COALESCE(SUM(x.nilai),0) FROM (
+      SELECT sp.amount AS nilai FROM sale_payments sp
+        JOIN sales sl ON sl.id = sp.sale_id
+       WHERE sl.shift_id = s.id AND sp.method='${m}'
+      UNION ALL
+      SELECT sl.total AS nilai FROM sales sl
+       WHERE sl.shift_id = s.id AND sl.pay_method='${m}'
+         AND NOT EXISTS (SELECT 1 FROM sale_payments sp2 WHERE sp2.sale_id = sl.id)
+    ) x)`;
+
 app.get('/api/shifts', (c) => {
   const status = c.req.query('status') ?? 'semua';
   if (!['semua', 'open', 'closed'].includes(status)) {
@@ -1705,16 +1726,16 @@ app.get('/api/shifts', (c) => {
     `SELECT s.*,
             (SELECT COUNT(*) FROM sales sl WHERE sl.shift_id = s.id) AS n_sales,
             (SELECT COALESCE(SUM(sl.total),0) FROM sales sl WHERE sl.shift_id = s.id) AS omzet,
-            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
-              WHERE sl.shift_id = s.id AND sl.pay_method='tunai') AS tunai,
             -- Rincian per metode (keputusan pemilik 2026-10-01: QRIS/transfer
-            -- TETAP masuk hitungan laci, wajib tercatat sumbernya) — selain
-            -- tunai di atas, supaya dialog tutup shift bisa menampilkan
-            -- "per sumber" tanpa menghitung ulang di klien.
-            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
-              WHERE sl.shift_id = s.id AND sl.pay_method='qris') AS qris,
-            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
-              WHERE sl.shift_id = s.id AND sl.pay_method='transfer') AS transfer,
+            -- TETAP masuk hitungan laci, wajib tercatat sumbernya) — supaya
+            -- dialog tutup shift bisa menampilkan "per sumber" tanpa
+            -- menghitung ulang di klien. Sejak 1.6.5 dibaca dari
+            -- sale_payments lewat helper nilaiMetodeShift() (nota split
+            -- tercatat 'campuran' — porsinya hanya ada di tabel itu; nota
+            -- lama tanpa baris jatuh ke fallback (pay_method, total)).
+            ${nilaiMetodeShift('tunai')} AS tunai,
+            ${nilaiMetodeShift('qris')} AS qris,
+            ${nilaiMetodeShift('transfer')} AS transfer,
             (SELECT COUNT(*) FROM topup_txns t WHERE t.shift_id = s.id) AS n_topup,
             -- Gerak kas topup/tarik TERPISAH per kolom & per angka (keputusan
             -- pemilik 2026-10-01): topup = tunai pelanggan -> laci NAIK
@@ -1844,6 +1865,11 @@ const insertSale = transaksi((sale: {
   // customer_id: absen/'' = tanpa catatan, payload lama tetap sah.
   note?: string;
   items: { product_id?: number; name?: string; qty: number; price?: number; unit?: string; discount?: number; note?: string }[];
+  /** Split payment 2+ metode (butir ROADMAP 1.6.5): `amount` = uang
+   *  DISERAHKAN per metode — untuk tunai = uang fisik diterima (server yang
+   *  mengurangi kembalian). Absen = nota satu metode (perilaku lama: kolom
+   *  `pay_method` + `cash_in`). Lihat blok validasi di bawah. */
+  payments?: { method?: string; amount?: number }[];
 }) => {
   const dup = db.prepare('SELECT * FROM sales WHERE id = ?').get(sale.id);
   if (dup) return { row: dup, duplicate: true };
@@ -1995,7 +2021,71 @@ const insertSale = transaksi((sale: {
   // disimpan ke sales tetap kotor, supaya subtotal - total = seluruh diskon.
   const total = subtotal - totalDiscBaris - Math.max(0, sale.discount);
   if (total < 0) throw new Error('diskon melebihi subtotal');
-  const change = Math.max(0, sale.cash_in - total);
+
+  // ---------- pembayaran per metode (split 2+ metode, ROADMAP 1.6.5) ----------
+  // `payments[]` OPSIONAL. Bila dikirim, `cash_in` dari body DIABAIKAN —
+  // server menjumlahkan sendiri (cash_in = Σ amount, change = Σ − total).
+  // Aturan (kontrak §3): metode wajib tunai|qris|transfer tanpa duplikat;
+  // nominal bulat >= 0; Σ amount >= total (split WAJIB menutup — uang kurang
+  // adalah jalur HUTANG satu metode); porsi NON-TUNAI <= total (kembalian
+  // hanya boleh keluar dari tunai — tanpa baris tunai Σ wajib pas).
+  // Hasil = baris `sale_payments` ATRIBUSI: Σ amount per nota SELALU = total
+  // (tunai = uang diserahkan − kembalian). Tabel ini satu-satunya sumber
+  // angka per metode: laporan byMethod & agregat tunai/qris/transfer shift
+  // membacanya (dengan fallback (pay_method, total) untuk nota lama — jangan
+  // hitung ulang dari `pay_method` tunggal di tempat lain).
+  let payMethod = sale.pay_method;
+  let cashIn = Number(sale.cash_in ?? 0);
+  let change: number;
+  const pecahan: { method: string; amount: number }[] = [];
+  if (sale.payments !== undefined) {
+    const METODE = ['tunai', 'qris', 'transfer'];
+    if (!Array.isArray(sale.payments) || sale.payments.length === 0 || sale.payments.length > METODE.length) {
+      throw new Error('payments harus array 1..3 metode');
+    }
+    const dipakai = new Set<string>();
+    let jumlah = 0;
+    let nonTunai = 0;
+    for (const p of sale.payments) {
+      const m = String(p?.method ?? '');
+      if (!METODE.includes(m)) throw new Error(`metode pembayaran tidak dikenal: ${m || '(kosong)'}`);
+      if (dipakai.has(m)) throw new Error(`metode pembayaran duplikat: ${m}`);
+      dipakai.add(m);
+      const a = Number(p?.amount ?? 0);
+      if (!Number.isFinite(a) || a < 0) {
+        throw new Error(`nominal pembayaran tidak valid untuk ${m} (harus angka >= 0)`);
+      }
+      jumlah += Math.round(a);
+      if (m !== 'tunai') nonTunai += Math.round(a);
+    }
+    if (nonTunai > total) {
+      throw new Error(
+        `pembayaran non-tunai melebihi total nota (kembalian hanya dari tunai; non-tunai ${nonTunai} > total ${total})`,
+      );
+    }
+    if (jumlah < total) {
+      throw new Error(
+        `split payment tidak menutup total (kurang ${total - jumlah} — uang kurang hanya jalur hutang satu metode tunai)`,
+      );
+    }
+    change = jumlah - total;
+    cashIn = jumlah;
+    // Porsi tunai yang menempel ke total = total − Σ non-tunai (sisanya
+    // kembalian uang fisik — konsisten dengan change = Σ − total di atas).
+    const tunaiTerapkan = total - nonTunai;
+    for (const p of sale.payments) {
+      const m = String(p.method);
+      const amount = m === 'tunai' ? tunaiTerapkan : Math.round(Number(p.amount ?? 0));
+      if (amount > 0) pecahan.push({ method: m, amount });
+    }
+    payMethod = pecahan.length > 1 ? 'campuran' : (pecahan[0]?.method ?? payMethod);
+  } else {
+    change = Math.max(0, cashIn - total);
+    // Nota satu metode — termasuk HUTANG: atribusi PENUH ke metodenya
+    // (perilaku lama; agregat tunai/qris/transfer & byMethod tidak berubah,
+    // porsi belum dibayar tampil terpisah sebagai sisa_hutang/hutang_baru).
+    if (total > 0) pecahan.push({ method: payMethod, amount: total });
+  }
   // Nomor invoice = kombinasi TAHUN + BULAN + TANGGAL + nomor urut (revisi
   // pemilik 2026-10-04, sebelumnya `YYMM-NNNNNN` urut per bulan):
   // `YYMMDD-NNNNNN` — mis. `261004-000001`, urut HARIAN UTC (satu aturan waktu
@@ -2018,7 +2108,7 @@ const insertSale = transaksi((sale: {
   const row = db.prepare(
     `INSERT INTO sales (id, shift_id, invoice_no, pay_method, subtotal, discount, total, cash_in, change, cashier, customer_id, customer_name, note)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-  ).get(sale.id, sale.shift_id, invoiceNo, sale.pay_method, subtotal, Math.max(0, sale.discount), total, sale.cash_in, change, sale.cashier, customerId, customerName, saleNote);
+  ).get(sale.id, sale.shift_id, invoiceNo, payMethod, subtotal, Math.max(0, sale.discount), total, cashIn, change, sale.cashier, customerId, customerName, saleNote);
   const insItem = db.prepare(
     `INSERT INTO sale_items (sale_id, product_id, name, qty, price, amount, discount, cost, unit, note)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -2026,6 +2116,11 @@ const insertSale = transaksi((sale: {
   for (const l of lines) {
     insItem.run(sale.id, l.product_id, l.name, l.qty, l.price, l.amount, l.discount, l.cost, l.unit, l.note);
   }
+  // Rincian pembayaran per metode (split 1.6.5) — SATU transaksi dengan nota
+  // (`transaksi` helper), jadi retry idempotent (guard duplikat di atas) dan
+  // rollback tidak pernah meninggalkan nota tanpa barisnya / sebaliknya.
+  const insBayar = db.prepare('INSERT INTO sale_payments (sale_id, method, amount) VALUES (?, ?, ?)');
+  for (const p of pecahan) insBayar.run(sale.id, p.method, p.amount);
   return { row, duplicate: false as const, lines };
 });
 
@@ -2054,6 +2149,9 @@ app.post('/api/sales', async (c) => {
       // Catatan transaksi per nota (2026-10-10) — opsional, '' = tanpa.
       note: body.note ?? '',
       items: body.items,
+      // Split payment (1.6.5) — opsional; absen = perilaku lama. Dikirim apa
+      // adanya, validasi bentuk di insertSale (di dalam transaction).
+      payments: body.payments,
     });
     const items = lines ?? db.prepare('SELECT * FROM sale_items WHERE sale_id=?').all((row as { id: string }).id);
     return c.json({ data: { sale: row, items, duplicate: duplicate ?? true } }, duplicate ? 200 : 201);
@@ -2116,7 +2214,14 @@ app.get('/api/sales', (c) => {
                  THEN s.total - s.cash_in ELSE 0 END AS sisa_hutang,
             (SELECT COUNT(*) FROM returns r WHERE r.sale_id = s.id) AS n_retur,
             (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.sale_id = s.id) AS retur_total,
-            (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS n_items
+            (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS n_items,
+            -- Metode pembayaran nota (split 1.6.5): gabungan nama metode
+            -- ber-urutan baris sale_payments ("tunai,qris"), NULL untuk nota
+            -- lama tanpa baris (klien jatuh ke pay_method tunggal). Dipakai
+            -- chip "Jenis" Riwayat menampilkan "Tunai + QRIS" pada campuran.
+            (SELECT GROUP_CONCAT(x.m) FROM (
+               SELECT sp.method AS m FROM sale_payments sp
+                WHERE sp.sale_id = s.id ORDER BY sp.id) x) AS pay_methods
        FROM sales s
       WHERE date(s.created_at)=date(?)
       ORDER BY s.created_at DESC, s.rowid DESC
@@ -2156,7 +2261,14 @@ app.get('/api/sales/:id', (c) => {
        FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
       WHERE si.sale_id=?`,
   ).all(c.req.param('id'));
-  return c.json({ data: { sale, items } });
+  // Rincian pembayaran per metode (split 1.6.5) — SATU baris per metode
+  // (Σ = sales.total); [] untuk nota lama tanpa baris (klien jatuh ke
+  // `pay_method` tunggal + `cash_in`). Dipakai Riwayat (kartu Pembayaran),
+  // cetak ulang struk, dan invoice A4 supaya nota campuran tampil per metode.
+  const payments = db.prepare(
+    'SELECT method, amount FROM sale_payments WHERE sale_id=? ORDER BY id',
+  ).all(c.req.param('id'));
+  return c.json({ data: { sale, items, payments } });
 });
 
 // ---------- topup & tarik tunai ----------
@@ -3200,10 +3312,26 @@ function laporanRentang(dari: string, sampai: string) {
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
       WHERE ${dl('s.created_at')}`,
   ).get(...ps) as { d: number }).d;
+  // Rincian per metode (split 1.6.5): dibaca dari `sale_payments` — tiap nota
+  // teratribusi penuh ke metodenya, jadi Σ total tetap = omzet; nota lama
+  // tanpa baris jatuh ke (pay_method, total). `n` = COUNT(DISTINCT sale_id):
+  // satu nota split terhitung di SETIAP metodenya sehingga Σ n >= sales.n
+  // (bukan bug — laporan-test menguji `tMethod === omzet` yang tetap eksak).
   const byMethod = db.prepare(
-    `SELECT pay_method, COUNT(*) AS n, COALESCE(SUM(total),0) AS total
-     FROM sales WHERE ${dl('created_at')} GROUP BY pay_method`,
-  ).all(...ps);
+    `SELECT metode AS pay_method, COUNT(DISTINCT sale_id) AS n, COALESCE(SUM(amount),0) AS total
+       FROM (
+         SELECT sp.method AS metode, sp.sale_id AS sale_id, sp.amount AS amount
+           FROM sale_payments sp JOIN sales s ON s.id = sp.sale_id
+          WHERE ${dl('s.created_at')}
+         UNION ALL
+         SELECT s.pay_method AS metode, s.id AS sale_id, s.total AS amount
+           FROM sales s
+          WHERE ${dl('s.created_at')}
+            AND NOT EXISTS (SELECT 1 FROM sale_payments sp2 WHERE sp2.sale_id = s.id)
+       ) x
+      GROUP BY metode
+      ORDER BY metode`,
+  ).all(...ps, ...ps) as { pay_method: string; n: number; total: number }[];
   const topup = db.prepare(
     `SELECT kind, COUNT(*) AS n, COALESCE(SUM(nominal),0) AS nominal, COALESCE(SUM(admin),0) AS admin
      FROM topup_txns WHERE ${dl('created_at')} GROUP BY kind`,

@@ -33,6 +33,10 @@ const cleanupDB = () => {
   try {
     execFileSync('sqlite3', [DB,
       "DELETE FROM sale_items WHERE sale_id = 'uuid-uji-hapus-dua'; " +
+      // FK `sale_payments.sale_id` ON DELETE CASCADE TIDAK jalan di CLI
+      // sqlite3 (foreign_keys OFF) — tanpa baris ini sisa baris pembayaran
+      // yatim memblokir POST ulang id tetap: UNIQUE(sale_id, method).
+      "DELETE FROM sale_payments WHERE sale_id = 'uuid-uji-hapus-dua'; " +
       "DELETE FROM sales WHERE id = 'uuid-uji-hapus-dua'; " +
       "DELETE FROM stock_moves WHERE product_id IN (SELECT id FROM products WHERE sku LIKE 'UJI-%'); " +
       "DELETE FROM products WHERE sku LIKE 'UJI-%';"]);
@@ -66,7 +70,9 @@ const jpost = async (p, b, m = 'POST') => {
 // (dibuat sesudah cleanup, jadi tidak ikut cleanupDB) juga dibuang di sini.
 const sisaAwal = cleanupDB();
 execFileSync('sqlite3', [DB,
-  "DELETE FROM sale_items WHERE sale_id = 'uuid-uji-hapus-penjaga'; DELETE FROM sales WHERE id = 'uuid-uji-hapus-penjaga';"]);
+  "DELETE FROM sale_items WHERE sale_id = 'uuid-uji-hapus-penjaga'; " +
+  "DELETE FROM sale_payments WHERE sale_id = 'uuid-uji-hapus-penjaga'; " +
+  "DELETE FROM sales WHERE id = 'uuid-uji-hapus-penjaga';"]);
 if (sisaAwal !== '0|0|0') console.log(`self-heal: sisa run sebelumnya dibuang (${sisaAwal})`);
 
 // ---------- setup ----------
@@ -244,6 +250,8 @@ const sisaPenjaga = execFileSync('sqlite3', [DB,
   `SELECT COUNT(*) FROM sales WHERE id = '${PENJAGA}';`], { encoding: 'utf8' }).trim();
 chk('cleanup TIDAK menyentuh sales lain (nota penjaga selamat)', (penjaga.s === 201 || penjaga.s === 200) && sisaPenjaga === '1', `create=${penjaga.s} sisa=${sisaPenjaga}`);
 execFileSync('sqlite3', [DB,
-  `DELETE FROM sale_items WHERE sale_id = '${PENJAGA}'; DELETE FROM sales WHERE id = '${PENJAGA}';`]);
+  `DELETE FROM sale_items WHERE sale_id = '${PENJAGA}'; ` +
+  `DELETE FROM sale_payments WHERE sale_id = '${PENJAGA}'; ` +
+  `DELETE FROM sales WHERE id = '${PENJAGA}';`]);
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);
 process.exit(gagal === 0 ? 0 : 1);

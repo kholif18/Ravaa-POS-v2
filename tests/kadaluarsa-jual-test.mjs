@@ -64,6 +64,7 @@ async function bacaAsli() {
 function bersih(asli) {
   try {
     execFileSync('sqlite3', [DB,
+      `DELETE FROM sale_payments WHERE sale_id IN (SELECT id FROM sales WHERE cashier = '${KASIR}');` +
       `DELETE FROM sale_items WHERE sale_id IN (SELECT id FROM sales WHERE cashier = '${KASIR}');`]);
     execFileSync('sqlite3', [DB, `DELETE FROM sales WHERE cashier = '${KASIR}';`]);
     execFileSync('sqlite3', [DB,

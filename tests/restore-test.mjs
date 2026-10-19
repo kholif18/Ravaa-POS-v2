@@ -83,8 +83,13 @@ chk('POST penjualan (insertSale) hidup sesudah restore',
 const saleId = jual.json.data.sale.id;
 const retur = await jpost('/api/returns', { items: [{ product_id: pidT, qty: 1, price: 1000 }] });
 chk('POST retur (simpanRetur) hidup sesudah restore', retur.status === 201, `status=${retur.status}`);
-// Bersihkan jejak tulis uji (cascade: sale_items/return_items ikut terhapus).
-sql(`DELETE FROM returns WHERE id = ${retur.json.data?.retur?.id ?? -1};`);
+// Bersihkan jejak tulis uji (sqlite3 CLI tidak menegakkan FK — return_items/
+// sale_items/sale_payments dibuang eksplisit, bukan lewat cascade).
+const returId = retur.json.data?.retur?.id ?? -1;
+sql(`DELETE FROM return_items WHERE return_id = ${returId};`);
+sql(`DELETE FROM returns WHERE id = ${returId};`);
+sql(`DELETE FROM sale_items WHERE sale_id = '${saleId}';`);
+sql(`DELETE FROM sale_payments WHERE sale_id = '${saleId}';`);
 sql(`DELETE FROM sales WHERE id = '${saleId}';`);
 sql(`DELETE FROM stock_moves WHERE product_id = ${pidT};`);
 sql(`DELETE FROM products WHERE id = ${pidT};`);

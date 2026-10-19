@@ -260,7 +260,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 |---|---|---|---|---|---|---|
 | Login multi-user + peran | ✓ | ✓ | ✓ | ✓ | ~ | **✓** (owner/kasir) |
 | Multi-outlet + transfer stok | ✓ | · | ✓ | ✓ | ✓ | ✗ sengaja (§5) |
-| Split payment / split bill | · | · | ✓ | ✓ | · | ⟳ ACC 19 Okt 2026 (4.1) |
+| Split payment / split bill | · | · | ✓ | ✓ | · | **✓** (2 metode, atribusi `sale_payments`) |
 | Metode bayar kustom / e-wallet (+MDR) | · | ✓ | ✓ | ✓ | ✓ | ✗ ditolak 19 Okt 2026 (4.2; kini 3 metode) |
 | Hutang/piutang pelanggan | ✓ | ✓ | ✓ | · | · | **✓** (+aging, +cetak A4) |
 | Diskon baris & transaksi | ✓ | ✓ | ✓ | ✓ | · | **✓** (+borongan qty) |
@@ -315,7 +315,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 
 | # | Kandidat | Keputusan 19 Okt 2026 | Referensi pasar | Catatan (biaya/risiko) |
 |---|---|---|---|---|
-| 4.1 | **Split payment** (tunai+QRIS satu nota) | **✅ dikerjakan** — `ROADMAP.md` §1.6.5 | Kasir Pintar (split bill/join), Olsera (F&B) | Butuh tabel `sale_payments` + laporan byMethod |
+| 4.1 | **Split payment** (tunai+QRIS satu nota) | **✅ selesai 2026-10-19** — §1.6.5 | Kasir Pintar (split bill/join), Olsera (F&B) | Tabel `sale_payments` (Σ = total) + laporan byMethod + modal 2 metode lebar `wider` |
 | 4.2 | **Metode bayar e-wallet + opsi MDR** | **❌ tidak perlu** — tanpa payment gateway; QRIS/transfer manual cukup | KP/Olsera/Loyverse | Konteks: MDR QRIS ≤Rp100 rb = 0% sejak 1 Okt 2026 (BI) |
 | 4.3 | **Pesanan jasa + status/DP** | **✅ dikerjakan** — §1.6.6 | KP vertical Bengkel | Order → dikerjakan → diambil; DP; domain cetak/servis laptop |
 | 4.4 | **Scan barcode kamera HP** | **✅ selesai 2026-10-19** — §1.6.1 | Loyverse | API browser (`BarcodeDetector`) tanpa dependensi; butuh konteks aman (HTTPS/localhost) |

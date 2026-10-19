@@ -45,6 +45,20 @@ apps/api/src/index.ts    API Hono. SATU-SATUNYA yang boleh tulis DB.
                          menampilkannya sebagai toast yang menjelaskan sebab +
                          arah perbaikan; detail penuh tetap di log server.
                          Diuji `tests/skema-guard-test.mjs` (11 asersi).
+                         **Split payment 1.6.5 (2026-10-19)**: `insertSale()`
+                         menulis tabel **`sale_payments`** (atribusi per metode,
+                         Σ amount per nota SELALU = `sales.total`) SATU
+                         transaction dengan nota; `payments[]` body opsional —
+                         bila dikirim `cash_in` DIABAIKAN (jumlahnya = Σ amount,
+                         `change = Σ − total`), `pay_method='campuran'` bila >1
+                         baris tersisa. Pembaca atribusi = helper
+                         **`nilaiMetodeShift(m)`** (agregat tunai/qris/transfer
+                         GET /api/shifts) + UNION `byMethod` laporan —
+                         keduanya fallback `(pay_method, total)` via
+                         `NOT EXISTS` untuk nota lama (SENGAJA tanpa backfill);
+                         `pay_methods` CSV di GET /api/sales, `payments` di
+                         GET /api/sales/:id. Kontrak & validasi persis di §3;
+                         diuji `tests/e2e-split.mjs` (56 asersi).
 apps/api/src/db.ts       Koneksi better-sqlite3 + migrate + seed. DB_PATH default ./data/data.db
                          + **`kolomHilang()`/`peringatkanSkema()`** (guard
                          skema 2026-10-18): parser mini `db/schema.sql`
@@ -197,6 +211,33 @@ apps/web/src/pos.css    File gaya KHUSUS POS (baru 2026-10-09 — keputusan
                            — elemennya sendiri membawa `pos-scope`) +
                            `.sk-panel`/`.sk-head`/`.sk-view`/`.sk-frame`/
                            `.sk-hint`.
+                           **Layout modal bayar split (revisi pemilik
+                           2026-10-19: "karena bayar split jadi memakan
+                           tempat, bisa kamu lebarkan saja modalnya, atur
+                           layout barunya agar tidak perlu scroll pada layar
+                           kecil")**: modal dibuka `wider: true` (1024px) dan
+                           `:has(.pos-bayar-band)` memasang
+                           `max-height: calc(100vh − 1.5rem)` (menggantikan
+                           90vh) sehingga tinggi mengikuti konten; toggle
+                           split = PIL `.pos-bayar-splittgl` di baris judul
+                           `.pos-bayar-headline` (baris full-width
+                           `.pos-bayar-splitbar` DIHAPUS; hint blokir topup =
+                           `.pos-bayar-splitoff`); panel `.pos-bayar-splitpanel`
+                           = 2 kolom `.pos-bayar-splitcol` (label + grid
+                           `.pos-bayar-splitgrid` chips kedua, chip dipadatkan
+                           `min-h-[48px] gap-0.5 py-1.5` + svg size-5) +
+                           `#bayar-split-note` `.pos-bayar-splitnote` span-2;
+                           `.pos-bayar-count-inline` = counter catatan menempel
+                           label (menggantikan `.pos-bayar-count` blok);
+                           pills nominal 4 kolom saat `≥1024px`;
+                           `.pos-bayar-kartu` `space-y-2`; `.pos-bayar-tunai`
+                           (dead) dibuang. Hasil terukur 1366×720 dgn split
+                           aktif: modal 1024×601, body 532 = clientH TANPA
+                           scroll (sebelum revisi: 768px, gulir ±222px);
+                           aman s/d vh 640. Semua id kelas kontrak test
+                           (`.pos-pay-3col`, `#bayar-split-*`, `#pos-cash`,
+                           `#pos-pay`, `data-pay`, `data-cash`,
+                           `#pos-change`) TIDAK berubah.
 apps/web/src/pos-mobile.css  Gaya KHUSUS tampilan MOBILE POS (baru 2026-10-17,
                           pasangan `pages/pos-mobile.ts`; pola sama dengan
                           pos.css). SELURUH aturan `.pm-*`: kerangka aplikasi
@@ -220,7 +261,14 @@ apps/web/src/pos-mobile.css  Gaya KHUSUS tampilan MOBILE POS (baru 2026-10-17,
                           {display:none}` — `@apply flex` mengalahkan UA rule
                           `[hidden]` (tanpa itu lapisan tampil sepanjang
                           waktu). Kelas `.pm-bayar*` DILARANG bocor ke
-                          pos.css. Di-link di
+                          pos.css. **Split 1.6.5 di mobile (2026-10-19)**:
+                          `.pm-splittgl` (pil toggle di bawah kartu metode,
+                          aktif = `.is-aktif` + `.cek`), `.pm-splitgrid` (2
+                          chip metode kedua), `.pm-splitinp` (input nominal
+                          sisi non-tunai) — id kontrak SAMA dengan desktop
+                          (`#bayar-split-toggle`/`#bayar-split-panel`/…)
+                          sehingga binder pos.ts berlaku apa adanya; diuji
+                          seksi M `tests/e2e-split.mjs`. Di-link di
                           index.html SETELAH pos.css; `@reference
                           "./styles.css"` WAJIB; token HANYA dari @theme
                           styles.css (DILARANG warna baru), kelas bersama
@@ -764,6 +812,42 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                             **SEMUA id lama dipertahankan**
                             (`#pos-cash`, `#pos-pay`, `data-cash`, `#pos-change`)
                             supaya F2/Enter/barrier + suite test tetap jalan.
+                            **SPLIT PAYMENT 2 METODE (butir ROADMAP 1.6.5, ACC
+                            pemilik 2026-10-19)**: state `splitAktif` /
+                            `splitMethod` (metode KEDUA) / `splitNominal`
+                            (porsi sisi NON-TUNAI — `porsiNonTunaiSplit()`
+                            menjepit 0..total; `tunaiDiterapkan()` = sisa);
+                            `resetSplit()` dipanggil `bukaBayar()`, F5,
+                            muat hold, & seusai nota. Toggle PIL di baris
+                            judul kartu metode (**`#bayar-split-toggle`**,
+                            `disabled` + hint `.pos-bayar-splitoff` bila
+                            `cartTopup.length > 0` — baris layanan tidak bisa
+                            displit); panel **`#bayar-split-panel`** 2 kolom =
+                            chip metode kedua (**`#bayar-split-chips
+                            [data-split]`**, klik metode utama yang ditabrak =
+                            TUKAR posisi) + kolom Nominal sisi non-tunai
+                            (`#bayar-split-label`/`#bayar-split-nominal`);
+                            `#bayar-split-note` = komposisi "Tunai RpX + QRIS
+                            RpY" + target uang diterima (satu-sumber
+                            `teksSplitNote()`). Seluruh uang mengikuti
+                            `tunaiDiterapkan()`: `change() = max(0, cashIn −
+                            tunaiDiterapkan())`, ctx kembalian merah
+                            sejak kolom kosong bila ada sisi tunai
+                            (`kelasCtxKembalian()` — dulu hijau, menyesatkan);
+                            barrier `pay()` menolak `Uang diterima belum diisi
+                            — porsi tunai RpX`. Payload **`payments:[{method,
+                            amount}…]`** (tunai = uang diserahkan, non-tunai =
+                            nominal) dikirim HANYA saat split — dan **split
+                            TIDAK punya jalur hutang** (uang kurang = tolak;
+                            hutang tetap jalur satu-metode-tunai). Kick laci
+                            ikut saat `adaSisiTunai()`; struk/resume
+                            menampilkan baris per metode. Markup
+                            `formBayarHtml()` juga direstrukturisasi (revisi
+                            layout pemilik 2026-10-19) — detail kelas di
+                            entri `pos.css` §2; id kontrak TIDAK berubah.
+                            Diuji `tests/e2e-split.mjs` (56 asersi: API,
+                            POS desktop, swap metode, blokir topup, Riwayat/
+                            cetak, lapisan mobile).
                            `pay()` kirim `customer_id` + struk meta
                            `Pelanggan: <customer_name>` + reset pilihan ke
                             Pelanggan Umum. Pintasan level document di
@@ -1074,6 +1158,10 @@ apps/web/src/pages/pos-mobile.ts  UI POS versi MOBILE (baru 2026-10-17) —
                            PERSIS modal desktop sehingga `bindFormBayar`/
                            `paintFormBayar`/`pay` berlaku tanpa cabang
                            (binding-nya `bindBayarMobile` pos.ts).
+                           **Split 1.6.5 ikut di lapisan mobile (2026-10-19)**:
+                           kartu toggle `.pm-splittgl` + grid `.pm-splitgrid`
+                           + input `.pm-splitinp` memakai id kontrak desktop —
+                           tidak ada cabang baru di pos.ts.
                            Diuji
                            `tests/pos-mobile-test.mjs` (43 asersi).
  apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
@@ -1144,6 +1232,16 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          subMap di `baris()`; `renderTabel()` sisipkan
                          `<tr class="topup-subrow">` (tanpa `data-trx`) tepat
                          setelah induknya.
+                         **Split payment 1.6.5 (2026-10-19)**: baris linimasa
+                         nota `campuran` memakai label gabungan dari CSV
+                         `pay_methods` (`metodeBaris()`: "Tunai + QRIS",
+                         fallback "Campuran"); kartu Pembayaran `detailJual()`
+                         memuat baris per metode dari `payments`
+                         GET /api/sales/:id (tunai = porsi + kembalian
+                         ditampilkan sebagai `Uang diterima …`/`Kembali …`),
+                         dan `cetakUlang()` ikut mencetak baris metode itu
+                         (fetch `payments` HANYA untuk nota `campuran` —
+                         nota satu metode jalur lama persis).
                          **Tombol "Buat retur" (Tahap 2, 2026-10-11)** di kartu
                          Pembayaran `detailJual()` (`data-retur-nota`):
                          `dialogReturNota()` prefill item nota + input qty
@@ -1685,6 +1783,13 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           browser/CUPS `lp -d EPSON-L3110-Series`). Lempar Error
                           bila popup diblokir (POS men-toast, penjualan TIDAK
                           dibatalkan). Dipanggil dari POS (dialog A4) & Riwayat.
+                          **Split payment 1.6.5 (2026-10-19)**: `htmlInvoice()`
+                          menerima param `payments` (dari GET /api/sales/:id);
+                          >1 baris = rincian Payment method ditulis PER metode
+                          (tunai = uang diserahkan = porsi + kembalian;
+                          non-tunai = porsi) — satu metode / data lama jalur
+                          lama persis; `cetakInvoice()` meneruskan
+                          `nota.data.payments ?? []`.
  apps/web/src/ui/auth-screen.ts  Kerangka layar auth (login & ubah-sandi):
                           `authLayarHtml(kartu)` — SATU markup untuk dua
                           halaman (pola shift-tutup.ts). Gradasi biru
@@ -2474,8 +2579,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Urutan **`id DESC`** (shift terbaru di atas).
   - Tiap baris = kolom `shifts` + **agregat via subquery** (satu kali baca,
     bukan N+1): `n_sales`, `omzet` (SUM total penjualan yang `shift_id`-nya
-    cocok), `tunai` / `qris` / `transfer` (bagian `pay_method` masing-masing —
-    rincian per metode di dialog tutup shift; ketiganya semua masuk omzet),
+    cocok), `tunai` / `qris` / `transfer` (**sejak split 1.6.5 dibaca dari
+    tabel `sale_payments`** lewat helper `nilaiMetodeShift(m)` — nota
+    `campuran` menyumbang porsi tiap metodenya, Σ tunai+qris+transfer =
+    omzet; nota lama tanpa baris jatuh ke fallback `(pay_method, total)`.
+    Rincian per metode di dialog tutup shift; ketiganya semua masuk omzet),
     `n_topup` (JUMLAH semua `topup_txns` shift ini — **semua kind**, makna
     lama tidak berubah), `topup_nominal` / `topup_admin` (SUM kind=`topup`
     saja), `tarik_nominal` / `tarik_admin` (SUM kind=`tarik` saja).
@@ -2528,7 +2636,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `invoice.ts` (window.print browser, pola `cetakInvoice` — kop `store_*`,
     tabel uraian, kotak Kas seharusnya/Modal akhir/Selisih). Gagal cetak
     tak pernah membatalkan tutup shift (toast saja).
-* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?,customer_id?}`
+* `POST /api/sales` `{id(uuid!),shift_id,items:[{product_id?,name?,qty>0,price?,unit?,discount?,note?}],pay_method,discount?,cash_in?,cashier?,customer_id?,payments?}`
   - **`invoice_no` (baru 2026-10-03, direvisi 2026-10-04, fitur Invoice A4)**:
     di-assign **SERVER**, tidak pernah dari client. Format **`YYMMDD-NNNNNN`**
     (UTC — tahun 2 digit + bulan 2 digit + **tanggal** 2 digit + `-` + 6 digit
@@ -2552,6 +2660,33 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     **400** `"pelanggan tidak dikenal: <id>"` (payload korup, seperti produk/
     satuan tak dikenal). `GET /api/sales` & `GET /api/sales/:id` ikut
     mengembalikan kedua kolom (SELECT `s.*`).
+  - **`payments?` — SPLIT PAYMENT / atribusi per metode (butir ROADMAP 1.6.5,
+    ACC pemilik 2026-10-19)**:
+    `[{method:'tunai'|'qris'|'transfer', amount>=0}, …]` maks 3 baris (metode
+    TIDAK boleh duplikat). Bila DIKIRIM: `cash_in` body **DIABAIKAN** — server
+    menjumlahkan sendiri (`cash_in = Σ amount`, `change = Σ − total`), dan
+    `pay_method` tersimpan = **`'campuran'`** bila >1 baris tersisa. Aturan
+    angka: Σ amount **WAJIB >= total** (kekurangan -> 400 `"split payment
+    tidak menutup total (… — uang kurang hanya jalur hutang satu metode
+    tunai)"`); porsi **non-tunai <= total** (kembalian hanya boleh keluar dari
+    tunai) — selain itu 400. Server menulis tabel **`sale_payments`** (SATU
+    transaction dengan nota; `UNIQUE(sale_id, method)`): baris ATRIBUSI per
+    metode dengan **Σ amount per nota SELALU = `sales.total`** — porsi tunai
+    yang tersimpan = `total − Σ non-tunai` (= uang fisik − kembalian), baris
+    ber-amount 0 dibuang. Nota TANPA `payments` (klien lama/outbox)
+    diperlakukan seperti sebelumnya: satu baris `(pay_method, total)` —
+    termasuk nota hutang (atribusi penuh; porsi belum dibayar tetap tampil
+    sebagai `sisa_hutang`, bukan diubah di tabel ini). **SENGAJA tanpa
+    backfill** untuk nota lama: semua pembaca atribusi (agregat shift
+    `nilaiMetodeShift()`, `byMethod` laporan) punya fallback
+    `(pay_method, total)` lewat `NOT EXISTS`. Validasi 400 konkret (urut):
+    `payments harus array 1..3 metode` -> `metode pembayaran tidak dikenal: X`
+    -> `metode pembayaran duplikat: X` -> `nominal pembayaran tidak valid
+    untuk X (harus angka >= 0)` -> `pembayaran non-tunai melebihi total nota
+    (…)` -> `split payment tidak menutup total (…)`. **Split tidak membuka
+    jalur hutang** — uang kurang = tolak; hutang tetap jalur satu metode
+    tunai (`{pay_method:'tunai', cash_in:<total>}`). Diuji `tests/e2e-split.mjs`
+    §A (16 asersi).
   - **Diskon PER BARIS `discount?`** (baru 2026-09-29): nilai rupiah mutlak.
     Diisi client (prefill dari `products.discount` tipe `rp`/`pct`, boleh
     diubah kasir per baris) lalu **DI-SNAPSHOT** ke `sale_items.discount` —
@@ -2618,10 +2753,15 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     catatan (payload lama sah). `GET /api/sales` & `:id` mengembalikannya
     via `s.*`. Tahap 1 = simpan + gema resume; cetak kaki struk = tahap 2.
     Migrasi: kolom BARU (install lama = ALTER manual, lihat §5).
-* `GET /api/sales/:id` -> `{data:{sale,items}}` (isi lengkap satu nota)
+* `GET /api/sales/:id` -> `{data:{sale,items,payments}}` (isi lengkap satu nota)
   - `sale` memuat **`invoice_no`** (`YYMMDD-NNNNNN`, urut harian) sejak
     2026-10-03 — diambil client oleh `cetakInvoice()` untuk dicetak di kop
     invoice A4.
+  - **`payments` (split 1.6.5, 2026-10-19)**: `[{method, amount}]`
+    (`ORDER BY id`) = baris atribusi `sale_payments` nota itu; `[]` untuk
+    nota lama tanpa baris (klien jatuh ke `(pay_method, total)`). Dipakai
+    rincian Riwayat, cetak ulang struk, invoice A4, dan ekspektasi
+    `tests/shift-test.mjs` untuk nota `campuran`.
   - `sale` juga memuat **`customer_id`** + **`customer_name`** (snapshot, sejak
     2026-10-04) — sumber baris `Pelanggan:` di struk ulang dan "Bill to"
     invoice A4. Baris lama bernama `''` = tampilkan "Pelanggan Umum".
@@ -2648,7 +2788,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     MATI saat sisa 0). Retur yang dibatalkan (`DELETE /api/returns/:id`) ikut
     hilang dari penjumlahan ini.
 * `GET /api/sales?date=&limit=&offset=`
-  -> `{data:[{id,shift_id,created_at,invoice_no,customer_id,customer_name,sisa_hutang,n_retur,retur_total,pay_method,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
+  -> `{data:[{id,shift_id,created_at,invoice_no,customer_id,customer_name,sisa_hutang,n_retur,retur_total,pay_method,pay_methods,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).
     Read-only: tidak mengubah `products.version` dan tidak perlu.
   - `date` default hari UTC (`YYYY-MM-DD`). Divalidasi round-trip
@@ -2664,6 +2804,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     jadi satu hari ratusan nota tidak ditarik sekaligus.
   - **`customer_id` + `customer_name`** ikut terbawa otomatis lewat `s.*`
     (snapshot kolom `sales`, lihat POST /api/sales).
+  - **`pay_methods` (split 1.6.5)**: CSV nama metode ber-urutan baris
+    `sale_payments` (`"tunai,qris"`), NULL untuk nota lama tanpa baris — chip
+    "Jenis" halaman Riwayat menampilkan **"Tunai + QRIS"** pada nota
+    `campuran` (klien fallback ke `pay_method` tunggal bila NULL). Nama saja;
+    nominal per metode ada di `payments` `GET /api/sales/:id`.
   - **`sisa_hutang` (putaran 13, 2026-10-06 — penanda transaksi HUTANG di
     halaman Riwayat)**: **computed per baris, bukan kolom tersimpan** —
     `CASE WHEN pay_method='tunai' AND total > cash_in AND customer_id IS NOT
@@ -2753,6 +2898,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     Σ(amount − diskon baris) − HPP; diskon transaksi TIDAK dialokasikan per
     baris). Tanpa LIMIT; halaman klien yang meringkas baris "Jumlah" (Σ).
     Ikut terkirim juga oleh `GET /api/reports/summary`.
+  - **`byMethod` (split 1.6.5)**: rincian per metode dibaca dari
+    `sale_payments` (UNION ALL fallback `(pay_method, total)` untuk nota lama
+    tanpa baris) — tiap nota teratribusi penuh, jadi **Σ total tetap = omzet**;
+    `n` = `COUNT(DISTINCT sale_id)` sehingga satu nota `campuran` terhitung di
+    tiap metodenya (Σ n >= `sales.n` — bukan bug; `laporan-test.mjs` menguji
+    `tMethod === omzet` yang tetap eksak).
 * `GET /api/reports/summary?from=&to=` -> `{data:{from,to,...sama dengan daily}}`
   (menu laporan ala Aronium, 2026-10-11). Validasi: format YYYY-MM-DD
   round-trip, `from<=to`, maks 366 hari (selain itu 400). `lowStock` snapshot
@@ -2910,6 +3061,15 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   (termasuk efek sampingnya — stok/mutasi) supaya suite tetap hijau walau
   run sebelumnya crash; helper `sql()` menyapa `apps/api/data/data.db`
   langsung (CLI `sqlite3` TIDAK menegakkan foreign_keys — jangan andalkan).
+  **Konsekuensi FK-OFF (kejadian nyata 2026-10-19)**: hapus baris induk
+  (`sales`/`returns`) lewat CLI TIDAK menjalankan `ON DELETE CASCADE`, jadi
+  baris anak (`sale_items`/`sale_payments`/`return_items`) harus dihapus
+  EKSPLISIT sebelum induknya. Suite dengan id sale TETAP
+  (`product-delete-test.mjs`) pernah merah seluruh-suite karena yatim
+  `sale_payments` memblokir POST ulang —
+  `UNIQUE constraint failed: sale_payments.sale_id, sale_payments.method`;
+  sekarang tiap suite yang menghapus sales via CLI ikut membuang
+  `sale_payments`-nya (recap/restore/kadaluarsa-jual/product-delete).
   **DILARANG `DELETE FROM` tanpa WHERE di DB bersama** — itu menghapus data
   PEMILIK, bukan artefak suite. Nyata 2026-10-18: `product-delete-test.mjs`
   menjalankan `DELETE FROM sale_items; DELETE FROM sales;` + invarian hitung
@@ -2941,7 +3101,27 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-19 (kas masuk non-penjualan — butir ROADMAP
+  **Migrasi terakhir 2026-10-19 (split payment — butir ROADMAP 1.6.5):**
+  tabel BARU **`sale_payments`** (SQL penuh di `db/schema.sql`; FK
+  `sales.id ON DELETE CASCADE`, `UNIQUE(sale_id, method)`, CHECK
+  `amount >= 0`). Murni tabel tambahan — `migrate()` (`CREATE TABLE IF
+  NOT EXISTS`) cukup: di DB dev sudah dijalankan lewat `npm run seed`
+  (data lama utuh, tanpa recreate; diverifikasi curl di API hidup). Nota
+  LAMA sengaja TIDAK di-backfill (semua pembaca punya fallback
+  `(pay_method, total)` lewat `NOT EXISTS`) — jangan tambah backfill
+  diam-diam. Install yang tidak boleh di-seed karena alasan lain jalankan
+  SQL yang sama:
+  ```sql
+  CREATE TABLE IF NOT EXISTS sale_payments (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id  TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+    method   TEXT NOT NULL,                        -- tunai | qris | transfer
+    amount   INTEGER NOT NULL CHECK (amount >= 0), -- 0 hanya mungkin di nota total 0
+    UNIQUE (sale_id, method)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sale_payments_sale ON sale_payments(sale_id);
+  ```
+  **Migrasi sebelumnya 2026-10-19 (kas masuk non-penjualan — butir ROADMAP
   1.6.2):** tabel BARU **`kas_masuk`** (SQL penuh di `db/schema.sql`; FK
   `shifts.id`, CHECK `jumlah > 0`, indeks `created_at` + `shift_id`).
   Murni tabel tambahan — `migrate()` (`CREATE TABLE IF NOT EXISTS`) cukup:

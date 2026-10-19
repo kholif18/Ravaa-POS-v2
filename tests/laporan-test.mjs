@@ -37,8 +37,12 @@ try {
     `${l.laba} != ${l.sales.omzet} - ${l.hpp}`);
   const nMethod = l.byMethod.reduce((a, m) => a + m.n, 0);
   const tMethod = l.byMethod.reduce((a, m) => a + m.total, 0);
+  // Split (1.6.5): satu nota campuran menyumbang `n` di DUA metode (n =
+  // COUNT DISTINCT sale_id per metode), jadi Σn BISA MELEBIHI jumlah nota —
+  // yang tetap invarian adalah Σtotal = omzet (baris sale_payments selalu
+  // menjumlah ke total nota). Uang yang diuji tetap: n >= sales.n.
   ok('rekap metode bayar menutup total transaksi & omzet',
-    nMethod === l.sales.n && tMethod === l.sales.omzet,
+    nMethod >= l.sales.n && tMethod === l.sales.omzet,
     `metode n=${nMethod}/total=${tMethod} vs sales n=${l.sales.n}/omzet=${l.sales.omzet}`);
   ok('topItems punya satuan (tidak mencampur pack & pcs)',
     l.topItems.every((t) => typeof t.unit === 'string' && t.unit !== ''),

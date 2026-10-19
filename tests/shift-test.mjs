@@ -119,17 +119,31 @@ try {
   }));
   const baris = perHari.flat().filter((sl) => sl.shift_id === target.id);
   const omzet = baris.reduce((a, sl) => a + sl.total, 0);
-  const tunai = baris.filter((sl) => sl.pay_method === 'tunai').reduce((a, sl) => a + sl.total, 0);
   ok(`shift #${target.id}: n_sales & omzet cocok (n=${baris.length}, ${rp(omzet)})`,
     target.n_sales === baris.length && target.omzet === omzet,
     `api n=${target.n_sales} omzet=${target.omzet} vs hitung n=${baris.length} omzet=${omzet} (rentang ${rentang[0]}..${rentang.at(-1)})`);
+  // Atribusi per metode (split 1.6.5): nota `campuran` tidak bisa dibaca dari
+  // `pay_method` tunggal — porsinya diambil dari `payments` GET /api/sales/:id
+  // (sumber sama dengan rincian Riwayat). Nota non-campuran tetap
+  // (pay_method, total) = fallback server `nilaiMetodeShift()`.
+  const porsiCampuran = new Map();
+  for (const sl of baris.filter((b) => b.pay_method === 'campuran')) {
+    const det = (await get(`/api/sales/${sl.id}`)).body.data ?? {};
+    for (const p of det.payments ?? []) {
+      porsiCampuran.set(p.method, (porsiCampuran.get(p.method) ?? 0) + (p.amount ?? 0));
+    }
+  }
+  const nilaiMetode = (m) =>
+    baris.filter((sl) => sl.pay_method === m).reduce((a, sl) => a + sl.total, 0)
+    + (porsiCampuran.get(m) ?? 0);
+  const tunai = nilaiMetode('tunai');
   ok(`shift #${target.id}: tunai cocok (${rp(tunai)})`, target.tunai === tunai,
-    `api=${target.tunai} vs ${tunai}`);
-  const qris = baris.filter((sl) => sl.pay_method === 'qris').reduce((a, sl) => a + sl.total, 0);
-  const transfer = baris.filter((sl) => sl.pay_method === 'transfer').reduce((a, sl) => a + sl.total, 0);
+    `api=${target.tunai} vs ${tunai} (campuran=${porsiCampuran.get('tunai') ?? 0})`);
+  const qris = nilaiMetode('qris');
+  const transfer = nilaiMetode('transfer');
   ok(`shift #${target.id}: qris & transfer cocok (${rp(qris)} / ${rp(transfer)})`,
     target.qris === qris && target.transfer === transfer,
-    `api=${target.qris}/${target.transfer} vs ${qris}/${transfer}`);
+    `api=${target.qris}/${target.transfer} vs ${qris}/${transfer} (campuran=${porsiCampuran.get('qris') ?? 0}/${porsiCampuran.get('transfer') ?? 0})`);
   // Agregat topup/tarik diverifikasi langsung ke sqlite (GET /api/topups
   // memfilter per hari, sedangkan agregat shift ALL-TIME).
   const tt = execFileSync('sqlite3', [DB,

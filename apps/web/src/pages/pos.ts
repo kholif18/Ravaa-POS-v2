@@ -187,6 +187,16 @@ let cashIn = 0;
  *  tujuannya memasukkan uang kurang/lebih sesungguhnya). Barrier `pay()`
  *  tetap pengaman terakhir: uang kosong / kurang tetap ditolak. */
 let cashTouched = false;
+/** SPLIT PEMBAYARAN (1.6.5, ACC pemilik 2026-10-19) — payment-scoped seperti
+ *  `cashIn`: dua metode dalam SATU nota. `splitMethod` = metode KEDUA (selain
+ *  `payMethod`); `splitNominal` = porsi sisi NON-TUNAI (isi kolom "Nominal");
+ *  sisi tunai selalu SISA tagihan, uang diterimanya di `#pos-cash`. Direset
+ *  `bukaBayar()`/`resetSplit()` — tidak ikut localStorage/outbox. */
+let splitAktif = false;
+let splitMethod: PayMethod | null = null;
+let splitNominal = 0;
+/** Penanda "kasir sudah mengelola kolom nominal split" — pola `cashTouched`. */
+let splitTouched = false;
 let busy = false;
 /** Catatan TRANSAKSI per nota (2026-10-10, kolom "Catatan transaksi" modal
  *  bayar): teks bebas, maks 200 karakter (satu aturan dengan catatan baris).
@@ -368,6 +378,12 @@ function htmlResumePenjualan(o: {
   metode: PayMethod;
   uang: number;
   tot: number;
+  /** Baris pembayaran SPLIT (1.6.5 — urutan = urutan input saat bayar): bila
+   *  terisi, resume menampilkan baris PER metode (Tunai = uang DISERAHKAN
+   *  `uang`, non-tunai = porsi atribusi; Kembalian hanya bila ada sisi tunai
+   *  & > 0) MENGGANTIKAN baris metode tunggal. []/absen = keluaran PERSIS
+   *  seperti sebelum fitur (uji lama aman). */
+  pecahan?: { method: PayMethod; amount: number }[];
   /** Kembalian tunai (uang − total, 0 bila pas/kurang/non-tunai) — tampil
    *  sebagai baris setelah Tunai, sama seperti baris `Kembalian` di struk
    *  cetak (`pay()`/`history.ts` sudah mencetaknya; resume kemarin belum). */
@@ -423,8 +439,13 @@ function htmlResumePenjualan(o: {
       ${baris.join('\n      ')}${tops ? `\n      ${tops}` : ''}
       <div class="struk-garis"></div>
       <div class="struk-baris struk-total"><span>Total</span><span>${rp(o.tot)}</span></div>
-      <div class="struk-baris"><span>${o.metode === 'tunai' ? 'Tunai' : labelMetode(o.metode)}</span><span>${o.metode === 'tunai' ? rp(o.uang) : rp(o.tot)}</span></div>${
-        o.metode === 'tunai' && o.kembalian && o.kembalian > 0
+      ${o.pecahan?.length
+        ? o.pecahan
+            .map((p) => `<div class="struk-baris"><span>${p.method === 'tunai' ? 'Tunai' : labelMetode(p.method)}</span><span>${rp(p.method === 'tunai' ? o.uang : p.amount)}</span></div>`)
+            .join('\n      ')
+        : `<div class="struk-baris"><span>${o.metode === 'tunai' ? 'Tunai' : labelMetode(o.metode)}</span><span>${o.metode === 'tunai' ? rp(o.uang) : rp(o.tot)}</span></div>`}${
+        (o.pecahan?.length ? o.pecahan.some((p) => p.method === 'tunai') : o.metode === 'tunai') &&
+        o.kembalian && o.kembalian > 0
           ? `\n      <div class="struk-baris"><span>Kembalian</span><span>${rp(o.kembalian)}</span></div>`
           : ''
       }${
@@ -469,7 +490,7 @@ async function pilihCetakSelesai(
   struk: Struk,
   tot: number,
   kembalian: number,
-  resume: { invoiceNo?: string | null; items: { qty: number; nama: string; net: number }[]; topups?: { label: string; nominal: number; admin: number; keluar?: boolean }[]; metode: PayMethod; uang: number; kembalian?: number; hutang?: number; catatan?: string },
+  resume: Omit<Parameters<typeof htmlResumePenjualan>[0], 'tot'>, // SATU sumber tipe; `tot` = param fungsi ini (ditempel saat render — jangan duplikat literal, pernah drift saat tambah `pecahan`)
 ): Promise<void> {
   const pilihan = await choiceDialog({
     // Judul hero KEMBALIAN — putaran 11b (2026-10-05, permintaan pemilik
@@ -634,7 +655,7 @@ const tarikTotal = () => cartTopup.filter(isTarik).reduce((s, l) => s + l.admin,
  *  SATU sumber guard untuk Bayar/Bersihkan/F5/F2/Enter — tanpa ini baris
  *  layanan sendirian tidak bisa dibayar (guard `!cart.length` lama). */
 const keranjangTerisi = () => !!(cart.length || cartTopup.length);
-const change = () => Math.max(0, cashIn - totalBayar());
+const change = () => Math.max(0, cashIn - tunaiDiterapkan());
 
 /** Teks label keranjang (`#pos-count`) — SATU sumber untuk render awal
  *  (desktop: cartKiriHtml, mobile: pmShellHtml) DAN refresh bedah paintCart().
@@ -657,6 +678,95 @@ function teksOwncount(): string {
  *  "Total tagihan", barrier tunai, kembalian, dan angka TOTAL BELANJA. */
 const totalBayar = () => total() + topupTotal() + tarikTotal();
 
+/* ---------- split pembayaran (1.6.5) ---------- */
+
+/** Ada sisi TUNAI di nota? = metode utama tunai, ATAU split dengan metode
+ *  kedua tunai. SATU sumber untuk blok uang diterima, barrier bayar, buka
+ *  laci otomatis, dan pemilihan baris struk/resume. */
+const adaSisiTunai = (): boolean => payMethod === 'tunai' || (splitAktif && splitMethod === 'tunai');
+
+/** Porsi sisi NON-TUNAI split = isi kolom "Nominal" (`#bayar-split-nominal`);
+ *  SELALU sisi non-tunai, berapa pun posisinya (sisi tunai = sisa — lihat
+ *  `sisiInputSplit()`). Dijepit 0..total tagihan saat dibaca (pertahanan
+ *  ganda di luar clamp paintCart). */
+const porsiNonTunaiSplit = (): number => Math.max(0, Math.min(splitNominal, totalBayar()));
+
+/** Porsi tagihan yang menempel ke UANG FISIK: satu metode tunai = seluruh
+ *  tagihan; split = total − porsi non-tunai; tanpa sisi tunai = 0. Dipakai
+ *  kembalian/barrier/kelas — jangan hitung ulang di tempat lain. */
+function tunaiDiterapkan(): number {
+  if (!adaSisiTunai()) return 0;
+  if (!splitAktif) return totalBayar();
+  return Math.max(0, totalBayar() - porsiNonTunaiSplit());
+}
+
+/** Metode yang nominalnya diisi kolom "Nominal split" (`#bayar-split-label`)
+ *  — SELALU sisi NON-TUNAI (tunai diisi lewat `#pos-cash`; sisi tunai =
+ *  sisa). Tanpa split = metode utama. */
+const sisiInputSplit = (): PayMethod => (splitMethod === 'tunai' ? payMethod : splitMethod ?? payMethod);
+
+/** Metode kedua default saat split dinyalakan / metode utama tertabrak:
+ *  metode pertama di PAY_METHODS yang bukan metode utama. */
+const metodeKeduaDefault = (): PayMethod =>
+  (PAY_METHODS.find((m) => m.key !== payMethod)?.key ?? 'qris') as PayMethod;
+
+/** Reset state split — payment-scoped seperti `cashIn`: dipanggil
+ *  `bukaBayar()`, Bersihkan (F5), muat hold, dan sesudah nota sukses. */
+function resetSplit(): void {
+  splitAktif = false;
+  splitMethod = null;
+  splitNominal = 0;
+  splitTouched = false;
+}
+
+/** Baris `payments` untuk POST /api/sales (split 1.6.5) — uang DISERAHKAN
+ *  per metode (tunai = uang fisik diterima; server yang mengurangi kembalian:
+ *  cash_in = Σ, change = Σ − total). [] = bukan split / semua nol = payload
+ *  lama (tanpa `payments`). Tunai selalu baris PERTAMA supaya urutan
+ *  `sale_payments`/`pay_methods` seragam di Riwayat. */
+function bayarSplitPayload(): { method: PayMethod; amount: number }[] {
+  if (!splitAktif || !splitMethod) return [];
+  const nonTunai = porsiNonTunaiSplit();
+  const rows: { method: PayMethod; amount: number }[] = [];
+  if (payMethod === 'tunai' || splitMethod === 'tunai') {
+    const metodeNonTunai = payMethod === 'tunai' ? splitMethod : payMethod;
+    rows.push({ method: 'tunai', amount: cashIn }, { method: metodeNonTunai, amount: nonTunai });
+  } else {
+    rows.push(
+      { method: payMethod, amount: Math.max(0, totalBayar() - nonTunai) },
+      { method: splitMethod, amount: nonTunai },
+    );
+  }
+  return rows.filter((r) => r.amount > 0);
+}
+
+/** Catatan komposisi split (`#bayar-split-note`): dua sisi + petunjuk uang
+ *  diterima. '' saat split mati. */
+function teksSplitNote(): string {
+  if (!splitAktif || !splitMethod) return '';
+  if (payMethod === 'tunai' || splitMethod === 'tunai') {
+    const m = payMethod === 'tunai' ? splitMethod : payMethod;
+    return `Komposisi: Tunai ${rp(tunaiDiterapkan())} + ${labelMetode(m)} ${rp(porsiNonTunaiSplit())}. Isi uang diterima untuk porsi tunai ${rp(tunaiDiterapkan())} — boleh lebih, kembalian dihitung otomatis.`;
+  }
+  return `Komposisi: ${labelMetode(payMethod)} ${rp(Math.max(0, totalBayar() - porsiNonTunaiSplit()))} + ${labelMetode(splitMethod)} ${rp(porsiNonTunaiSplit())} — tanpa uang tunai.`;
+}
+
+/** Chip metode KEDUA di panel split — PAY_METHODS selain metode utama (satu
+ *  metode tidak bisa jadi dua peran). Dipakai render awal `formBayarHtml()`,
+ *  refresh `paintFormBayar()`, DAN lapisan mobile (`pmBayarHtml` lewat ctx):
+ *  `kelas` = tombol chip milik lapisannya (`pos-pay-pick` desktop /
+ *  `pm-paypick` mobile — daftar toggle aktif PERSIS pola `[data-pay]`).
+ *  Setelah metode utama ditukar, daftarnya ikut berganti — jangan duplikat
+ *  markupnya di tempat lain. */
+function splitChipsHtml(kelas: string): string {
+  return PAY_METHODS.filter((m) => m.key !== payMethod)
+    .map((m) => {
+      const aktif = splitAktif && splitMethod === m.key;
+      return `<button type="button" data-split="${m.key}" class="${kelas}${aktif ? ' !bg-primary !text-white !border-primary' : ''}">${icon(m.icon)}<span>${m.label}</span><span class="cek${aktif ? '' : ' hidden'}">${icon('check')}</span></button>`;
+    })
+    .join('');
+}
+
 /** Kembalian modal = uang diterima − total tagihan (0 bila uang belum diisi). */
 
 /** Bolehkah tombol Bayar / Bayar pas aktif: keranjang terisi (produk/manual
@@ -670,7 +780,7 @@ const bisaBayar = () => keranjangTerisi();
  *  saat dirawat. */
 function kelasKembalian(): string {
   if (!(cashIn > 0)) return 'text-gray-900 dark:text-white';
-  return cashIn < totalBayar()
+  return cashIn < tunaiDiterapkan()
     ? 'text-red-600 dark:text-red-400'
     : 'text-emerald-600 dark:text-emerald-400';
 }
@@ -697,15 +807,53 @@ const formatRibu = (n: number): string => {
  *  angka — ambil digitnya saja, abaikan pemisah/sampah ketik. */
 const parseRibu = (v: string): number => Number((v.match(/\d+/g) ?? []).join('')) || 0;
 
+/** Format ribuan LIVE saat mengetik + kembalikan caret ke digit yang sama
+ *  (titik sisipan menggeser posisi — tanpa ini caret loncat ke ujung tiap
+ *  ketik di tengah angka). Mengembalikan nilai numeriknya (`|| 0` = guard
+ *  NaN). Dipakai dua kolom: `#pos-cash` dan `#bayar-split-nominal` (1.6.5). */
+function formatInputRibu(inp: HTMLInputElement): number {
+  const digitSebelum = (inp.value.slice(0, inp.selectionStart ?? inp.value.length).match(/\d/g) ?? []).length;
+  const nilai = parseRibu(inp.value);
+  const tampil = formatRibu(nilai);
+  if (inp.value !== tampil) {
+    inp.value = tampil;
+    let hitung = 0;
+    let pos = tampil.length;
+    for (let i = 0; i < tampil.length; i++) {
+      if (/\d/.test(tampil[i])) hitung++;
+      if (hitung >= digitSebelum) { pos = i + 1; break; }
+    }
+    inp.setSelectionRange(pos, pos);
+  }
+  return nilai;
+}
+
 /** Teks konteks KEMBALIAN (P2): angka "Rp0" saat uang masih kurang
  *  menyesatkan — kasir mengira tidak ada kembalian. Dua frasa sesuai
  *  permintaan pemilik; saat uang lebih, angka KEMBALIAN saja sudah menjelaskan,
  *  jadi teks kosong. SATU sumber untuk render awal & update live (paintCart). */
 function teksKembalian(): string {
-  if (!(cashIn > 0) || !keranjangTerisi()) return '';
-  if (cashIn < totalBayar()) return `Kurang ${rp(totalBayar() - cashIn)}`;
-  if (cashIn === totalBayar()) return 'Uang pas. Tidak ada kembalian.';
+  if (!keranjangTerisi()) return '';
+  // Split dengan sisi tunai: porsi tunai sudah PASTI (tagihan − nominal
+  // non-tunai) — "Kurang" tampil sejak kolom uang masih kosong supaya kasir
+  // tahu targetnya. Plain tunai tetap senyap saat kolom kosong (pola lama).
+  if (!(cashIn > 0) && !(splitAktif && tunaiDiterapkan() > 0)) return '';
+  const harus = tunaiDiterapkan();
+  if (cashIn < harus) return `Kurang ${rp(harus - cashIn)}`;
+  if (cashIn === harus) return 'Uang pas. Tidak ada kembalian.';
   return '';
+}
+
+/** Kelas warna teks konteks kembalian (`#pos-change-ctx`): MERAH saat teks
+ *  berbunyi "Kurang …" — termasuk split bersisi tunai yang menampilkan target
+ *  sejak kolom uang masih kosong (teksKembalian()); hijau saat "Uang pas…".
+ *  Dulu syarat merahnya `cashIn > 0` sehingga "Kurang Rp…" di split (kolom
+ *  kosong) tampil HIJAU — menyesatkan. SATU sumber untuk render awal
+ *  formBayarHtml() & update live paintCart() (pola kelasPosChange()). */
+function kelasCtxKembalian(): string {
+  return teksKembalian().startsWith('Kurang ')
+    ? 'text-red-600 dark:text-red-400'
+    : 'text-emerald-600 dark:text-emerald-400';
 }
 
 /** Jumlah baris (harga x qty) sebelum diskon. Server menyimpan angka kotor ini
@@ -1701,7 +1849,11 @@ function cekHutangDiperbolehkan(): string {
  *  Payment Checkout", 2026-10-10) — diganti paintFormBayar() tiap ganti
  *  metode (tanpa render ulang). */
 const INFO_BAYAR: Record<PayMethod, string> = {
-  tunai: 'Pilih metode Tunai, kemudian masukkan nominal pembayaran sesuai dengan jumlah yang dibayarkan.',
+  // Revisi 2026-10-19: teks tunai dipendekkan agar kotak info SATU baris
+  // (dua baris = 52px; pemilik: "atur layout barunya agar tidak perlu scroll
+  // pada layar kecil"). Panduan "boleh lebih, kembalian otomatis" sudah ada
+  // di baris hint bawah ledger kembalian.
+  tunai: 'Masukkan nominal uang yang diterima dari pelanggan.',
   qris: 'Pelanggan cukup scan QRIS sebesar total tagihan — tanpa uang diterima.',
   transfer: 'Catat transfer sebesar total tagihan — tanpa uang diterima.',
 };
@@ -1710,7 +1862,10 @@ function formBayarHtml(): string {
   // totalBayar()). Blok Pelanggan dan petunjuk HUTANG selalu tampil —
   // mode lain sudah dihapus, jadi tidak ada cabang lagi.
   const tot = totalBayar();
-  const tunai = payMethod === 'tunai';
+  // Sisi tunai bisa datang dari metode utama ATAU metode kedua split (1.6.5)
+  // — blok uang diterima + ledger ikut sisi itu (adaTunai/tunaiDiterapkan).
+  const adaTunai = adaSisiTunai();
+  const diterapkan = tunaiDiterapkan();
   const sel = document.querySelector<HTMLSelectElement>('#pos-customer');
   const namaCust = sel?.selectedOptions[0]?.text.trim() || 'Pelanggan Umum';
   return `
@@ -1720,11 +1875,19 @@ function formBayarHtml(): string {
          memakai data-x yang di-bind modal.ts ke SELURUH overlay) + 2 kolom
          kartu (metode+info+catatan ↔ total+uang+pill+kembalian) + strip
          trust; tombol aksi tetap footer bawaan modal.ts (#pos-pay +
-         Batal). Hook WAJIB hidup: #bayar-total, #bayar-cust, [data-pay] ×3
+         Batal). Revisi 2026-10-19 (permintaan pemilik "bayar split jadi
+         memakan tempat … lebarkan saja modalnya … tidak perlu scroll"):
+         lebar modal = max-w-5xl (option wider), panel split 2 kolom, judul+
+         subjudul sebaris (.pos-bayar-headline), counter catatan pindah
+         ke baris label — lihat pos.css §7.
+         Hook WAJIB hidup: #bayar-total, #bayar-cust, [data-pay] ×3
          (+ .cek + 3 kelas aktif = paintFormBayar), #bayar-info, #bayar-note
          + #bayar-note-count, #bayar-total-2, #pos-cash, #bayar-clear,
          [data-cash] ×4 (pills), #bayar-tunai-ledger, #pos-change,
-         #pos-change-ctx, #bayar-tunai/#bayar-non-tunai (toggle hidden). -->
+         #pos-change-ctx, #bayar-tunai/#bayar-non-tunai (toggle hidden),
+         #bayar-split-toggle, #bayar-split-panel, [data-split] ×2,
+         #bayar-split-label, #bayar-split-nominal, #bayar-split-note
+         (split 1.6.5 — toggle/panel/chip di paintFormBayar). -->
     <div class="pos-bayar pos-scope">
       <div class="pos-bayar-band">
         <span class="pos-bayar-band-ikon">${icon('wallet')}</span>
@@ -1740,8 +1903,24 @@ function formBayarHtml(): string {
       </div>
       <div class="pos-bayar-grid2">
         <div class="pos-bayar-kartu">
-          <div class="pos-bayar-judul">Metode Pembayaran</div>
-          <p class="pos-bayar-sub2">Pilih metode pembayaran yang Anda inginkan</p>
+          <div class="pos-bayar-headline">
+            <div class="pos-bayar-judul">Metode Pembayaran</div>
+            <!-- SPLIT PEMBAYARAN (1.6.5, "PR bisa 2 mode dalam 1 transaksi"
+                 ala KulaPOS): dua metode dalam satu nota. Sisi tunai = SISA
+                 tagihan (uang diterima #pos-cash dihitung dari porsi itu),
+                 kolom "Nominal" = porsi sisi NON-TUNAI (sisiInputSplit()).
+                 Tombol mati saat keranjang berisi baris topup/tarik —
+                 alokasi uang hybrid punya aturan sendiri (ditolak barrier
+                 pay() juga). Revisi pemilik 2026-10-19 ("bayar split jadi
+                 memakan tempat … atur layout barunya agar tidak perlu
+                 scroll"): pil toggle naik ke baris judul (menghapus satu
+                 baris penuh) + panel dua kolom (versi menumpuk 5 baris =
+                 214px). -->
+            <button type="button" id="bayar-split-toggle" class="pos-bayar-splittgl${splitAktif ? ' is-aktif' : ''}" aria-pressed="${splitAktif ? 'true' : 'false'}"${cartTopup.length ? ' disabled' : ''}>
+              ${icon('sync')}<span>Bayar 2 metode (split)</span><span class="cek${splitAktif ? '' : ' hidden'}">${icon('check')}</span>
+            </button>
+          </div>
+          ${cartTopup.length ? '<p class="pos-bayar-sub2 pos-bayar-splitoff">Split tidak tersedia saat keranjang berisi topup/tarik.</p>' : ''}
           <!-- 3 opsi sebaris ala mockup; aktif = BIRU SOLID + badge cek
                (daftar toggle SAMA PERSIS dengan paintFormBayar(): 3 kelas
                + .cek). -->
@@ -1751,13 +1930,23 @@ function formBayarHtml(): string {
               return `<button type="button" data-pay="${m.key}" class="pos-pay-pick${aktif ? ' !bg-primary !text-white !border-primary' : ''}">${icon(m.icon)}<span>${m.label}</span><span class="cek${aktif ? '' : ' hidden'}">${icon('check')}</span></button>`;
             }).join('')}
           </div>
+          <div id="bayar-split-panel" class="pos-bayar-splitpanel"${splitAktif ? '' : ' hidden'}>
+            <div class="pos-bayar-splitcol">
+              <div class="pos-bayar-judulrow">${icon('sync')}<span>Metode Kedua</span></div>
+              <div class="pos-bayar-splitgrid" id="bayar-split-chips">${splitChipsHtml('pos-pay-pick')}</div>
+            </div>
+            <div class="pos-bayar-splitcol">
+              <label class="pos-bayar-judulrow" for="bayar-split-nominal">${icon('pencil')}<span id="bayar-split-label">Nominal ${labelMetode(sisiInputSplit())}</span></label>
+              <input id="bayar-split-nominal" class="input !text-right !text-2xl !py-2.5 font-bold tabular-nums" type="text" inputmode="numeric" autocomplete="off" value="${formatRibu(splitNominal)}" />
+            </div>
+            <p id="bayar-split-note" class="pos-bayar-hint pos-bayar-splitnote">${esc(teksSplitNote())}</p>
+          </div>
           <div class="pos-bayar-info">${icon('info')}<span id="bayar-info">${INFO_BAYAR[payMethod]}</span></div>
-          <label class="pos-bayar-judulrow" for="bayar-note">${icon('pencil')}<span>Catatan Transaksi <span class="pos-bayar-ops">(Opsional)</span></span></label>
-          <textarea id="bayar-note" class="input pos-bayar-note" rows="3" maxlength="200" placeholder="Contoh: titip ke ojek, ambil nanti">${esc(catatanBayar)}</textarea>
-          <div class="pos-bayar-count"><span id="bayar-note-count">${catatanBayar.length}</span>/200</div>
+          <label class="pos-bayar-judulrow" for="bayar-note">${icon('pencil')}<span>Catatan Transaksi <span class="pos-bayar-ops">(Opsional)</span></span><span class="pos-bayar-count-inline"><span id="bayar-note-count">${catatanBayar.length}</span>/200</span></label>
+          <textarea id="bayar-note" class="input pos-bayar-note" rows="2" maxlength="200" placeholder="Contoh: titip ke ojek, ambil nanti">${esc(catatanBayar)}</textarea>
         </div>
         <div class="pos-bayar-kanan">
-          <div class="pos-bayar-kartu" id="bayar-tunai"${tunai ? '' : ' hidden'}>
+          <div class="pos-bayar-kartu" id="bayar-tunai"${adaTunai ? '' : ' hidden'}>
             <div class="pos-bayar-judulrow">${icon('wallet')}<span>Uang Diterima</span></div>
             <!-- type=text (spinner native menumpuk ×) + format ribuan live
                  (formatRibu/parseRibu + caret restore di bindFormBayar). -->
@@ -1766,19 +1955,21 @@ function formBayarHtml(): string {
               <input id="pos-cash" class="input !pr-[76px] pl-12 !text-right !text-2xl !py-2.5 font-bold tabular-nums" type="text" inputmode="numeric" autocomplete="off" value="${formatRibu(cashIn)}" />
               <button type="button" id="bayar-clear" aria-label="Kosongkan uang diterima" class="absolute right-2 top-1/2 flex size-14 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-700 [&>svg]:size-7">${icon('close')}</button>
             </div>
-            <div class="pos-bayar-judulrow">${icon('zap')}<span>Nominal Cepat</span></div>
-            <p class="pos-bayar-sub2">Pilih nominal yang sering digunakan</p>
+            <div class="pos-bayar-headline">
+              <div class="pos-bayar-judulrow">${icon('zap')}<span>Nominal Cepat</span></div>
+              <p class="pos-bayar-sub2">Pilih nominal yang sering digunakan</p>
+            </div>
             <div class="pos-bayar-pills">
               ${QUICK_CASH.map((c) => `<button type="button" data-cash="${c}" class="pos-bayar-pill${cashIn > 0 && cashIn === c ? ' !border-primary !text-primary' : ''}">${rp(c)}</button>`).join('')}
             </div>
             <!-- Ledger TANPA duplikat (Total hanya hero+kartu kanan, Kurang
                  hanya ctx). BG hidup: merah saat kurang, hijau saat ada
                  kembalian — toggle di paintCart() + render awal di sini. -->
-            <div id="bayar-tunai-ledger" class="pos-bayar-change${tunai && cashIn > 0 && cashIn < tot ? ' bg-red-50 dark:bg-red-500/10' : tunai && cashIn > tot ? ' bg-green-50 dark:bg-green-500/10' : ''}"${tunai ? '' : ' hidden'}>
+            <div id="bayar-tunai-ledger" class="pos-bayar-change${adaTunai && cashIn > 0 && cashIn < diterapkan ? ' bg-red-50 dark:bg-red-500/10' : adaTunai && cashIn > diterapkan ? ' bg-green-50 dark:bg-green-500/10' : ''}"${adaTunai ? '' : ' hidden'}>
               <div class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kembalian</div>
               <div id="pos-change" class="${kelasPosChange()}">${rp(change())}</div>
               <p id="pos-change-ctx" class="text-sm font-medium ${teksKembalian() ? '' : 'hidden'} ${
-                cashIn > 0 && cashIn < tot ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+                kelasCtxKembalian()
               }">${teksKembalian()}</p>
             </div>
             <!-- Uang kurang / uang 0 = HUTANG OTOMATIS (putaran 12,
@@ -1786,7 +1977,7 @@ function formBayarHtml(): string {
                  cekHutangDiperbolehkan(). -->
             <p class="pos-bayar-hint">Uang kurang otomatis jadi <b>hutang</b> — asal pelanggan bukan "Pelanggan Umum".</p>
           </div>
-          <p id="bayar-non-tunai" class="pos-bayar-hint"${tunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
+          <p id="bayar-non-tunai" class="pos-bayar-hint"${adaTunai ? ' hidden' : ''}>Tanpa uang diterima — transaksi ini tidak ada kembalian.</p>
         </div>
       </div>
     </div>`;
@@ -1816,6 +2007,7 @@ function bukaBayar(): void {
   cashIn = 0;
   cashTouched = false;
   catatanBayar = '';
+  resetSplit(); // split juga payment-scoped (1.6.5) — kolom selalu buka polos
   // Tampilan MOBILE (2026-10-17): bukan modal — LAPISAN FULLSCREEN milik
   // pos-mobile.ts (`#pm-bayar`, fixed inset-0, "seperti bukan modal") dengan
   // hook id yang PERSIS modal desktop. Elemennya persisten di shell (tidak
@@ -1849,7 +2041,12 @@ function bukaBayar(): void {
   bayarApi = openModal({
     title: `Bayar — ${rp(totalBayar())}`,
     body: formBayarHtml(),
-    wide: true, // revisi: modal 768px proporsional untuk screen 1366x720
+    // Revisi 2026-10-19 (pemilik: "lebarkan saja modalnya"): 768px
+    // (`wide`/max-w-3xl) → 1024px (`wider`/max-w-5xl) — panel split dua
+    // kolom butuh ruang; tinggi modal juga dinaikkan lewat aturan `:has`
+    // di pos.css (calc(100vh − 1.5rem), overlay p-3) supaya layar kecil
+    // (1366x720) tidak perlu gulir.
+    wider: true,
     // Label OK = HTML (modal.ts tidak meng-escape okLabel): ikon wallet +
     // panah ala mockup. Test memencet via id #pos-pay — teks tak diassert.
     okLabel: `${icon('wallet')}<span>Bayar</span><span aria-hidden="true">→</span>`,
@@ -1908,15 +2105,17 @@ function paintFormBayar(): void {
   // lihat bayarEl().
   const el = bayarEl();
   if (!el) return;
-  const tunai = payMethod === 'tunai';
+  // Sisi TUNAI (metode utama ATAU metode kedua split, 1.6.5) yang menentukan
+  // blok uang diterima + ledger — jangan baca payMethod mentah di sini.
+  const adaTunai = adaSisiTunai();
   // Blok tunai + ledger kembalian di-toggle BERSAMA (hint hutang kini DI
   // DALAM #bayar-tunai, ikut hidden otomatis).
   for (const id of ['#bayar-tunai', '#bayar-tunai-ledger']) {
     const b = el.querySelector<HTMLElement>(id);
-    if (b) b.hidden = !tunai;
+    if (b) b.hidden = !adaTunai;
   }
   const bNon = el.querySelector<HTMLElement>('#bayar-non-tunai');
-  if (bNon) bNon.hidden = tunai;
+  if (bNon) bNon.hidden = adaTunai;
   // Teks panduan ikut metode (mockup "Modern Blue", 2026-10-10).
   const info = el.querySelector('#bayar-info');
   if (info) info.textContent = INFO_BAYAR[payMethod];
@@ -1929,6 +2128,32 @@ function paintFormBayar(): void {
     b.classList.toggle('!border-primary', aktif);
     b.querySelector('.cek')?.classList.toggle('hidden', !aktif);
   });
+  // --- SPLIT PEMBAYARAN (1.6.5): toggle + panel + chip metode kedua +
+  // label kolom Nominal. Chip `data-split` = PAY_METHODS selain metode
+  // utama (render formBayarHtml), sorotan persis pola `data-pay`.
+  const tgl = el.querySelector<HTMLButtonElement>('#bayar-split-toggle');
+  if (tgl) {
+    // Keranjang berisi layanan (topup/tarik) = alokasi uang hybrid punya
+    // aturan sendiri — split tak tersedia (barrier pay() juga menjaga).
+    tgl.disabled = cartTopup.length > 0;
+    tgl.classList.toggle('is-aktif', splitAktif);
+    tgl.setAttribute('aria-pressed', splitAktif ? 'true' : 'false');
+    tgl.querySelector('.cek')?.classList.toggle('hidden', !splitAktif);
+  }
+  const panel = el.querySelector<HTMLElement>('#bayar-split-panel');
+  if (panel) panel.hidden = !splitAktif;
+  // Chip metode kedua dirender ULANG (daftarnya bergantung metode utama;
+  // ganti metode utama = chip bergeser). Kelas tombol mengikuti lapisan yang
+  // aktif (#pm-bayar = mobile, sisanya modal desktop). Listener delegated di
+  // panel — lihat bindFormBayar, bukan per-chip.
+  const chips = el.querySelector<HTMLElement>('#bayar-split-chips');
+  if (chips) chips.innerHTML = splitChipsHtml(el.id === 'pm-bayar' ? 'pm-paypick' : 'pos-pay-pick');
+  const lbl = el.querySelector('#bayar-split-label');
+  if (lbl) lbl.textContent = `Nominal ${labelMetode(sisiInputSplit())}`;
+  const sInp = el.querySelector<HTMLInputElement>('#bayar-split-nominal');
+  if (sInp) sInp.value = formatRibu(splitNominal);
+  const sNote = el.querySelector('#bayar-split-note');
+  if (sNote) sNote.textContent = teksSplitNote();
 }
 
 /** Pasang listener isi form bayar. Dipanggil SATU KALI tiap modal dibuka
@@ -1936,7 +2161,12 @@ function paintFormBayar(): void {
 function bindFormBayar(overlay: HTMLElement): void {
   overlay.querySelectorAll<HTMLElement>('[data-pay]').forEach((b) =>
     b.addEventListener('click', () => {
+      const lama = payMethod;
       payMethod = (b.dataset.pay as PayMethod) || 'tunai';
+      // Metode utama baru = metode kedua split saat ini → TUKAR posisi
+      // (nota tetap dua metode; nominal split tak hilang). Split nonaktif
+      // tidak terpengaruh.
+      if (splitAktif && splitMethod === payMethod) splitMethod = lama;
       // Ganti metode = mulai lagi dari awal: kolom uang kosong (cashIn=0,
       // cashTouched=false) — paintCart menulis ulang isian lewat guard
       // `!cashTouched`. Sama persis dengan aturan lama di sidebar.
@@ -1944,30 +2174,18 @@ function bindFormBayar(overlay: HTMLElement): void {
       cashTouched = false;
       paintCart();
       paintFormBayar();
-      if (payMethod === 'tunai') overlay.querySelector<HTMLInputElement>('#pos-cash')?.focus();
+      if (adaSisiTunai()) overlay.querySelector<HTMLInputElement>('#pos-cash')?.focus();
     }),
   );
 
   overlay.querySelector('#pos-cash')?.addEventListener('input', (e) => {
     // Format ribuan LIVE (2026-10-10, permintaan pemilik: titik pemisah
     // ribuan): ketik "50000" -> tampil "50.000". Caret dikembalikan ke
-    // digit yang sama (titik sisipan menggeser posisi — tanpa ini caret
-    // loncat ke ujung tiap ketik di tengah angka). `|| 0` = guard NaN.
+    // digit yang sama oleh formatInputRibu (1.6.5 — diekstrak agar kolom
+    // Nominal split memakai aturan yang sama persis).
     const inp = e.target as HTMLInputElement;
     cashTouched = true;
-    const digitSebelum = (inp.value.slice(0, inp.selectionStart ?? inp.value.length).match(/\d/g) ?? []).length;
-    cashIn = parseRibu(inp.value);
-    const tampil = formatRibu(cashIn);
-    if (inp.value !== tampil) {
-      inp.value = tampil;
-      let hitung = 0;
-      let pos = tampil.length;
-      for (let i = 0; i < tampil.length; i++) {
-        if (/\d/.test(tampil[i])) hitung++;
-        if (hitung >= digitSebelum) { pos = i + 1; break; }
-      }
-      inp.setSelectionRange(pos, pos);
-    }
+    cashIn = formatInputRibu(inp);
     paintCart();
   });
 
@@ -2012,6 +2230,38 @@ function bindFormBayar(overlay: HTMLElement): void {
     catatanBayar = (e.target as HTMLTextAreaElement).value.slice(0, 200);
     const hit = overlay.querySelector('#bayar-note-count');
     if (hit) hit.textContent = String(catatanBayar.length);
+  });
+
+  // --- SPLIT PEMBAYARAN (1.6.5): toggle + chip metode kedua (delegated —
+  // chip dirender ulang paintFormBayar, listener per-chip akan hilang) +
+  // kolom Nominal sisi non-tunai. Split hanya untuk keranjang produk murni:
+  // keranjang berisi topup/tarik punya alokasi uang hybrid sendiri.
+  overlay.querySelector('#bayar-split-toggle')?.addEventListener('click', () => {
+    if (cartTopup.length) return; // paranoia — tombolnya juga disabled
+    if (splitAktif) {
+      resetSplit(); // matikan: kolom nominal & catatan komposisi ikut bersih
+    } else {
+      splitAktif = true;
+      splitMethod = metodeKeduaDefault(); // selalu ≠ payMethod
+    }
+    paintCart();
+    paintFormBayar();
+    if (splitAktif) overlay.querySelector<HTMLInputElement>('#bayar-split-nominal')?.focus();
+  });
+  overlay.querySelector('#bayar-split-panel')?.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-split]');
+    if (!b) return;
+    const m = b.dataset.split as PayMethod;
+    if (!m || m === payMethod) return; // chip metode utama = tak bermakna
+    splitMethod = m;
+    paintCart();
+    paintFormBayar();
+    overlay.querySelector<HTMLInputElement>('#bayar-split-nominal')?.focus();
+  });
+  overlay.querySelector('#bayar-split-nominal')?.addEventListener('input', (e) => {
+    splitTouched = true;
+    splitNominal = formatInputRibu(e.target as HTMLInputElement);
+    paintCart();
   });
 }
 
@@ -2298,6 +2548,17 @@ function pmCtx(): PosMobileCtx {
     change,
     teksKembalian,
     kelasChange: kelasPosChange(),
+    // Split pembayaran (1.6.5) — lapisan mobile memakai hook id PERSIS modal
+    // desktop, jadi bindFormBayar/paintFormBayar menanganinya tanpa cabang.
+    splitAktif,
+    splitMethod,
+    splitNominal,
+    splitTersedia: cartTopup.length === 0,
+    splitLabel: `Nominal ${labelMetode(sisiInputSplit())}`,
+    splitNote: teksSplitNote(),
+    adaTunai: adaSisiTunai(),
+    tunaiTarget: tunaiDiterapkan(),
+    splitChips: (kelas) => splitChipsHtml(kelas),
     jumlahBaris,
     diskonBaris,
     daftarSatuan,
@@ -2415,16 +2676,25 @@ function paintCart(): void {
     // tidak ikut berubah. Tulis SELALU terformat ribuan (formatRibu).
     if (!cashTouched) cashEl.value = formatRibu(cashIn);
   }
+  // Kolom Nominal split (1.6.5) — pola sama `#pos-cash` (guard splitTouched).
+  // Catatan komposisi ikut angka terkini (label non-tunai & sisa tunai).
+  const spEl = document.querySelector<HTMLInputElement>('#bayar-split-nominal');
+  if (spEl && !splitTouched) spEl.value = formatRibu(splitNominal);
+  const spNote = document.querySelector('#bayar-split-note');
+  if (spNote) spNote.textContent = teksSplitNote();
   // Angka "Total tagihan" di band ikut total terkini.
   set('#bayar-total', rp(totalBayar()));
   segarJudulBayar();
   set('#pos-change', rp(change()));
   // BG hidup ledger (2026-10-10): merah saat uang kurang, hijau saat ada
   // kembalian — toggle 4 kelas yang SAMA dengan render awal formBayarHtml().
+  // Pembanding = porsi TUNAI (`tunaiDiterapkan()`): split dengan sisi tunai
+  // memasang target lebih kecil dari total (nominal non-tunai sudah dibayar
+  // metode kedua) — total mentah akan selalu "Kurang" palsu.
   const led = document.querySelector('#bayar-tunai-ledger');
   if (led) {
-    const kurang = cashIn > 0 && cashIn < totalBayar();
-    const lebih = cashIn > totalBayar();
+    const kurang = cashIn > 0 && cashIn < tunaiDiterapkan();
+    const lebih = cashIn > tunaiDiterapkan();
     led.classList.toggle('bg-red-50', kurang);
     led.classList.toggle('dark:bg-red-500/10', kurang);
     led.classList.toggle('bg-green-50', lebih);
@@ -2434,11 +2704,9 @@ function paintCart(): void {
   const ctx = document.querySelector('#pos-change-ctx');
   if (ctx) {
     const t = teksKembalian();
-    const pendek = cashIn > 0 && cashIn < totalBayar();
     ctx.textContent = t;
     ctx.className =
-      `text-sm font-medium ${pendek ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}` +
-      (t ? '' : ' hidden');
+      `text-sm font-medium ${kelasCtxKembalian()}` + (t ? '' : ' hidden');
   }
   // Baris "Diskon item" dirender sekali lalu ditampilkan/disembunyikan —
   // paintCart tidak mengganti sidebar, jadi barisnya harus bisa hidup mati
@@ -2517,6 +2785,7 @@ function bersihkanKeranjang(): void {
   discount = 0;
   cashIn = 0;
   cashTouched = false;
+  resetSplit(); // split payment-scoped — nota baru mulai dari satu metode
   simpanKeranjang(); // "Bersihkan" ikut menulis localStorage — reload tidak boleh memulihkan baris yang sudah dibersihkan
   paintAktif();
   const disc = host?.querySelector<HTMLInputElement>('#pos-discount');
@@ -2818,6 +3087,7 @@ async function muatHold(h: Hold): Promise<void> {
   await simpanTertahan();
   cashIn = 0;
   cashTouched = false;
+  resetSplit(); // hold lama tanpa state split — form selalu buka polos
   const disc = host?.querySelector<HTMLInputElement>('#pos-discount');
   if (disc) disc.value = discount ? String(discount) : '';
   const cash = document.querySelector<HTMLInputElement>('#pos-cash');
@@ -3764,10 +4034,12 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
 function bayarPas(): void {
   if (busy) return;
   if (!keranjangTerisi()) return;
-  if (payMethod === 'tunai') {
-    // Uang pas = persis TOTAL GABUNGAN (keranjang + baris layanan, Opsi B) —
-    // satu-satunya jalur "tanpa kembalian" yang sah juga saat ada layanan.
-    cashIn = totalBayar();
+  if (adaSisiTunai()) {
+    // Uang pas = persis porsi TUNAI yang menempel tagihan: satu metode tunai
+    // = TOTAL GABUNGAN (keranjang + baris layanan, Opsi B) — jalur "tanpa
+    // kembalian" yang sah; split = sisa setelah nominal non-tunai
+    // (`tunaiDiterapkan()`) — Σ pembayaran = total, kembalian 0.
+    cashIn = tunaiDiterapkan();
     cashTouched = true;
     paintCart();
   }
@@ -3904,7 +4176,26 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
   // sudah dibayar ke penyedia (pulsa/listrik), nominal tarik sudah diserahkan
   // tunai — bukan barang yang bisa ditalangi.
   const totBayar = totalBayar();
-  if (payMethod === 'tunai' && !opts?.hutang && cashIn < totBayar) {
+  // SPLIT PEMBAYARAN (1.6.5): dua metode WAJIB menutup total — tidak ada
+  // jalur hutang (sisa_hutang server dihitung dari cash_in satu metode).
+  // Sisi tunai (bila ada) tetap butuh uang fisik >= porsinya
+  // (`tunaiDiterapkan()`; boleh lebih = kembalian). Baris topup/tarik tidak
+  // bisa displit (alokasi uang hybrid punya aturan sendiri).
+  if (splitAktif && !opts?.hutang) {
+    if (cartTopup.length) {
+      toast('Split tidak tersedia saat keranjang berisi topup/tarik', 'error');
+      bukaBayar();
+      return;
+    }
+    const perlu = tunaiDiterapkan();
+    if (adaSisiTunai() && cashIn < perlu) {
+      if (!(cashIn > 0)) toast(`Uang diterima belum diisi — porsi tunai ${rp(perlu)}`, 'error');
+      else toast(`Uang diterima kurang dari porsi tunai ${rp(perlu)} — lengkapi dulu`, 'error');
+      bukaBayar();
+      document.querySelector<HTMLInputElement>('#pos-cash')?.focus();
+      return;
+    }
+  } else if (payMethod === 'tunai' && !opts?.hutang && cashIn < totBayar) {
     if (cartTopup.length) {
       toast(`Uang diterima kurang dari total ${rp(totBayar)} — baris topup/tarik tidak bisa jadi hutang`, 'error');
       bukaBayar();
@@ -3976,7 +4267,11 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     const topupTot = tagihTopup + tagihTarik;
     const adaTarik = cartTopup.some(isTarik);
     const adaTopup = cartTopup.some((t) => !isTarik(t));
-    const kembalian = payMethod === 'tunai' ? change() : 0;
+    const kembalian = adaSisiTunai() ? change() : 0;
+    // Snapshot baris split (1.6.5) SEBELUM state direset — dipakai payload
+    // `payments`, baris struk, resume, dan kondisi buka laci. [] = bukan
+    // split (payload legacy TANPA key `payments`).
+    const pecahanBayar: { method: PayMethod; amount: number }[] = splitAktif ? bayarSplitPayload() : [];
     // SISA HUTANG — hanya bisa muncul lewat jalur `opts.hutang`; barrier di
     // atas sudah memvalidasi pelanggan DAN memblokir hutang saat ada baris
     // topup. Dicatat ke ledger /api/customer-debts SETELAH nota tersimpan.
@@ -4050,6 +4345,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       discount = 0;
       cashIn = 0;
       cashTouched = false;
+      resetSplit();
       catatanBayar = ''; // layanan-saja pun payment-scoped
       customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
       const selCustTop = host?.querySelector<HTMLSelectElement>('#pos-customer');
@@ -4070,6 +4366,12 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       id: saleId, // uuid yang sama di-stamp ke sale_id tiap baris topup di atas
       shift_id: shift.id,
       pay_method: payMethod,
+      // Split (1.6.5): baris uang DISERAHKAN per metode. Bila `payments`
+      // ada, server mengabaikan `cash_in` body & menjumlahkan sendiri
+      // (cash_in = Σ, change = Σ − total; `pay_method` diturunkan server:
+      // 'campuran' bila >1 baris — jangan hitung di klien). Absen/[] =
+      // payload perilaku lama PERSIS (regresi suite lama aman).
+      ...(pecahanBayar.length ? { payments: pecahanBayar } : {}),
       discount,
       // Alokasi uang ke nota (Opsi B): kembalian diberikan atas TOTAL
       // GABUNGAN, jadi cash_in nota = total + kembalian — invarian server
@@ -4164,14 +4466,27 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         { kiri: 'TOTAL', kanan: rp(tot + topupTot), tebal: true },
         // Tunai ditampilkan walau uang diterima 0 (transaksi hutang penuh
         // lewat form) — selain itu cabang lama menganggapnya metode biasa.
-        ...(payMethod === 'tunai' && (cashIn > 0 || sisaHutang > 0)
+        // Split (1.6.5): baris PER metode — tunai = uang DISERAHKAN (pola
+        // lama), non-tunai = porsi atribusi; Kembalian hanya bila ada sisi
+        // tunai & memang ada kembalian (pecahanBayar [] = struk lama persis).
+        ...(pecahanBayar.length
           ? [
-              { kiri: 'Tunai', kanan: rp(cashIn) },
-              // Sisa yang jadi hutang ikut tercetak supaya struk ≠ "lunas".
-              ...(sisaHutang > 0 ? [{ kiri: 'Hutang', kanan: rp(sisaHutang) }] : []),
-              { kiri: 'Kembalian', kanan: rp(kembalian) },
+              ...pecahanBayar.map((p) => ({
+                kiri: p.method === 'tunai' ? 'Tunai' : labelMetode(p.method),
+                kanan: rp(p.method === 'tunai' ? cashIn : p.amount),
+              })),
+              ...(pecahanBayar.some((p) => p.method === 'tunai') && kembalian > 0
+                ? [{ kiri: 'Kembalian', kanan: rp(kembalian) }]
+                : []),
             ]
-          : [{ kiri: labelMetode(payMethod), kanan: rp(tot + topupTot) }]),
+          : payMethod === 'tunai' && (cashIn > 0 || sisaHutang > 0)
+            ? [
+                { kiri: 'Tunai', kanan: rp(cashIn) },
+                // Sisa yang jadi hutang ikut tercetak supaya struk ≠ "lunas".
+                ...(sisaHutang > 0 ? [{ kiri: 'Hutang', kanan: rp(sisaHutang) }] : []),
+                { kiri: 'Kembalian', kanan: rp(kembalian) },
+              ]
+            : [{ kiri: labelMetode(payMethod), kanan: rp(tot + topupTot) }]),
       ],
       kaki: adaTarik
         ? ['Terima kasih sudah berbelanja', 'Nominal tarik sudah diserahkan tunai']
@@ -4194,8 +4509,8 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     // F2/Enter/F10/F12 lewat sini): kick ESC/POS SEGERA saat server
     // konfirmasi, tanpa menunggu pilihan cetak modal resume, tanpa syarat
     // saklar autoPrint. QRIS/transfer TIDAK mengirim kick — laci hanya untuk
-    // uang fisik masuk.
-    if (payMethod === 'tunai') void bukaLaciOtomatis();
+    // uang fisik masuk. Split (1.6.5): ikut kick bila ADA sisi tunai.
+    if (adaSisiTunai()) void bukaLaciOtomatis();
     void pilihCetakSelesai(res.data.sale.id, strukJual, tot + topupTot, kembalian, {
       invoiceNo: res.data.sale.invoice_no,
       items: cart.map((l) => ({ qty: l.qty, nama: l.name, net: jumlahBaris(l) - l.discount })),
@@ -4210,6 +4525,9 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
       metode: payMethod,
       uang: cashIn,
       kembalian,
+      // Baris split (1.6.5) — resume menampilkan baris PER metode; [] =
+      // keluaran resume lama persis (uji aman).
+      pecahan: pecahanBayar,
       // Baris HUTANG merah di resume (putaran 12) — sisa sudah tercatat ke
       // ledger beberapa baris di atas; snapshot sebelum cart/cashIn di-reset.
       hutang: sisaHutang,
@@ -4221,6 +4539,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     discount = 0;
     cashIn = 0;
     cashTouched = false; // penjualan baru -> form berikutnya buka kolom kosong (10d)
+    resetSplit(); // split juga per-nota (1.6.5) — form berikutnya buka polos
     catatanBayar = ''; // catatan berlaku PER NOTA (seperti pelanggan & cashIn)
     // Pelanggan kembali ke bawaan (Pelanggan Umum) — pilihan pelanggan berlaku
     // PER NOTA, jangan menempel ke transaksi kasir berikutnya diam-diam.
@@ -4773,6 +5092,7 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   const keranjangAda = cart.length > 0;
   if (!keranjangAda) discount = 0;
   cashIn = 0;
+  resetSplit(); // state split tidak pernah menyeberang mount (payment-scoped)
   busy = false;
   // Jalankan SEMUA fetch independen SEKALIGUS (Promise.all) — critical path
   // jadi maksimum antar-task, bukan JUMLAH seluruh roundtrip. Dulu mount
