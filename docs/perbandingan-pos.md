@@ -325,7 +325,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.8 | **Bundling / paket produk** | **❌ tidak perlu** ("sepertinya tidak butuh") | Kasir Pintar (paket/bahan baku) | — |
 | 4.9 | **Varian produk** | **❌ tidak perlu** | KP, Olsera, Loyverse | Pola SKU terpisah (bungkus/ketengan) dipertahankan |
 | 4.10 | **Analitik lanjutan** (valuasi stok, dead stock) | **✅ dikerjakan** — §1.6.7 | Olsera "Analisa Bisnis", Loyverse add-on | Menu laporan baru + endpoint server |
-| 4.11 | **Logo di struk thermal** | **✅ dikerjakan** — §1.6.4 | KP iOS, Aronium custom receipts | Raster ESC/POS (`GS v 0`) — uji kertas dulu |
+| 4.11 | **Logo di struk thermal** | **✅ selesai 2026-10-19** — §1.6.4 | KP iOS, Aronium custom receipts | Raster ESC/POS (`GS v 0`) — uji kertas oleh pemilik |
 | 4.12 | **Pengingat hutang via WA** | **— belum dibahas** | kebiasaan pasar | Use-case beda dari WA rekap yang dicoret 2026-10-01 |
 | 4.13 | **Akses dari luar LAN** | **❌ tidak perlu** | semua cloud | Opsi Tailscale/tunnel ditolak; tetap self-hosted LAN |
 | 4.14 | **Absensi staf** | **— belum dibahas** | KP StaffPlus, Olsera, Loyverse | Prioritas rendah di skala 1–2 kasir; login + shift sudah ada |

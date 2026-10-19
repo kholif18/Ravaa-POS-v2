@@ -38,7 +38,7 @@ import { diskonBorongan, type TingkatBorongan } from '../borongan';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
 import { getAutoPrint, getPrintPause, setAutoPrint, setStrukLayout } from '../ui/print-pref';
-import { kirimPrint, strukUntuk, bukaLaci, type Struk, type StrukBaris } from '../escpos';
+import { kirimPrint, strukUntukTercetak, bukaLaci, type Struk, type StrukBaris } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
 import { toast } from '../ui/toast';
@@ -530,7 +530,7 @@ async function pilihCetakSelesai(
       toast(mati, 'info');
       return;
     }
-    void cetak(strukUntuk(struk, 'thermal'));
+    void cetak(await strukUntukTercetak(struk, 'thermal'));
   } else if (pilihan === 'a4') {
     setStrukLayout('a4');
     if (saleId === null) {
@@ -542,7 +542,7 @@ async function pilihCetakSelesai(
         toast(mati, 'info');
         return;
       }
-      void cetak(strukUntuk(struk, 'a4'));
+      void cetak(await strukUntukTercetak(struk, 'a4'));
       return;
     }
     // Invoice A4 = window.print() browser/CUPS (`cetakInvoice`), BUKAN

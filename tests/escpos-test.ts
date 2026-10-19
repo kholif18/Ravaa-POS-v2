@@ -8,6 +8,7 @@ import {
   COLS, COLS_A4, ascii, rp, potong, tengah, kanan,
   keBase64, struk, strukA4, strukUntuk, bukaLaci,
 } from '../apps/web/src/escpos.ts';
+import { packBit, perintahRaster } from '../apps/web/src/logo-struk.ts';
 
 let lolos = 0, gagal = 0;
 const ok = (n: string, c: boolean, info: unknown = '') => {
@@ -189,6 +190,39 @@ console.log('=== D. struk A4 (Epson L3110) & pilihan layout ===');
   // 0x1B 0x70 0x00 0x19 0xFA. Dipakai POS untuk penjualan tunai OTOMATIS
   // (tanpa syarat saklar cetak); byte ini wajib dikenali printer thermal.
   eq('bukaLaci = ESC p 00 19 FA (5 byte)', bukaLaci(), [0x1b, 0x70, 0x00, 0x19, 0xfa]);
+}
+
+console.log('=== E. logo struk thermal (raster GS v 0, butir 1.6.4) ===');
+{
+  // packBit: bitmap baris-per-baris -> byte data GS v 0. MSB = piksel paling
+  // kiri, baris dipad sampai kelipatan 8 (byte terakhir baris berisi sisa).
+  eq('packBit: baris 8 penuh hitam = 0xFF', [...packBit([[true, true, true, true, true, true, true, true]])], [0xff]);
+  eq('packBit: piksel ke-0 = bit 7 (MSB kiri)', [...packBit([[true, false, false, false, false, false, false, false]])], [0x80]);
+  eq('packBit: 9 kolom -> 2 byte/baris, piksel ke-8 = 0x80 byte kedua',
+    [...packBit([[true, false, false, false, false, false, false, false, true]])], [0x80, 0x80]);
+  eq('packBit: dua baris ditumpuk berurutan (row-major)',
+    [...packBit([
+      [false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false],
+    ])], [0x01, 0x80]);
+}
+{
+  // perintahRaster: header GS v 0 m=0 + xL xH yL yH + data (little-endian).
+  eq('perintahRaster = 1d 76 30 00 + dims + data',
+    perintahRaster(384, 1, new Uint8Array([0xaa])), [0x1d, 0x76, 0x30, 0x00, 0x80, 0x01, 0x01, 0x00, 0xaa]);
+}
+{
+  // struk() + logo: raster disisipkan SETELAH INIT+ALIGN (byte ke-5), sebelum
+  // judul; struk tanpa logo TIDAK berubah byte-nya (anti-regresi e2e-struk).
+  const raster = perintahRaster(8, 1, new Uint8Array([0xaa]));
+  const b = struk(strukJual, raster);
+  const i = b.findIndex((_, k) => b[k] === 0x1d && b[k + 1] === 0x76 && b[k + 2] === 0x30 && b[k + 3] === 0x00);
+  ok('logo disisipkan di AWAL struk (setelah INIT+ALIGN)', i === 5, i);
+  eq('logo byte persis GS v 0 lalu LF', b.slice(i, i + raster.length + 1), [...raster, 10]);
+  eq('struk tanpa logo = byte lama (null/undefined sama)', struk(strukJual, null), struk(strukJual));
+  eq('logo diabaikan di layout A4', strukUntuk(strukJual, 'a4', raster), strukA4(strukJual));
+  const s2 = teksDari(b.slice(i + raster.length));
+  ok('teks struk tetap utuh setelah raster', s2.includes('TOKO MAJU JAYA') && s2.includes('TOTAL') && s2.includes('Rp15.000'));
 }
 
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);

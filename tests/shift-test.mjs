@@ -91,14 +91,33 @@ try {
   const tglBuka = target.opened_at.slice(0, 10);
   const tglHariIni = new Date().toISOString().slice(0, 10);
   const rentang = [];
-  for (let d = tglBuka; d <= tglHariIni && rentang.length < 14; ) {
+  // Cap 366 hari murni pengaman loop — JANGAN kembali ke 14: shift dev boleh
+  // terbuka berbulan-bulan (shift `kasir` sejak 6 Okt), dan jendela 14-hari
+  // dari TANGGAL BUKA membuat penjualan hari ke-15+ tak pernah ikut dihitung
+  // (suite merah mulai 2026-10-20, terbukti dari arah cap lama).
+  for (let d = tglBuka; d <= tglHariIni && rentang.length < 366; ) {
     rentang.push(d);
     const dd = new Date(`${d}T00:00:00Z`);
     dd.setUTCDate(dd.getUTCDate() + 1);
     d = dd.toISOString().slice(0, 10);
   }
-  const perHari = await Promise.all(rentang.map((d) => get(`/api/sales?date=${d}&limit=200`)));
-  const baris = perHari.flatMap((r) => r.body.data ?? []).filter((sl) => sl.shift_id === target.id);
+  // Satu hari bisa >200 nota (batas `limit` server). NYATA 2026-10-19: 210
+  // nota sehari (akumulasi suite) — satu page memotong nota paling lama
+  // sehingga hitungan test < agregat server (n_sales 284 vs 289) dan suite
+  // merah padahal data benar. Paginasi lewat `total` sampai habis.
+  const perHari = await Promise.all(rentang.map(async (d) => {
+    const out = [];
+    for (let offset = 0, total = Infinity; out.length < total;) {
+      const r = await get(`/api/sales?date=${d}&limit=200&offset=${offset}`);
+      const rows = r.body.data ?? [];
+      total = r.body.total ?? rows.length;
+      if (!rows.length) break;
+      out.push(...rows);
+      offset += rows.length;
+    }
+    return out;
+  }));
+  const baris = perHari.flat().filter((sl) => sl.shift_id === target.id);
   const omzet = baris.reduce((a, sl) => a + sl.total, 0);
   const tunai = baris.filter((sl) => sl.pay_method === 'tunai').reduce((a, sl) => a + sl.total, 0);
   ok(`shift #${target.id}: n_sales & omzet cocok (n=${baris.length}, ${rp(omzet)})`,

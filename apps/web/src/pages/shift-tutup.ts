@@ -44,7 +44,7 @@ import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { choiceDialog } from '../ui/confirm';
 import { getAutoPrint, getPrintPause } from '../ui/print-pref';
-import { kirimPrint, rp, strukUntuk, type Struk } from '../escpos';
+import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { cetakRekapShift } from '../invoice';
 
 /** Baris `GET /api/shifts` (kontrak lengkap dengan agregat subquery —
@@ -163,7 +163,7 @@ async function kirimRekapThermal(s: ShiftRow, fisik: number | null): Promise<voi
     return;
   }
   try {
-    await kirimPrint(strukUntuk(bangunStrukRekap(s, await namaToko(), fisik), 'thermal'));
+    await kirimPrint(await strukUntukTercetak(bangunStrukRekap(s, await namaToko(), fisik), 'thermal'));
   } catch (e) {
     toast(`Rekap tidak tercetak: ${e instanceof Error ? e.message : 'print-agent tidak jalan'}.`, 'warning', 9000);
   }

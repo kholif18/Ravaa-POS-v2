@@ -731,7 +731,9 @@ npm run dev:api
       L3110). Kini khusus struk topup/tarik (penjualan A4 = invoice browser).
       Label harga TIDAK lewat jalur ini sejak 2026-10-17 — cetak lembar A4/Folio
       lewat browser print (lihat butir Label harga di atas).
-  - Struk disusun `struk()`/`strukA4()` di `apps/web/src/escpos.ts` — INIT -> nama toko
+  - Struk disusun `struk()`/`strukA4()` di `apps/web/src/escpos.ts` — INIT ->
+    **logo toko** (raster `GS v 0`, hanya layout thermal, bila diunggah di
+    Sistem — butir 1.6.4, lihat "Pengaturan toko") -> nama toko
     (bold, rata tengah) -> tanggal/no transaksi/kasir/shift -> garis 32 kolom ->
     item (`qty x nama` + line total; baris yang didiskon memunculkan baris
     **Diskon item -Rp…** tepat di bawahnya) -> Subtotal/Diskon (total item +
@@ -1004,6 +1006,10 @@ npm run dev:api
     semua device; tombol **Simpan toko** tanpa konfirmasi swal (non-destruktif
     seperti Backup), nilai tampil kembali persis seperti hasil trim server.
     Bawaan seed = contoh pemilik (RAVAA STUDIO, alamat Ngluyu Nganjuk).
+    Sejak butir 1.6.4 (2026-10-19) kartu ini juga memuat **logo struk
+    thermal** — unggah/ganti/hapus dari sini (file di `img/` server, kunci
+    `store_logo`; `POST /api/settings/logo` khusus owner, `GET
+    /api/settings/logo` publik untuk `<img>` + unduhan klien raster).
   - **Cetak struk** (baru — satu-satunya kartu **per device**): saklar
     **Cetak struk otomatis** + pilihan layout struk (**Thermal 58mm** /
     **Epson L3110 (A4)**, lihat bagan struk di atas). TIDAK lewat API: keduanya

@@ -48,7 +48,7 @@ function cekPathAbsolut() {
 
 const SUITE = [
   ['importcsv-test.ts', 176],
-  ['escpos-test.ts', 46],
+  ['escpos-test.ts', 56],
   ['labelsheet-test.ts', 80],
   ['borongan-test.ts', 31],
   ['sku-urut-test.mjs', 17],
@@ -83,6 +83,7 @@ const SUITE = [
   ['tier-harga-test.mjs', 16],
   ['e2e-borongan.mjs', 52],
   ['recap-test.mjs', 13],
+  ['logo-test.mjs', 21],
   ['laporan-menu-test.mjs', 38],
   ['sidebar-dark-test.mjs', 12],
   ['sidebar-scroll-test.mjs', 5],

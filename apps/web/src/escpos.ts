@@ -19,8 +19,15 @@
 //
 // Setiap baris WAJIB <= kolom layout-nya setelah `ascii()`, karena byte di luar
 // 0x20-0x7E bisa menggeser posisi cetak di firmware printer.
+//
+// Sejak butir ROADMAP 1.6.4 (2026-10-19) struk thermal diawali raster LOGO
+// TOKO (`GS v 0`, 1-bit) bila logo sudah diunggah di halaman Sistem — byte
+// raster dikonversi di klien oleh `logo-struk.ts` dan disisipkan lewat
+// `strukUntukTercetak()` (dipakai SEMUA jalur cetak thermal: POS, cetak ulang
+// Riwayat, rekap shift). Layout `a4` sengaja tanpa raster.
 
 import { getPrintPause, getStrukLayout, type LayoutStruk } from './ui/print-pref';
+import { logoStrukBytes } from './logo-struk';
 
 export const COLS = 32;
 /** Lebar struk layout A4 (Epson L3110) — 64 kolom aman jauh di bawah lebar
@@ -147,8 +154,15 @@ function duaKiriKanan(kiri: string, kanan: string): string {
 /** Struk 32 kolom: INIT -> header -> item -> rincian (TOTAL tebal) -> kaki -> FEED -> CUT.
  *  Layout di sini PANDUAN, bukan spesifikasi cetak: yang mengisi `baris` adalah
  *  pemanggil (POS tahu subtotal/diskon/kembalian), escpos hanya menyusun. */
-export function struk(s: Struk): number[] {
+/** Struk thermal 32 kolom. `logo` = byte raster `GS v 0` yang disisipkan di
+ *  AWAL (opsional; lihat logo-struk.ts) — struk tanpa logo byte-nya identik
+ *  dengan sebelum fitur 1.6.4. */
+export function struk(s: Struk, logo?: number[] | null): number[] {
   const out: number[] = [...INIT, ...ALIGN(1)];
+
+  // Logo toko (1.6.4): raster digambar rata tengah oleh printer; LF memberi
+  // jarak satu baris sebelum judul.
+  if (logo?.length) out.push(...logo, ...LF);
 
   const baris = (teksBaris: string) => out.push(...teks(teksBaris), ...LF);
 
@@ -265,9 +279,21 @@ export function strukA4(s: Struk): number[] {
 }
 
 /** Pilih layout struk sesuai preferensi device ini (panel Sistem -> Cetak).
- *  Parameter `layout` bisa ditimpa untuk test unit tanpa localStorage. */
-export function strukUntuk(s: Struk, layout: LayoutStruk = getStrukLayout()): number[] {
-  return layout === 'a4' ? strukA4(s) : struk(s);
+ *  Parameter `layout` bisa ditimpa untuk test unit tanpa localStorage.
+ *  `logo` (byte raster GS v 0) hanya berlaku di layout thermal. */
+export function strukUntuk(s: Struk, layout: LayoutStruk = getStrukLayout(), logo?: number[] | null): number[] {
+  return layout === 'a4' ? strukA4(s) : struk(s, logo);
+}
+
+/** Siap kirim: `strukUntuk` + logo toko di awal khusus layout thermal (butir
+ *  ROADMAP 1.6.4). Logo diunduh/dikonversi sekali per sesi (logo-struk.ts);
+ *  tanpa logo / gagal muat = struk tetap tercetak apa adanya — hiasan tidak
+ *  boleh membatalkan transaksi. Layout a4 tinggal memanggil strukUntuk biasa
+ *  (tanpa raster). Dipakai SEMUA jalur cetak struk thermal: POS (pay + cetak
+ *  ulang), Riwayat `cetakUlang()`, dan rekap shift (tutup shift). */
+export async function strukUntukTercetak(s: Struk, layout: LayoutStruk = getStrukLayout()): Promise<number[]> {
+  const logo = layout === 'thermal' ? await logoStrukBytes() : null;
+  return strukUntuk(s, layout, logo);
 }
 
 export function keBase64(bytes: number[]): string {

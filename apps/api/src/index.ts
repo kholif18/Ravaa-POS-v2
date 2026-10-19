@@ -77,9 +77,11 @@ app.use('/api/*', async (c, next) => {
   // Foto produk & avatar pengguna = pengecualian token: dimuat lewat tag
   // `<img src>` (cache-buster ?version) yang TIDAK bisa membawa header
   // Authorization. Keduanya gambar yang memang tampil di layar kasir — bukan
-  // data sensitif; id saja tidak membuka apa pun lain.
+  // data sensitif; id saja tidak membuka apa pun lain. Logo toko (1.6.4)
+  // ikut: ditampilkan di kartu Sistem DAN diunduh klien untuk raster struk.
   if (c.req.method === 'GET' && /^\/api\/products\/\d+\/image$/.test(c.req.path)) return next();
   if (c.req.method === 'GET' && /^\/api\/users\/\d+\/avatar$/.test(c.req.path)) return next();
+  if (c.req.method === 'GET' && c.req.path === '/api/settings/logo') return next();
   const user = sesiDariToken(c.req.header('Authorization'));
   if (!user) return c.json({ error: 'belum login — masuk dulu di halaman Login' }, 401);
   // Sandi wajib ganti (akun baru/reset): selain ganti-sandi, keluar, dan
@@ -2790,7 +2792,10 @@ function settingBool(key: string, bawaan: boolean): boolean {
   return row ? row.value === '1' : bawaan;
 }
 
-function settingStr(key: KStore): string {
+// `string` (bukan KStore): `store_logo` juga dibaca lewat helper ini tapi
+// SENGAJA bukan bagian K_STORE — nilainya HANYA boleh ditulis endpoint unggah
+// logo, tidak lewat POST /api/settings (nama file di img/ ≠ teks bebas).
+function settingStr(key: string): string {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row?.value ?? '';
 }
@@ -2803,6 +2808,9 @@ function semuaSettings() {
     store_address: settingStr('store_address'),
     store_phone: settingStr('store_phone'),
     store_email: settingStr('store_email'),
+    // Logo toko untuk struk thermal (butir ROADMAP 1.6.4, 2026-10-19): NAMA
+    // file di img/ (pola avatar), bukan isi gambar — '' = tanpa logo.
+    store_logo: settingStr('store_logo'),
   };
 }
 
@@ -2852,6 +2860,80 @@ app.post('/api/settings', hanyaOwner, async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengaturan' }, 400);
   }
+});
+
+// ---------- Logo toko untuk struk thermal (butir ROADMAP 1.6.4, ACC pemilik 19 Okt 2026) ----------
+// File disimpan di img/ sebelah DB (pola foto produk/avatar — folder dibuat
+// sendiri oleh API); tabel settings hanya menyimpan NAMANYA (`store_logo`),
+// bukan localStorage: logo milik TOKO, semua device kasir harus mencetak logo
+// yang sama. Konversi raster ESC/POS (`GS v 0`) dilakukan di KLIEN saat cetak
+// (apps/web/src/logo-struk.ts) — server nol-dependensi tidak mengolah gambar.
+const RE_LOGO_NAMA = /^logo-\d+\.(jpg|png|webp)$/;
+
+/** Satu-satunya penulis kunci `store_logo` (nama file) — lihat komentar blok. */
+function simpanSettingLogo(nama: string): void {
+  db.prepare(
+    `INSERT INTO settings (key, value) VALUES ('store_logo', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(nama);
+}
+
+app.post('/api/settings/logo', hanyaOwner, async (c) => {
+  try {
+    const body = await c.req.json();
+    const kiriman = body?.image;
+    // Tanpa kunci `image` sama sekali = 400, bukan dianggap hapus (pola foto
+    // produk): menghapus logo karena payload tidak lengkap terlalu mahal.
+    if (kiriman === undefined) return c.json({ error: 'image wajib diisi ("" untuk menghapus logo)' }, 400);
+    const lama = settingStr('store_logo');
+    if (kiriman === null || String(kiriman).trim() === '') {
+      if (lama) buangFileFoto(lama);
+      simpanSettingLogo('');
+      catatAudit(c, 'update', 'setting', 'store_logo', { logo: null });
+      return c.json({ data: { store_logo: '' } });
+    }
+    const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(kiriman).trim());
+    if (!m) return c.json({ error: 'image harus dataURL data:image/...;base64' }, 400);
+    const ext = IMG_EXT[m[1].toLowerCase()];
+    const buf = Buffer.from(m[2], 'base64');
+    if (buf.length === 0) return c.json({ error: 'gambar kosong' }, 400);
+    if (buf.length > IMG_MAKS_BYTE) {
+      return c.json({
+        error: `logo terlalu besar (${buf.length} byte, maks ${IMG_MAKS_BYTE}) — resize dulu di client`,
+      }, 400);
+    }
+    const nama = `logo-${Date.now()}.${ext}`;
+    imgDir(); // pastikan folder ada
+    fs.writeFileSync(path.join(imgDir(), nama), buf);
+    if (lama) buangFileFoto(lama); // nama berganti tiap unggah → file lama dibuang
+    simpanSettingLogo(nama);
+    catatAudit(c, 'update', 'setting', 'store_logo', { logo: nama });
+    return c.json({ data: { store_logo: nama } });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal unggah logo' }, 400);
+  }
+});
+
+app.get('/api/settings/logo', (c) => {
+  const nama = settingStr('store_logo');
+  // Belum diunggah = 204 TANPA body (sengaja BUKAN 404): jalur cetak thermal
+  // memanggil endpoint ini tiap sesi perangkat, dan 404 rutin muncul sebagai
+  // "Failed to load resource" di console kasir — sekaligus memerahkan suite
+  // e2e "tanpa error console". 404 tetap dipakai untuk nilai KORUP/file hilang.
+  if (!nama) return c.body(null, 204);
+  // Guard GANDA (pola GET /api/backup/:nama): nilai kolom + basename WAJIB
+  // cocok pola — nilai korup tidak boleh jadi jalur baca file sembarangan.
+  if (!RE_LOGO_NAMA.test(nama)) return c.json({ error: 'logo tidak ada' }, 404);
+  const file = path.join(imgDir(), path.basename(nama));
+  if (!fs.existsSync(file)) return c.json({ error: 'file logo hilang' }, 404);
+  const etag = `"${nama}"`; // nama berganti tiap unggah → ETag = cache-buster alami
+  if (c.req.header('if-none-match') === etag) return c.body(null, 304);
+  const buf = fs.readFileSync(file);
+  return c.body(new Uint8Array(buf), 200, {
+    'Content-Type': IMG_MIME[path.extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream',
+    'ETag': etag,
+    'Cache-Control': 'no-cache',
+  });
 });
 
 // ---------- jejak audit (2026-10-16) — daftar untuk halaman #/audit ----------

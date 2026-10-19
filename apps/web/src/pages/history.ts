@@ -22,7 +22,7 @@ import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
 import { getCashier, getToko } from '../ui/user';
 import { openModal } from '../ui/modal';
-import { rp, strukUntuk, kirimPrint, type Struk } from '../escpos';
+import { rp, strukUntukTercetak, kirimPrint, type Struk } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog } from '../ui/confirm';
 
@@ -803,7 +803,7 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
     };
     // Eksplisit 'thermal' — pilihan Thermal di dialog tidak boleh tergantung
     // pref layout per-device (pref 'a4' kini berarti invoice A4, bukan struk).
-    await kirimPrint(strukUntuk(strukUlang, 'thermal'));
+    await kirimPrint(await strukUntukTercetak(strukUlang, 'thermal'));
     toast(`Struk ${s.invoice_no ?? s.id.slice(0, 8)} dicetak ulang`, 'success');
   } catch (e) {
     toast(`Struk tidak tercetak: ${errMsg(e)}`, 'warning', 9000);

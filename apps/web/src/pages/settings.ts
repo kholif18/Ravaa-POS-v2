@@ -19,10 +19,13 @@ import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPaus
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
+import { LEBAR_LOGO, resetLogoStrukCache } from '../logo-struk';
 
 type Settings = {
   allow_negative_stock: boolean; tolak_jual_kadaluarsa: boolean;
   store_name: string; store_address: string; store_phone: string; store_email: string;
+  /** NAMA file logo di img/ ('' = tanpa logo) — butir ROADMAP 1.6.4. */
+  store_logo: string;
 };
 type BarisBackup = { nama: string; ukuran: number; waktu: string };
 
@@ -31,6 +34,8 @@ const state = {
   backups: [] as BarisBackup[], backupErr: '', backupJalan: false,
   toko: { store_name: '', store_address: '', store_phone: '', store_email: '' },
   tokoJalan: false,
+  /** Nama file logo struk thermal ('' = belum ada). */
+  logo: '',
 };
 
 let host: HTMLElement | null = null;
@@ -197,6 +202,56 @@ function kartuPerangkat(): string {
 // SERVER (4 kunci store_* di tabel settings) supaya semua device mencetak kop
 // yang sama; nilai awal di-seed dari contoh pemilik. Form biasa + tombol
 // Simpan, tanpa konfirmasi swal (non-destruktif seperti Backup).
+//
+// Sejak butir ROADMAP 1.6.4 (2026-10-19) kartu ini juga memuat unggah LOGO
+// STRUK THERMAL: file disimpan di img/ (endpoint POST /api/settings/logo —
+// hanya owner), tercetak di awal struk thermal semua jalur cetak. Unggah/hapus
+// TIDAK mem-paint ulang form — isian store_* yang belum disimpan tidak boleh
+// hilang karena render ulang (pola avatar di halaman Profil).
+function logoHtml(): string {
+  return state.logo
+    ? `<img id="set-logo-img" src="/api/settings/logo?${esc(state.logo)}" alt="Logo toko" class="max-h-16 max-w-full object-contain" />`
+    : `<span class="px-2 text-center text-xs text-gray-400 dark:text-gray-500">Belum ada logo</span>`;
+}
+
+/** Repaint parsial baris logo (bukan `paint()`): pertahankan ketikan form. */
+function tampilLogo(): void {
+  const wadah = host?.querySelector('#set-logo-wadah');
+  if (wadah) wadah.innerHTML = logoHtml();
+  host?.querySelector('#set-logo-hapus')?.classList.toggle('hidden', !state.logo);
+  const lbl = host?.querySelector('#set-logo-label');
+  if (lbl) lbl.textContent = state.logo ? 'Ganti logo' : 'Unggah logo';
+}
+
+/** Baca berkas logo → PNG skala maksimal LEBAR_LOGO (384px, lebar printer
+ *  thermal) sebagai dataURL. PNG (bukan JPEG): tepi garis harus tajam karena
+ *  raster struk memakai ambang luminance — derau JPEG berubah jadi bercak dot. */
+async function kecilkanLogo(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('gambar tidak bisa dibaca'));
+      i.src = url;
+    });
+    const skala = Math.min(1, LEBAR_LOGO / img.naturalWidth);
+    const w = Math.max(1, Math.round(img.naturalWidth * skala));
+    const h = Math.max(1, Math.round(img.naturalHeight * skala));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    if (!ctx) throw new Error('canvas tidak tersedia');
+    ctx.fillStyle = '#fff'; // PNG transparan → latar putih, bukan hitam
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return cv.toDataURL('image/png');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function kartuToko(): string {
   const t = state.toko;
   const f = (id: string, label: string, nilai: string, opsional?: boolean, lebar?: boolean) => `
@@ -211,8 +266,9 @@ function kartuToko(): string {
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan toko</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Kop <b>INVOICE A4</b> (cetak gaya Aronium) memakai empat isian ini.
-            Disimpan di <b>server</b>, jadi seluruh device mencetak kop yang sama.
+            Kop <b>INVOICE A4</b> (cetak gaya Aronium) memakai empat isian ini,
+            dan <b>logo</b> di bawah tercetak di awal <b>struk thermal</b>.
+            Disimpan di <b>server</b>, jadi seluruh device mencetak yang sama.
           </p>
         </div>
       </div>
@@ -221,6 +277,24 @@ function kartuToko(): string {
         ${f('set-toko-telepon', 'Phone', t.store_phone, true)}
         ${f('set-toko-alamat', 'Alamat', t.store_address, true, true)}
         ${f('set-toko-email', 'Email', t.store_email, true)}
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-gray-100 p-3 dark:border-gray-700/60">
+        <div id="set-logo-wadah" class="flex h-16 w-32 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-dashed border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800">
+          ${logoHtml()}
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium text-gray-900 dark:text-white">Logo struk thermal</p>
+          <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            Tercetak hitam-putih di awal struk (lebar maks ${LEBAR_LOGO}px — gambar diskalakan otomatis).
+          </p>
+        </div>
+        <div class="flex shrink-0 flex-wrap gap-2">
+          <label class="btn btn-ghost btn-sm relative" for="set-logo-file">
+            ${icon('upload')}<span id="set-logo-label">${state.logo ? 'Ganti logo' : 'Unggah logo'}</span>
+            <input id="set-logo-file" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" />
+          </label>
+          <button type="button" id="set-logo-hapus" class="btn btn-ghost btn-sm !text-red-600 dark:!text-red-400 ${state.logo ? '' : 'hidden'}">${icon('trash')}<span>Hapus</span></button>
+        </div>
       </div>
       <div class="mt-3 flex justify-end">
         <button type="button" id="set-toko-simpan" class="btn btn-primary" ${state.tokoJalan ? 'disabled' : ''}>
@@ -462,6 +536,40 @@ function bind(): void {
     }
   });
 
+  // Logo struk thermal (butir ROADMAP 1.6.4): unggah diproses di klien dulu
+  // (PNG ≤384px) lalu POST /api/settings/logo; sukses/gagal TIDAK mem-paint
+  // ulang form — ketikan store_* yang belum disimpan harus tetap utuh.
+  // resetLogoStrukCache() supaya struk berikutnya memakai logo terbaru.
+  host?.querySelector<HTMLInputElement>('#set-logo-file')?.addEventListener('change', async (ev) => {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ''; // pilih berkas yang sama dua kali tetap memicu change
+    if (!file) return;
+    try {
+      const dataUrl = await kecilkanLogo(file);
+      const r = await apiPost<{ data: { store_logo: string } }>('/api/settings/logo', { image: dataUrl });
+      state.logo = r.data.store_logo ?? '';
+      resetLogoStrukCache();
+      tampilLogo();
+      toast('Logo disimpan — struk thermal berikutnya mencetak logo ini', 'success');
+    } catch (e) {
+      toast(`Gagal unggah logo: ${errMsg(e)}`, 'error');
+    }
+  });
+  // Hapus logo: tanpa swal (pola avatar — non-destruktif, berkasnya bisa
+  // diunggah ulang kapan saja; swal repo ini untuk aksi yang menghilangkan data).
+  host?.querySelector('#set-logo-hapus')?.addEventListener('click', async () => {
+    try {
+      await apiPost('/api/settings/logo', { image: '' });
+      state.logo = '';
+      resetLogoStrukCache();
+      tampilLogo();
+      toast('Logo dihapus — struk thermal kembali tanpa logo', 'success');
+    } catch (e) {
+      toast(`Gagal hapus logo: ${errMsg(e)}`, 'error');
+    }
+  });
+
   // Kartu "Cetak struk": preferensi per-device, langsung tersimpan tanpa
   // konfirmasi (non-destruktif & bisa dibalik — alasan sama dengan Backup).
   // Di-paint ulang supaya label saklar ("Aktif"/"Nonaktif") ikut terbarui.
@@ -596,6 +704,7 @@ async function load(): Promise<void> {
       store_phone: s.value.data?.store_phone ?? '',
       store_email: s.value.data?.store_email ?? '',
     };
+    state.logo = s.value.data?.store_logo ?? '';
   } else {
     state.error = errMsg(s.reason);
   }

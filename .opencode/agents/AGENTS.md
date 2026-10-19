@@ -1479,7 +1479,16 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Redesign
                           2026-10-03: 4 input nama/alamat/Phone/Email ->
                           kunci `store_*` di POST /api/settings, tanpa swal —
                           kop INVOICE A4 tersimpan di server supaya semua
-                          device mencetak kop yang sama), PLUS kartu
+                          device mencetak kop yang sama; **sejak butir 1.6.4
+                          2026-10-19 kartu ini juga memuat unggah LOGO STRUK
+                          THERMAL** — `#set-logo-file` (label btn berisi
+                          input sr-only; `kecilkanLogo()` = resize klien ke
+                          PNG ≤ `LEBAR_LOGO` 384px, pola avatar) +
+                          `#set-logo-hapus` + pratinjau `#set-logo-wadah`;
+                          sukses/gagal TIDAK paint ulang form — ketikan
+                          store_* yang belum disimpan harus utuh
+                          (`tampilLogo()` repaint parsial +
+                          `resetLogoStrukCache()`)), PLUS kartu
                            **Cetak struk** (preferensi
                            PER-DEVICE lewat ui/print-pref.ts: saklar auto-print
                            — sejak putaran 11 2026-10-05 hanya IZIN kirim ke
@@ -1587,8 +1596,22 @@ apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                           browser (`invoice.ts`), BUKAN struk ini** — `strukA4()`
                           kini hanya dipakai struk topup/tarik saat pref layout
                           `a4` dan tetap diuji unit di `escpos-test.ts`.
-                           Pemilihan: strukUntuk() (panggil dari tiap pencetakan
-                           struk), pref di ui/print-pref.ts.
+                           Pemilihan: **`strukUntukTercetak()`** — panggil dari
+                           tiap pencetakan struk (logo butir 1.6.4 di bawah),
+                           pref di ui/print-pref.ts.
+                           **Logo toko struk thermal (butir ROADMAP 1.6.4,
+                           2026-10-19)**: `struk(s, logo?)` menyisipkan byte
+                           raster `GS v 0` SETELAH INIT+ALIGN (sebelum judul
+                           nama toko), `strukUntuk(s, layout, logo?)`
+                           mengabaikannya di layout a4, dan wrapper async
+                           **`strukUntukTercetak(s, layout)`** mengambil logo
+                           dari `logo-struk.ts` (cache per sesi) lalu
+                           memanggil strukUntuk — dipakai SEMUA jalur cetak
+                           thermal: POS `pilihCetakSelesai` (dua cabang),
+                           Riwayat `cetakUlang()`, rekap shift
+                           `kirimRekapThermal()`. Gagal muat logo = struk
+                           tetap tercetak tanpa logo (hiasan tidak pernah
+                           membatalkan penjualan).
                            Berisi: struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
                            dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
                           default :9100). Dipanggil dari pay()/submitTopup() POS. PENTING: `teks()` tidak
@@ -1609,7 +1632,32 @@ apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                          perintah GS (2 byte) sehingga byte SIZE tidak bocor
                          ke asersi kolom; test struk lama tanpa baris `besar`
                          tetap lolos.
- apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
+ apps/web/src/logo-struk.ts  **Konversi logo → raster ESC/POS di KLIEN (butir
+                          ROADMAP 1.6.4, 2026-10-19)**: `packBit(baris:
+                          boolean[][])` (MSB = piksel paling kiri, tiap baris
+                          dipad sampai kelipatan 8) + `perintahRaster(lebar,
+                          tinggi, data)` (`1d 76 30 00 xL xH yL yH <data>`) +
+                          `LEBAR_LOGO = 384` (dot printer thermal 58mm) +
+                          `logoStrukBytes()` — fetch `GET /api/settings/logo`
+                          (endpoint publik; **204 = belum ada logo**, sengaja
+                          bukan 404) → Image + canvas → ambang luminance 160,
+                          latar dipaksa putih, lebar diskalakan turun ke 384
+                          (tinggi > 512 ditolak) → cache per sesi
+                          (`resetLogoStrukCache()` dipanggil halaman Sistem
+                          setelah unggah/hapus). Gagal apa pun (offline, file
+                          korup) = `null` → struk tercetak TANPA logo; hanya
+                          hasil PASTI yang di-cache (kegagalan jaringan tidak,
+                          dicoba lagi cetak berikutnya). Modul SENGAJA tanpa
+                          import modul app lain supaya fungsi murninya tetap
+                          bisa diimpor unit test Node — `api.ts` menarik
+                          `ui/auth.ts` yang memakai `import.meta.env` dan
+                          jatuh di luar bundler. Fungsi murni
+                          `packBit`/`perintahRaster` diuji unit
+                          `tests/escpos-test.ts` section E; alur penuh
+                          `tests/logo-test.mjs` (ungggah API/UI → payload cetak
+                          memuat raster byte-per-byte + jalur tanpa logo tidak
+                          pernah 404).
+apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           `htmlInvoice(sale, items, toko, piutang?)` menyusun
                           HTML + CSS `@page A4 margin 16mm 14mm` (kop INVOICE +
                           nama/alamat/Phone/Email dari `store_*` + logo lingkaran
@@ -2224,9 +2272,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   `Authorization: Bearer`, kedaluwarsa 30 hari.
   - **Middleware global `/api/*`**: tanpa token = 401; `must_change=1` mengunci
     SEMUA kecuali `/api/users/password` + `/api/logout` + `/api/me` (403).
-    SATU-SATUNYA pengecualian token: `GET /api/products/:id/image` (dimuat
-    lewat tag `<img>` yang tak bisa membawa header; thumbnail, bukan data
-    sensitif). Print-agent ikut mengizinkan header `authorization` di CORS.
+    PENGECUALIAN token (dimuat lewat tag `<img>`/klien raster yang tak
+    praktis membawa header; bukan data sensitif): `GET /api/products/:id/image`
+    (pertama), `GET /api/users/:id/avatar` (kedua, lihat Profil),
+    `GET /api/settings/logo` (ketiga, butir 1.6.4). Print-agent ikut
+    mengizinkan header `authorization` di CORS.
   - `POST /api/login` `{username,password}` -> `{data:{token,user,must_change}}}`;
     username tak ada & sandi salah = PESAN SAMA (401, anti-enumerasi); akun
     nonaktif = 403. `POST /api/logout` (idempotent), `GET /api/me`.
@@ -2292,7 +2342,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     filter q/tanggal/limit, 401 tanpa token, kasir 403, login-gagal tercatat,
     dan UI `#/audit` (chip jumlah, cari, modal detail, Esc).
 * `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false,
-  store_name:"",store_address:"",store_phone:"",store_email:""}}`
+  store_name:"",store_address:"",store_phone:"",store_email:"",store_logo:""}}`
   (selalu ada — dua baris boolean default di-seed `db/seed.sql` lewat `INSERT OR
   IGNORE` jadi seed ulang tidak mereset pilihan pemilik; empat kunci `store_*`
   = **kop INVOICE A4** (nama/alamat/Phone/Email toko) juga `INSERT OR IGNORE`
@@ -2317,6 +2367,28 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `false`. Empat `store_*` dibaca client saat **membuka invoice A4**
     (`cetakInvoice()` di `apps/web/src/invoice.ts`) — satu kop untuk semua
     device, sengaja di server bukan localStorage.
+  - **Logo struk thermal (butir ROADMAP 1.6.4, 2026-10-19)** — file di `img/`
+    sebelah DB (pola foto produk/avatar), tabel settings hanya menyimpan
+    NAMANYA di kunci `store_logo`. TANPA migrasi skema (baris `settings`
+    biasa; kunci absen = `''` = tanpa logo). `store_logo` SENGAJA **bukan**
+    bagian `K_STORE`/`POST /api/settings` — nilainya hanya boleh ditulis
+    endpoint unggah (nama file di `img/`, bukan teks bebas).
+    * `POST /api/settings/logo` `{image:"<dataURL>"}` (hanyaOwner) -> 200
+      `{data:{store_logo:"logo-<epoch>.<ext>"}}`; `''`/null = hapus (file
+      di-unlink, balas `{store_logo:""}`). Validasi: dataURL
+      `data:image/(jpeg|png|webp);base64,...` (selain itu 400), byte <=
+      `IMG_MAKS_BYTE` (300.000 → 400). Nama file BERGANTI tiap unggah
+      (cache-buster alami) & file lama dibuang. Audit: entity `setting`,
+      entity_id `store_logo`.
+    * `GET /api/settings/logo` (pengecualian token — lihat Login & peran)
+      -> **204 TANPA body bila belum diunggah** (sengaja BUKAN 404: jalur
+      cetak thermal memanggil endpoint ini tiap sesi perangkat, dan 404
+      rutin mengotori console kasir + memerahkan suite e2e "tanpa error
+      console"); 200 byte + `Content-Type` + `ETag` `"<nama>"` (`no-cache`)
+      bila ada; whitelist pola `^logo-\d+\.(jpg|png|webp)$` + `path.basename`
+      (nilai korup = 404 `"logo tidak ada"`), file hilang = 404. Dipakai
+      `<img>` pratinjau halaman Sistem & unduhan klien raster
+      (`logo-struk.ts`).
 * `POST /api/products/import` `{rows:[<payload POST /api/products>], dry_run?:bool}` -> `{data:{total,ok,baru,update,gagal,errors:[{baris,sku,error}]}}` (200)
   - Tiap baris di-upsert lewat **fungsi yang sama** dengan `POST /api/products`
     (kategori/satuan/turunan SKU jadi satu sumber kebenaran, bukan versi kedua).
