@@ -298,8 +298,14 @@ function productRows(): string {
              class="size-8 shrink-0 rounded-md border border-gray-200 object-cover dark:border-gray-700"
              loading="lazy" onerror="this.remove()" />`
         : '';
+      // Baris nonaktif TIDAK diredupkan lewat `opacity` (dulu opacity-60 pada
+      // <tr>): opacity membuat stacking context yang menjebak .row-dd
+      // (position: fixed, z-50) di dalam baris — dropdown jadi ikut transparan
+      // (samar) DAN baris sesudahnya menimpanya sehingga klik "Aktifkan
+      // kembali" tak pernah sampai ke tombolnya (bug nyata 2026-10-19).
+      // Penanda nonaktif = badge "nonaktif" di sebelah nama (jangan opacity).
       return `
-      <tr class="tr${off ? ' opacity-60' : ''}" data-row="${p.id}">
+      <tr class="tr" data-row="${p.id}">
         <td class="td w-12 text-center tabular-nums text-gray-400">${i + 1}</td>
         <td class="td">
           <div class="flex items-start gap-2">

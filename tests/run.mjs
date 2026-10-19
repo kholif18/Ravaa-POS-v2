@@ -61,7 +61,7 @@ const SUITE = [
   ['satuan-test.mjs', 44],
   ['e2e-multisatuan.mjs', 30],
   ['e2e-duplikat.mjs', 37],
-  ['e2e-aksi.mjs', 34],
+  ['e2e-aksi.mjs', 38],
   ['pos-qtykode-test.mjs', 26],
   ['e2e-topup-keranjang.mjs', 61],
   ['kategori-expiry-test.mjs', 14],

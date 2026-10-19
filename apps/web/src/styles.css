@@ -911,7 +911,12 @@
      `position: fixed` WAJIB: .table-wrap pakai overflow-x-auto, dan menurut
      spesifikasi itu memaksa overflow-y ikut dihitung `auto` — anak ber-position
      absolute di dalamnya ikut terpotong / memicu scrollbar tabel. Posisi
-     kiri-atasnya dihitung JS di bukaMenu() dari getBoundingClientRect tombol. */
+     kiri-atasnya dihitung JS di bukaMenu() dari getBoundingClientRect tombol.
+     KEDUA: leluhur .row-dd DILARANG pakai `opacity` (dulu baris nonaktif
+     diredupkan opacity-60) — opacity membuat stacking context sehingga z-50
+     menu TERJEBAK di dalam baris: tampil samar + tertimpa baris sesudahnya
+     (klik item mati; bug nyata 2026-10-19). Redupkan baris lewat WARNA, jangan
+     opacity. */
   .row-more {
     @apply relative;
   }

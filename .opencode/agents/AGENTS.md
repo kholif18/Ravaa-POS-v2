@@ -1715,6 +1715,17 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        pernah merah karena ini — history-test 22/27 BELUM
                        diperkuat (hindari mulai suite dalam ±4 menit dari
                        tengah malam UTC bila ingin pasti hijau).
+                       **Fixture seed (insiden 2026-10-19)**: e2e-struk &
+                       satuan-test butuh `PRD00013` aktif, e2e-opname &
+                       pos-qtykode butuh `PRD00002`, foto-tambah-test menolak
+                       DB ber-tombstone — produk SEED yang dihapus/
+                       dinonaktifkan memerahkan 5 suite sekaligus (bukan
+                       regresi kode). Pulihkan: `POST /api/products` payload
+                       LENKAP (SKU tombstone bangkit otomatis; tanpa barcode
+                       kirim `null`, bukan `""` — UNIQUE menolak) + tombstone
+                       artefak test: `UPDATE products SET deleted_at=NULL,
+                       is_active=0, version=version+1` (JANGAN `DELETE` baris:
+                       FK `purchase_items`/`stock_moves`).
 infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + Caddyfile
 ```
 
@@ -2264,6 +2275,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   `apps/web/src/pages/products.ts` untuk nonaktifkan DAN aktifkan lagi. Jangan
   pernah kirim `{sku, is_active}` saja — `unit` jadi `pcs`, `cost`/`markup` jadi 0.
   Regresi ada di `/tmp/opencode/pos-form-test.mjs` (section 9).
+  UI tab Nonaktif (dropdown ⋮ + "Aktifkan kembali") diuji **klik nyata** di
+  `tests/e2e-aksi.mjs` §G; baris nonaktif diredupkan lewat badge, BUKAN
+  `opacity` di `<tr>` (stacking context menjebak `.row-dd` — §5).
 * Search produk & POS memecah query jadi kata: SEMUA kata wajib cocok di
   nama/SKU/barcode, tidak harus di field atau urutan yang sama — jadi "aqua 600"
   dan "600 aqua" sama-sama ketemu. Kalau dipecah balik jadi `includes(query)`
@@ -2698,6 +2712,15 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   mengikat koneksi mati dan mematikan semua tulisan sesudah restore (bug
   nyata 2026-10-16). Selalu bungkus lewat helper **`transaksi(fn)`** dari
   `db.ts`; regresi dijaga section B2 `tests/restore-test.mjs`.
+* **DILARANG memberi `opacity` pada `<tr>`/leluhur `.row-dd`** (menu aksi ⋮
+  baris tabel): opacity membuat stacking context sehingga `.row-dd`
+  (`position: fixed`, z-50) TERJEBAK di dalam baris — tampil samar + tertimpa
+  baris SESUDAHNYA, klik item mati tanpa error apa pun. Bug nyata 2026-10-19
+  di tab Nonaktif halaman Produk (pemilik: *"dropdown aksi tampilannya
+  samar… aktifkan kembali tidak terjadi apa-apa"*); redupkan baris nonaktif
+  lewat badge/warna, bukan opacity. Anti-regresi: klik NYATA di
+  `tests/e2e-aksi.mjs` §G (dulu `isVisible()` lolos padahal tombolnya tak
+  pernah menerima klik).
 * **Data uji WAJIB nama eksak + self-heal di awal suite.** Cleanup bertipe
   prefix (`name LIKE 'UjiX%'`) pernah menjaring pelanggan durable milik suite
   lain (`UjiHutang%` vs `UjiHutang POS E2E`) dan menyisakan yatim yang

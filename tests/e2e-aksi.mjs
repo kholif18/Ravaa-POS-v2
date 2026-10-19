@@ -158,6 +158,11 @@ try {
   const bo = baris('E2e Aksi Nonaktif');
   ok('produk nonaktif tampil di tab Nonaktif', (await bo.count()) > 0);
   ok('Ubah tetap terlihat di baris nonaktif', await bo.locator('[data-edit]').isVisible());
+  // Anti-regresi 2026-10-19: baris nonaktif pernah diredupkan `opacity-60` di
+  // <tr> -> seluruh isinya (termasuk dropdown ⋮) tampak samar di layar pemilik.
+  // Redupnya harus lewat badge "nonaktif", BUKAN opacity baris.
+  ok('baris nonaktif tidak samar (tanpa opacity di <tr>)',
+    (await bo.evaluate((el) => getComputedStyle(el).opacity)) === '1');
   await bo.locator('[data-more]').click();
   await page.waitForSelector('.row-more.is-open .row-dd', { timeout: 3000 });
   ok('menu nonaktif berisi Aktifkan kembali', await bo.locator('.row-dd [data-on]').isVisible());
@@ -171,6 +176,25 @@ try {
     !(await page.locator('#f-active').isChecked()));
   await page.click('.modal [data-x]');
   await page.waitForSelector('.modal', { state: 'detached', timeout: 8000 });
+
+  // Anti-regresi 2026-10-19: dulu klik item menu TIDAK pernah sampai — dropdown
+  // (position: fixed, z-50) terjebak stacking context `opacity-60` milik <tr>,
+  // sehingga tertimpa tombol baris SESUDAHNYA dan Playwright menolak klik
+  // ("subtree intercepts pointer events"). isVisible() lolos padahal tombolnya
+  // mati, jadi di sini WAJIB klik nyata + tunggu dialog konfirmasi.
+  await bo.locator('[data-more]').click();
+  await page.waitForSelector('.row-more.is-open .row-dd', { timeout: 3000 });
+  const galatKlik = await bo.locator('.row-dd [data-on]').click({ timeout: 5000 })
+    .then(() => '').catch((e) => String(e).slice(0, 200));
+  const dialogMuncul = (await page.locator('.swal2-popup').count()) === 1;
+  ok('klik "Aktifkan kembali" membuka konfirmasi (dulu: tertimpa baris lain)', dialogMuncul, galatKlik);
+  if (dialogMuncul) {
+    await page.click('.swal2-confirm');
+    await bo.waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+  }
+  const aktifLagi = await (await fetch(`${API}/api/products?since=0&status=aktif`)).json();
+  ok('konfirmasi -> produk aktif lagi (is_active=1)', aktifLagi?.data?.some((x) => x.sku === SKU_OFF));
+  ok('baris keluar dari daftar Nonaktif', (await bo.count()) === 0);
 
   console.log('=== H. Tanpa error runtime ===');
   ok('tanpa pageerror / console error', errs.length === 0, errs.join(' | '));
