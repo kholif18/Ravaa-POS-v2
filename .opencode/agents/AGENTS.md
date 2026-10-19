@@ -217,9 +217,19 @@ apps/web/src/pos.css    File gaya KHUSUS POS (baru 2026-10-09 — keputusan
                            .icon-btn`, 2026-10-18 — aturan dasar .icon-btn
                            gray-600 di tema terang nyaris tak terlihat di atas
                            biru; hover ikut putih/15, bukan gray-100+gray-900);
-                           diuji `tests/pos-ibar-test.mjs` (7 asersi: light/
+                           diuji `tests/pos-ibar-test.mjs` (11 asersi: light/
                            dark/hover + guard tombol ⬅ header MOBILE yang
-                           SENGAJA tidak ikut putih — latarnya putih).
+                           SENGAJA tidak ikut putih — latarnya putih; seksi D
+                           = tombol Tutup shift).
+                           **`.pos-tutup` (revisi pemilik 19 Okt 2026:
+                           "warna merahnya buat menyala agar lebih mudah di
+                           lihat")** = tombol `#pos-shift-tutup` — gradasi
+                           `from-red-500 to-red-600` + shadow merah + teks
+                           putih + hover red-600→700, pola SATU sumber dengan
+                           tombol hijau `.pos-paypas` di file yang sama;
+                           versi lama merah transparan `red-500/20` nyaris
+                           tak terlihat di atas bar biru (aturan tepat di
+                           bawah `.pos-ibar-biru .icon-btn`).
                            **`.sk-*` pemindai kamera (2026-10-19, butir
                            ROADMAP 1.6.1)**: overlay `.sk-overlay` (fixed
                            inset-0 z-50, di bawah toast z-60; elemen dibuat
@@ -379,6 +389,18 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           DITOLAK/DIGANTI; grid kini `lg:grid-cols-3` sama
                           rata ala putaran 9 — jangan kembalikan track auto
                           atau `[auto_1fr_auto]`);
+                          **REVISI 19 Okt 2026 — MERAH MENYALA** (kelas
+                          `btn pos-tutup`, aturan di pos.css): *"warna merahnya
+                          buat menyala agar lebih mudah di lihat"* — versi
+                          lama merah transparan `!bg-red-500/20` nyaris
+                          menyatu dengan bar biru, kini gradasi merah SOLID +
+                          shadow + teks putih (pola tombol hijau
+                          `.pos-paypas`). Posisi SENGAJA tetap di kolom kiri:
+                          sekelompok Waktu/Kasir/Shift (konteks sesi) dan jauh
+                          dari alur uang di sidebar kanan. Diuji
+                          `tests/pos-ibar-test.mjs` seksi D (+4 asersi: gradasi
+                          red-500 + teks putih di kedua tema + hover
+                          menggelap; suite kini 11 asersi);
                           **`dialogTutupShift()` dari `pages/shift-tutup.ts`**
                           — modul BERSAMA dengan halaman `#/shifts`
                           (satu sumber kebenaran `kasSeharusnya()`/
@@ -1479,10 +1501,14 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           Diterima/Kasir/Shift/Status, tabel barang, ringkas
                           Total/Terbayar/Sisa (label kontekstual "Sisa
                           (lunas)"/"Sisa hutang"/"Sisa (belum diterima)"/
-                          "Dibatalkan"), catatan + striping; popup diblokir/
+                          "Dibatalkan"), catatan + striping; **slot logo toko
+                          kanan-atas lewat helper bersama
+                          `logoA4Html`/`CSS_LOGO_A4` dari `invoice.ts`**
+                          (revisi pemilik 19 Okt 2026: "logo itu harusnya
+                          juga di terapkan pada a4 juga"); popup diblokir/
                           gagal = toast. `tests/purchase-test.mjs`
-                          44 asersi (section F uji popup: kop + supplier +
-                          nomor + baris + ringkas).
+                          45 asersi (section F uji popup: kop + supplier +
+                          nomor + baris + ringkas + slot logo).
 apps/web/src/labelsheet.ts  **Model cetak label (baru 2026-10-17, refactor
                          halaman Label harga)**: LEMBAR label A4/Folio lewat
                          CETAK BROWSER (`window.print()` + `@page` mm), bukan
@@ -1663,7 +1689,10 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            pratinjau "Sisa setelah bayar") dan tombol
                            **Cetak A4** di dialog rincian (`htmlHutangA4`/
                            `cetakHutangA4` — pola popup `invoice.ts`, tanpa
-                           print-agent, gagal = toast). Hutang DICATAT
+                           print-agent, gagal = toast; **slot logo toko
+                           kanan-atas lewat helper bersama
+                           `logoA4Html`/`CSS_LOGO_A4` dari `invoice.ts`** —
+                           revisi pemilik 19 Okt 2026). Hutang DICATAT
                            MANUAL di sini — POS tidak punya mode piutang.
                            **Layout A4 (putaran 15, 2026-10-06)**: ringkas
                            bawah **`Total dihutang` / `Total dibayar` /
@@ -1821,9 +1850,11 @@ apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
 apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           `htmlInvoice(sale, items, toko, piutang?)` menyusun
                           HTML + CSS `@page A4 margin 16mm 14mm` (kop INVOICE +
-                          nama/alamat/Phone/Email dari `store_*` + logo lingkaran
-                          "R", Bill to = `sale.customer_name` snapshot ("Pelanggan
-                          Umum" bila kosong), Invoice No. = `sales.invoice_no`,
+                          nama/alamat/Phone/Email dari `store_*` + SLOT LOGO
+                          BERSAMA `logoA4Html()` — lihat butir "Logo toko di
+                          SEMUA dokumen A4" di bawah; Bill to =
+                          `sale.customer_name` snapshot ("Pelanggan Umum"
+                          bila kosong), Invoice No. = `sales.invoice_no`,
                           **Payment status `Lunas`/`Belum lunas`** (putaran 14:
                           `Belum lunas` bila `sale.sisa_hutang > 0`), tabel item
                           + baris `* note`, ringkasan Discount/Total, footer
@@ -1866,6 +1897,25 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           valuasi + TIDAK LAKU keluar sebagai SATU dokumen
                           (satu popup). Opsional: pemanggil lama tanpa
                           `bagian` menghasilkan HTML persis sama.
+                          **Logo toko di SEMUA dokumen A4 (revisi pemilik
+                          19 Okt 2026: *"logo itu harusnya juga di terapkan
+                          pada a4 juga"*)** — slot BERSAMA: `urlLogoA4()`
+                          (URL ABSOLUT `${location.origin}/api/settings/logo`
+                          — popup cetak ber-about:blank tidak bisa me-resolve
+                          src relatif) + `logoA4Html()` (img + bulatan
+                          fallback "R"; logo gagal/204 -> `onerror`
+                          menyembunyikan img, cetak tak pernah gagal karena
+                          hiasan) + `CSS_LOGO_A4` (slot 84px naik dari 66px
+                          ala Aronium; img berlatar putih menutupi bulatan).
+                          Dipakai LIMA dokumen: invoice, laporan (semua menu
+                          `#/reports`), rekap shift PDF, nota PO
+                          (`purchases.ts`), rincian hutang (`debts.ts`);
+                          baris `Phone:`/`Email:` ditambahkan ke kop laporan
+                          & rekap (invoice/PO/hutang sudah punya). Struk
+                          ESC/POS layout `a4` (topup L3110) TETAP tanpa logo.
+                          Diuji `tests/a4-logo-test.mjs` (12 asersi) + asersi
+                          slot di e2e-struk/purchase-test/customer-debt-test/
+                          recap-test.
  apps/web/src/ui/auth-screen.ts  Kerangka layar auth (login & ubah-sandi):
                           `authLayarHtml(kartu)` — SATU markup untuk dua
                           halaman (pola shift-tutup.ts). Gradasi biru
@@ -2022,6 +2072,17 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        artefak test: `UPDATE products SET deleted_at=NULL,
                        is_active=0, version=version+1` (JANGAN `DELETE` baris:
                        FK `purchase_items`/`stock_moves`).
+                       **Logo A4**: `tests/a4-logo-test.mjs` (12 asersi) —
+                       builder invoice/laporan/rekap memuat slot logo
+                       (`img.logo-img` absolut + fallback "R" + onerror);
+                       popup laporan NYATA (klik `#rp-print`) memuat logo
+                       sampai `naturalWidth > 0`; tanpa logo (endpoint 204)
+                       img menyembunyikan diri sementara bulatan fallback
+                       tetap tampil; self-heal + bersih sendiri. Suite
+                       `purchase-test`/`customer-debt-test` memanggil CLI
+                       `sqlite3` (execSync) — mesin tanpa sqlite3 = crash
+                       pre-existing (bukan regresi kode); `recap-test` sama
+                       tapi cleanup-nya ter-catch.
 infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + Caddyfile
 ```
 

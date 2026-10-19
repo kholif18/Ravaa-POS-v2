@@ -1463,15 +1463,20 @@ function infoBarHtml(): string {
             <span class="flex items-center gap-1.5">${icon('clock')}<span class="font-semibold">Waktu:</span><span id="pos-jam" class="tabular-nums">${jamPos()}</span></span>
             <span class="flex items-center gap-1.5">${icon('users')}<span class="font-semibold">Kasir:</span><span>${esc(getCashier())}</span><span class="text-white/60">· Shift #${shift?.id}</span></span>
           </div>
-          <!-- Tombol MERAH tutup shift — revisi pemilik 2026-10-06: tetap di
-               kolom ini (bukan kolom terpisah seperti versi track-auto),
-               "cuma rata kanan, mepet ke kanan" → ml-auto menempelkan ke
-               tepi kanan cell (sebelum border-l kolom Pelanggan). Dialog =
-               modul bersama shift-tutup.ts (sama persis dengan halaman
-               Shift); kula-07-pos-kasir.png taruh "Tutup Sesi Kas" di
-               toolbar atas. -->
-          <button type="button" id="pos-shift-tutup"
-            class="btn btn-ghost ml-auto !min-h-[30px] !px-2.5 !py-1 text-sm !bg-red-500/20 !border-transparent !text-red-100 hover:!bg-red-500/35 dark:!bg-red-500/20 dark:!text-red-100 dark:hover:!bg-red-500/35"
+          <!-- Tombol MERAH MENYALA tutup shift — revisi pemilik 2026-10-06:
+               tetap di kolom ini (bukan kolom terpisah seperti versi
+               track-auto), "cuma rata kanan, mepet ke kanan" → ml-auto
+               menempelkan ke tepi kanan cell (sebelum border-l kolom
+               Pelanggan). Dialog = modul bersama shift-tutup.ts (sama persis
+               dengan halaman Shift); kula-07-pos-kasir.png taruh "Tutup Sesi
+               Kas" di toolbar atas. WARNA: revisi pemilik 19 Okt 2026 —
+               "warna merahnya buat menyala agar lebih mudah di lihat"; versi
+               lama merah transparan (red-500/20) nyaris menyatu dengan bar
+               biru → kini gradasi merah solid + shadow (kelas .pos-tutup di
+               pos.css, pola tombol hijau .pos-paypas). POSISI tetap di kolom
+               kiri: sekelompok dengan Waktu/Kasir/Shift (konteks sesi) dan
+               jauh dari alur uang di sidebar kanan. -->
+          <button type="button" id="pos-shift-tutup" class="btn pos-tutup"
             title="Tutup shift kasir (hitung laci dulu)" aria-label="Tutup shift">
             ${icon('logout')}<span>Tutup shift</span>
           </button>

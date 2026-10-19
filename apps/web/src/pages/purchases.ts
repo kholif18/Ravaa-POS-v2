@@ -43,6 +43,9 @@ import { toast } from '../ui/toast';
 import { getCashier } from '../ui/user';
 import { tglPendek } from '../ui/waktu';
 import { rp } from '../escpos';
+// Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026) —
+// helper tinggal di invoice.ts, dipakai juga oleh debts.ts & rekap/laporan.
+import { CSS_LOGO_A4, logoA4Html } from '../invoice';
 
 type Po = {
   id: number; created_at: string;
@@ -320,8 +323,7 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
   .alamat { margin-top: 4px; max-width: 60%; }
   .baris-kop { display: flex; margin-top: 2px; }
   .baris-kop .lbl { width: 72px; }
-  .logo { width: 66px; height: 66px; border-radius: 50%; background: #4a90d9; color: #fff;
-          font-size: 40px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  ${CSS_LOGO_A4}
   hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
   .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
   .meta .ttl { font-weight: 700; margin-bottom: 4px; }
@@ -356,7 +358,7 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
       ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
       ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
     </div>
-    <div class="logo" aria-hidden="true">R</div>
+    ${logoA4Html()}
   </div>
   <hr>
   <div class="meta">

@@ -702,7 +702,8 @@ npm run dev:api
   tidak ada nota sale untuk invoice).
   - **Pilihan A4 = INVOICE A4 gaya Aronium** (baru 2026-10-03): membuka tab
     baru berisi nota invoice A4 (kop **INVOICE** + nama/alamat/Phone/Email
-    toko + logo "R", Bill to pelanggan terpilih — *Pelanggan Umum* bila
+    toko + logo toko — unggahan di Sistem, fallback bulatan "R" —, Bill to
+    pelanggan terpilih — *Pelanggan Umum* bila
     kosong —, **Invoice No. `YYMMDD-NNNNNN`**
     (tahun+bulan+tanggal, nomor urut harian yang di-assign server), tabel item
     + baris catatan
@@ -720,6 +721,12 @@ npm run dev:api
     Kop disimpan **di server** (4 kunci `store_*`) lewat kartu **Pengaturan
     toko** di **Sistem → Pengaturan toko** — semua device mencetak kop yang
     sama; nilai awal = contoh pemilik (RAVAA STUDIO) lewat seed.
+    **Logo toko di semua dokumen A4** (2026-10-19): logo yang diunggah di
+    Sistem → Pengaturan toko tampil di kanan-atas SEMUA dokumen A4 cetak
+    browser — invoice, laporan (`#/reports`), rekap shift (PDF), nota PO,
+    dan rincian hutang. Belum diunggah = bulatan "R" fallback; cetak tidak
+    pernah gagal karena logo (gambar gagal dimuat menyembunyikan diri).
+    Struk ESC/POS layout A4 (topup L3110) tetap tanpa logo.
   - **Dua layout struk** — dipilih per device di **Sistem → Cetak struk**
     (default *Thermal*; pilihan dialog terakhir juga menyetel pref ini untuk
     struk topup/tarik berikutnya):

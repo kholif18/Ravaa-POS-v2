@@ -9,6 +9,10 @@
 //     dengan latar putih/15;
 //   - tombol ⬅ header MOBILE (.pm-headrow, latar putih) SENGAJA tidak ikut
 //     putih (akan tak terlihat) — aturan hanya menyasar `.pos-ibar-biru`.
+//   - tombol "Tutup shift" (.pos-tutup, revisi pemilik 19 Okt 2026: "warna
+//     merahnya buat menyala agar lebih mudah di lihat") = gradasi merah
+//     SOLID + teks putih di KEDUA tema; versi lama merah transparan
+//     (red-500/20) nyaris menyatu dengan bar biru. Lihat seksi D.
 // Jalankan: node pos-ibar-test.mjs   (butuh API :3001 + vite :5656 hidup)
 import { chromium } from 'playwright-core';
 import { pasangToken } from './bantuan-uji.mjs';
@@ -102,6 +106,52 @@ try {
   });
   chk('mobile: tombol ⬅ header TIDAK ikut putih (latar putih — tetap abu .icon-btn)',
     !!mob && mob.warna !== 'rgb(255, 255, 255)', mob ? mob.warna : 'tombol tak ditemukan');
+
+  // ——— D. tombol "Tutup shift": MERAH MENYALA ———
+  // Revisi pemilik 19 Okt 2026: *"warna merahnya buat menyala agar lebih
+  // mudah di lihat"* — versi lama merah transparan (red-500/20) nyaris
+  // menyatu dengan bar biru. Kontrak: gradasi merah solid (.pos-tutup, pola
+  // .pos-paypas) + teks PUTIH di KEDUA tema; hover menggelap. Posisi tetap di
+  // kolom kiri info bar (konteks sesi Waktu/Kasir/Shift).
+  await p.evaluate(() => {
+    localStorage.setItem('ravaa.theme', 'light');
+    localStorage.setItem('ravaa.mobile-layout', '0');
+  });
+  await p.reload({ waitUntil: 'networkidle' });
+  await p.waitForSelector('.pos-ibar-biru #pos-shift-tutup', { timeout: 15000 });
+  await p.waitForTimeout(400);
+  const bacaTutup = () => p.evaluate(() => {
+    const b = document.querySelector('.pos-ibar-biru #pos-shift-tutup');
+    if (!b) return null;
+    const g = getComputedStyle(b);
+    return { warna: g.color, grad: g.backgroundImage, adaKelas: b.classList.contains('pos-tutup') };
+  });
+  const tutupT = await bacaTutup();
+  // Warna acuan (terukur di Chrome): oklch(0.637 0.237 25.331) = red-500,
+  // oklch(0.577 0.245 27.325) = red-600, oklch(0.505 0.213 27.518) = red-700
+  // — format oklch itulah yang dikomputasi browser dari @apply gradient.
+  chk('light: Tutup shift MERAH MENYALA (kelas .pos-tutup + gradasi red-500)',
+    !!tutupT && tutupT.adaKelas && /linear-gradient/.test(tutupT.grad)
+      && tutupT.grad.includes('oklch(0.637 0.237 25.331)'),
+    tutupT ? `${tutupT.adaKelas} / ${tutupT.grad.slice(0, 90)}` : '');
+  chk('light: teks Tutup shift PUTIH (kontras di atas merah)',
+    !!tutupT && tutupT.warna === 'rgb(255, 255, 255)', tutupT ? tutupT.warna : '');
+  await p.hover('.pos-ibar-biru #pos-shift-tutup');
+  await p.waitForTimeout(350);
+  const tutupH = await bacaTutup();
+  chk('light hover: gradasi menggelap ke red-600 → red-700 (tetap menyala saat disentuh)',
+    !!tutupH && tutupH.grad.includes('oklch(0.577 0.245 27.325) 0%')
+      && tutupH.grad.includes('oklch(0.505 0.213 27.518)'),
+    tutupH ? tutupH.grad.slice(0, 90) : '');
+  await p.evaluate(() => { localStorage.setItem('ravaa.theme', 'dark'); });
+  await p.reload({ waitUntil: 'networkidle' });
+  await p.waitForSelector('.pos-ibar-biru #pos-shift-tutup', { timeout: 15000 });
+  await p.waitForTimeout(400);
+  const tutupG = await bacaTutup();
+  chk('dark: tetap MERAH MENYALA + teks putih (bar sama di kedua tema)',
+    !!tutupG && tutupG.warna === 'rgb(255, 255, 255)' && tutupG.grad.includes('oklch(0.637 0.237 25.331)'),
+    tutupG ? `${tutupG.warna} / ${tutupG.grad.slice(0, 90)}` : '');
+  await p.evaluate(() => { localStorage.setItem('ravaa.theme', 'light'); });
 } catch (e) {
   gagal++;
   console.log(`  GAGAL crash: ${String(e).slice(0, 300)}`);

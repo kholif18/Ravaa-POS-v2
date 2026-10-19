@@ -443,6 +443,22 @@ try {
   ok('E: memuat item terjual + Total ringkasan + Paid amount',
     teksE.includes('Aqua 600ml') && /Total\b/.test(teksE) && teksE.includes('Paid amount'),
     teksE.replace(/\s+/g, ' ').slice(-220));
+  // Slot logo kanan-atas dokumen A4 (revisi pemilik 19 Okt 2026: "logo itu
+  // harusnya juga di terapkan pada a4 juga"). `<img>` SELALU ada di HTML
+  // walau belum ada logo (endpoint 204 -> onerror menyembunyikan; bulatan
+  // fallback "R" yang tampil) — asersi tidak bergantung ada/tidaknya logo.
+  const logoE = await popup.evaluate(() => {
+    const img = document.querySelector('img.logo-img');
+    const fb = document.querySelector('.logo-fb');
+    return {
+      src: img?.getAttribute('src') ?? '',
+      fb: (fb?.textContent ?? '').trim(),
+      onerr: img?.getAttribute('onerror') ?? '',
+    };
+  });
+  ok('E: slot logo A4 (img absolut /api/settings/logo + fallback "R")',
+    logoE.src.endsWith('/api/settings/logo') && logoE.fb === 'R' && logoE.onerr.includes('display'),
+    JSON.stringify(logoE));
   ok('E: invoice lewat browser — /print print-agent TIDAK ikut (tetap 4)',
     tercetak.length === 4, tercetak.length);
 

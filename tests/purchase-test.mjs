@@ -232,6 +232,16 @@ chk('A4 PO: kop + supplier + nomor + baris barang + striping',
 chk('ringkas A4 = Total/Terbayar/Sisa (lunas) Rp2.000',
   a4po.ringkas.length === 3 && a4po.ringkas[0].includes('Total') && /Rp2\.000/.test(a4po.ringkas[0])
     && a4po.ringkas[2].includes('Sisa (lunas)'), JSON.stringify(a4po.ringkas));
+// Slot logo kanan-atas dokumen A4 (revisi pemilik 19 Okt 2026: "logo itu
+// harusnya juga di terapkan pada a4 juga") — img SELALU ada di HTML walau
+// logo belum diunggah (endpoint 204 -> onerror menyembunyikan; bulatan
+// fallback "R" tampil), jadi asersi tidak bergantung ada/tidaknya logo.
+const logoPo = await popPo.evaluate(() => ({
+  src: document.querySelector('img.logo-img')?.getAttribute('src') ?? '',
+  fb: (document.querySelector('.logo-fb')?.textContent ?? '').trim(),
+}));
+chk('A4 PO: slot logo kanan-atas (/api/settings/logo + fallback "R")',
+  logoPo.src.endsWith('/api/settings/logo') && logoPo.fb === 'R', JSON.stringify(logoPo));
 await popPo.close().catch(() => {});
 
 await p.click('[data-po-kembali]');

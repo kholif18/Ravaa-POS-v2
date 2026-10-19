@@ -33,6 +33,35 @@ export interface DokLaporan {
   }[];
 }
 
+/** URL ABSOLUT slot logo dokumen A4. Popup cetak (`window.open('')` +
+ *  `document.write`) ber-`about:blank`, jadi `src` RELATIF tidak akan
+ *  teresolusi — origin app ditempel. Endpoint-nya publik (pengecualian
+ *  token, AGENTS §3): 200 = gambar, 204 = belum ada logo. */
+export function urlLogoA4(): string {
+  const o = typeof location !== 'undefined' ? location.origin : '';
+  return `${o}/api/settings/logo`;
+}
+
+/** Slot logo kanan-atas SEMUA dokumen A4 — permintaan pemilik 19 Okt 2026:
+ *  "logo itu harusnya juga di terapkan pada a4 juga". Dipakai bersama oleh
+ *  invoice, laporan, rekap shift (file ini), nota PO (purchases.ts), dan
+ *  rincian hutang (debts.ts) supaya kelima dokumen tampil sama. `<img>`
+ *  MENIMPA bulatan fallback "R" saat logo toko ada; belum ada logo / gagal
+ *  dimuat → `onerror` menyembunyikan img dan bulatan fallback tetap tampil
+ *  (hiasan tidak pernah membatalkan cetak). */
+export function logoA4Html(): string {
+  return `<div class="logo" aria-hidden="true"><span class="logo-fb">R</span><img class="logo-img" src="${urlLogoA4()}" alt="" onerror="this.style.display='none'"></div>`;
+}
+
+/** CSS slot logo bersama — disisipkan `${CSS_LOGO_A4}` di <style> tiap
+ *  dokumen (menggantikan aturan .logo lama). Img diberi latar putih supaya
+ *  logo berlatar transparan tetap menutup bulatan fallback; ukuran 84px
+ *  mendekati proporsi logo pada contoh Aronium pemilik (23-200-000036.pdf). */
+export const CSS_LOGO_A4 = `.logo { position: relative; width: 84px; height: 84px; flex: none; }
+  .logo-fb { position: absolute; inset: 0; border-radius: 50%; background: #4a90d9; color: #fff;
+             font-size: 50px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .logo-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; }`;
+
 export function htmlLaporan(d: DokLaporan, toko: Toko): string {
   const cls = (k: { kanan?: boolean; tengah?: boolean }) => (k.kanan ? ' class="r"' : k.tengah ? ' class="c"' : '');
   // Sel angka (ribuan + desimal Aronium) rata kanan otomatis: pemanggil
@@ -52,8 +81,9 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
   .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
   .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
   .alamat { margin-top: 4px; max-width: 60%; }
-  .logo { width: 66px; height: 66px; border-radius: 50%; background: #4a90d9; color: #fff;
-          font-size: 40px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  .baris-kop { display: flex; margin-top: 2px; }
+  .baris-kop .lbl { width: 72px; }
+  ${CSS_LOGO_A4}
   hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
   .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
   .meta .ttl { font-weight: 700; margin-bottom: 4px; }
@@ -79,8 +109,10 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
       <div class="judul">${esc(d.judul)}</div>
       <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
       ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
+      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
+      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
     </div>
-    <div class="logo" aria-hidden="true">R</div>
+    ${logoA4Html()}
   </div>
   <hr>
   <div class="meta">
@@ -248,8 +280,7 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
   .alamat { margin-top: 4px; max-width: 60%; }
   .baris-kop { display: flex; margin-top: 2px; }
   .baris-kop .lbl { width: 72px; }
-  .logo { width: 66px; height: 66px; border-radius: 50%; background: #4a90d9; color: #fff;
-          font-size: 40px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  ${CSS_LOGO_A4}
   hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
   .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
   .meta .ttl { font-weight: 700; margin-bottom: 4px; }
@@ -284,7 +315,7 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
       ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
       ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
     </div>
-    <div class="logo" aria-hidden="true">R</div>
+    ${logoA4Html()}
   </div>
   <hr>
   <div class="meta">
@@ -399,8 +430,9 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
   .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
   .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
   .alamat { margin-top: 4px; max-width: 60%; }
-  .logo { width: 66px; height: 66px; border-radius: 50%; background: #4a90d9; color: #fff;
-          font-size: 40px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  .baris-kop { display: flex; margin-top: 2px; }
+  .baris-kop .lbl { width: 72px; }
+  ${CSS_LOGO_A4}
   hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
   .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
   .meta .ttl { font-weight: 700; margin-bottom: 4px; }
@@ -424,8 +456,10 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
       <div class="judul">${fisik !== null ? 'REKAP TUTUP SHIFT' : 'REKAP SEMENTARA (X)'}</div>
       <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
       ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
+      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
+      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
     </div>
-    <div class="logo" aria-hidden="true">R</div>
+    ${logoA4Html()}
   </div>
   <hr>
   <div class="meta">

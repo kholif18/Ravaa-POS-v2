@@ -201,6 +201,15 @@ chk('ringkas A4 = tabel 3 baris (Total dihutang/dibayar/sisa) TANPA box',
   a4.isi);
 chk('striping ledger + ringkas aktif, ringkas pakai garis bawah-saja',
   a4.stripeLedger && a4.stripeRingkas && a4.garis, JSON.stringify(a4));
+// Slot logo kanan-atas dokumen A4 (revisi pemilik 19 Okt 2026: "logo itu
+// harusnya juga di terapkan pada a4 juga") — img tetap ada di HTML walau
+// tanpa logo (onerror menyembunyikan; fallback "R" tampil).
+const logoA4 = await popA4.evaluate(() => ({
+  src: document.querySelector('img.logo-img')?.getAttribute('src') ?? '',
+  fb: (document.querySelector('.logo-fb')?.textContent ?? '').trim(),
+}));
+chk('A4 hutang: slot logo kanan-atas (/api/settings/logo + fallback "R")',
+  logoA4.src.endsWith('/api/settings/logo') && logoA4.fb === 'R', JSON.stringify(logoA4));
 await popA4.close().catch(() => {});
 await p.click('.modal [data-x]'); await p.waitForTimeout(300);
 

@@ -107,6 +107,15 @@ await pasangToken(page);
   const pdfTeks = await popPdf.evaluate(() => document.title + ' ' + document.body.innerText.replace(/\s+/g, ' '));
   ok('PDF: judul + Kas seharusnya + Selisih absen (X)', /Rekap Shift #\d+/.test(pdfTeks)
     && pdfTeks.includes('Kas seharusnya') && !pdfTeks.includes('Selisih'), pdfTeks.slice(0, 160));
+  // Slot logo kanan-atas dokumen A4 (revisi pemilik 19 Okt 2026: "logo itu
+  // harusnya juga di terapkan pada a4 juga") — pola sama dengan dokumen A4
+  // lain; img tetap ada di HTML walau tanpa logo (onerror menyembunyikan).
+  const logoRek = await popPdf.evaluate(() => ({
+    src: document.querySelector('img.logo-img')?.getAttribute('src') ?? '',
+    fb: (document.querySelector('.logo-fb')?.textContent ?? '').trim(),
+  }));
+  ok('PDF rekap: slot logo kanan-atas (/api/settings/logo + fallback "R")',
+    logoRek.src.endsWith('/api/settings/logo') && logoRek.fb === 'R', JSON.stringify(logoRek));
   await popPdf.close().catch(() => {});
   await page.click('[data-rekap="thermal"]');
   await page.waitForTimeout(1200);
