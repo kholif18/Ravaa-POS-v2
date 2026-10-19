@@ -1,0 +1,255 @@
+// UI halaman Pengaturan (#/settings) — redesign 2026-10-20 ala POS populer:
+//   * nav seksi kiri yang menempel + menu chip di mobile,
+//   * pencarian pengaturan client-side (SEMUA kata harus cocok) + Ctrl+K,
+//   * chip ringkasan status (stok minus / kadaluarsa / cetak / backup),
+//   * penanda "belum disimpan" pada form toko + draft yang selamat dari
+//     repaint toggle lain,
+//   * putaran 2: pratinjau struk live (nama toko device + gambar tersimpan)
+//     dan tombol "Tes cetak" lewat print-agent (hormat "Jeda semua cetak").
+//
+// Suite ini READ-ONLY terhadap server settings: tidak pernah menekan
+// "Simpan toko" / saklar / Pulihkan, jadi tidak mengubah data pemilik
+// (satu-satunya tulis = preferensi localStorage device uji yang dipulihkan).
+//
+// Jalankan: node settings-ui-test.mjs   (butuh API :3001 + vite :5656 hidup)
+import './bantuan-uji.mjs';
+import { pasangToken } from './bantuan-uji.mjs';
+import { chromium } from 'playwright-core';
+
+const WEB = 'http://localhost:5656';
+const API = 'http://localhost:3001';
+
+let lolos = 0, gagal = 0;
+const ok = (n, cond, info = '') => {
+  if (cond) { lolos++; console.log(`  OK   ${n}`); }
+  else { gagal++; console.log(`  GAGAL ${n} ${info !== '' ? `| ${info}` : ''}`); }
+};
+
+const pengaturan = (await (await fetch(`${API}/api/settings`)).json()).data ?? {};
+
+const browser = await chromium.launch({
+  executablePath: '/usr/bin/google-chrome-stable',
+  headless: true,
+  args: ['--no-sandbox', '--disable-dev-shm-usage'],
+});
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await pasangToken(page);
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });
+
+  await page.goto(`${WEB}/#/settings`, { waitUntil: 'load' });
+  await page.waitForSelector('#set-kadaluarsa', { timeout: 10000 });
+  await page.waitForTimeout(300);
+
+  const urutanSeksi = ['transaksi', 'toko', 'perangkat', 'data'];
+  const seksiTersembunyi = () => page.evaluate((ids) =>
+    ids.map((id) => document.querySelector(`[data-set-sec="${id}"]`).hidden), urutanSeksi);
+
+  console.log('=== A. Struktur & navigasi seksi ===');
+  ok('menu pengaturan berisi 4 seksi', (await page.locator('[data-set-nav]').count()) === 4);
+  ok('empat seksi isi dirender', (await page.locator('[data-set-sec]').count()) === 4);
+  ok('kartu ditandai untuk pencarian (>= 6)',
+    (await page.locator('[data-set-card]').count()) >= 6,
+    `jumlah=${await page.locator('[data-set-card]').count()}`);
+
+  await page.locator('[data-set-nav="data"]').click();
+  await page.waitForTimeout(900);
+  const navData = await page.evaluate(() => {
+    const pg = document.querySelector('#page');
+    const sec = document.querySelector('#set-sec-data');
+    const btn = document.querySelector('[data-set-nav="data"]');
+    return {
+      st: pg.scrollTop,
+      top: sec.getBoundingClientRect().top - pg.getBoundingClientRect().top,
+      aria: btn.getAttribute('aria-current'),
+    };
+  });
+  ok('klik menu Backup menggulir ke seksi & menandainya aktif',
+    navData.st > 0 && navData.top < 120 && navData.aria === 'true', JSON.stringify(navData));
+
+  console.log('=== B. Pencarian pengaturan (client-side) ===');
+  await page.locator('#set-cari').fill('logo');
+  await page.waitForTimeout(150);
+  ok('cari "logo" menyisakan seksi Identitas toko saja',
+    JSON.stringify(await seksiTersembunyi()) === JSON.stringify([true, false, true, true]),
+    JSON.stringify(await seksiTersembunyi()));
+
+  await page.locator('#set-cari').fill('alamat email');
+  await page.waitForTimeout(150);
+  ok('cari multi-kata "alamat email" juga hanya menyisakan Identitas toko',
+    JSON.stringify(await seksiTersembunyi()) === JSON.stringify([true, false, true, true]),
+    JSON.stringify(await seksiTersembunyi()));
+
+  await page.locator('#set-cari').fill('zzzz');
+  await page.waitForTimeout(150);
+  ok('tanpa hasil: empty-state tampil & menu seksi ikut kosong',
+    (await page.locator('#set-kosong').isVisible())
+    && (await page.locator('[data-set-nav]:visible').count()) === 0);
+
+  await page.locator('#set-cari').press('Escape');
+  await page.waitForTimeout(150);
+  ok('Esc di kolom cari mengembalikan semua seksi',
+    (await page.locator('#set-cari').inputValue()) === ''
+    && (await seksiTersembunyi()).every((h) => !h));
+
+  await page.locator('#set-cari').fill('printer');
+  await page.waitForTimeout(150);
+  ok('filter kartu: hanya "Cetak struk" yang tampil di seksi Perangkat',
+    (await page.locator('[data-set-card]:visible').count()) === 1,
+    `tampil=${await page.locator('[data-set-card]:visible').count()}`);
+  ok('tombol bersihkan muncul saat ada kata kunci',
+    await page.locator('#set-cari-hapus').isVisible());
+  await page.locator('#set-cari-hapus').click();
+  await page.waitForTimeout(150);
+  ok('tombol bersihkan mengosongkan kata kunci & memulihkan seksi',
+    (await page.locator('#set-cari').inputValue()) === ''
+    && (await seksiTersembunyi()).every((h) => !h));
+
+  console.log('=== C. Chip ringkasan status ===');
+  ok('empat chip ringkasan dirender', (await page.locator('#set-ringkas [data-set-chip]').count()) === 4);
+  const nilaiMinus = await page.locator('[data-set-chip="minus"]').getAttribute('data-set-nilai');
+  const nilaiKadaluarsa = await page.locator('[data-set-chip="kadaluarsa"]').getAttribute('data-set-nilai');
+  ok('chip Stok minus & Kadaluarsa mencerminkan aturan server',
+    nilaiMinus === (pengaturan.allow_negative_stock === true ? 'Aktif' : 'Nonaktif')
+    && nilaiKadaluarsa === (pengaturan.tolak_jual_kadaluarsa === true ? 'Ditolak' : 'Boleh'),
+    `minus=${nilaiMinus} kadaluarsa=${nilaiKadaluarsa}`);
+
+  await page.locator('[data-set-chip="cetak"]').click();
+  await page.waitForTimeout(900);
+  const lompat = await page.evaluate(() => {
+    const pg = document.querySelector('#page');
+    const sec = document.querySelector('#set-sec-perangkat');
+    const btn = document.querySelector('[data-set-nav="perangkat"]');
+    return {
+      top: sec.getBoundingClientRect().top - pg.getBoundingClientRect().top,
+      aria: btn.getAttribute('aria-current'),
+    };
+  });
+  ok('chip Cetak melompat ke seksi Perangkat & menandai menunya',
+    lompat.top < 160 && lompat.aria === 'true', JSON.stringify(lompat));
+
+  console.log('=== D. Form toko: status simpan & draft ===');
+  const namaAwal = await page.locator('#set-toko-nama').inputValue();
+  ok('awalnya bersih: status tersimpan & tombol simpan mati',
+    (await page.locator('#set-toko-status').innerText()).includes('tersimpan')
+    && (await page.locator('#set-toko-simpan').isDisabled()));
+
+  await page.locator('#set-toko-nama').fill(`${namaAwal} UJI`);
+  ok('ketikan menyalakan "belum disimpan" & tombol simpan hidup',
+    (await page.locator('#set-toko-status').innerText()).includes('belum disimpan')
+    && !(await page.locator('#set-toko-simpan').isDisabled()));
+
+  const cetakAwal = await page.locator('#set-cetak').isChecked();
+  await page.locator('label[for="set-cetak"]').click();
+  await page.waitForTimeout(400);
+  ok('draft toko selamat dari repaint toggle cetak',
+    (await page.locator('#set-toko-nama').inputValue()).endsWith('UJI'));
+  await page.locator('label[for="set-cetak"]').click();
+  await page.waitForTimeout(400);
+  ok('preferensi cetak kembali ke kondisi semula',
+    (await page.locator('#set-cetak').isChecked()) === cetakAwal);
+
+  await page.locator('#set-toko-nama').fill(namaAwal);
+  ok('dikembalikan ke nilai server: status bersih lagi (tanpa menulis)',
+    (await page.locator('#set-toko-status').innerText()).includes('tersimpan')
+    && (await page.locator('#set-toko-simpan').isDisabled()));
+
+  console.log('=== F. Pratinjau struk (riset putaran 2) ===');
+  const namaDevice = await page.locator('#set-dev-toko').inputValue();
+  const teksPreview = await page.locator('#set-preview-struk').innerText();
+  ok('pratinjau struk dirender & memuat nama toko device',
+    (await page.locator('#set-preview-struk').isVisible())
+    && teksPreview.includes('Contoh barang')
+    && teksPreview.includes(namaDevice || 'RAVA POS'),
+    `teks=${teksPreview.replace(/\n/g, ' / ').slice(0, 90)}`);
+
+  await page.locator('#set-dev-toko').fill('TOKO PRATINJAU UJI');
+  await page.waitForTimeout(120);
+  ok('ketikan nama toko device langsung tampil di pratinjau (belum disimpan)',
+    (await page.locator('#set-preview-struk').innerText()).includes('TOKO PRATINJAU UJI'));
+  await page.locator('#set-dev-toko').fill(namaDevice);
+
+  const jmlGambarPreview = await page.locator('#set-preview-struk img').count();
+  ok('slot gambar pratinjau mengikuti logo tersimpan di server',
+    jmlGambarPreview === (pengaturan.store_logo ? 1 : 0),
+    `img=${jmlGambarPreview} store_logo=${JSON.stringify(pengaturan.store_logo)}`);
+
+  console.log('=== G. Tombol Tes cetak (riset putaran 2) ===');
+  ok('tombol Tes cetak dirender di kartu Cetak struk',
+    (await page.locator('#set-tes-cetak').count()) === 1);
+
+  const permintaanPrint = [];
+  await page.route('**/print', async (route) => {
+    try { permintaanPrint.push(route.request().postDataJSON()); } catch { permintaanPrint.push({}); }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"via":"uji"}' });
+  });
+  const pauseAwal = await page.evaluate(() => localStorage.getItem('ravaa.printpause'));
+
+  // G1: jeda aktif (bawaan) -> ditolak dengan toast, NOL request (kertas aman).
+  await page.evaluate(() => localStorage.setItem('ravaa.printpause', '1'));
+  await page.locator('#set-tes-cetak').click();
+  await page.waitForTimeout(300);
+  const teksToast = await page.evaluate(() =>
+    [...document.querySelectorAll('#toast-root .toast')].map((t) => t.textContent ?? '').join(' | '));
+  ok('jeda aktif: tes cetak ditolak & nol request ke print-agent',
+    permintaanPrint.length === 0 && teksToast.includes('Jeda'),
+    `req=${permintaanPrint.length} toast=${teksToast.slice(0, 80)}`);
+
+  // G2: jeda mati -> payload struk contoh benar-benar terkirim.
+  await page.evaluate(() => localStorage.setItem('ravaa.printpause', '0'));
+  await page.locator('#set-tes-cetak').click();
+  for (let i = 0; i < 25 && permintaanPrint.length === 0; i++) await page.waitForTimeout(100);
+  const isiPrint = permintaanPrint.length
+    ? Buffer.from(String(permintaanPrint[0].data_base64 ?? ''), 'base64').toString('latin1') : '';
+  ok('tes cetak mengirim struk contoh ke print-agent (memuat "TES CETAK")',
+    permintaanPrint.length === 1 && isiPrint.includes('TES CETAK'),
+    `req=${permintaanPrint.length} isi=${isiPrint.slice(0, 60)}`);
+
+  // Kembalikan preferensi jeda device ke kondisi awal.
+  await page.evaluate((v) => {
+    if (v === null) localStorage.removeItem('ravaa.printpause');
+    else localStorage.setItem('ravaa.printpause', v);
+  }, pauseAwal);
+
+  console.log('=== H. Pintasan Ctrl+K (riset putaran 2) ===');
+  ok('hint kbd "Ctrl K" tampil di kartu judul',
+    (await page.locator('kbd.kbd').count()) >= 1
+    && (await page.locator('kbd.kbd').first().innerText()).trim() === 'Ctrl K');
+
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await page.keyboard.press('Control+KeyK');
+  await page.waitForTimeout(120);
+  ok('Ctrl+K memfokuskan kolom pencarian pengaturan',
+    await page.evaluate(() => document.activeElement?.id === 'set-cari'));
+
+  console.log('=== I. Kontrak id lama + kebersihan console ===');
+  const ids = ['set-minus', 'set-kadaluarsa', 'set-toko-nama', 'set-toko-telepon',
+    'set-toko-alamat', 'set-toko-email', 'set-toko-simpan', 'set-logo-wadah',
+    'set-logo-file', 'set-logo-hapus', 'set-dev-toko', 'set-dev-theme',
+    'set-dev-simpan', 'set-pause', 'set-cetak', 'set-layout', 'set-backup'];
+  ok('semua id kontrak lama tetap ada',
+    await page.evaluate((list) => list.every((id) => !!document.getElementById(id)), ids));
+  ok('tanpa error console', errs.length === 0, errs.slice(0, 3).join(' | '));
+
+  console.log('=== J. Listener Ctrl+K dilepas saat keluar halaman ===');
+  await page.goto(`${WEB}/#/dashboard`, { waitUntil: 'load' });
+  await page.waitForSelector('#set-cari', { state: 'detached', timeout: 10000 });
+  const ctrlKDitahan = await page.evaluate(() => {
+    const ev = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  ok('Ctrl+K tidak lagi ditahan setelah keluar dari halaman Pengaturan', ctrlKDitahan === false);
+} catch (e) {
+  gagal++;
+  console.log('  CRASH', String(e.message || e).slice(0, 400));
+} finally {
+  await browser.close();
+}
+
+console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})  [settings-ui-test.mjs]`);
+if (gagal) process.exit(1);

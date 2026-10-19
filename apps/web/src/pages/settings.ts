@@ -18,9 +18,11 @@ import { getToko, setToko } from '../ui/user';
 import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPause, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
-import { waktu } from '../ui/waktu';
+import { hariIni, waktu } from '../ui/waktu';
 import { LEBAR_LOGO, resetLogoStrukCache } from '../logo-struk';
+import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 
+type Toko = { store_name: string; store_address: string; store_phone: string; store_email: string };
 type Settings = {
   allow_negative_stock: boolean; tolak_jual_kadaluarsa: boolean;
   store_name: string; store_address: string; store_phone: string; store_email: string;
@@ -28,17 +30,48 @@ type Settings = {
   store_logo: string;
 };
 type BarisBackup = { nama: string; ukuran: number; waktu: string };
+type SeksiId = 'transaksi' | 'toko' | 'perangkat' | 'data';
+
+/** Menu seksi (riset 2026-10-20): pola katalog Settings Loyverse + menu
+ *  laporan repo ini — nav kiri yang menempel, isi kanan. Empat seksi adalah
+ *  batas domain halaman ini; jangan pecah jadi menu yang tidak punya kartu. */
+const SEKSI: { id: SeksiId; label: string; judul: string; ikon: IconName; cakupan: string }[] = [
+  { id: 'transaksi', label: 'Aturan transaksi', judul: 'Aturan transaksi', ikon: 'stock', cakupan: 'Semua device' },
+  { id: 'toko', label: 'Identitas toko', judul: 'Identitas toko', ikon: 'receipt', cakupan: 'Semua device' },
+  { id: 'perangkat', label: 'Perangkat & cetak', judul: 'Perangkat ini', ikon: 'smartphone', cakupan: 'Browser ini' },
+  { id: 'data', label: 'Backup & pemulihan', judul: 'Backup & pemulihan', ikon: 'shieldCheck', cakupan: 'Server' },
+];
+
+const tokoKosong = (): Toko => ({ store_name: '', store_address: '', store_phone: '', store_email: '' });
+
+const KUNCI_TOKO: Record<string, keyof Toko> = {
+  'set-toko-nama': 'store_name',
+  'set-toko-alamat': 'store_address',
+  'set-toko-telepon': 'store_phone',
+  'set-toko-email': 'store_email',
+};
 
 const state = {
   loading: true, error: '', minus: false, kadaluarsa: false,
   backups: [] as BarisBackup[], backupErr: '', backupJalan: false,
-  toko: { store_name: '', store_address: '', store_phone: '', store_email: '' },
+  /** Draft form toko (bisa berbeda dari `tokoAsli` bila belum disimpan). */
+  toko: tokoKosong(),
+  /** Nilai terakhir yang tersimpan di server — dasar penanda "belum disimpan". */
+  tokoAsli: tokoKosong(),
   tokoJalan: false,
+  /** Tombol "Tes cetak" sedang mengirim (menahan klik ganda). */
+  tesJalan: false,
   /** Nama file logo struk thermal ('' = belum ada). */
   logo: '',
+  /** Seksi yang disorot menu kiri; diperbarui scroll-spy/nav. */
+  seksiAktif: 'transaksi' as SeksiId,
 };
 
 let host: HTMLElement | null = null;
+let ioSeksi: IntersectionObserver | null = null;
+/** Listener dokumen (Ctrl+K) milik kunjungan terakhir — di-abort saat mount
+ *  berikutnya supaya berpindah-pindah halaman tidak menumpuk listener. */
+let sinyal: AbortController | null = null;
 
 function errMsg(e: unknown): string {
   if (e instanceof HttpError) return e.message;
@@ -47,17 +80,34 @@ function errMsg(e: unknown): string {
 
 // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
 // halaman Stok & Produk.
+//
+// Kerangka 2026-10-20 (riset Settings POS populer): judul + pencarian +
+// ringkasan status di kartu atas; menu seksi + isi dirender `renderBody()`
+// supaya repaint data tidak menghapus fokus kolom cari (elemen ini STATIS).
 function renderPage(): string {
   return `
   <div class="space-y-3">
     <div class="card">
-      <div>
-        <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
-        <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-          Aturan <b>server</b> berlaku untuk semua device kasir; preferensi
-          <b>perangkat</b> (tema & cetak) hanya menempel di browser ini.
-        </p>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
+          <p class="mt-0.5 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
+            Aturan <b>server</b> berlaku untuk semua device kasir; preferensi
+            <b>perangkat</b> (tema & cetak) hanya menempel di browser ini.
+            Cari di bawah menyaring tampilan — tidak mengubah data
+            (<kbd class="kbd">Ctrl K</kbd> fokus ke kolom cari).
+          </p>
+        </div>
+        <div class="relative w-full sm:w-80">
+          <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
+          <input id="set-cari" class="input pl-9 pr-9" type="search" enterkeyhint="search"
+                 placeholder="Cari pengaturan… (cth: logo, printer, backup)"
+                 autocomplete="off" aria-label="Cari pengaturan" />
+          <button type="button" id="set-cari-hapus" class="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  title="Bersihkan pencarian" aria-label="Bersihkan pencarian">${icon('close')}</button>
+        </div>
       </div>
+      <div id="set-ringkas" class="mt-3 flex flex-wrap items-center gap-1.5" aria-live="polite"></div>
     </div>
     <div id="set-body"></div>
   </div>`;
@@ -90,52 +140,276 @@ function renderBody(): string {
   // Sengaja TANPA badge status di sebelah judul: label saklarnya sendiri sudah
   // membaca "Aktif"/"Nonaktif", jadi badge hanya mengulang teks yang sama.
   // Status = posisi saklar; keterangan = paragraf di atas footer.
-  // Kartu dikelompokkan per CAKUPAN lewat kepalaSeksi: "berlaku semua device"
-  // (server) vs "tersimpan di browser ini" — konsep paling penting halaman ini.
+  // Kartu dikelompokkan per CAKUPAN lewat kepalaSeksi: "Semua device" (server)
+  // vs "Browser ini" — konsep paling penting halaman ini.
   return `
-  <div class="space-y-4">
-    <section class="space-y-2">
-      ${kepalaSeksi('Aturan transaksi', 'berlaku semua device')}
-      <div class="grid items-stretch gap-3 lg:grid-cols-2">
-        ${kartuSaklar({
-          input: 'set-minus', judul: 'Stok boleh minus', isi: isiMinus,
-          aktif: state.minus, label: state.minus ? 'Aktif' : 'Nonaktif',
-          ikon: 'stock', tile: 'bg-primary-soft text-primary dark:bg-primary/15',
-        })}
-        ${kartuSaklar({
-          input: 'set-kadaluarsa', judul: 'Tolak jual kadaluarsa', isi: isiKadaluarsa,
-          aktif: state.kadaluarsa, label: state.kadaluarsa ? 'Aktif' : 'Nonaktif',
-          ikon: 'calendar', tile: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
-        })}
+  <div class="grid items-start gap-3 lg:grid-cols-[220px_1fr]">
+    ${navPengaturan()}
+    <div id="set-isi" class="min-w-0 space-y-4">
+      <section id="set-sec-transaksi" data-set-sec="transaksi" class="scroll-mt-2 space-y-2" aria-label="Aturan transaksi">
+        ${kepalaSeksi('transaksi')}
+        <div class="grid items-stretch gap-3 lg:grid-cols-2">
+          ${kartuSaklar({
+            input: 'set-minus', judul: 'Stok boleh minus', isi: isiMinus,
+            aktif: state.minus, label: state.minus ? 'Aktif' : 'Nonaktif',
+            ikon: 'stock', tile: 'bg-primary-soft text-primary dark:bg-primary/15',
+            cari: 'stok minus negatif habis penjualan aturan server',
+          })}
+          ${kartuSaklar({
+            input: 'set-kadaluarsa', judul: 'Tolak jual kadaluarsa', isi: isiKadaluarsa,
+            aktif: state.kadaluarsa, label: state.kadaluarsa ? 'Aktif' : 'Nonaktif',
+            ikon: 'calendar', tile: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
+            cari: 'kadaluarsa kedaluwarsa expiry tanggal barang basi aturan server',
+          })}
+        </div>
+      </section>
+      <section id="set-sec-toko" data-set-sec="toko" class="scroll-mt-2 space-y-2" aria-label="Identitas toko">
+        ${kepalaSeksi('toko')}
+        ${kartuToko()}
+      </section>
+      <section id="set-sec-perangkat" data-set-sec="perangkat" class="scroll-mt-2 space-y-2" aria-label="Perangkat dan cetak">
+        ${kepalaSeksi('perangkat')}
+        <div class="grid items-stretch gap-3 xl:grid-cols-2">
+          ${kartuPerangkat()}
+          ${kartuCetak()}
+          ${kartuPratinjau()}
+        </div>
+      </section>
+      <section id="set-sec-data" data-set-sec="data" class="scroll-mt-2 space-y-2" aria-label="Backup dan pemulihan">
+        ${kepalaSeksi('data')}
+        ${kartuBackup()}
+      </section>
+      <div id="set-kosong" class="card" hidden>
+        <div class="empty">
+          ${icon('search')}
+          <span>Tidak ada pengaturan yang cocok dengan pencarian.</span>
+          <button type="button" id="set-cari-bersih" class="btn btn-ghost btn-sm">Bersihkan pencarian</button>
+        </div>
       </div>
-    </section>
-    <section class="space-y-2">
-      ${kepalaSeksi('Identitas toko', 'berlaku semua device')}
-      ${kartuToko()}
-    </section>
-    <section class="space-y-2">
-      ${kepalaSeksi('Perangkat ini', 'tersimpan di browser ini')}
-      <div class="grid items-stretch gap-3 xl:grid-cols-2">
-        ${kartuPerangkat()}
-        ${kartuCetak()}
-      </div>
-    </section>
-    <section class="space-y-2">
-      ${kepalaSeksi('Backup & pemulihan', 'di server')}
-      ${kartuBackup()}
-    </section>
+    </div>
   </div>`;
 }
 
-// Kepala kelompok kartu: label kecil uppercase + garis + keterangan cakupan
-// di kanan. Quiet (11px abu) supaya tidak bersaing dengan judul kartunya.
-function kepalaSeksi(judul: string, cakupan: string): string {
+// Menu seksi kiri (desktop menempel) / chip 2 kolom (mobile). Pola visual
+// sama dengan menu Laporan; tombol = navigasi dalam halaman, bukan hash —
+// hash milik router (#/settings), jadi jangan diganti anchor href.
+function navPengaturan(): string {
+  const tombol = SEKSI.map((s) => {
+    const aktif = state.seksiAktif === s.id;
+    return `<button type="button" data-set-nav="${s.id}" class="${kelasNav(aktif)}"${aktif ? ' aria-current="true"' : ''}>
+      <span class="shrink-0 [&>svg]:size-4">${icon(s.ikon)}</span><span class="truncate">${s.label}</span>
+    </button>`;
+  }).join('');
+  return `
+  <aside class="min-w-0" aria-label="Menu pengaturan">
+    <div class="card lg:sticky lg:top-0">
+      <p class="form-sec hidden lg:block">Menu pengaturan</p>
+      <div id="set-nav" class="grid grid-cols-2 gap-1 lg:mt-2 lg:block lg:gap-0">${tombol}</div>
+      <div class="mt-3 hidden border-t border-gray-100 pt-3 dark:border-gray-700/60 lg:block">
+        <p class="form-sec">Cakupan</p>
+        <p class="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+          <span class="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>Server — semua device
+        </p>
+        <p class="mt-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+          <span class="size-2 shrink-0 rounded-full bg-emerald-500" aria-hidden="true"></span>Perangkat — browser ini
+        </p>
+      </div>
+    </div>
+  </aside>`;
+}
+
+const kelasNav = (aktif: boolean): string =>
+  `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+    aktif
+      ? 'bg-primary-soft font-semibold text-primary dark:bg-primary/15 dark:text-primary'
+      : 'font-medium text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800'
+  }`;
+
+// Kepala seksi: ikon + judul + garis + chip cakupan. Judul sengaja `<p>`
+// (bukan h3) supaya asersi test `#set-body h3` tetap hanya berisi judul KARTU
+// (kontrak halaman ini sejak 2026-10-16).
+function kepalaSeksi(id: SeksiId): string {
+  const s = SEKSI.find((x) => x.id === id)!;
   return `
   <div class="flex items-center gap-2 px-0.5">
-    <p class="form-sec">${judul}</p>
+    <span class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon(s.ikon)}</span>
+    <p class="text-sm font-semibold text-gray-900 dark:text-white">${s.judul}</p>
     <span class="h-px flex-1 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></span>
-    <span class="shrink-0 text-xs text-gray-400 dark:text-gray-500">${cakupan}</span>
+    <span class="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">${s.cakupan}</span>
   </div>`;
+}
+
+/* ---------- ringkasan status (chip di kartu atas) ---------- */
+
+type WarnaChip = 'ok' | 'warn' | 'bad' | 'netral';
+
+function chipRingkas(
+  kunci: 'minus' | 'kadaluarsa' | 'cetak' | 'backup',
+  target: SeksiId, label: string, nilai: string, warna: WarnaChip, judul: string,
+): string {
+  const titik = warna === 'ok' ? 'bg-emerald-500'
+    : warna === 'warn' ? 'bg-amber-500'
+      : warna === 'bad' ? 'bg-red-500' : 'bg-gray-400';
+  return `<button type="button" class="chip" data-set-chip="${kunci}" data-set-lompat="${target}" data-set-nilai="${esc(nilai)}" title="${esc(judul)}">
+    <span class="size-2 shrink-0 rounded-full ${titik}" aria-hidden="true"></span>
+    <span class="text-gray-500 dark:text-gray-400">${label}</span>
+    <b class="font-semibold text-gray-700 dark:text-gray-200">${esc(nilai)}</b>
+  </button>`;
+}
+
+function ringkasBackup(): { nilai: string; warna: WarnaChip; judul: string } {
+  const b = state.backups[0];
+  if (!b) {
+    if (state.backupErr) return { nilai: 'Gagal dibaca', warna: 'bad', judul: state.backupErr };
+    return { nilai: 'Belum ada', warna: 'netral', judul: 'Belum ada file backup — buka bagian Backup & pemulihan' };
+  }
+  const tgl = String(b.waktu ?? '').slice(0, 10);
+  const nilai = tgl === hariIni() ? 'hari ini' : waktu(b.waktu).split(' · ')[0];
+  return {
+    nilai,
+    warna: tgl === hariIni() ? 'ok' : 'warn',
+    judul: `Backup terakhir: ${waktu(b.waktu)} (${b.nama})`,
+  };
+}
+
+function ringkasHtml(): string {
+  if (state.loading) return `<span class="chip text-gray-400 dark:text-gray-500">Memuat status…</span>`;
+  if (state.error) return `<span class="chip"><span class="size-2 rounded-full bg-red-500"></span>Status tidak terbaca</span>`;
+  const b = ringkasBackup();
+  const jeda = getPrintPause();
+  const layout = getStrukLayout() === 'a4' ? 'A4' : 'Thermal';
+  return [
+    chipRingkas('minus', 'transaksi', 'Stok minus', state.minus ? 'Aktif' : 'Nonaktif',
+      state.minus ? 'warn' : 'netral',
+      state.minus ? 'Penjualan boleh melewati stok (stok bisa minus)' : 'Penjualan ditolak bila stok kurang'),
+    chipRingkas('kadaluarsa', 'transaksi', 'Kadaluarsa', state.kadaluarsa ? 'Ditolak' : 'Boleh',
+      state.kadaluarsa ? 'ok' : 'warn',
+      state.kadaluarsa ? 'Barang lewat tanggal kadaluarsa ditolak server' : 'Barang lewat tanggal kadaluarsa masih boleh dijual'),
+    chipRingkas('cetak', 'perangkat', 'Cetak', jeda ? 'Dijeda' : layout,
+      jeda ? 'warn' : 'netral',
+      jeda ? 'Semua kirim ke printer ditahan' : `Layout struk: ${layout}`),
+    chipRingkas('backup', 'data', 'Backup', b.nilai, b.warna, b.judul),
+  ].join('');
+}
+
+function paintRingkas(): void {
+  const el = host?.querySelector('#set-ringkas');
+  if (!el) return;
+  el.innerHTML = ringkasHtml();
+  el.querySelectorAll<HTMLElement>('[data-set-lompat]').forEach((b) =>
+    b.addEventListener('click', () => lompatSeksi(b.dataset.setLompat as SeksiId)));
+}
+
+/** Pindah ke seksi: bersihkan filter dulu supaya target pasti tampil. */
+function lompatSeksi(id: SeksiId): void {
+  if ((host?.querySelector<HTMLInputElement>('#set-cari')?.value ?? '').trim() !== '') bersihkanCari(false);
+  setSeksiAktif(id);
+  host?.querySelector<HTMLElement>(`#set-sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setSeksiAktif(id: SeksiId): void {
+  if (state.seksiAktif === id) return;
+  state.seksiAktif = id;
+  paintNavAktif();
+}
+
+function paintNavAktif(): void {
+  host?.querySelectorAll<HTMLElement>('[data-set-nav]').forEach((b) => {
+    const aktif = b.dataset.setNav === state.seksiAktif;
+    b.className = kelasNav(aktif);
+    if (aktif) b.setAttribute('aria-current', 'true');
+    else b.removeAttribute('aria-current');
+  });
+}
+
+/* ---------- pencarian pengaturan (client-side, tanpa API) ---------- */
+
+/** Saring kartu berdasarkan SEMUA kata kunci (pola search produk): kata boleh
+ *  ada di atribut `data-cari` maupun teks kartu, tidak harus berurutan. */
+function terapkanCari(): void {
+  const q = (host?.querySelector<HTMLInputElement>('#set-cari')?.value ?? '').trim();
+  const kata = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const body = host?.querySelector('#set-body');
+  if (!body) return;
+  let total = 0;
+  body.querySelectorAll<HTMLElement>('[data-set-sec]').forEach((sec) => {
+    let tampil = 0;
+    sec.querySelectorAll<HTMLElement>('[data-set-card]').forEach((card) => {
+      const teks = `${card.dataset.cari ?? ''} ${card.textContent ?? ''}`.toLowerCase();
+      const cocok = kata.every((k) => teks.includes(k));
+      // style.display, BUKAN atribut hidden — sebagian kartu memakai `flex`
+      // (kartuSaklar/kartuPerangkat/kartuCetak) sehingga UA rule
+      // `[hidden]{display:none}` kalah oleh author utility `.flex`.
+      card.style.display = cocok ? '' : 'none';
+      if (cocok) {
+        tampil++;
+        total++;
+      }
+    });
+    sec.hidden = tampil === 0;
+    const nav = body.querySelector<HTMLElement>(`[data-set-nav="${sec.dataset.setSec}"]`);
+    // style.display, BUKAN atribut hidden: tombol nav memakai `flex` (author
+    // display) yang mengalahkan UA rule `[hidden]{display:none}` — pelajaran
+    // yang sama dengan `.pm-bayarlayer[hidden]` di pos-mobile.css.
+    if (nav) nav.style.display = tampil === 0 ? 'none' : '';
+  });
+  const kosong = body.querySelector<HTMLElement>('#set-kosong');
+  if (kosong) kosong.hidden = !(kata.length > 0 && total === 0);
+  const hapus = host?.querySelector<HTMLElement>('#set-cari-hapus');
+  if (hapus) hapus.classList.toggle('hidden', q === '');
+  // Seksi aktif tidak boleh tersembunyi oleh filter.
+  const aktif = body.querySelector<HTMLElement>(`[data-set-sec="${state.seksiAktif}"]`);
+  if (aktif?.hidden) {
+    const pertama = body.querySelector<HTMLElement>('[data-set-sec]:not([hidden])');
+    const id = pertama?.dataset.setSec as SeksiId | undefined;
+    if (id) setSeksiAktif(id);
+  }
+}
+
+function bersihkanCari(fokus = true): void {
+  const input = host?.querySelector<HTMLInputElement>('#set-cari');
+  if (input) {
+    input.value = '';
+    if (fokus) input.focus();
+  }
+  terapkanCari();
+}
+
+/** Pemasangan sekali per mount: kolom cari ada di kartu header STATIS sehingga
+ *  repaint `#set-body` tidak menghapus fokus ketikan. */
+function bindCari(): void {
+  const input = host?.querySelector<HTMLInputElement>('#set-cari');
+  input?.addEventListener('input', terapkanCari);
+  input?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    bersihkanCari();
+  });
+  host?.querySelector('#set-cari-hapus')?.addEventListener('click', () => bersihkanCari());
+}
+
+/** Sorot menu sesuai posisi gulir (IntersectionObserver, root = #page yang
+ *  memang kontainer scroll-nya). Diputus di awal paint supaya node lama tidak
+ *  menahan callback. */
+function pantauSeksi(): void {
+  ioSeksi?.disconnect();
+  ioSeksi = null;
+  if (!host || typeof IntersectionObserver === 'undefined') return;
+  const secs = [...host.querySelectorAll<HTMLElement>('[data-set-sec]')];
+  if (!secs.length) return;
+  ioSeksi = new IntersectionObserver((entries) => {
+    if (!host?.isConnected) {
+      ioSeksi?.disconnect();
+      return;
+    }
+    const tampak = entries
+      .filter((e) => e.isIntersecting)
+      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+    if (!tampak) return;
+    const id = (tampak.target as HTMLElement).dataset.setSec as SeksiId | undefined;
+    if (id) setSeksiAktif(id);
+  }, { root: host, rootMargin: '0px 0px -55% 0px', threshold: 0 });
+  secs.forEach((s) => ioSeksi!.observe(s));
 }
 
 // Kartu saklar aturan transaksi: ikon + judul + deskripsi, lalu footer
@@ -143,10 +417,10 @@ function kepalaSeksi(judul: string, cakupan: string): string {
 // pengaturan yang seragam dengan kartu-kartu di bawahnya.
 function kartuSaklar(opt: {
   input: string; judul: string; isi: string; aktif: boolean; label: string;
-  ikon: IconName; tile: string;
+  ikon: IconName; tile: string; cari: string;
 }): string {
   return `
-  <div class="card flex flex-col">
+  <div class="card flex flex-col" data-set-card data-cari="${esc(opt.cari)}">
     <div class="flex flex-1 items-start gap-3">
       <span class="flex size-9 shrink-0 items-center justify-center rounded-xl ${opt.tile} [&>svg]:size-4">${icon(opt.ikon)}</span>
       <div class="min-w-0 flex-1">
@@ -167,7 +441,7 @@ function kartuPerangkat(): string {
   const toko = getToko();
   const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   return `
-    <div class="card flex flex-col">
+    <div class="card flex flex-col" data-set-card data-cari="tampilan perangkat tema terang gelap nama toko kepala struk thermal browser lokal">
       <div class="flex items-start gap-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('smartphone')}</span>
         <div class="min-w-0 flex-1">
@@ -221,6 +495,8 @@ function tampilLogo(): void {
   host?.querySelector('#set-logo-hapus')?.classList.toggle('hidden', !state.logo);
   const lbl = host?.querySelector('#set-logo-label');
   if (lbl) lbl.textContent = state.logo ? 'Ganti logo' : 'Unggah logo';
+  // Pratinjau struk ikut memperlihatkan gambar terbaru (tanpa repaint form).
+  paintPratinjauStruk();
 }
 
 /** Baca berkas logo → PNG skala maksimal LEBAR_LOGO (384px, lebar printer
@@ -252,27 +528,52 @@ async function kecilkanLogo(file: File): Promise<string> {
   }
 }
 
+/** Apakah draft form toko berbeda dari nilai terakhir yang tersimpan? */
+function tokoKotor(): boolean {
+  const t = state.toko;
+  const a = state.tokoAsli;
+  return (t.store_name ?? '').trim() !== a.store_name
+    || (t.store_address ?? '').trim() !== a.store_address
+    || (t.store_phone ?? '').trim() !== a.store_phone
+    || (t.store_email ?? '').trim() !== a.store_email;
+}
+
+/** Perbarui penanda & tombol simpan TANPA repaint — fokus ketikan tetap. */
+function perbaruiStatusToko(): void {
+  const kotor = tokoKotor();
+  const status = host?.querySelector<HTMLElement>('#set-toko-status');
+  if (status) {
+    status.textContent = kotor ? 'Perubahan belum disimpan' : 'Semua perubahan tersimpan';
+    status.className = `text-xs ${kotor ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}`;
+  }
+  const btn = host?.querySelector<HTMLButtonElement>('#set-toko-simpan');
+  if (btn) btn.disabled = state.tokoJalan || !kotor;
+}
+
 function kartuToko(): string {
   const t = state.toko;
+  const kotor = tokoKotor();
   const f = (id: string, label: string, nilai: string, opsional?: boolean, lebar?: boolean) => `
     <div class="field-sm${lebar ? ' sm:col-span-2' : ''}">
       <label class="label" for="${id}">${label}${opsional ? ' <span class="font-normal">(opsional)</span>' : ''}</label>
       <input class="input" id="${id}" value="${esc(nilai)}" maxlength="300" autocomplete="off">
     </div>`;
   return `
-    <div class="card">
+    <div class="card" data-set-card data-cari="toko identitas nama alamat phone telepon email logo kop invoice struk a4">
       <div class="flex items-start gap-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('receipt')}</span>
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan toko</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Kop <b>INVOICE A4</b> (cetak gaya Aronium) memakai empat isian ini,
-            dan <b>logo</b> di bawah tercetak di awal <b>struk thermal</b>.
-            Disimpan di <b>server</b>, jadi seluruh device mencetak yang sama.
+            Kop <b>INVOICE A4</b> (cetak gaya Aronium) memakai empat isian ini.
+            <b>Logo</b> di bawah tampil di awal <b>struk thermal</b> dan di sudut
+            kanan-atas <b>dokumen A4</b> (invoice, laporan, rekap shift, nota PO,
+            rincian hutang). Disimpan di <b>server</b>, jadi seluruh device
+            mencetak yang sama.
           </p>
         </div>
       </div>
-      <div class="mt-3 grid gap-3 sm:grid-cols-2">
+      <div id="set-toko-form" class="mt-3 grid gap-3 sm:grid-cols-2">
         ${f('set-toko-nama', 'Nama toko', t.store_name)}
         ${f('set-toko-telepon', 'Phone', t.store_phone, true)}
         ${f('set-toko-alamat', 'Alamat', t.store_address, true, true)}
@@ -283,9 +584,10 @@ function kartuToko(): string {
           ${logoHtml()}
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-sm font-medium text-gray-900 dark:text-white">Logo struk thermal</p>
+          <p class="text-sm font-medium text-gray-900 dark:text-white">Logo toko</p>
           <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            Tercetak hitam-putih di awal struk (lebar maks ${LEBAR_LOGO}px — gambar diskalakan otomatis).
+            Struk thermal: raster hitam-putih, lebar maks ${LEBAR_LOGO}px.
+            Dokumen A4: slot kanan-atas (gambar diskalakan otomatis).
           </p>
         </div>
         <div class="flex shrink-0 flex-wrap gap-2">
@@ -296,8 +598,11 @@ function kartuToko(): string {
           <button type="button" id="set-logo-hapus" class="btn btn-ghost btn-sm !text-red-600 dark:!text-red-400 ${state.logo ? '' : 'hidden'}">${icon('trash')}<span>Hapus</span></button>
         </div>
       </div>
-      <div class="mt-3 flex justify-end">
-        <button type="button" id="set-toko-simpan" class="btn btn-primary" ${state.tokoJalan ? 'disabled' : ''}>
+      <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <span id="set-toko-status" aria-live="polite" class="text-xs ${kotor ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}">
+          ${kotor ? 'Perubahan belum disimpan' : 'Semua perubahan tersimpan'}
+        </span>
+        <button type="button" id="set-toko-simpan" class="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60" ${state.tokoJalan || !kotor ? 'disabled' : ''}>
           ${icon('check')}<span>${state.tokoJalan ? 'Menyimpan…' : 'Simpan toko'}</span>
         </button>
       </div>
@@ -330,7 +635,7 @@ function kartuCetak(): string {
         ditahan; nol kertas terbuang. Invoice A4 lewat browser tetap bisa dicetak.`
     : `Nonaktif — struk, label harga, dan kick laci mengirim ke printer seperti biasa.`;
   return `
-    <div class="card flex flex-col">
+    <div class="card flex flex-col" data-set-card data-cari="cetak printer struk thermal 58mm a4 epson l3110 jeda otomatis layout kertas browser perangkat">
       <div class="flex items-start gap-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 [&>svg]:size-4">${icon('print')}</span>
         <div class="min-w-0 flex-1">
@@ -367,7 +672,102 @@ function kartuCetak(): string {
           </select>
         </div>
       </div>
+      <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-700/60">
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          Kirim struk contoh lewat print-agent device ini — cara tercepat
+          memastikan printer & kertas siap.
+        </p>
+        <button type="button" id="set-tes-cetak" class="btn btn-outline disabled:cursor-not-allowed disabled:opacity-60" ${state.tesJalan ? 'disabled' : ''}>
+          ${icon('print')}<span>${state.tesJalan ? 'Mengirim…' : 'Tes cetak'}</span>
+        </button>
+      </div>
     </div>`;
+}
+
+// Pratinjau struk (riset 2026-10-20 — pola "receipt visual editor" Shopify POS):
+// contoh struk thermal yang MENGIKUTI nama toko device + gambar tersimpan.
+// Sengaja contoh statis (bukan nota nyata): memperlihatkan pengaruh pengaturan,
+// bukan membuka data penjualan. `paintPratinjauStruk()` memperbaruinya live
+// saat nama toko device diketik / gambar diunggah — tanpa menyentuh fokus input.
+function namaStrukDevice(): string {
+  const input = host?.querySelector<HTMLInputElement>('#set-dev-toko');
+  return ((input ? input.value : getToko()).trim()) || 'RAVA POS';
+}
+
+function isiPratinjauStruk(): string {
+  const gambar = state.logo
+    ? `<img src="/api/settings/logo?${esc(state.logo)}" alt="" class="mx-auto mb-1.5 max-h-12 max-w-[220px] object-contain" />`
+    : '';
+  const garis = '<div class="my-1.5 border-t border-dashed border-gray-300"></div>';
+  const baris = (kiri: string, kanan: string, tebal = false) => `
+      <div class="flex justify-between gap-2 ${tebal ? 'font-bold' : ''}">
+        <span class="truncate">${esc(kiri)}</span><span class="shrink-0">${esc(kanan)}</span>
+      </div>`;
+  return `
+      ${gambar}
+      <div class="text-center font-bold">${esc(namaStrukDevice())}</div>
+      <div class="text-center text-gray-400">Contoh tampilan</div>
+      ${garis}
+      ${baris('1 x Contoh barang', rp(10000))}
+      ${baris('2 x Contoh kedua', rp(2500))}
+      ${garis}
+      ${baris('TOTAL', rp(15000), true)}
+      ${baris('Tunai', rp(20000))}
+      ${baris('Kembali', rp(5000))}
+      ${garis}
+      <div class="text-center text-gray-400">Terima kasih</div>`;
+}
+
+function kartuPratinjau(): string {
+  const layout = getStrukLayout() === 'a4' ? 'topup/tarik: A4 64 kolom' : 'topup/tarik: thermal 32 kolom';
+  return `
+    <div class="card flex flex-col xl:col-span-2" data-set-card data-cari="pratinjau preview contoh struk thermal kertas tampilan kepala nama gambar">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-1 items-start gap-3">
+          <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('receipt')}</span>
+          <div class="min-w-0">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Pratinjau struk</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Contoh tampilan struk <b>thermal 58mm</b> device ini — nama toko
+              dan gambar tersimpan langsung terlihat di kertas contoh. Isi
+              transaksi nyata tetap berasal dari nota, bukan pratinjau ini.
+            </p>
+          </div>
+        </div>
+        <span class="chip shrink-0">${layout}</span>
+      </div>
+      <div class="mt-3 flex flex-1 justify-center">
+        <div id="set-preview-struk" class="w-full max-w-[320px] self-start rounded-lg border border-gray-200 bg-white px-4 py-3 font-mono text-xs leading-relaxed text-gray-800 shadow-sm">
+          ${isiPratinjauStruk()}
+        </div>
+      </div>
+    </div>`;
+}
+
+/** Repaint HANYA isi kertas pratinjau — elemen lain & fokus ketikan aman. */
+function paintPratinjauStruk(): void {
+  const el = host?.querySelector('#set-preview-struk');
+  if (el) el.innerHTML = isiPratinjauStruk();
+}
+
+/** Struk contoh tombol "Tes cetak" — dibangun builder yang SAMA dengan struk
+ *  penjualan (escpos), jadi yang diuji = jalur cetak sebenarnya. */
+function strukContoh(nama: string): Struk {
+  return {
+    judul: nama.trim() || 'RAVA POS',
+    subjudul: 'TES CETAK',
+    meta: [],
+    items: [
+      { name: 'Contoh barang', qty: 1, price: 10000 },
+      { name: 'Contoh kedua', qty: 2, price: 2500 },
+    ],
+    baris: [
+      { kiri: 'TOTAL', kanan: rp(15000), tebal: true },
+      { kiri: 'Tunai', kanan: rp(20000) },
+      { kiri: 'Kembali', kanan: rp(5000) },
+    ],
+    kaki: ['Printer & kertas siap dipakai.'],
+  };
 }
 
 // Format ukuran file: 12 KB / 3,4 MB (id-ID).
@@ -408,7 +808,7 @@ function kartuBackup(): string {
   const err = state.backupErr
     ? `<p class="mt-2 text-xs text-red-600 dark:text-red-400">${esc(state.backupErr)}</p>` : '';
   return `
-    <div class="card">
+    <div class="card" data-set-card data-cari="backup cadangan pulihkan restore unduh data database salinan otomatis harian">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="flex min-w-0 flex-1 items-start gap-3">
           <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('shieldCheck')}</span>
@@ -443,11 +843,32 @@ function esc(s: unknown): string {
 function paint(): void {
   const body = host?.querySelector('#set-body');
   if (!body) return;
+  ioSeksi?.disconnect();
+  ioSeksi = null;
   body.innerHTML = renderBody();
   bind();
+  terapkanCari();
+  pantauSeksi();
+  paintRingkas();
 }
 
 function bind(): void {
+  // Navigasi seksi (tombol, bukan anchor — hash milik router).
+  host?.querySelectorAll<HTMLElement>('[data-set-nav]').forEach((b) =>
+    b.addEventListener('click', () => lompatSeksi(b.dataset.setNav as SeksiId)));
+  host?.querySelector('#set-cari-bersih')?.addEventListener('click', () => bersihkanCari());
+
+  // Draft form toko: setiap ketikan disimpan di state supaya repaint dari
+  // toggle lain (mis. Jeda cetak) TIDAK membuang isian yang belum disimpan.
+  const formToko = host?.querySelector<HTMLElement>('#set-toko-form');
+  formToko?.addEventListener('input', (ev) => {
+    const el = ev.target as HTMLInputElement;
+    const kunci = KUNCI_TOKO[el.id];
+    if (!kunci) return;
+    state.toko[kunci] = el.value;
+    perbaruiStatusToko();
+  });
+
   // Kedua saklar pola sama: konfirmasi -> POST HANYA kunci yang diubah
   // (endpoint menerima update parsial) -> snapshot state -> paint ulang.
   const saklar: {
@@ -511,12 +932,16 @@ function bind(): void {
   host?.querySelector('#set-toko-simpan')?.addEventListener('click', async () => {
     if (state.tokoJalan) return;
     const val = (id: string) => (host?.querySelector<HTMLInputElement>(id)?.value ?? '').trim();
-    const payload = {
+    const payload: Toko = {
       store_name: val('#set-toko-nama'),
       store_address: val('#set-toko-alamat'),
       store_phone: val('#set-toko-telepon'),
       store_email: val('#set-toko-email'),
     };
+    // Simpan draft ke state SEBELUM paint: nilai yang dikirim = nilai yang
+    // tampil (sudah di-trim), dan status "belum disimpan" tetap benar bila POST
+    // gagal (draft tidak boleh hilang karena kegagalan jaringan).
+    state.toko = { ...payload };
     state.tokoJalan = true;
     paint();
     try {
@@ -527,6 +952,7 @@ function bind(): void {
         store_phone: r.data.store_phone ?? '',
         store_email: r.data.store_email ?? '',
       };
+      state.tokoAsli = { ...state.toko };
       toast('Pengaturan toko disimpan — kop invoice A4 memakai nilai ini', 'success');
     } catch (e) {
       toast(`Gagal simpan pengaturan toko: ${errMsg(e)}`, 'error');
@@ -567,6 +993,32 @@ function bind(): void {
       toast('Logo dihapus — struk thermal kembali tanpa logo', 'success');
     } catch (e) {
       toast(`Gagal hapus logo: ${errMsg(e)}`, 'error');
+    }
+  });
+
+  // Pratinjau struk: mengikuti ketikan nama toko device secara LIVE (tanpa
+  // menunggu Simpan) — menjawab "apa efek isian ini ke kertas struk".
+  host?.querySelector<HTMLInputElement>('#set-dev-toko')?.addEventListener('input', () => paintPratinjauStruk());
+
+  // Tombol "Tes cetak" (riset 2026-10-20 — pola printer setup Shopify/Square):
+  // kirim struk CONTOH lewat print-agent yang sama dengan transaksi asli.
+  // Menghormati "Jeda semua cetak" — tolak dengan toast, nol kertas terbuang.
+  host?.querySelector('#set-tes-cetak')?.addEventListener('click', async () => {
+    if (state.tesJalan) return;
+    if (getPrintPause()) {
+      toast('Tes cetak ditolak: "Jeda semua cetak" sedang aktif — nyalakan dulu di kartu ini', 'warning');
+      return;
+    }
+    state.tesJalan = true;
+    paint();
+    try {
+      await kirimPrint(await strukUntukTercetak(strukContoh(getToko()), getStrukLayout()));
+      toast('Tes cetak terkirim ke print-agent device ini', 'success');
+    } catch (e) {
+      toast(`Gagal tes cetak: ${errMsg(e)}`, 'error');
+    } finally {
+      state.tesJalan = false;
+      if (host?.isConnected) paint();
     }
   });
 
@@ -704,6 +1156,8 @@ async function load(): Promise<void> {
       store_phone: s.value.data?.store_phone ?? '',
       store_email: s.value.data?.store_email ?? '',
     };
+    // Snapshot server = pembanding penanda "belum disimpan".
+    state.tokoAsli = { ...state.toko };
     state.logo = s.value.data?.store_logo ?? '';
   } else {
     state.error = errMsg(s.reason);
@@ -714,7 +1168,31 @@ async function load(): Promise<void> {
 
 export async function mountSettingsPage(el: HTMLElement): Promise<void> {
   host = el;
+  // Kunjungan baru selalu mulai dari atas & tanpa filter; state modul dipakai
+  // ulang antar-navigasi, jadi jangan biarkan seksi/filter kunjungan lalu bocor.
+  state.seksiAktif = 'transaksi';
+  state.error = '';
+  state.backupErr = '';
+  // Ctrl+K = fokus kolom cari (pola dashboard POS populer: Square/Shopify).
+  // Listener dokumen milik kunjungan terakhir di-abort dulu supaya berpindah
+  // halaman tidak menumpuk listener; dialog yang menutupi halaman memegang
+  // pintasannya sendiri (jangan direbut).
+  sinyal?.abort();
+  sinyal = new AbortController();
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (String(e.key).toLowerCase() !== 'k') return;
+    // Sudah pindah halaman (host lama dilepas router): lepas listener ini
+    // supaya Ctrl+K tidak terus ditahan (preventDefault) di halaman lain.
+    if (!host?.isConnected) {
+      sinyal?.abort();
+      return;
+    }
+    if (document.querySelector('.modal-overlay:not(.is-closing), .swal2-popup')) return;
+    e.preventDefault();
+    host?.querySelector<HTMLInputElement>('#set-cari')?.focus();
+  }, { signal: sinyal.signal });
   el.innerHTML = renderPage();
-  paint();
+  bindCari();
   await load();
 }

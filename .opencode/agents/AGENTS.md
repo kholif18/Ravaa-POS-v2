@@ -1612,7 +1612,51 @@ apps/web/src/pages/audit.ts  Halaman #/audit (menu Jejak Audit, 2026-10-16,
                          cari `#audit-q` multi-kata + tanggal), klik baris =
                          modal detail read-only (pola riwayatForm — satu
                          tombol "Tutup"; baris tanpa detail aman dibuka).
-apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Redesign
+apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
+                          2026-10-20 (riset Settings POS populer — Loyverse:
+                          katalog seksi per topik; Shopify: receipt visual
+                          editor + test print; Odoo: seksi berjudul/scope)** —
+                          kartu judul STATIS memuat pencarian client-side
+                          `#set-cari` + chip ringkas `#set-ringkas`; `#set-body`
+                          di-render ulang `paint()` = nav seksi kiri
+                          (sticky 220px `[data-set-nav]`, chip 2 kolom di
+                          mobile) + empat seksi `#set-sec-{transaksi,toko,
+                          perangkat,data}` berisi kartu `[data-set-card]`
+                          ber-`data-cari`. SEMUA id & logika lama
+                          dipertahankan (kontrak `tests/settings-ui-test.mjs`
+                          30 asersi). Rincian:
+                          * **Cari** client-side tanpa API: semua kata wajib
+                            cocok di `data-cari`+textContent; filter memakai
+                            `style.display` — BUKAN atribut `hidden` (kartu
+                            `.flex` / tombol nav `flex` mengalahkan UA rule
+                            `[hidden]`, pelajaran `.pm-bayarlayer`); nav seksi
+                            ikut disembunyikan; empty-state `#set-kosong`;
+                            `#set-cari-hapus`/Esc membersihkan; pintasan
+                            **Ctrl+K** fokus kolom cari (listener dokumen
+                            di-abort tiap mount via `sinyal`).
+                          * **Chip ringkas** `[data-set-chip]` (minus/
+                            kadaluarsa/cetak/backup) dari state server +
+                            cache backup; klik = `lompatSeksi()` (kosongkan
+                            filter dulu, scrollIntoView + tandai nav);
+                            scroll-spy IntersectionObserver `root:#page`.
+                          * **Form toko = draft** `state.toko` vs snapshot
+                            `state.tokoAsli`: `tokoKotor()` / status
+                            `#set-toko-status` / tombol simpan mati saat
+                            bersih; repaint toggle lain tidak membuang
+                            ketikan; handler simpan menyinkronkan draft
+                            sebelum/sesudah POST.
+                          * **Putaran 2 (lanjutan riset)**: kartu **Pratinjau
+                            struk** `#set-preview-struk` (`xl:col-span-2`,
+                            ala receipt visual editor) — contoh struk thermal
+                            yang live mengikuti ketikan nama toko device +
+                            gambar tersimpan (`paintPratinjauStruk()` repaint
+                            isi kertas saja); dan tombol **`#set-tes-cetak`**
+                            di kartu Cetak struk — kirim `strukContoh()` via
+                            `kirimPrint(strukUntukTercetak(...))` (builder
+                            ESC/POS yang sama dengan struk asli), hormat
+                            `getPrintPause()` (jeda = tolak + toast, nol
+                            kertas; `disabled` saat `state.tesJalan`).
+                          Setelah itu riwayat layout tetap: **Redesign
                           layout 2026-10-16** (permintaan pemilik "lebih user
                           friendly") — empat seksi berkepala `kepalaSeksi()`
                           (label .form-sec + garis + hint cakupan "berlaku
@@ -2083,6 +2127,15 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        `sqlite3` (execSync) — mesin tanpa sqlite3 = crash
                        pre-existing (bukan regresi kode); `recap-test` sama
                        tapi cleanup-nya ter-catch.
+                       **Halaman Pengaturan**: `tests/settings-ui-test.mjs`
+                       (30 asersi) — nav seksi + scroll/aria, cari multi-kata
+                       (logo / alamat email / printer / tanpa hasil / Esc),
+                       4 chip ringkas + lompat seksi, status & draft form toko
+                       (tanpa menulis server), pratinjau struk live, tombol
+                       Tes cetak (route `**/print` di-mock — jeda aktif = nol
+                       request, jeda mati = payload "TES CETAK"), Ctrl+K.
+                       READ-ONLY terhadap settings server; hanya preferensi
+                       localStorage device uji yang dipulihkan.
 infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + Caddyfile
 ```
 

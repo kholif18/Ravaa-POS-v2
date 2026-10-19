@@ -73,6 +73,9 @@ const SUITE = [
   ['foto-tambah-test.mjs', 10],
   ['kadaluarsa-jual-test.mjs', 17],
   ['backup-test.mjs', 27],
+  // UI halaman Pengaturan (2026-10-20): nav seksi + cari client-side + chip
+  // ringkasan + penanda "belum disimpan". Read-only terhadap /api/settings.
+  ['settings-ui-test.mjs', 30],
   ['skema-guard-test.mjs', 11],
   ['customer-debt-test.mjs', 37],
   ['expense-supplier-test.mjs', 34],
