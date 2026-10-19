@@ -121,6 +121,44 @@ await pasangToken(page);
     const sesudah = await page.locator('#db-body [data-tgl]').count();
     ok('Segarkan memuat ulang, tetap 7 batang', sesudah === 7, `jumlah=${sesudah}`);
     ok('tanpa error console', errs.length === 0, errs.slice(0, 3).join(' | '));
+
+    console.log('=== G. Grafik 30 hari tidak meluap (regresi 2026-10-19) ===');
+    // Laporan pemilik: "jika di pilih 30 hari maka menerobos kanan hingga
+    // menimpa card pada status shift" — baris 30 label sumbu-X dulu memaksa
+    // track grid `1fr` melar (min-content ±887px) sampai kontainer batang
+    // keluar kartu. Kontrak: batang tetap 30, tidak melewati tepi kanan
+    // kartu grafik, tidak menyentuh kartu Status shift, label dijarangkan.
+    await page.selectOption('#db-n', '30');
+    await page.waitForFunction(
+      () => document.querySelectorAll('#db-body [data-tgl]').length === 30,
+      { timeout: 15000 },
+    );
+    await page.waitForTimeout(300);
+    const g30 = await page.evaluate(() => {
+      const kartu = [...document.querySelectorAll('.card')].find((c) =>
+        /^Penjualan \d+ hari/.test(c.querySelector('h2')?.textContent || ''),
+      );
+      const bars = kartu.querySelector('[role="img"]');
+      const shift = [...document.querySelectorAll('.card')].find((c) =>
+        /Shift/i.test(c.querySelector('h2')?.textContent || ''),
+      );
+      const row = kartu.querySelector('.grid')?.children?.[3];
+      return {
+        batang: bars.querySelectorAll('[data-tgl]').length,
+        kananBatang: Math.round(bars.getBoundingClientRect().right),
+        kananKartu: Math.round(kartu.getBoundingClientRect().right),
+        kiriShift: shift ? Math.round(shift.getBoundingClientRect().left) : null,
+        label: row ? [...row.children].filter((c) => c.textContent.trim() !== '').length : 0,
+      };
+    });
+    ok('30 hari -> tetap 30 batang', g30.batang === 30, `jumlah=${g30.batang}`);
+    ok('batang tidak melewati tepi kanan kartu grafik',
+      g30.kananBatang <= g30.kananKartu + 1, `kanan=${g30.kananBatang} kartu=${g30.kananKartu}`);
+    ok('batang tidak menyentuh kartu Status shift',
+      g30.kiriShift === null || g30.kananBatang <= g30.kiriShift,
+      `kanan=${g30.kananBatang} shift=${g30.kiriShift}`);
+    ok('label sumbu-X dijarangkan (6 label, jangkar hari terakhir)',
+      g30.label === 6, `label=${g30.label}`);
   } finally {
     await browser.close();
   }

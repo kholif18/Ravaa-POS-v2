@@ -177,6 +177,17 @@ function grafik(): string {
 
   const totalOmzet = state.pekan.reduce((a, d) => a + d.omzet, 0);
   const totalN = state.pekan.reduce((a, d) => a + d.n, 0);
+  // Label sumbu-X dijarangkan saat rentang panjang (perbaikan 2026-10-19 —
+  // laporan pemilik: "jika di pilih 30 hari maka menerobos kanan hingga
+  // menimpa card pada status shift"): 30 label "dd/mm" @10px dulu memaksa
+  // track grid `1fr` melar ke min-content (±887px, melebihi lebar kartu)
+  // sehingga kontainer batang menjulur keluar kartu; `min-w-0` di KEDUA item
+  // grid kolom 1fr + label dijarangkan (sel `whitespace-nowrap` supaya
+  // "dd/mm" tidak pecah dua baris di sel sempit) memperbaikinya. Jangkar
+  // HARI TERAKHIR (i % langkah === langkah - 1) supaya "hari ini" selalu
+  // berlabel; batang TETAP semua — title + tooltip hover per batang tidak
+  // hilang.
+  const langkahLabel = state.n <= 7 ? 1 : state.n <= 14 ? 2 : 5;
   const opsi = PILIHAN_N.map(
     (n) => `<option value="${n}"${n === state.n ? ' selected' : ''}>${n} hari terakhir</option>`,
   ).join('');
@@ -194,7 +205,7 @@ function grafik(): string {
       <div class="flex flex-col justify-between text-right text-[10px] tabular-nums text-gray-400 dark:text-gray-500" style="height:${tinggiPx}px">
         <span>${esc(labelY[0])}</span><span>${esc(labelY[1])}</span><span>Rp0</span>
       </div>
-      <div class="relative" style="height:${tinggiPx}px">
+      <div class="relative min-w-0" style="height:${tinggiPx}px">
         <div class="pointer-events-none absolute inset-0 flex flex-col justify-between">
           <span class="border-t border-dashed border-gray-200 dark:border-gray-700"></span>
           <span class="border-t border-dashed border-gray-100 dark:border-gray-700/60"></span>
@@ -206,10 +217,13 @@ function grafik(): string {
         </div>
       </div>
       <div></div>
-      <div class="flex gap-1.5 sm:gap-2">
+      <div class="flex min-w-0 gap-1.5 sm:gap-2">
         ${state.pekan
           .map(
-            (d) => `<div class="min-w-0 flex-1 text-center text-[10px] text-gray-400 dark:text-gray-500">${esc(tglPendek(d.date))}</div>`,
+            (d, i) =>
+              `<div class="min-w-0 flex-1 whitespace-nowrap text-center text-[10px] text-gray-400 dark:text-gray-500">${
+                i % langkahLabel === langkahLabel - 1 ? esc(tglPendek(d.date)) : ''
+              }</div>`,
           )
           .join('')}
       </div>

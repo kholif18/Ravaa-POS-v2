@@ -66,7 +66,7 @@ const SUITE = [
   ['kategori-expiry-test.mjs', 14],
   ['history-test.mjs', 27],
   ['laporan-test.mjs', 20],
-  ['dashboard-test.mjs', 19],
+  ['dashboard-test.mjs', 23],
   ['shift-test.mjs', 23],
   ['foto-tambah-test.mjs', 10],
   ['kadaluarsa-jual-test.mjs', 17],

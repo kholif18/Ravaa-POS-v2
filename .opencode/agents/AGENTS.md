@@ -1025,10 +1025,27 @@ apps/web/src/pages/pos-mobile.ts  UI POS versi MOBILE (baru 2026-10-17) —
                            `tests/pos-mobile-test.mjs` (43 asersi).
  apps/web/src/pages/satuan.ts  Halaman #/satuan: CRUD master satuan.
 apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
-                          omzet/laba/topup/outbox, grafik 7 hari murni CSS
-                          (7x GET /api/reports/daily paralel), status shift
-                          (GET /api/shifts/open?cashier=) + stok menipis.
-                          Seluruh angka diambil apa adanya dari API.
+                          omzet/laba/topup/outbox, grafik murni CSS rentang
+                          7/14/30 hari (`GET /api/reports/daily` paralel per
+                          tanggal), status shift (GET /api/shifts/open?cashier=)
+                          + stok menipis. **Grafik 30 hari tidak lagi meluap
+                          menimpa kartu Status shift (2026-10-19, laporan
+                          pemilik: batang "menerobos kanan hingga menimpa card
+                          pada status shift")**: baris 30 label sumbu-X dulu
+                          memaksa track grid `1fr` melar ke min-content-nya
+                          (terukur ±887px > lebar kartu) sehingga kontainer
+                          batang ikut keluar kartu; perbaikan = `min-w-0` pada
+                          KEDUA item grid kolom 1fr (kolom grafik + baris
+                          label — min-width otomatis item grid = min-content,
+                          harus dijepit) + label sumbu-X dijarangkan per
+                          rentang (7 hari semua, 14 tiap 2, 30 tiap 5 —
+                          jangkar HARI TERAKHIR supaya "hari ini" selalu
+                          berlabel) + `whitespace-nowrap` per sel (tanpa itu
+                          "dd/mm" pecah dua baris di sel sempit). Batang TETAP
+                          semua (title + tooltip hover per batang tidak
+                          hilang). Anti-regresi section G `dashboard-test.mjs`
+                          (19→23 asersi). Seluruh angka diambil apa adanya
+                          dari API.
 apps/web/src/pages/shifts.ts  Halaman #/shifts (menu Shift Kasir): tabel
                           riwayat dari GET /api/shifts (agregat penjualan/
                           topup per baris), filter status, dialog Buka shift
