@@ -34,6 +34,7 @@ import {
   getCachedProducts, syncMaster, getHolds, saveHolds, getKeranjang, saveKeranjang,
   type Product,
 } from '../store';
+import { diskonBorongan, type TingkatBorongan } from '../borongan';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
 import { getAutoPrint, getPrintPause, setAutoPrint, setStrukLayout } from '../ui/print-pref';
@@ -100,6 +101,12 @@ export type CartLine = {
   prefill: { type: 'rp' | 'pct'; value: number } | null;
   /** true = kasir sudah mengubah sendiri -> jangan ditimpa lagi oleh prefill. */
   discManual: boolean;
+  /** Snapshot aturan harga borongan produk (`Product.borongan`) saat baris
+   *  masuk keranjang (2026-10-19). HANYA diisi untuk baris SATUAN DASAR —
+   *  pak/dus memakai harga satuan jual sendiri (keputusan pemilik: aturan
+   *  tidak dicampur). null = baris ini tanpa aturan borongan. Diskon baris
+   *  dihitung ulang otomatis saat qty berubah selama `discManual` false. */
+  borongan: TingkatBorongan[] | null;
   /** Snapshot `products.use_note` saat produk masuk keranjang: 1 = baris ini
    *  dirender dengan input catatan di bawahnya (mis. Cetak Banner -> ukuran). */
   useNote: boolean;
@@ -216,6 +223,17 @@ const pelangganGrosir = (): boolean =>
 /** Harga dasar ecer/grosir satu produk (sebelum resolusi satuan). */
 const hargaDasar = (p: Product, grosir: boolean): number =>
   grosir && (p.price_grosir ?? 0) > 0 ? p.price_grosir : p.price;
+/** Salinan aturan borongan untuk satu baris keranjang — HANYA bila baris itu
+ *  memakai SATUAN DASAR produk (keputusan pemilik 2026-10-19: pak/dus tidak
+ *  dicampur dengan borongan; keduanya punya harga sendiri-sendiri). Disalin,
+ *  bukan referensi, karena keranjang disimpan ke localStorage/hold dan jangan
+ *  ikut berubah saat cache master di-reload. */
+function snapshotBorongan(p: Product, unit: string): TingkatBorongan[] | null {
+  const list = p.borongan ?? [];
+  return unit === p.unit && list.length > 0
+    ? list.map((t) => ({ qty: t.qty, price: t.price }))
+    : null;
+}
 /** Paint chip "Grosir" di info bar (tanpa repaint — dipanggil tiap titik
  *  ganti pelanggan; baris lama TIDAK di-reprice, hanya baris baru). */
 function paintTier(): void {
@@ -693,15 +711,27 @@ function teksKembalian(): string {
  *  ke `sales.subtotal`, supaya `subtotal - total` = seluruh diskon. */
 const jumlahBaris = (l: Pick<CartLine, 'price' | 'qty'>) => Math.round(l.price * l.qty);
 
-/** Besar diskon satu baris BILA prefill-nya dihitung ulang dari qty saat ini.
+/** Besar diskon otomatis satu baris BILA dihitung ulang dari qty saat ini:
+ *  prefill diskon permanen produk ATAU harga borongan (2026-10-19) — mana
+ *  yang lebih menguntungkan pelanggan, TIDAK ditumpuk (konsisten dengan
+ *  keputusan pemilik "termurah menang" untuk grosir vs borongan). Diskon
+ *  borongan dihitung dari HARGA BARIS saat ini (ecer/grosir), sehingga
+ *  interaksi keduanya otomatis ikut aturan itu.
  *  Selalu dijepit ke jumlah baris: server menolak `discount > amount` (400). */
-function hitungPrefill(l: Pick<CartLine, 'prefill' | 'price' | 'qty'>): number {
-  if (!l.prefill) return 0;
-  const perUnit =
-    l.prefill.type === 'pct'
-      ? Math.round((l.price * l.prefill.value) / 100)
-      : l.prefill.value;
-  return Math.max(0, Math.min(Math.round(perUnit * l.qty), jumlahBaris(l)));
+function hitungPrefill(l: Pick<CartLine, 'prefill' | 'price' | 'qty' | 'borongan'>): number {
+  let hasil = 0;
+  if (l.prefill) {
+    const perUnit =
+      l.prefill.type === 'pct'
+        ? Math.round((l.price * l.prefill.value) / 100)
+        : l.prefill.value;
+    hasil = Math.round(perUnit * l.qty);
+  }
+  // Hanya baris satuan dasar yang punya snapshot (lihat snapshotBorongan).
+  if (l.borongan && l.borongan.length > 0) {
+    hasil = Math.max(hasil, diskonBorongan(l.qty, l.price, l.borongan));
+  }
+  return Math.max(0, Math.min(hasil, jumlahBaris(l)));
 }
 
 /* ---------- cari produk ---------- */
@@ -808,9 +838,14 @@ function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1):
     ? { type: p.discount_type === 'pct' ? ('pct' as const) : ('rp' as const), value: p.discount }
     : null;
   const found = cart.find((l) => l.key === key);
+  // Snapshot aturan borongan (2026-10-19). Diambil ulang tiap kali produk
+  // masuk — kalau pemilik baru mengubah aturan, scan berikutnya langsung
+  // memakai aturan terbaru (baris yang sudah ada ikut disegarkan di bawah).
+  const borongan = snapshotBorongan(p, unit);
   if (found) {
     found.qty += qty;
     found.price = price; // harga terbaru — untuk dinamis key sudah memastikan ini harga yang SAMA
+    found.borongan = borongan;
     // Diskon mengikuti qty ASALKAN belum diedit tangan — kalau kasir sudah
     // menyetel angka sendiri, menimpanya akan mengubah harga yang sudah
     // disepakati pelanggan di tengah transaksi.
@@ -822,6 +857,7 @@ function addLine(p: Product, price: number, qty = 1, unit = p.unit, factor = 1):
       unit, baseUnit: p.unit, factor,
       dyn: !!p.price_dynamic,
       discount: 0, prefill, discManual: false,
+      borongan,
       useNote: !!p.use_note, note: '',
     };
     baris.discount = hitungPrefill(baris);
@@ -913,6 +949,9 @@ function gantiSatuan(key: string, unitSlug: string): void {
       // baris lama dibuang. Diskon baris tujuan TIDAK di-reset: ia milik baris
       // lain yang tidak ikut berganti.
       tabrakan.qty += qty;
+      // Snapshot borongan disamakan dengan satuan baris tujuan — aturan hanya
+      // hidup untuk satuan dasar (2026-10-19).
+      tabrakan.borongan = snapshotBorongan(p, res.unit);
       if (!tabrakan.discManual) tabrakan.discount = hitungPrefill(tabrakan);
       tabrakan.discount = Math.min(tabrakan.discount, jumlahBaris(tabrakan));
       cart = cart.filter((l) => l.key !== key);
@@ -926,6 +965,10 @@ function gantiSatuan(key: string, unitSlug: string): void {
       // melihat angka 0 dan boleh mengisi sendiri kalau memang mau.
       line.discount = 0;
       line.discManual = true;
+      // Borongan ikut satuan: pindah ke pak/dus = aturan mati; pindah kembali
+      // ke satuan dasar = snapshot disiapkan untuk perhitungan berikutnya.
+      // Diskon TETAP 0/manual seperti aturan ganti-satuan di atas.
+      line.borongan = snapshotBorongan(p, res.unit);
     }
   }
   clampDiskonTransaksi();
@@ -2131,6 +2174,13 @@ function cartRows(): string {
       // Ganti satuan → gantiSatuan(): qty ANGKA SAMA pindah satuan, diskon
       // baris di-reset, harga ulang dari product_units.
       const pAlt = l.product_id !== null ? products.find((x) => x.id === l.product_id) : undefined;
+      // Harga borongan aktif (2026-10-19): baris satuan dasar yang diskonnya
+      // masih dikelola otomatis. `data-borongan` = penanda stabil untuk uji
+      // e2e; `title` menjelaskan aturan supaya kasir paham angka diskonnya.
+      const borAktif = !!l.borongan && !l.discManual;
+      const borTeks = borAktif
+        ? ` · otomatis dari harga borongan (${l.borongan!.map((t) => `${t.qty}→${rp(t.price)}`).join(', ')})`
+        : '';
       const unitUi = pAlt && (pAlt.units?.length ?? 0) > 0
         ? `<select class="input input-sm !w-auto" data-act="unit" data-key="${l.key}"
              aria-label="Satuan ${esc(l.name)}"
@@ -2163,7 +2213,7 @@ function cartRows(): string {
       <td class="td td-num">
         <input class="input input-sm !w-24 !px-2 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
           min="0" step="100" value="${l.discount || ''}" placeholder="0"
-          aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}" />
+          aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}${borTeks}"${borAktif ? ' data-borongan="1"' : ''} />
       </td>
       <td class="td td-num">
         ${l.discount > 0 ? `<div class="text-sm text-gray-400 line-through tabular-nums">${rp(gross)}</div>` : ''}
@@ -2623,6 +2673,16 @@ function muatKeranjang(): boolean {
     const m = /^manual:(\d+)$/.exec(l.key);
     if (m) manualSeq = Math.max(manualSeq, Number(m[1]));
   }
+  // Harga borongan (2026-10-19): segarkan snapshot aturan dari cache master
+  // TERKINI dan hitung ulang baris yang belum diedit manual — aturan yang
+  // diubah pemilik saat keranjang tersimpan langsung berlaku. Baris yang
+  // `discManual` tetap dipertahankan angkanya (pola muatKeranjang sendiri).
+  for (const l of cart) {
+    if (l.product_id === null) { l.borongan = null; continue; }
+    const p = byId.get(l.product_id);
+    l.borongan = p ? snapshotBorongan(p, l.unit) : null;
+    if (l.borongan && !l.discManual) l.discount = hitungPrefill(l);
+  }
   clampDiskonTransaksi(); // diskon transaksi > sisa subtotal (harga berubah) dijepit sebelum paint
   if (dibuang) toast(`${dibuang} baris dibuang — produknya sudah dihapus dari katalog`, 'info');
   if (keranjangTerisi()) {
@@ -2705,6 +2765,15 @@ async function muatHold(h: Hold): Promise<void> {
     const p = byIdHold.get(l.product_id);
     l.dyn = !!p?.price_dynamic;
     if (l.dyn) l.key = `${l.product_id}:${l.unit}:${l.price}`;
+  }
+  // Harga borongan (2026-10-19): snapshot diambil dari master TERKINI dan
+  // baris yang belum diedit manual dihitung ulang — hold bisa dibuat sebelum
+  // pemilik mengubah aturan borongan produknya.
+  for (const l of cart) {
+    if (l.product_id === null) { l.borongan = null; continue; }
+    const p = byIdHold.get(l.product_id);
+    l.borongan = p ? snapshotBorongan(p, l.unit) : null;
+    if (l.borongan && !l.discManual) l.discount = hitungPrefill(l);
   }
   // Baris topup ikut hold (Opsi B) — divalidasi ringan saat dimuat (jenis
   // dikenal + nominal > 0; admin dijepit) supaya hold korup tidak meledak
@@ -3448,6 +3517,8 @@ function openManualItem(): void {
           // manual juga tidak lewat kolom input harga (bukan produk dinamis).
           dyn: false,
           discount: 0, prefill: null, discManual: false,
+          // Item manual bukan produk katalog — tanpa aturan borongan.
+          borongan: null,
           // Tanpa input catatan: tidak ada produk use_note-nya (pemilik memang
           // menandai produk katalog, mis. Cetak Banner — bukan jasa dadakan).
           useNote: false, note: '',

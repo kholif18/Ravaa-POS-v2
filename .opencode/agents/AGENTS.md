@@ -237,7 +237,23 @@ apps/web/src/store.ts    Cache master IndexedDB + maxVersion (?since= delta sync
                          setelah mutasi, tulisan IndexedDB yang open+tx async
                          bisa terbuang sebelum sampai; pola outbox
                          `ravaa.outbox.v1` memakai localStorage karena alasan
-                         sama).
+                         sama)
+                         + **`Product.borongan`** aturan harga borongan per qty
+                         (normalisasi `?? []` di `getCachedProducts()` seperti
+                         `units` — produk yang tidak berubah tidak pernah
+                         dikirim ulang delta sync).
+apps/web/src/borongan.ts  **Matematika harga borongan (baru 2026-10-19, butir
+                         ACC ROADMAP 3.5)** — modul murni tanpa DOM:
+                         `TingkatBorongan {qty,price}`, `totalBorongan(qty, harga,
+                         tiers)` + `diskonBorongan()`. Model **"kelipatan paket"**
+                         (contoh pemilik: 6 lembar → Rp5.000; 7 = 5.000 + 1.000)
+                         dihitung sebagai DP min-cost cover "ambil N bayar paket
+                         + satuan, tanpa overshoot"; qty > `MAKS_DP` 100.000
+                         jatuh ke greedy (hanya mungkin salah ketik). Dipakai
+                         `pos.ts` (potongan otomatis keranjang) + `products.ts`
+                         (validasi form "Harga borongan"); kontrak data =
+                         `products.borongan[]` (§3). Diuji `tests/borongan-test.ts`
+                         (31 asersi) + `tests/e2e-borongan.mjs` (52 asersi).
 apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           referensi KulaPOS (kula-02-transaksi-pos.png):
                           info bar → scan bar (+ Mode) → label keranjang →
@@ -882,6 +898,29 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            reload** (cart sengaja penuh di sana untuk uji sync
                            master — tanpa clear, restore menggandakan qty dan
                            barrier menolak dengan total membengkak).
+                           **Harga borongan otomatis di keranjang (2026-10-19)**:
+                           produk ber-atribut `products.borongan` memotong
+                           otomatis saat qty baris berubah (`borongan.ts` +
+                           `CartLine.borongan` snapshot — `snapshotBorongan()`
+                           HANYA satuan dasar, di-refresh tiap produk masuk).
+                           Diskon = `max(prefill master, borongan)` di
+                           `hitungPrefill`, dijepit jumlah baris; input Diskon
+                           ditandai `data-borongan="1"` + `title` penjelasan saat
+                           otomatis aktif. Edit manual kolom Diskon (termasuk
+                           menyetel 0) atau ganti satuan (`gantiSatuan`) =
+                           baris itu BERHENTI otomatis (`discManual`, pola lama);
+                           qty berubah setelahnya tidak menimpa. Restore
+                           `muatKeranjang`/`muatHold` me-recompute baris
+                           ber-snapshot & `!discManual`; prefill-only tidak ikut.
+                           Nilai akhir tersimpan `items[].discount` (server tetap
+                           penjaga harga non-dinamis); tidak memecah baris & key
+                           baris tidak berubah (borongan tidak menambah segmen
+                           key). Marker hanya di render desktop — keranjang
+                           mobile ikut otomatis karena perhitungan di pos.ts.
+                           Diuji `tests/e2e-borongan.mjs` (52 asersi: API, qty
+                           6/7/12/20, `6*SKU`, edit manual, ganti satuan, grosir
+                           termurah-menang, pulih setelah reload, nilai di
+                           `sale_items.discount`, form produk).
                            **Mount paralel (revisi 2026-10-08, "terasa lemot
                            berpindah dari halaman admin ke POS")**:
                            `mountPosPage` dulu menjalankan 3 roundtrip network
@@ -1913,10 +1952,22 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     ikut). Cache lama tanpa field ini dinormalisasi jadi `[]` saat dibaca
     (`getCachedProducts()`), karena produk yang tidak berubah tidak pernah
     dikirim ulang oleh delta sync.
+  - **`borongan`** (harga bertingkat per qty — butir ACC ROADMAP 3.5,
+    implementasi 2026-10-19): array aturan `[{qty,price}]` pada **satuan dasar**,
+    SELALU ADA (array kosong = tanpa aturan). Model **"kelipatan paket"**:
+    setiap kelipatan `qty` berharga total `price`, kelebihan dihitung harga
+    normal (6→5.000 berarti 7 = 5.000 + harga satuan). Disaring dengan subquery
+    kondisi yang SAMA, jadi `?since=` ikut menarik perubahannya (upsert produk
+    selalu `version++`, jadi aturannya ikut terkirim bersama produknya);
+    cache lama tanpa field ini dinormalisasi jadi `[]`.
+    Aturan KHUSUS klien POS — potongan dihitung di klien sebagai
+    `items[].discount` (server tetap penjaga lewat validasi diskon baris);
+    hanya satuan dasar (pak/dus tidak dicampur), grosir dihitung "termurah
+    menang" di klien (lihat §2 `pos.ts`).
   - Client WAJIB menghapus SKU nonaktif dari cache (`removeProductBySku`).
     Untuk produk **dihapus** (tombstone) tidak perlu dipanggil manual:
     `syncMaster()` sudah membuangnya saat menerima `deleted_at` terisi.
-* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,price_grosir?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?,image?,discount_type?,discount?,expiry_date?,use_note?}` (upsert by sku, version++)
+* `POST /api/products` `{sku?,name,category_slug,barcode?,unit?,price?,price_grosir?,cost?,markup?,price_dynamic?,stock?,min_stock?,is_active?,units?,borongan?,image?,discount_type?,discount?,expiry_date?,use_note?}` (upsert by sku, version++)
   - **`price_grosir` (tier pelanggan, 2026-10-11)**: harga per satuan dasar
     untuk pelanggan tier `grosir` (lihat `customers.tier`). 0 = ikut ecer.
     Field BIASA (ikut reset, wajib di `payloadToggleAktif()` + form);
@@ -1955,6 +2006,16 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `factor` wajib `> 0`, `unit` wajib ada di master `units`, satuan dasar
     TIDAK boleh diulang, dan tidak boleh duplikat. Stok TIDAK pernah dikonversi
     lewat endpoint ini — stok selalu satuan dasar.
+  - **`borongan` DIKECUALIKAN dari aturan reset, sama seperti `units`**:
+    `undefined` / tidak dikirim = **tidak ada perubahan** (baris
+    `product_borongan` dibiarkan — dipakai `payloadToggleAktif()` + baris impor;
+    form produk sendiri SELALU mengirim array); `[]` = hapus semua aturan;
+    `[{qty,price}]` = replace seluruh daftar. Validasi dijalankan di dalam
+    transaction (throw = rollback = 400): `qty` bulat `>= 2`, tidak boleh ada
+    `qty` ganda, `price` bulat `>= 0`, dan **`price < qty × price produk`**
+    (paket yang tidak lebih murah dari beli satuan hampir pasti salah input;
+    form klien menolaknya lebih dulu dengan pesan spesifik). `factor` satuan
+    alternatif TIDAK memakai aturan ini (hanya satuan dasar).
   - **`image` (foto produk, sejak 2026-09-29)**: berisi **nama file** thumbnail
     (bukan isi gambar — isinya lewat `GET /api/products/:id/image`).
     **DIKECUALIKAN dari aturan reset, sama seperti `units`**: `undefined` =
@@ -2676,7 +2737,24 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-17 (peran `pemilik` → `owner` + akun seed
+  **Migrasi terakhir 2026-10-19 (harga borongan per qty — butir ACC 3.5):**
+  tabel BARU **`product_borongan`** (SQL penuh di `db/schema.sql`; FK
+  `products.id ON DELETE CASCADE`, `UNIQUE(product_id,qty)`, CHECK `qty>=2`
+  dan `price>=0`). Ini murni tabel tambahan — `migrate()` (`CREATE TABLE IF
+  NOT EXISTS`) cukup: di DB dev sudah dijalankan lewat `npm run seed`
+  (data lama utuh, tanpa recreate; diverifikasi curl di API hidup). Install
+  yang tidak boleh di-seed karena alasan lain jalankan SQL yang sama:
+  ```sql
+  CREATE TABLE IF NOT EXISTS product_borongan (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    qty        INTEGER NOT NULL CHECK (qty >= 2),
+    price      INTEGER NOT NULL CHECK (price >= 0),
+    UNIQUE (product_id, qty)
+  );
+  CREATE INDEX IF NOT EXISTS idx_product_borongan_product ON product_borongan(product_id);
+  ```
+  **Migrasi sebelumnya 2026-10-17 (peran `pemilik` → `owner` + akun seed
   `owner`):** CHECK `users.role` jadi `('owner','kasir')`; akun lama
   berperan `pemilik` DITOLAK guard baru (toast "Halaman ini khusus owner" di
   web + 403 `"khusus owner"` di API), dan `npm run seed` TIDAK memperbaikinya

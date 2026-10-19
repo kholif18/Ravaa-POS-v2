@@ -933,6 +933,21 @@ function productForm(
           <button type="button" id="f-unit-add" class="btn btn-ghost">${icon('plus')}<span>Tambah satuan</span></button>
         </div>
 
+        <p class="form-sec">Harga borongan (qty)</p>
+        <div class="space-y-1.5">
+          <p class="hint">
+            "Beli banyak" untuk satuan <b id="f-bor-base">${esc(d?.unit ?? 'pcs')}</b>:
+            setiap <b>qty</b> tercapai, bagian itu berharga <b>total paket</b> — sisanya harga normal
+            (mis. 6 &rarr; Rp5.000: beli 7 = 5.000 + 1.000). Berlaku juga untuk jasa.
+            Kosong = tanpa aturan; pak/dus memakai harga satuan jual di atas.
+          </p>
+          <div class="grid grid-cols-[1fr_1fr_auto] gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+            <span>Beli qty</span><span>Total harga paket (Rp)</span><span></span>
+          </div>
+          <div id="f-bor-rows" class="space-y-1.5"></div>
+          <button type="button" id="f-bor-add" class="btn btn-ghost">${icon('plus')}<span>Tambah tingkatan</span></button>
+        </div>
+
         <div id="f-stock-wrap">
           <p class="form-sec">Stok</p>
           <div class="grid gap-2 ${mode === 'edit' ? 'grid-cols-1' : 'grid-cols-2'}">
@@ -1272,6 +1287,58 @@ function productForm(
       unitSel.addEventListener('change', () => { bacaUnitRows(); renderUnitRows(); });
       renderUnitRows();
 
+      // --- harga borongan per qty (2026-10-19) ------------------------------
+      // "Beli `qty` -> total `price`" untuk SATUAN DASAR (keputusan pemilik:
+      // pak/dus memakai harga satuan jual sendiri — aturan tidak dicampur).
+      // Boleh beberapa tingkatan; baris kosong = tanpa aturan. POS yang
+      // menghitung potongannya (diskon baris); server memvalidasi ulang.
+      const borRowsEl = el.querySelector('#f-bor-rows') as HTMLElement;
+      const borBaseEl = el.querySelector('#f-bor-base') as HTMLElement;
+      let borList: { qty: number; price: number }[] = (d?.borongan ?? []).map((b) => ({ ...b }));
+
+      const renderBorRows = () => {
+        borBaseEl.textContent = unitSel.value || 'pcs';
+        borRowsEl.innerHTML = borList
+          .map(
+            (b, i) => `<div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2" data-b-row="${i}">
+              <input class="input input-sm" data-b-qty inputmode="numeric" value="${b.qty || ''}"
+                placeholder="6" title="Jumlah satuan dasar" aria-label="Beli qty" />
+              <input class="input input-sm" data-b-price inputmode="numeric" value="${b.price || ''}"
+                placeholder="5000" title="Total harga untuk qty tersebut" aria-label="Total harga paket" />
+              <button type="button" class="row-btn row-btn-danger" data-b-del aria-label="Hapus tingkatan" title="Hapus tingkatan">${icon('trash')}</button>
+            </div>`,
+          )
+          .join('');
+      };
+
+      // Baca isi DOM -> state, dipanggil SEBELUM tiap mutasi (pola bacaUnitRows).
+      const bacaBorRows = () => {
+        borList = [...borRowsEl.querySelectorAll<HTMLElement>('[data-b-row]')]
+          .map((r) => ({
+            qty: Number((r.querySelector('[data-b-qty]') as HTMLInputElement).value.replace(/\D/g, '') || 0),
+            price: Number((r.querySelector('[data-b-price]') as HTMLInputElement).value.replace(/\D/g, '') || 0),
+          }))
+          .filter((b) => b.qty > 0 || b.price > 0);
+      };
+
+      el.querySelector('#f-bor-add')?.addEventListener('click', () => {
+        bacaBorRows();
+        borList.push({ qty: 0, price: 0 });
+        renderBorRows();
+      });
+
+      borRowsEl.addEventListener('click', (e) => {
+        const row = (e.target as HTMLElement).closest<HTMLElement>('[data-b-row]');
+        if (!row || !(e.target as HTMLElement).closest('[data-b-del]')) return;
+        const i = Number(row.dataset.bRow);
+        if (!Number.isInteger(i)) return; // Number(undefined) = NaN -> splice(NaN) = hapus baris PERTAMA
+        bacaBorRows();
+        borList.splice(i, 1);
+        renderBorRows();
+      });
+      unitSel.addEventListener('change', () => { borBaseEl.textContent = unitSel.value || 'pcs'; });
+      renderBorRows();
+
       syncTrack();
       syncPrice();
       syncSkuHint();
@@ -1320,6 +1387,40 @@ function productForm(
           discInput.focus();
           return;
         }
+        // --- harga borongan: tolak sebelum mengirim (server memvalidasi ulang) --
+        // Aturan pemilik: paket WAJIB lebih murah dari qty x harga normal —
+        // angka yang tidak lebih murah = salah input, bukan diskon.
+        bacaBorRows();
+        if (borList.length > 0) {
+          if (hargaJual <= 0) {
+            toast('Harga borongan butuh harga jual normal (> 0) — isi kolom Harga jual dulu', 'warning');
+            price.focus();
+            return;
+          }
+          const qtyBor = new Set<number>();
+          for (const b of borList) {
+            if (!Number.isInteger(b.qty) || b.qty < 2) {
+              toast(`Harga borongan: qty harus angka bulat minimal 2 (ditemukan ${b.qty || 0})`, 'warning');
+              return;
+            }
+            if (qtyBor.has(b.qty)) {
+              toast(`Harga borongan: qty ${b.qty} ditulis lebih dari sekali`, 'warning');
+              return;
+            }
+            qtyBor.add(b.qty);
+            if (!Number.isFinite(b.price) || b.price <= 0) {
+              toast(`Harga borongan qty ${b.qty}: total harga paket wajib diisi`, 'warning');
+              return;
+            }
+            if (b.price >= b.qty * hargaJual) {
+              toast(
+                `Harga borongan qty ${b.qty}: ${rp(b.price)} harus lebih murah dari ${b.qty} × ${rp(hargaJual)} = ${rp(b.qty * hargaJual)}`,
+                'warning',
+              );
+              return;
+            }
+          }
+        }
         const expVal = val('f-exp');
         if (expVal && !/^\d{4}-\d{2}-\d{2}$/.test(expVal)) {
           toast('Tanggal kadaluarsa tidak valid', 'warning'); expInput.focus(); return;
@@ -1351,6 +1452,11 @@ function productForm(
             // form tanpa perubahan satuan harus tetap mengirim daftar lama agar
             // konsisten dengan tampilan. `[]` = hapus semua satuan alternatif.
             units: unitList.map((u) => ({ unit: u.unit, factor: u.factor, price: u.price })),
+            // Harga borongan juga SELALU dikirim (termasuk [] = hapus semua) —
+            // pola `units`: form adalah sumber kebenaran daftar. `undefined`
+            // hanya dipakai payload toggle aktif & baris impor supaya aturan
+            // tidak terhapus diam-diam dari jalur yang tak menampilkannya.
+            borongan: borList.map((b) => ({ qty: b.qty, price: b.price })),
             // Diskon & kadaluarsa SELALU ikut: field yang tidak dikirim di-reset
             // server ke default (lihat AGENTS §3), jadi form yang tidak menyentuhnya
             // tetap harus mengirim nilai yang sedang tampil.
@@ -1912,11 +2018,11 @@ function payloadToggleAktif(p: Product, isActive: 0 | 1) {
     discount: p.discount ?? 0,
     expiry_date: p.expiry_date ?? null,
     use_note: p.use_note ?? 0,
-    // `image` & `units` sengaja TIDAK dimasukkan. Server memperlakukan
-    // ketidakhadirannya sebagai "tidak ada perubahan" (lihat upsertProduct),
-    // sehingga toggle status tidak pernah menghapus foto maupun satuan jual —
-    // dan nilai di DB (bukan cache client yang mungkin basi) tetap jadi yang
-    // dipertahankan.
+    // `image`, `units` & `borongan` sengaja TIDAK dimasukkan. Server
+    // memperlakukan ketidakhadirannya sebagai "tidak ada perubahan" (lihat
+    // upsertProduct), sehingga toggle status tidak pernah menghapus foto,
+    // satuan jual, maupun aturan harga borongan — dan nilai di DB (bukan
+    // cache client yang mungkin basi) tetap jadi yang dipertahankan.
   };
 }
 

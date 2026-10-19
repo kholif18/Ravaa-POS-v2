@@ -29,6 +29,10 @@ export type Product = {
   /** Satuan jual ALTERNATIF (fitur #3). Satuan dasar = `unit` + `price` di atas
    *  dan sengaja TIDAK jadi baris. Selalu ada (array kosong bila tidak ada). */
   units: { unit: string; factor: number; price: number | null }[];
+  /** Harga borongan per qty (2026-10-19): "beli `qty` satuan dasar ->
+   *  total `price`", berlaku kelipatan; sisa qty harga normal. SELALU ada
+   *  (array kosong = produk tanpa aturan). Dihitung POS menjadi diskon baris. */
+  borongan: { qty: number; price: number }[];
 };
 
 /** Satuan jual sebuah baris keranjang. `unit` = satuan dasar (produk tanpa
@@ -87,6 +91,10 @@ export async function getCachedProducts(): Promise<Product[]> {
   return rows.map((p) => ({
     ...p,
     units: p.units ?? [],
+    // Aturan harga borongan (2026-10-19) — alasan sama dengan `units`: produk
+    // yang tidak berubah tidak dikirim ulang oleh ?since=, jadi cache lama
+    // datang tanpa field ini dan harus dinormalisasi saat dibaca.
+    borongan: p.borongan ?? [],
     image: p.image ?? null,
     discount_type: p.discount_type ?? 'rp',
     discount: p.discount ?? 0,

@@ -1028,7 +1028,30 @@ app.get('/api/products', (c) => {
     arr.push({ unit: r.unit, factor: r.factor, price: r.price });
     unitsPerProduct.set(r.product_id, arr);
   }
-  const data = rows.map((r) => ({ ...r, units: unitsPerProduct.get(Number(r.id)) ?? [] }));
+  // Harga borongan per qty (2026-10-19) — subquery dengan kondisi yang SAMA
+  // supaya `?since=` delta sync ikut menarik perubahannya: ubah borongan ->
+  // products.version++ -> produk terkirim -> barisnya ikut. Selalu array
+  // (kosong = tanpa aturan) supaya POS tidak perlu menebak.
+  const boronganRows = db.prepare(
+    `SELECT pb.product_id, pb.qty, pb.price
+       FROM product_borongan pb
+      WHERE pb.product_id IN (
+        SELECT p.id FROM products p JOIN categories c ON c.id = p.category_id
+        ${conds.length ? 'WHERE ' + conds.join(' AND ') : ''}
+      )
+      ORDER BY pb.qty`,
+  ).all(...params) as { product_id: number; qty: number; price: number }[];
+  const boronganPerProduct = new Map<number, { qty: number; price: number }[]>();
+  for (const r of boronganRows) {
+    const arr = boronganPerProduct.get(r.product_id) ?? [];
+    arr.push({ qty: r.qty, price: r.price });
+    boronganPerProduct.set(r.product_id, arr);
+  }
+  const data = rows.map((r) => ({
+    ...r,
+    units: unitsPerProduct.get(Number(r.id)) ?? [],
+    borongan: boronganPerProduct.get(Number(r.id)) ?? [],
+  }));
   const maxVersion = db.prepare('SELECT COALESCE(MAX(version),0) AS v FROM products').get() as { v: number };
   return c.json({ data, maxVersion: maxVersion.v });
 });
@@ -1133,6 +1156,48 @@ function simpanSatuanJual(productId: number, baseUnit: string, rows: unknown[]):
   for (const b of disiapkan) ins.run(productId, b.unit, b.factor, b.price);
 }
 
+// Harga borongan per qty (2026-10-19) — model "kelipatan paket" yang dipakai
+// POS: setiap `qty` satuan dasar berharga `price`, kelebihannya harga normal.
+// Kontrak `borongan` di POST /api/products mengikuti `units` persis:
+//   - `undefined` / tidak dikirim = TIDAK mengubah aturan (payload toggle
+//     aktif & tiap baris impor tidak boleh menghapus aturan diam-diam)
+//   - `[]` = hapus semua aturan
+//   - `[{qty,price}]` = ganti seluruh daftar (replace, bukan merge)
+// Validasi (semua 400 lewat throw di dalam transaksi upsert): qty bilangan
+// bulat >= 2 & tidak ganda; price bilangan bulat >= 0; dan paket WAJIB lebih
+// murah dari qty x harga jual saat ini — aturan "beli banyak" yang tidak lebih
+// murah adalah salah input, bukan diskon. Server tidak pernah menghitung
+// potongannya sendiri: POS mengirim lewat `items[].discount` (jalur diskon
+// baris yang sudah tervalidasi `0 <= discount <= qty*price`).
+function simpanBorongan(productId: number, hargaJual: number, rows: unknown[]): void {
+  if (!Array.isArray(rows)) throw new Error('borongan harus berupa array');
+  const jual = Number(hargaJual);
+  if (rows.length > 0 && (!Number.isFinite(jual) || jual <= 0)) {
+    throw new Error('borongan: isi harga jual normal (> 0) dulu — aturan borongan harus lebih murah dari harga normal');
+  }
+  const seen = new Set<number>();
+  const disiapkan: { qty: number; price: number }[] = [];
+  for (const raw of rows as { qty?: unknown; price?: unknown }[]) {
+    const qty = Number(raw?.qty);
+    if (!Number.isInteger(qty) || qty < 2) throw new Error('borongan: qty harus bilangan bulat >= 2');
+    if (seen.has(qty)) throw new Error(`borongan qty ganda: ${qty}`);
+    seen.add(qty);
+    const price = Number(raw?.price);
+    if (!Number.isInteger(price) || price < 0) {
+      throw new Error(`borongan qty ${qty}: harga paket harus angka bulat >= 0`);
+    }
+    if (price >= qty * jual) {
+      throw new Error(
+        `borongan qty ${qty}: harga paket harus lebih murah dari ${qty} x harga jual (${qty * jual})`,
+      );
+    }
+    disiapkan.push({ qty, price });
+  }
+  db.prepare('DELETE FROM product_borongan WHERE product_id = ?').run(productId);
+  const ins = db.prepare('INSERT INTO product_borongan (product_id, qty, price) VALUES (?, ?, ?)');
+  for (const b of disiapkan) ins.run(productId, b.qty, b.price);
+}
+
 // Tambah / ubah master. Naikkan version agar client yang cache bisa sync via ?since=
 //
 // `opts.pertahankanTidakDikirim` dipasang SATU-SATUNYA oleh /api/products/import.
@@ -1149,6 +1214,7 @@ const upsertProduct = transaksi((
     cost?: number; markup?: number;
     price_dynamic?: number; stock?: number; min_stock?: number; is_active?: number;
     units?: unknown[];
+    borongan?: unknown[];
     image?: string | null; discount_type?: string; discount?: number; expiry_date?: string | null;
     use_note?: number;
   },
@@ -1278,6 +1344,11 @@ const upsertProduct = transaksi((
   // units === undefined -> biarkan apa adanya; array (termasuk []) -> ganti semua.
   if (input.units !== undefined) simpanSatuanJual(pid, unit, input.units);
   else db.prepare('DELETE FROM product_units WHERE product_id = ? AND unit = ?').run(pid, unit);
+  // borongan === undefined -> biarkan apa adanya; array (termasuk []) -> ganti
+  // semua (pola `units` di atas — payload toggle aktif & impor tak menghapus).
+  // Validasi memakai harga jual EFEKTIF baris ini (setelah aturan `amb`), jadi
+  // impor yang tidak membawa kolom harga memakai harga lama, bukan 0.
+  if (input.borongan !== undefined) simpanBorongan(pid, Number(price), input.borongan);
   return db.prepare('SELECT * FROM products WHERE sku = ?').get(sku);
 });
 

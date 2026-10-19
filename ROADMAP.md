@@ -242,39 +242,47 @@ butir yang sudah di-ACC pemilik.
 | 3.2 | **Loyalty poin** — **DIBATALKAN pemilik 2026-10-18 ("tidak butuh")** | Kasir Pintar (plugin), Moka CRM, tren 2026 | — (tidak dikerjakan) |
 | 3.3 | **Hutang/piutang tempo** | Kasir Pintar free "Hutang/Piutang", Aronium "credit payments" | Siapa yang boleh nyicil (langganan kantor?) |
 | 3.4 | **Split payment** (tunai+QRIS satu nota) — **DIPERTIMBANGKAN pemilik 2026-10-18 (belum di-ACC)** | Tren 2026, Erzap/Moka | Skema `sale_payments` baru + laporan byMethod |
-| 3.5 | **Harga bertingkat per jumlah qty** (`min_qty` di `product_units`) **[ACC PEMILIK 2026-10-18 — tunggu jawaban 4 keputusan di bawah]** | Kasir Pintar "Tipe Harga", Olsera harga grosir + pertanyaan pemilik 2026-10-18 saat membedah form "Satuan jual" (*"jika qty tercapai harga juga berubah?"*) | Rincian di bawah tabel — bentuk tingkatan, interaksi satuan alternatif & grosir, perilaku keranjang, penjaga harga server |
+| 3.5 | **Harga bertingkat per jumlah qty** — **SELESAI 2026-10-19** (tabel `product_borongan` + API `borongan` + blok form produk + potongan otomatis POS) | Kasir Pintar "Tipe Harga", Olsera harga grosir + pertanyaan pemilik 2026-10-18 saat membedah form "Satuan jual" (*"jika qty tercapai harga juga berubah?"*) | Terjawab — keputusan pemilik 2026-10-18/19 (3 opsi rekomendasi dipilih); detail + implementasi di bawah |
 | 3.6 | **Supplier & riwayat pembelian (PO)** | Kasir Pintar free, Loyverse purchase order | Cukup nama supplier di `restock`? |
 
-### 3.5 Harga bertingkat per jumlah qty **[ACC PEMILIK 2026-10-18 — tunggu jawaban 4 keputusan di bawah]**
-- **Status 2026-10-18:** pemilik (setelah membaca ringkasan butir Fase 3) menyetujui
-  butir ini — *"harga bertingkat OK"*. Fitur ACC; **4 keputusan di bawah masih
-  menunggu jawaban** sebelum dikembangkan.
-- **Latar:** pemilik bertanya saat membedah form produk bagian "Satuan jual"
-  (*"Tambah satuan untuk apa? apakah bukan untuk menentukan harga qty tertentu
-  harga jadi berubah? di POS nanti juga bergantung pada pengaturan ini, jika
-  qty tercapai harga juga berubah?"*). Jawaban status repo (terverifikasi baca
-  kode — bukan tebakan): "Tambah satuan" = harga per **SATUAN**
-  (`resolusiSatuan` di `pos.ts`, kontrak `products.units[]` §3), harga grosir =
-  per **PELANGGAN** (`customers.tier`), dan **aturan qty→harga belum ada** —
-  `setQty()` tidak pernah menyentuh harga baris dan tidak ada `min_qty` di
-  `db/schema.sql` (grep = 0).
-- **Isi usulan:** harga per satuan yang berubah saat qty mencapai ambang
-  (ilustrasi: 1–4 pcs Rp3.000, ≥5 pcs Rp2.800). Skema usulan riset 2026-10-01
-  = `min_qty` per baris `product_units`; alternatif = tabel tingkatan per
-  produk — **diputuskan saat ACC**, jangan memilih dulu.
-- **Keputusan pemilik yang dibutuhkan (jangan dikembangkan sebelum ada):**
-  1. **Bentuk tingkatan** — berapa level + contoh nyata (qty berapa → harga
-     berapa); berlaku untuk semua produk atau hanya yang ditandai per produk?
-  2. **Hubungan dengan satuan alternatif & grosir** — ambang dihitung per
-     satuan dasar atau per satuan jual terpilih; pelanggan grosir + qty besar
-     — mana yang menang / digabung?
-  3. **Perilaku keranjang POS** — harga baris turun OTOMATIS begitu qty
-     diubah? Harus kompatibel dengan aturan "harga beda = baris BARU"
-     (2026-10-06): menaikkan qty melewati ambang harus me-reprice baris yang
-     sama, bukan memecahnya jadi baris baru.
-  4. **Penjaga server** — harga non-dinamis tetap dihitung/dikunci server saat
-     bayar (`POST /api/sales`); client dilarang menentukan sendiri harga
-     tier-nya (pola sama dengan multi satuan; `price_dynamic` tidak berubah).
+### 3.5 Harga bertingkat per jumlah qty — **SELESAI 2026-10-19**
+- **Keputusan pemilik 2026-10-19 (semua opsi rekomendasi dipilih):**
+  1. **Bentuk tingkatan = "kelipatan paket"** — contoh nyata pemilik: cetak
+     foto 3×4 Rp1.000/lembar *"beli 6 = Rp5.000"* + buku tulis Rp3.500
+     *"beli 10 = Rp33.000"*; sisa di atas paket tetap harga normal
+     (7 lembar = 5.000 + 1.000; 12 buku = 33.000 + 7.000). **Opt-in per
+     produk** (boleh beberapa tingkatan; kosong = tanpa aturan), berlaku juga
+     untuk jasa (tanpa gate kategori).
+  2. **Hanya satuan dasar** — jual per pak/dus tetap harga `product_units`
+     sendiri (tidak dicampur). Pelanggan grosir: **"termurah menang"**
+     (grosir vs borongan dihitung dari harga baris, tidak ditumpuk).
+  3. **Keranjang POS**: potongan otomatis begitu qty berubah (ketik qty,
+     tombol +/−, scan `6*SKU`), tampil transparan di kolom Diskon; edit
+     diskon manual (termasuk menyetel 0) / ganti satuan = otomatisasi baris
+     itu berhenti; baris TIDAK dipecah (aturan "harga beda = baris baru"
+     tidak tersentuh).
+  4. **Penjaga server tidak berubah** — harga non-dinamis tetap dikunci
+     server; potongan lewat jalur diskon baris yang sudah divalidasi
+     (`0 ≤ discount ≤ qty*price`); data ikut delta sync offline (`?since=`).
+- **Implementasi 2026-10-19:** modul `apps/web/src/borongan.ts` (DP min-cost
+  cover, fallback greedy qty > 100.000), tabel `product_borongan` + field API
+  `borongan` (pola `units`: absen = tidak diubah, `[]` = hapus, isi = replace;
+  validasi `qty ≥ 2`, tanpa qty ganda, `price < qty × harga jual`), blok
+  "Harga borongan (qty)" di form produk, integrasi `pos.ts`
+  (`CartLine.borongan` + `hitungPrefill` + `discManual`). Uji:
+  `tests/borongan-test.ts` (31 asersi) + `tests/e2e-borongan.mjs`
+  (52 asersi — API, qty 6/7/12/20, `6*SKU`, edit manual, ganti satuan,
+  grosir termurah-menang, pulih setelah reload, nilai di
+  `sale_items.discount`, form produk). SQL migrasi manual: AGENTS §5.
+- **Latar (arsip):** pemilik bertanya saat membedah form produk bagian "Satuan
+  jual" (*"Tambah satuan untuk apa? apakah bukan untuk menentukan harga qty
+  tertentu harga jadi berubah? … jika qty tercapai harga juga berubah?"*).
+  Jawaban status repo waktu itu (terverifikasi kode): "Tambah satuan" = harga
+  per **SATUAN** (`resolusiSatuan`), harga grosir = per **PELANGGAN**
+  (`customers.tier`), dan aturan qty→harga belum ada. ACC 2026-10-18
+  (*"harga bertingkat OK"*); skema usulan riset `min_qty` di `product_units`
+  **diganti** tabel tingkatan per produk (`product_borongan`) supaya
+  tingkatan bisa beberapa level terpisah dari satuan jual.
 
 ## 4. Sengaja TIDAK diusulkan (domain 1–2 kasir toko fisik)
 

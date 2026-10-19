@@ -97,6 +97,24 @@ CREATE TABLE IF NOT EXISTS product_units (
 );
 CREATE INDEX IF NOT EXISTS idx_product_units_product ON product_units(product_id);
 
+-- Harga borongan per qty (2026-10-19) — model "kelipatan paket", keputusan
+-- pemilik dari contoh nyata toko: "beli 6 lembar Rp5.000", "beli 10 buku
+-- Rp33.000". Baris berarti: SETIAP kelipatan `qty` satuan dasar berharga
+-- `price`; kelebihannya dihitung harga normal (6 -> 5000, 7 = 5000 + harga
+-- satuan). Hanya berlaku untuk SATUAN DASAR — pak/dus memakai harga
+-- product_units sendiri (aturan tidak dicampur).
+-- Klien POS yang menghitung potongannya sebagai `items[].discount`; server
+-- tetap penjaga lewat validasi diskon baris (0 <= discount <= qty*price).
+-- Tanpa baris di sini = produk tanpa aturan borongan (perilaku lama).
+CREATE TABLE IF NOT EXISTS product_borongan (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  qty        INTEGER NOT NULL CHECK (qty >= 2),    -- jumlah satuan dasar
+  price      INTEGER NOT NULL CHECK (price >= 0),  -- total harga paket qty itu
+  UNIQUE (product_id, qty)
+);
+CREATE INDEX IF NOT EXISTS idx_product_borongan_product ON product_borongan(product_id);
+
 CREATE TABLE IF NOT EXISTS shifts (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   opened_at   TEXT NOT NULL DEFAULT (datetime('now')),

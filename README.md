@@ -1046,6 +1046,31 @@ npm run dev:api
   - **Semua resolusi harga & faktor ada di server** (`POST /api/sales`): client
     hanya mengirim `unit`, harga produk non-dinamis tidak bisa dimanipulasi.
   - Form produk punya seksi **Satuan jual** untuk menambah/mengubah barisnya.
+* **Harga borongan per qty** (butir ACC ROADMAP 3.5, 2026-10-19) — harga khusus
+  saat membeli banyak, dari contoh nyata toko: cetak foto 3×4 Rp1.000/lembar
+  *"beli 6 = Rp5.000"* dan buku tulis Rp3.500 *"beli 10 = Rp33.000"*.
+  - Model **"kelipatan paket"**: setiap kelipatan qty berharga total paket,
+    kelebihannya tetap harga normal — 7 lembar = Rp5.000 + Rp1.000, 12 buku
+    = Rp33.000 + Rp7.000. Boleh beberapa tingkatan per produk (kombinasi
+    termurah yang dipakai, mis. tingkatan 6 dan 12).
+  - **Opt-in per produk** lewat blok form produk **"Harga borongan (qty)"**
+    (`beli ≥ [qty] → total Rp [harga]`); kosong = tanpa aturan. Bisa untuk
+    barang maupun jasa (tanpa gate kategori). Hanya berlaku untuk **satuan
+    dasar** — jual per pak/dus tetap harga satuan jualnya sendiri.
+  - POS: potongan muncul **otomatis** di kolom Diskon saat qty berubah
+    (ketik qty, tombol +/−, atau scan `6*KODE`), nilainya transparan di struk
+    & laporan (tersimpan `sale_items.discount`). Edit diskon manual per baris
+    (termasuk menyetel 0) = baris itu berhenti otomatis; ganti satuan jual
+    juga mematikan potongannya.
+  - Pelanggan **grosir**: dihitung **"termurah menang"** — harga grosir vs
+    borongan tidak ditumpuk, yang termurah untuk pelanggan itu yang dipakai.
+  - Server tetap penjaga: harga produk non-dinamis tidak bisa ditentukan
+    client (potongan lewat jalur diskon baris yang sudah divalidasi
+    `0 ≤ diskon ≤ jumlah baris`); data ikut delta sync offline (`?since=`).
+    Aturan disimpan di tabel `product_borongan`; field API `borongan` (pola
+    `units`: tidak dikirim = tidak diubah, `[]` = hapus, isi = replace).
+    Uji `tests/borongan-test.ts` (31 asersi) + `tests/e2e-borongan.mjs`
+    (52 asersi).
 * **Impor produk** (`#/products` -> tombol **Impor**): tempel tabel dari Excel
   atau pilih file CSV. Dialognya dua langkah — **Baca & tinjau** dulu (tabel
   pratinjau + badge `baru`/`timpa`/`gagal`), baru tombol **Impor** aktif.
@@ -1159,5 +1184,6 @@ npm run dev:api
   dari Excel). **Varian (warna/ukuran) sengaja TIDAK dibuat** — keputusan pemilik:
   warna berbeda dibuat sebagai produk terpisah dengan nama & harga sendiri, bukan
   varian. Yang sudah tertutup: multi-satuan (lihat entri "Multi satuan"), HPP
-  rata-rata (bagian "HPP & laba"), riwayat pembelian (`stock_moves.unit_cost`).
+  rata-rata (bagian "HPP & laba"), riwayat pembelian (`stock_moves.unit_cost`),
+  harga borongan per qty (entri "Harga borongan per qty").
 * Baca `.opencode/agents/AGENTS.md` sebelum mengubah apa pun.
