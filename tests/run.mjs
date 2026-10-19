@@ -98,6 +98,7 @@ const SUITE = [
   ['login-test.mjs', 26],
   ['aging-test.mjs', 21],
   ['audit-test.mjs', 24],
+  ['orders-test.mjs', 68],
   // restore-test memulihkan DB ke snapshot yang ia buat SENDIRI di awal suite
   // (data suite sebelumnya ikut masuk snapshot) — taruh menjelang akhir supaya
   // suite yang butuh data live panjang tidak terpengaruh urutan.

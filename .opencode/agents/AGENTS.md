@@ -59,6 +59,21 @@ apps/api/src/index.ts    API Hono. SATU-SATUNYA yang boleh tulis DB.
                          `pay_methods` CSV di GET /api/sales, `payments` di
                          GET /api/sales/:id. Kontrak & validasi persis di §3;
                          diuji `tests/e2e-split.mjs` (56 asersi).
+                         **Pesanan jasa 1.6.6 (2026-10-19)**: seksi `orders`
+                         (GET list+ringkas, GET :id, POST, /:id/payments,
+                         /:id/status, /:id/take, /:id/cancel) + `nomorOrder()`
+                         (ORD-YYMMDD-NNN pola MAX — pola SKU/invoice, BUKAN
+                         COUNT) + `SQL_ORDER_UANG` (dibayar/sisa computed) +
+                         audit entity `order`. `take` = SATU transaction:
+                         `insertSale` nota penuh (item teks bebas, TANPA
+                         potong stok) → pelunasan → sisa → charge
+                         `customer_debts` (`Nota <invoice> — sisa pesanan
+                         <order_no>`) → status `diambil` + sale_id +
+                         hutang_sisa. Atribusi `sale_payments` saat take =
+                         agregat DP per metode + pelunasan + hutang_sisa
+                         menempel metode serah (Σ = total nota, invarian 1.6.5
+                         terjaga). Kontrak §3; diuji `tests/orders-test.mjs`
+                         (68 asersi).
 apps/api/src/db.ts       Koneksi better-sqlite3 + migrate + seed. DB_PATH default ./data/data.db
                          + **`kolomHilang()`/`peringatkanSkema()`** (guard
                          skema 2026-10-18): parser mini `db/schema.sql`
@@ -87,6 +102,7 @@ apps/api/src/seed.ts     Runner seed (idempotent, INSERT OR IGNORE) +
                          `peringatkanSkema()` di akhir (2026-10-18: seed di
                          DB lama "sukses" tapi kolom baru tak terpasang).
 db/schema.sql            SUMBER KEBENARAN skema. Ubah skema = edit file ini + migrasi manual.
+                         (tabel `orders`/`order_items`/`order_payments` 1.6.6 ikut di sini).
 db/seed.sql              Master awal (8 kategori + contoh SKU).
 apps/web/src/main.ts     UI kasir (7+ tab kategori). Semua search/filter lokal.
                          Router hash (`render()` + guard login/peran) — di awal
@@ -1242,6 +1258,14 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          dan `cetakUlang()` ikut mencetak baris metode itu
                          (fetch `payments` HANYA untuk nota `campuran` —
                          nota satu metode jalur lama persis).
+                         **Pesanan jasa 1.6.6 (2026-10-19)**: `SaleRow`
+                         mendapat `order_no` + kartu Pembayaran `detailJual()`
+                         menampilkan baris **`Pesanan <ORD-…>`** bila nota
+                         lahir dari serah pesanan (server mengisi lewat
+                         subquery `orders.sale_id`). `sisa_hutang` nota take
+                         jatuh ke cadangan `orders.hutang_sisa` (lihat §3) —
+                         chip Hutang tetap tampil walau uang diterima nota = total
+                         (kasus sisa dibayar sebagian saat serah).
                          **Tombol "Buat retur" (Tahap 2, 2026-10-11)** di kartu
                          Pembayaran `detailJual()` (`data-retur-nota`):
                          `dialogReturNota()` prefill item nota + input qty
@@ -1612,6 +1636,12 @@ apps/web/src/pages/customers.ts  Halaman #/customers (menu Pelanggan, baru
                            bila pelanggan masih punya catatan hutang (pesan
                            server menunjuk halaman Hutang). Read-only terhadap
                            products.version.
+                           **Sejak 1.6.6 (2026-10-19)** hapus juga DITOLAK 400 bila
+                           pelanggan punya riwayat pesanan
+                           (`"pelanggan ini masih punya N pesanan — riwayat pesanan
+                           harus utuh"`) — pesanan menyimpan snapshot nama & nota
+                           take-nya menunjuk pelanggan; nonaktifkan bukan opsi di
+                           master pelanggan, jadi pesanan harus dibatalkan/dibiarkan.
 apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            kartu "Total piutang berjalan" (dari total GET
                            /api/customer-debts), tabel per-pelanggan (sisa
@@ -1675,6 +1705,30 @@ apps/web/src/pages/kas-masuk.ts  Halaman #/kas-masuk (butir ROADMAP 1.6.2,
                           `#km-jumlah`, input form = `#km-nominal` (sengaja
                           beda supaya tidak kembar). Jangan menyentuh
                           `products.version` / omzet / HPP.
+apps/web/src/pages/orders.ts  Halaman #/orders (butir ROADMAP 1.6.6, ACC
+                           pemilik 19 Okt 2026) — pesanan jasa cetak/desain/
+                           service ala KP vertical Bengkel. Daftar + chip
+                           status (hitungan server `ringkas`, termasuk
+                           `piutang` = Σ sisa pesanan aktif) + pager + cari
+                           (order_no / pelanggan / NAMA ITEM) + SUB-HALAMAN
+                           `#/orders/baru` & `#/orders/<id>` (pola
+                           purchases.ts — bukan modal, rawan terklik). Alur:
+                           dikerjakan → selesai → **Serahkan** (take = nota
+                           penjualan penuh; omzet DIKAKUI di sini) atau
+                           **Batalkan** (DP di-refund). Item = teks bebas
+                           (nama/qty/harga/catatan), TANPA potong stok.
+                           Dialog: DP (nominal + tombol "Penuh" + chip
+                           metode), Serahkan (uang diterima → pratinjau
+                           pelunasan/kembalian/Masuk Hutang), Batalkan
+                           (catatan + refund). Nota pesanan thermal
+                           (`cetakNotaPesanan()` — builder sendiri, BUKAN
+                           struk penjualan); struk penjualan saat serah lewat
+                           `cetakUlang()` history.ts (satu susunan dengan
+                           nota POS — jangan duplikat di sini). Sesudah serah
+                           = choiceDialog [Struk penjualan][Nota pesanan]
+                           [Selesai]; Alt+N terdaftar (ui/aksi-baru.ts →
+                           `#/orders/baru`). Diuji `tests/orders-test.mjs`
+                           (68 asersi).
 apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                           (**label harga DIHAPUS dari file ini 2026-10-17** —
                           refactor halaman Label ke cetak lembar browser,
@@ -1790,6 +1844,12 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           non-tunai = porsi) — satu metode / data lama jalur
                           lama persis; `cetakInvoice()` meneruskan
                           `nota.data.payments ?? []`.
+                          **Pesanan jasa 1.6.6**: `htmlRekapShift()` juga
+                          memuat baris `Uang pesanan masuk` +
+                          `Nota pesanan (keluar)` (orderMasuk/orderOmzet —
+                          rumus laci sama dengan `kasSeharusnya()`); nota
+                          take dibaca `cetakInvoice` jalur biasa (order_no
+                          ada di `sale`).
  apps/web/src/ui/auth-screen.ts  Kerangka layar auth (login & ubah-sandi):
                           `authLayarHtml(kartu)` — SATU markup untuk dua
                           halaman (pola shift-tutup.ts). Gradasi biru
@@ -2031,6 +2091,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       TIDAK ada cascade hapus — baris `customer_debts` dirujuk `sale_items` masa
       depan dan wajib utuh selama masih ada.
     - 404 tak ada / sudah dihapus; 400 bila `:id` bukan integer.
+    - **Guard kedua (sejak 1.6.6, 2026-10-19)**: 400 bila pelanggan masih
+      punya riwayat pesanan — `"pelanggan ini masih punya N pesanan — riwayat
+      pesanan harus utuh"` (pesanan menyimpan snapshot nama; nota take-nya
+      menunjuk pelanggan lewat `orders.customer_id` NOT NULL — tanpa guard
+      FK meledak sebagai 500 mentah).
   - **Supplier (master pemasok, baru 2026-10-11, halaman `#/suppliers`)** —
     lahir dari pencabutan `customers.supplier_no`: nomor `SUP-000001` kini
     menjadi `code` master ini. Dipakai Tahap 3 Pembelian sebagai pilihan
@@ -2112,6 +2177,82 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       klik (`GET /api/purchases/:id` + `GET /api/settings`) sehingga nota
       tercetak selalu cermin server; popup diblokir/gagal = toast, tidak
       pernah mengubah data.
+  - **Pesanan jasa + DP + serah (butir ROADMAP 1.6.6, ACC pemilik 2026-10-19,
+    halaman `#/orders`)** — alur bengkel-style: dikerjakan → selesai →
+    diambil/batal. **Omzet DIKAKUI SAAT SERAH** (nota penjualan penuh; DP =
+    uang muka + laci penerima, BUKAN omzet); item **teks bebas TANPA potong
+    stok** (jasa cetak/desain/service). Tabel `orders`/`order_items`/
+    `order_payments` (lihat §5 migrasi). Nomor **`ORD-YYMMDD-NNN`** dari
+    `nomorOrder()` — MAX `CAST(substr(order_no,12))` + pola `LIKE`, BUKAN
+    COUNT (pola SKU/invoice). Semua tulis satu `transaksi(fn)`.
+    - `POST /api/orders` `{customer_id,items:[{name,qty>0,price>=0,note?≤200}],note?≤200,cashier?}`
+      -> 201 `{data:{order,items}}`. **`customer_id` WAJIB** (400
+      `"customer_id harus integer"`; tak ada -> 400 `"pelanggan tidak
+      dikenal: X"`); `customer_name` di-SNAPSHOT dari master (body tidak
+      menerimanya). Items 1..100 (`"pesanan harus punya minimal 1 item"` /
+      `"maksimal 100 item per pesanan"`); per item `"item 1: nama wajib
+      diisi"`, `"item 1: qty harus > 0"`, `"item 1: harga harus angka >= 0"`,
+      catatan baris > 200 -> 400. Status awal `dikerjakan`.
+    - `GET /api/orders?status=&q=&limit=&offset=` ->
+      `{data:[<orders + dibayar/sisa/refund_total/n_items>], total, ringkas}`.
+      `status` default `semua`; sah `dikerjakan|selesai|diambil|batal|semua`
+      (400 `"status harus dikerjakan|selesai|diambil|batal|semua"`). `q`
+      multi-kata: SEMUA kata cocok di `order_no` / `customer_name` / **nama
+      item** (EXISTS `order_items`). `ringkas` = hitungan per status +
+      `piutang` (Σ sisa pesanan dikerjakan/selesai) — semua `COALESCE` supaya
+      tabel kosong mengirim 0, bukan null (sumber chip kepala halaman).
+      `dibayar`/`sisa` dari `SQL_ORDER_UANG` (Σ `order_payments` net refund;
+      `sisa` = max(0, total − dibayar), 0 saat batal).
+    - `GET /api/orders/:id` -> `{data:{order,items,payments}}` (`payments`
+      `id DESC`); 404 tak ada / 400 id bukan integer.
+    - `POST /api/orders/:id/payments` (DP) `{method:tunai|qris|transfer,amount>0,shift_id?,cashier?,note?≤200}`
+      -> 201 `{data:{payment,order}}` (baris `order_payments.kind='dp'`).
+      Status `diambil` -> 400 `"pesanan sudah diambil — tidak bisa menerima
+      pembayaran lagi"`; `batal` -> 400. Pesan: `"metode pembayaran tidak
+      dikenal: X"` (kosong -> `'(kosong)'`), `"jumlah harus rupiah bulat > 0"`,
+      `"melebihi sisa pesanan (sisa X)"`. `shift_id` opsional
+      (`cekShiftOpsional`, pola expenses — NULL = di luar laci; dikirim harus
+      ada -> `"shift tidak dikenal"`).
+    - `POST /api/orders/:id/status` `{status:'dikerjakan'|'selesai'}`
+      (bolak-balik untuk koreksi) -> 200 `{data:<order segar>}`; nilai lain
+      -> 400 `"status harus dikerjakan|selesai (diambil lewat Serahkan, batal
+      lewat Batalkan)"`; `diambil` -> `"pesanan sudah diambil"`.
+    - `POST /api/orders/:id/take` (SERAH) `{method:tunai|qris|transfer,diterima>=0,shift_id?,cashier?,note?≤200}`
+      -> 200 `{data:{order,sale,kembalian,hutang}}`. **SATU transaction**:
+      `insertSale` nota penuh (item dari `order_items` teks bebas — TANPA
+      potong stok; `cash_in = total`; `note` pesanan diteruskan sebagai
+      `sales.note`; `bayar = min(diterima, sisa)`, `kembalian = diterima −
+      bayar`, `hutang = sisa − bayar`) → `bayar>0` baris `order_payments`
+      kind `pelunasan` note `Pelunasan <order_no>` → `hutang>0` charge
+      `customer_debts` note `Nota <invoice_no> — sisa pesanan <order_no>` →
+      status `diambil` + `taken_at` + `sale_id` + `hutang_sisa`. `diterima`
+      bukan int >= 0 -> 400 `"uang diterima harus rupiah bulat >= 0"`.
+      **Atribusi `sale_payments` nota take**: agregat DP per metode (net
+      refund) + pelunasan kini + `hutang_sisa` menempel metode serah —
+      Σ = `total` nota (invarian 1.6.5; jangan dikira omzet ganda).
+    - `POST /api/orders/:id/cancel` `{method?=tunai,note?≤200,shift_id?,cashier?}`
+      -> 200 `{data:{order,refund}}`. Net DP > 0 dikembalikan lewat baris kind
+      `refund` note `Refund pembatalan pesanan` (uang KELUAR — mengurangi
+      agregat laci shift refund, bukan shift DP); status `batal` +
+      `batal_at`/`batal_note`. `diambil` -> 400 `"pesanan sudah diambil —
+      barang/jasanya sekarang tercatat di Riwayat; koreksi lewat Retur"`.
+    - **Laci & laporan (rumus 1.6.6)**: `GET /api/shifts` menambah agregat
+      `order_masuk_total` (Σ `order_payments` shift itu; refund negatif) +
+      `order_omzet_total` (Σ `sales.total` nota ber-link pesanan) →
+      `kasSeharusnya()` memasukkan `(omzet − hutang_baru − order_omzet) +
+      order_masuk` — nota take dihitung dari uang BENAR diterima lewat
+      `order_masuk`, sedangkan `omzet` (yang memuat nota take) dikeluarkan
+      lewat `order_omzet` (uang pesanan TIDAK dihitung dobel); `hutang_baru`
+      TIDAK ikut order (netting ada di `order_masuk < order_omzet`).
+      `reports/daily.piutang.baru` += Σ `orders.hutang_sisa` order `diambil`
+      di periode (per `taken_at`). Rekap cetak tutup shift (thermal + PDF)
+      memuat baris pesanan masuk.
+    - **Riwayat**: nota take memuat `order_no` (subquery `orders WHERE
+      sale_id`) di `GET /api/sales` & `/api/sales/:id`, dan `sisa_hutang`-nya
+      di-FALLBACK ke `orders.hutang_sisa` (nota take selalu `cash_in = total`
+      sehingga CASE tunai-kurang lama sunyi). `detailJual()` halaman Riwayat
+      menampilkan baris `Pesanan <ORD-…>`. Diuji `tests/orders-test.mjs`
+      (68 asersi).
   - **Pengeluaran kas (Tahap 1, 2026-10-11, halaman `#/expenses`)** — kas
     TUNAI keluar operasional. Bukan mutasi stok (tidak menyentuh
     `products.version`) dan bukan HPP (laba = omzet − HPP, definisi tetap).
@@ -2595,9 +2736,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `inv_awal` / `inv_akhir` (MIN/MAX `invoice_no`, rentang nota butir 5
     Z-report), `diskon_total` (transaksi + per baris, rumus SAMA dengan
     `sales.diskon` reports/daily), `hutang_baru` (SUM CASE `sisa_hutang`
-    persis GET /api/sales — porsi tunai tak masuk laci), `piutang_bayar`
+    persis GET /api/sales — porsi tunai tak masuk laci; **TIDAK termasuk
+    order hutang**), `piutang_bayar`
     (SUM `customer_debts` payment dalam periode opened..closed — ledger tak
     punya shift_id; masuk laci). Semua 2026-10-11, rekap Z-report.
+    **Sejak 1.6.6 (2026-10-19)** dua agregat pesanan: `order_masuk_total`
+    (SUM `order_payments` shift ini — dp + pelunasan − refund) dan
+    `order_omzet_total` (SUM `sales.total` nota ber-link pesanan lewat
+    `orders.sale_id`).
   - Agregat dihitung **all-time** (bukan per hari), sehingga penjualan offline
     yang masuk lewat outbox ikut terhitung begitu tersimpan dengan `shift_id`.
   - **Rumus selisih tutup shift = expected-cash (keputusan pemilik
@@ -2623,7 +2769,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     9. Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19): laci
        **NAIK** `kas_masuk_total` (injeksi modal/koreksi laci; hanya yang
        terikat shift ini — pasangan butir 4).
-    `kas seharusnya = modal_awal + (omzet − hutang_baru) + topup_nominal + topup_admin + piutang_bayar + kas_masuk_total − expense_total − retur_total − purchase_total`
+    10. Pesanan jasa (butir ROADMAP 1.6.6, 2026-10-19): laci **NAIK**
+       `order_masuk_total` (DP/pelunasan uang diterima kasir shift ini,
+       refund negatif) dan **TURUN** `order_omzet_total` — nilai nota
+       penjualan take ada di `omzet` padahal uangnya sudah dibawa
+       `order_masuk`; tanpa pengurangan ini uang pesanan dihitung dobel.
+       Sisa hutang serah TIDAK masuk `hutang_baru` (netting tercermin di
+       `order_masuk < order_omzet` — **jangan kurangkan dua kali**).
+    `kas seharusnya = modal_awal + (omzet − hutang_baru − order_omzet) + order_masuk + topup_nominal + topup_admin + piutang_bayar + kas_masuk_total − expense_total − retur_total − purchase_total`
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shift-tutup.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
@@ -2761,7 +2914,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     (`ORDER BY id`) = baris atribusi `sale_payments` nota itu; `[]` untuk
     nota lama tanpa baris (klien jatuh ke `(pay_method, total)`). Dipakai
     rincian Riwayat, cetak ulang struk, invoice A4, dan ekspektasi
-    `tests/shift-test.mjs` untuk nota `campuran`.
+    `tests/shift-test.mjs` untuk nota `campuran`. Nota take pesanan (1.6.6)
+    dibaca jalur yang sama — atribusinya = agregat DP per metode + pelunasan
+    saat serah + sisa hutang menempel metode serah (Σ = total nota).
+  - Sejak 1.6.6 (2026-10-19) `sale` memuat **`order_no`** (nomor pesanan
+    `ORD-…` subquery `orders WHERE sale_id`; NULL untuk nota POS biasa) —
+    sumber baris `Pesanan <ORD-…>` di kartu Pembayaran Riwayat.
   - `sale` juga memuat **`customer_id`** + **`customer_name`** (snapshot, sejak
     2026-10-04) — sumber baris `Pelanggan:` di struk ulang dan "Bill to"
     invoice A4. Baris lama bernama `''` = tampilkan "Pelanggan Umum".
@@ -2809,11 +2967,16 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     "Jenis" halaman Riwayat menampilkan **"Tunai + QRIS"** pada nota
     `campuran` (klien fallback ke `pay_method` tunggal bila NULL). Nama saja;
     nominal per metode ada di `payments` `GET /api/sales/:id`.
+  - **`order_no` (sejak 1.6.6, 2026-10-19)**: nomor pesanan bila nota lahir
+    dari serah pesanan (subquery `orders WHERE sale_id`), NULL untuk nota
+    POS biasa. Sumber baris `Pesanan <ORD-…>` kartu Pembayaran `detailJual()`
+    halaman Riwayat.
   - **`sisa_hutang` (putaran 13, 2026-10-06 — penanda transaksi HUTANG di
     halaman Riwayat)**: **computed per baris, bukan kolom tersimpan** —
     `CASE WHEN pay_method='tunai' AND total > cash_in AND customer_id IS NOT
-    NULL AND customer_name <> 'Pelanggan Umum' THEN total - cash_in ELSE 0
-    END`. Syaratnya PERSIS kondisi catat-hutang otomatis di POS (putaran 12):
+    NULL AND customer_name <> 'Pelanggan Umum' THEN total - cash_in
+    ELSE COALESCE(orders.hutang_sisa via sale_id, 0) END`. Syaratnya PERSIS
+    kondisi catat-hutang otomatis di POS (putaran 12):
     uang kurang/0 + pelanggan valid -> nota ini berhutang; pelanggan bawaan
     "Pelanggan Umum" / non-tunai / lunas -> 0. **Maknanya = KEJADIAN saat
     nota, bukan saldo ledger live**: sisa di `customer_debts` bisa berubah
@@ -2821,7 +2984,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     saldo aktual selalu dibaca dari halaman Hutang. CASE yang sama juga
     dikirim oleh `GET /api/sales/:id`. Jangan mengganti ini dengan JOIN ke
     ledger: `customer_debts` tidak punya FK/relasi ke `sales` (charge hanya
-    di-note `Nota <invoice_no> — sisa bayar POS`).
+    di-note `Nota <invoice_no> — sisa bayar POS`). **Fallback 1.6.6**: nota
+    take selalu `cash_in = total` sehingga CASE lama sunyi — sisa hutangnya
+    dibaca dari `orders.hutang_sisa` (penanda serah, pelanggan umum tetap
+    mungkin karena take selalu punya `customer_id`).
   - **`n_retur` + `retur_total` (2026-10-18 — penanda RETUR di halaman
     Riwayat)**: **computed per baris, bukan kolom tersimpan** —
     `(SELECT COUNT(*) …)/(SELECT COALESCE(SUM(r.total),0) …)` dari `returns
@@ -2883,8 +3049,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
 * `GET /api/reports/daily?date=YYYY-MM-DD`
   -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byHour,byCategory,byMethod,topup,topItems,lowStock,expense:{n,total},kas_masuk:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
   - Bentuk dihitung SATU fungsi `laporanRentang(dari,sampai)` (2026-10-11) —
-    daily = rentang 1 hari. `piutang` = hutang TERBENTUK (CASE sisa_hutang) +
-    TERBAYAR (ledger payment), butir credit Z-report.
+    daily = rentang 1 hari. `piutang.baru` = hutang TERBENTUK (CASE
+    sisa_hutang) **+ Σ `orders.hutang_sisa` order `diambil` di periode (per
+    `taken_at` — butir 1.6.6; piutang baru tercatat sekali di hari SERAH,
+    bukan hari DP)**; `piutang.bayar` = TERBAYAR (ledger payment, termasuk
+    pelunasan hutang pesanan) — butir credit Z-report.
   - **`byHour` (2026-10-17)**: array **24 ember 0..23 zero-fill** (jam tanpa
     penjualan = `n:0, omzet:0`), grup `strftime('%H', created_at)` — jam UTC,
     aturan hari sama dengan filter `date(created_at)`. Jam `'00'..'09'` dikirim
@@ -3101,7 +3270,61 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-19 (split payment — butir ROADMAP 1.6.5):**
+  **Migrasi terakhir 2026-10-19 (pesanan jasa + DP/serah — butir ROADMAP
+  1.6.6):** tiga tabel BARU **`orders` / `order_items` / `order_payments`**
+  (SQL penuh di `db/schema.sql` §"Pesanan jasa"; FK `orders.customer_id ->
+  customers.id`, anak-anak `order_id -> orders.id ON DELETE CASCADE`,
+  `order_payments.shift_id -> shifts.id`, indeks status/customer/sale +
+  order/shift anak). **Murni tabel tambahan** — `migrate()` (`CREATE TABLE
+  IF NOT EXISTS`) cukup: di DB dev sudah dijalankan lewat `npm run seed`
+  (data lama utuh, tanpa recreate; diverifikasi curl di API hidup). Perhatikan
+  `orders.sale_id` sengaja **TANPA FK** (nota dibuat di transaction yang
+  sama; query laci men-join lewat kolom ini). Install yang tidak boleh
+  di-seed karena alasan lain jalankan SQL yang sama:
+  ```sql
+  CREATE TABLE IF NOT EXISTS orders (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_no      TEXT UNIQUE,                -- ORD-YYMMDD-NNN (MAX+1, pola invoice)
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    customer_id   INTEGER NOT NULL REFERENCES customers(id),
+    customer_name TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'dikerjakan'
+                  CHECK (status IN ('dikerjakan', 'selesai', 'diambil', 'batal')),
+    total         INTEGER NOT NULL DEFAULT 0 CHECK (total >= 0),
+    note          TEXT NOT NULL DEFAULT '',
+    cashier       TEXT NOT NULL DEFAULT 'kasir',
+    taken_at      TEXT, sale_id TEXT, hutang_sisa INTEGER NOT NULL DEFAULT 0,
+    batal_at      TEXT, batal_note TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+  CREATE INDEX IF NOT EXISTS idx_orders_sale ON orders(sale_id);
+  CREATE TABLE IF NOT EXISTS order_items (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    name     TEXT NOT NULL,
+    qty      REAL NOT NULL CHECK (qty > 0),
+    price    INTEGER NOT NULL CHECK (price >= 0),
+    amount   INTEGER NOT NULL,
+    note     TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+  CREATE TABLE IF NOT EXISTS order_payments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    kind       TEXT NOT NULL CHECK (kind IN ('dp', 'pelunasan', 'refund')),
+    method     TEXT NOT NULL,
+    amount     INTEGER NOT NULL CHECK (amount > 0),
+    shift_id   INTEGER REFERENCES shifts(id),
+    cashier    TEXT NOT NULL DEFAULT 'kasir',
+    note       TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_order_payments_order ON order_payments(order_id);
+  CREATE INDEX IF NOT EXISTS idx_order_payments_shift ON order_payments(shift_id);
+  ```
+  **Migrasi sebelumnya 2026-10-19 (split payment — butir ROADMAP 1.6.5):**
   tabel BARU **`sale_payments`** (SQL penuh di `db/schema.sql`; FK
   `sales.id ON DELETE CASCADE`, `UNIQUE(sale_id, method)`, CHECK
   `amount >= 0`). Murni tabel tambahan — `migrate()` (`CREATE TABLE IF

@@ -965,10 +965,12 @@ npm run dev:api
     admin, tarik tunai sebagai catatan di luar hitungan, pengeluaran/retur/
     pembelian terikat shift, kas masuk non-penjualan, hingga rekap Z-report
     — lalu input modal akhir dengan **selisih live** terhadap **kas
-    seharusnya di laci** (keputusan pemilik 2026-10-01, ROADMAP §1.3):
-    `kas seharusnya = modal_awal + (omzet − hutang terbentuk) + topup
-    (nominal + admin) + piutang terbayar + kas masuk − pengeluaran − retur
-    − pembelian (terbayar)`; `selisih = modal_akhir − kas seharusnya`.
+    seharusnya di laci** (keputusan pemilik 2026-10-01, ROADMAP §1.3;
+    sejak 2026-10-19 memuat komponen pesanan jasa):
+    `kas seharusnya = modal_awal + (omzet − hutang terbentuk − omzet
+    pesanan) + uang pesanan masuk + topup (nominal + admin) + piutang
+    terbayar + kas masuk − pengeluaran − retur − pembelian (terbayar)`;
+    `selisih = modal_akhir − kas seharusnya`.
     Tarik tunai sengaja tidak mengurangi laci (hanya dicatat). Rumus ada di
     `kasSeharusnya()` + `hitungSelisih()` di `apps/web/src/pages/shift-tutup.ts`
     — bila keputusan berubah, ubah di situ saja.
@@ -981,6 +983,30 @@ npm run dev:api
   **menambah** kas seharusnya di dialog tutup shift + rekap Z (thermal/PDF);
   di luar shift tetap tercatat + masuk laporan harian (kartu/CSV/cetak).
   Bukan omzet, bukan mutasi stok, dan tidak menggerus laba.
+* **Pesanan jasa + DP** (`#/orders`, menu **Pesanan** di sidebar, butir
+  ROADMAP 1.6.6, 2026-10-19) — alur bengkel untuk cetak/desain/service:
+  pesanan dicatat + dikerjakan dulu, **omzet baru dikakui saat Serahkan**.
+  Daftar = chip status (Dikerjakan/Selesai/Diambil/Batal + kartu piutang
+  pesanan aktif), cari nomor/nama pelanggan/nama item, form pesanan &
+  rincian sebagai **halaman penuh** (pola Pembelian — rawan terklik bila
+  modal). Item = **teks bebas** (nama, qty, harga, catatan) dan **tanpa
+  potong stok**; pelanggan wajib dipilih (nama di-snapshot); nomor otomatis
+  `ORD-YYMMDD-NNN`.
+  - **DP** per metode (tunai/QRIS/transfer) boleh kapan saja — uang masuk ke
+    laci shift penerima, tapi bukan omzet. Sisa DP dicek server (tidak boleh
+    melebihi sisa tagihan).
+  - **Serahkan** menerbitkan **nota penjualan penuh** (omzet dikakui di
+    sini): dialog menaksir live uang diterima → pelunasan → kembalian →
+    sisa, dan sisa otomatis tercatat sebagai **hutang pelanggan** (ledger
+    yang sama dengan halaman Hutang — kasir menemukannya dari tautan).
+    Cetak **struk penjualan** (dialog yang sama dengan Riwayat) atau
+    **nota pesanan** thermal 58mm terpisah.
+  - **Batalkan** mengembalikan DP yang sudah diterima lewat baris refund
+    (uang keluar, mengurangi laci shift refund). Pesanan yang sudah diambil
+    tidak bisa dibatalkan — koreksi barang lewat **Retur**.
+  - Rekap shift memuat **uang pesanan masuk** + nota pesanan (pengurang
+    omzet agar tidak dobel), dan piutang baru laporan harian ikut menghitung
+    sisa hutang saat serah.
 * **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — dua kartu saklar
   server, kartu kop toko, kartu preferensi device, masing-masing dengan
   penjelasan sendiri (bukan lagi satu kartu):
@@ -1189,7 +1215,8 @@ npm run dev:api
   hutang), Pengeluaran, Kas masuk, Pengguna, Satuan, Produk, Retur (retur
   manual), dan
   Shift (buka shift)** pintasan membuka modal form barunya; di **Pembelian**
-  masuk **halaman Buat PO** (`#/purchases/baru`). Tombol buat baru di
+  masuk **halaman Buat PO** (`#/purchases/baru`), di **Pesanan** masuk
+  **halaman Pesanan baru** (`#/orders/baru`). Tombol buat baru di
   halaman-halaman itu memuat badge `<kbd>Alt+N</kbd>` sebagai penanda. Saat
   modal/SweetAlert sedang terbuka pintasan diabaikan (tidak menumpuk modal
   kedua), navigasi selalu hanya memakai aksi halaman yang sedang tampil, dan

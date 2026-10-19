@@ -17,7 +17,10 @@ export type IconName =
   // 2026-10-17: input berikon + tombol lihat sandi.
   | 'user' | 'lock' | 'eye' | 'eyeOff'
   // camera — pemindai barcode lewat kamera HP (butir ROADMAP 1.6.1, 2026-10-19).
-  | 'camera';
+  | 'camera'
+  // clipboard — nav "Pesanan" jasa + tombol buat baru (butir ROADMAP 1.6.6,
+  // 2026-10-19). Lucide "clipboard".
+  | 'clipboard';
 
 const P: Record<IconName, string> = {
   dashboard: '<rect width="7" height="9" x="3" y="3" rx="1" /> <rect width="7" height="5" x="14" y="3" rx="1" /> <rect width="7" height="9" x="14" y="12" rx="1" /> <rect width="7" height="5" x="3" y="16" rx="1" />',
@@ -68,6 +71,8 @@ const P: Record<IconName, string> = {
   // camera — tombol pindai barcode lewat kamera HP di scan bar POS desktop &
   // header mobile (butir ROADMAP 1.6.1, 2026-10-19). Lucide "camera".
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /> <circle cx="12" cy="13" r="3" />',
+  // clipboard — nav "Pesanan" (butir ROADMAP 1.6.6, 2026-10-19). Lucide asli.
+  clipboard: '<rect width="8" height="4" x="8" y="2" rx="1" ry="1" /> <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />',
   // zap (kilat) — tile "Token PLN" di modal topup POS (lucide zap klasik).
   zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />',
   // landmark — tile "Dari rekening" (tarik tunai) di modal topup POS.

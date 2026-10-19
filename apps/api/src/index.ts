@@ -682,6 +682,15 @@ app.delete('/api/customers/:id', (c) => {
       400,
     );
   }
+  // Pesanan jasa (1.6.6) juga menahan hapus: orders.customer_id NOT NULL —
+  // tanpa guard ini FK akan meledak sebagai 500 mentah SQLite.
+  const no = db.prepare('SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?').get(id) as { n: number };
+  if (no.n > 0) {
+    return c.json(
+      { error: `pelanggan ini masih punya ${no.n} pesanan — riwayat pesanan harus utuh` },
+      400,
+    );
+  }
   db.prepare('DELETE FROM customers WHERE id = ?').run(id);
   catatAudit(c, 'delete', 'customer', id);
   return c.json({ data: { id, deleted: true } });
@@ -1802,7 +1811,18 @@ app.get('/api/shifts', (c) => {
             (SELECT COALESCE(SUM(d.amount),0) FROM customer_debts d
               WHERE d.type = 'payment'
                 AND datetime(d.created_at) >= datetime(s.opened_at)
-                AND (s.closed_at IS NULL OR datetime(d.created_at) <= datetime(s.closed_at))) AS piutang_bayar
+                AND (s.closed_at IS NULL OR datetime(d.created_at) <= datetime(s.closed_at))) AS piutang_bayar,
+            -- Pesanan jasa (butir ROADMAP 1.6.6, 2026-10-19): uang pesanan
+            -- yang MASUK ke laci shift ini = Σ dp + pelunasan − refund
+            -- (refund = uang KELUAR, dikurangkan lewat nilai negatif).
+            (SELECT COALESCE(SUM(CASE WHEN op.kind='refund' THEN -op.amount ELSE op.amount END),0)
+               FROM order_payments op WHERE op.shift_id = s.id) AS order_masuk_total,
+            -- Omzet nota pesanan (nota yang lahir dari take — orders.sale_id):
+            -- DIKELUARKAN dari hitungan laci karena uangnya sudah tercatat di
+            -- order_masuk_total — tanpa ini uang pesanan terhitung dobel.
+            (SELECT COALESCE(SUM(sl.total),0) FROM sales sl
+               WHERE sl.shift_id = s.id
+                 AND EXISTS (SELECT 1 FROM orders o WHERE o.sale_id = sl.id)) AS order_omzet_total
        FROM shifts s
        ${klausul}
       ORDER BY s.id DESC
@@ -2211,7 +2231,11 @@ app.get('/api/sales', (c) => {
             CASE WHEN s.pay_method='tunai' AND s.total > s.cash_in
                   AND s.customer_id IS NOT NULL
                   AND s.customer_name <> 'Pelanggan Umum'
-                 THEN s.total - s.cash_in ELSE 0 END AS sisa_hutang,
+                 THEN s.total - s.cash_in
+                 -- (1.6.6) Nota pesanan selalu cash_in = total → CASE di atas
+                 -- sunyi; sisa hutangnya dibaca dari penanda orders.hutang_sisa.
+                 ELSE COALESCE((SELECT o.hutang_sisa FROM orders o WHERE o.sale_id = s.id), 0) END AS sisa_hutang,
+            (SELECT o.order_no FROM orders o WHERE o.sale_id = s.id) AS order_no,
             (SELECT COUNT(*) FROM returns r WHERE r.sale_id = s.id) AS n_retur,
             (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.sale_id = s.id) AS retur_total,
             (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS n_items,
@@ -2232,14 +2256,18 @@ app.get('/api/sales', (c) => {
 
 app.get('/api/sales/:id', (c) => {
   // `sisa_hutang` = penanda "nota ini berhutang" — CASE yang SAMA dengan
-  // GET /api/sales (putaran 13); `n_retur`/`retur_total` = penanda retur
-  // (2026-10-18) — subquery yang SAMA pula; lihat komentar di sana.
+  // GET /api/sales (putaran 13) + fallback penanda pesanan (1.6.6); `n_retur`/
+  // `retur_total` = penanda retur (2026-10-18) — subquery yang SAMA pula;
+  // lihat komentar di sana. `order_no` = nomor pesanan bila nota ini lahir
+  // dari take pesanan (dipakai struk ulang/Riwayat menampilkan asalnya).
   const sale = db.prepare(
     `SELECT *,
             CASE WHEN pay_method='tunai' AND total > cash_in
                   AND customer_id IS NOT NULL
                   AND customer_name <> 'Pelanggan Umum'
-                 THEN total - cash_in ELSE 0 END AS sisa_hutang,
+                 THEN total - cash_in
+                 ELSE COALESCE((SELECT o.hutang_sisa FROM orders o WHERE o.sale_id = sales.id), 0) END AS sisa_hutang,
+            (SELECT o.order_no FROM orders o WHERE o.sale_id = sales.id) AS order_no,
             (SELECT COUNT(*) FROM returns r WHERE r.sale_id = sales.id) AS n_retur,
             (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.sale_id = sales.id) AS retur_total
        FROM sales WHERE id=?`,
@@ -2269,6 +2297,384 @@ app.get('/api/sales/:id', (c) => {
     'SELECT method, amount FROM sale_payments WHERE sale_id=? ORDER BY id',
   ).all(c.req.param('id'));
   return c.json({ data: { sale, items, payments } });
+});
+
+// ---------- pesanan jasa + DP/status (butir ROADMAP 1.6.6, ACC 19 Okt 2026) ----------
+// Halaman #/orders. Lima keputusan pemilik (dikonfirmasi 2026-10-19) yang
+// membentuk kontrak ini:
+//   1. Omzet DIKAKUI SAAT DIAMBIL — nota penjualan penuh (insertSale, item
+//      teks bebas tanpa potong stok) dibuat saat `take`; DP = uang muka.
+//   2. Item pesanan = teks bebas — stok tidak pernah disentuh di jalur ini.
+//   3. Sisa yang belum dibayar saat diambil dicatat otomatis ke ledger
+//      Hutang pelanggan (customer_debts charge) + penanda orders.hutang_sisa.
+//   4. Pembayaran satu metode per baris: tunai|qris|transfer.
+//   5. Nota pesanan dicetak thermal oleh klien.
+// Uang pesanan SATU ledger: order_payments (dp/pelunasan/refund) — agregat
+// `order_masuk_total` MENAMBAH laci shift penerima, dan nota pesanan
+// DIKELUARKAN dari hitungan laci lewat `order_omzet_total` (uangnya sudah
+// dicatat di pembayaran; rumusnya di kasSeharusnya() shift-tutup.ts). Input
+// `payments[]` nota penjualan dibangun dari aggregat pembayaran per metode —
+// Σ baris SELALU = total nota (aturan atribusi split 1.6.5).
+
+/** Nomor pesanan `ORD-YYMMDD-NNN` — urut HARIAN UTC, pola invoice_no:
+ *  MAX lewat CAST(substr(order_no,12)) + pola LIKE (BUKAN COUNT/teks),
+ *  dicek dari DB supaya celah nomor tidak dipakai ulang. */
+function nomorOrder(): string {
+  const ymd = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
+  const last = db
+    .prepare(
+      `SELECT order_no AS n FROM orders
+        WHERE order_no LIKE 'ORD-' || ? || '-%'
+        ORDER BY CAST(substr(order_no, 12) AS INTEGER) DESC LIMIT 1`,
+    )
+    .get(ymd) as { n: string } | undefined;
+  const urut = last ? Number(last.n.slice(11)) + 1 : 1;
+  return `ORD-${ymd}-${String(urut).padStart(3, '0')}`;
+}
+
+/** Subquery bobot pesanan yang dipakai berulang (list & detail): `dibayar` =
+ *  NET uang diterima kasir (DP + pelunasan − refund; refund hanya muncul di
+ *  pesanan batal), `refund` = bagian refund saja, `sisa` = total − dibayar
+ *  (0 untuk batal — pesanan yang dibatalkan tidak menagih apa pun). */
+const SQL_ORDER_UANG = `
+  (SELECT COALESCE(SUM(CASE WHEN op.kind='refund' THEN -op.amount ELSE op.amount END),0)
+     FROM order_payments op WHERE op.order_id = o.id) AS dibayar,
+  (SELECT COALESCE(SUM(CASE WHEN op.kind='refund' THEN op.amount ELSE 0 END),0)
+     FROM order_payments op WHERE op.order_id = o.id) AS refund_total,
+  CASE WHEN o.status = 'batal' THEN 0
+       ELSE MAX(0, o.total -
+         (SELECT COALESCE(SUM(CASE WHEN op.kind='refund' THEN -op.amount ELSE op.amount END),0)
+            FROM order_payments op WHERE op.order_id = o.id)) END AS sisa,
+  (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS n_items`;
+
+app.get('/api/orders', (c) => {
+  const status = c.req.query('status') ?? 'semua';
+  if (!['semua', 'dikerjakan', 'selesai', 'diambil', 'batal'].includes(status)) {
+    return c.json({ error: 'status harus dikerjakan|selesai|diambil|batal|semua' }, 400);
+  }
+  // Cari multi-kata (pola pelanggan/produk): SEMUA kata harus cocok di
+  // nomor pesanan / nama pelanggan / nama item — tidak harus di field yang
+  // sama. Nama item ikut supaya kasir bisa menemukan pesanan dari isinya
+  // (mis. "banner") tanpa hafal nomor.
+  const q = (c.req.query('q') ?? '').trim().toLowerCase();
+  const kata = q.split(/\s+/).filter(Boolean);
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (status !== 'semua') { where.push('o.status = ?'); params.push(status); }
+  for (const k of kata) {
+    where.push(`(lower(o.order_no) LIKE ? OR lower(o.customer_name) LIKE ?
+      OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND lower(oi.name) LIKE ?))`);
+    params.push(`%${k}%`, `%${k}%`, `%${k}%`);
+  }
+  const klausul = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM orders o ${klausul}`).get(...params) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT o.*, ${SQL_ORDER_UANG}
+       FROM orders o ${klausul}
+      ORDER BY o.id DESC LIMIT ? OFFSET ?`,
+  ).all(...params, limit, offset);
+  // Ringkasan kepala halaman: jumlah per status (chip filter) + piutang
+  // pesanan aktif (Σ sisa status dikerjakan/selesai — cermin kartu halaman).
+  const ringkas = db.prepare(
+    `SELECT
+       COALESCE(SUM(CASE WHEN o.status='dikerjakan' THEN 1 ELSE 0 END),0) AS dikerjakan,
+       COALESCE(SUM(CASE WHEN o.status='selesai' THEN 1 ELSE 0 END),0) AS selesai,
+       COALESCE(SUM(CASE WHEN o.status='diambil' THEN 1 ELSE 0 END),0) AS diambil,
+       COALESCE(SUM(CASE WHEN o.status='batal' THEN 1 ELSE 0 END),0) AS batal,
+       COALESCE(SUM(CASE WHEN o.status IN ('dikerjakan','selesai')
+         THEN MAX(0, o.total - (SELECT COALESCE(SUM(CASE WHEN op.kind='refund' THEN -op.amount ELSE op.amount END),0)
+              FROM order_payments op WHERE op.order_id = o.id)) ELSE 0 END),0) AS piutang
+     FROM orders o`,
+  ).get();
+  return c.json({ data, total, ringkas });
+});
+
+app.get('/api/orders/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const order = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
+  if (!order) return c.json({ error: 'tidak ditemukan' }, 404);
+  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id').all(id);
+  const payments = db.prepare('SELECT * FROM order_payments WHERE order_id = ? ORDER BY id DESC').all(id);
+  return c.json({ data: { order, items, payments } });
+});
+
+// Buat pesanan baru (status 'dikerjakan'). Pelanggan WAJIB (keputusan
+// pemilik: pesanan butuh identitas pengambil); item = teks bebas, harga
+// diketik kasir (TIDAK ada resolusi produk/harga master di jalur ini).
+app.post('/api/orders', async (c) => {
+  try {
+    const body = await c.req.json();
+    const customerId = Number(body?.customer_id);
+    if (!Number.isInteger(customerId)) return c.json({ error: 'customer_id harus integer' }, 400);
+    const cust = db.prepare('SELECT id, name FROM customers WHERE id = ?').get(customerId) as
+      { id: number; name: string } | undefined;
+    if (!cust) return c.json({ error: `pelanggan tidak dikenal: ${customerId}` }, 400);
+    const itemsMentah = Array.isArray(body?.items) ? (body.items as unknown[]) : [];
+    if (itemsMentah.length === 0) return c.json({ error: 'pesanan harus punya minimal 1 item' }, 400);
+    if (itemsMentah.length > 100) return c.json({ error: 'maksimal 100 item per pesanan' }, 400);
+    const note = String(body?.note ?? '').trim();
+    if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    const items: { name: string; qty: number; price: number; amount: number; note: string }[] = [];
+    for (let i = 0; i < itemsMentah.length; i++) {
+      const it = itemsMentah[i] as { name?: unknown; qty?: unknown; price?: unknown; note?: unknown };
+      const nama = String(it.name ?? '').trim();
+      if (!nama) return c.json({ error: `item ${i + 1}: nama wajib diisi` }, 400);
+      const qty = Number(it.qty);
+      if (!(qty > 0)) return c.json({ error: `item ${i + 1}: qty harus > 0` }, 400);
+      const price = Number(it.price);
+      if (!Number.isFinite(price) || price < 0) {
+        return c.json({ error: `item ${i + 1}: harga harus angka >= 0` }, 400);
+      }
+      const catatan = String(it.note ?? '').trim();
+      if (catatan.length > 200) {
+        return c.json({ error: `catatan baris terlalu panjang: ${nama} (maks 200 karakter)` }, 400);
+      }
+      items.push({ name: nama, qty, price: Math.round(price), amount: Math.round(qty * Math.round(price)), note: catatan });
+    }
+    const total = items.reduce((a, b) => a + b.amount, 0);
+    const cashier = body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir';
+    const row = transaksi(() => {
+      const orderNo = nomorOrder();
+      const o = db.prepare(
+        `INSERT INTO orders (order_no, customer_id, customer_name, status, total, note, cashier)
+         VALUES (?, ?, ?, 'dikerjakan', ?, ?, ?) RETURNING *`,
+      ).get(orderNo, cust.id, cust.name, total, note, cashier) as { id: number };
+      const insItem = db.prepare(
+        'INSERT INTO order_items (order_id, name, qty, price, amount, note) VALUES (?, ?, ?, ?, ?, ?)',
+      );
+      for (const it of items) insItem.run(o.id, it.name, it.qty, it.price, it.amount, it.note);
+      return db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(o.id);
+    })();
+    catatAudit(c, 'create', 'order', (row as { id: number }).id, {
+      order_no: (row as { order_no: string }).order_no, total, items: items.length,
+    });
+    return c.json({ data: { order: row, items } }, 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pesanan' }, 400);
+  }
+});
+
+/** Validasi shift OPSIONAL (pola expenses/kas masuk): dikirim = harus ada
+ *  (400 "shift tidak dikenal"); absen = dicatat tanpa ikut laci shift mana
+ *  pun. Mengembalikan pesan error atau null. */
+function cekShiftOpsional(shiftId: unknown): string | null {
+  if (shiftId === undefined || shiftId === null || shiftId === '') return null;
+  const sid = Number(shiftId);
+  if (!Number.isInteger(sid)) return 'shift_id harus integer';
+  const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(sid);
+  return ada ? null : 'shift tidak dikenal';
+}
+
+const METODE_ORDER = ['tunai', 'qris', 'transfer'];
+
+/** Catat DP (uang muka) — status masih dikerjakan/selesai. Tidak boleh
+ *  melebihi sisa (uang lebih tidak ada; pelunasan penuh lewat `take`). */
+app.post('/api/orders/:id/payments', async (c) => {
+  try {
+    const body = await c.req.json();
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+    const o = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id) as
+      { id: number; status: string; order_no: string; total: number; sisa: number } | undefined;
+    if (!o) return c.json({ error: 'tidak ditemukan' }, 404);
+    if (o.status === 'diambil') return c.json({ error: 'pesanan sudah diambil — tidak bisa menerima pembayaran lagi' }, 400);
+    if (o.status === 'batal') return c.json({ error: 'pesanan sudah dibatalkan' }, 400);
+    const method = String(body?.method ?? '');
+    if (!METODE_ORDER.includes(method)) {
+      return c.json({ error: `metode pembayaran tidak dikenal: ${method || '(kosong)'}` }, 400);
+    }
+    const amount = Number(body?.amount);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return c.json({ error: 'jumlah harus rupiah bulat > 0' }, 400);
+    }
+    if (amount > o.sisa) {
+      return c.json({ error: `melebihi sisa pesanan (sisa ${o.sisa})` }, 400);
+    }
+    const sErr = cekShiftOpsional(body?.shift_id);
+    if (sErr) return c.json({ error: sErr }, 400);
+    const row = db.prepare(
+      `INSERT INTO order_payments (order_id, kind, method, amount, shift_id, cashier, note)
+       VALUES (?, 'dp', ?, ?, ?, ?, ?) RETURNING *`,
+    ).get(id, method, amount, body?.shift_id ?? null, body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir',
+      String(body?.note ?? '').slice(0, 200));
+    catatAudit(c, 'update', 'order', id, { kind: 'dp', method, amount });
+    const segar = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
+    return c.json({ data: { payment: row, order: segar } }, 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pembayaran' }, 400);
+  }
+});
+
+/** Pindah status antar-dikerjakan/selesai (bolak-balik untuk koreksi).
+ *  'diambil' hanya lewat POST /:id/take; 'batal' hanya lewat /:id/cancel. */
+app.post('/api/orders/:id/status', async (c) => {
+  try {
+    const body = await c.req.json();
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+    const target = String(body?.status ?? '');
+    if (!['dikerjakan', 'selesai'].includes(target)) {
+      return c.json({ error: 'status harus dikerjakan|selesai (diambil lewat Serahkan, batal lewat Batalkan)' }, 400);
+    }
+    const o = db.prepare('SELECT id, status FROM orders WHERE id = ?').get(id) as
+      { id: number; status: string } | undefined;
+    if (!o) return c.json({ error: 'tidak ditemukan' }, 404);
+    if (o.status === 'diambil') return c.json({ error: 'pesanan sudah diambil' }, 400);
+    if (o.status === 'batal') return c.json({ error: 'pesanan sudah dibatalkan' }, 400);
+    db.prepare(`UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(target, id);
+    catatAudit(c, 'update', 'order', id, { status: target });
+    const segar = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
+    return c.json({ data: segar });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal ubah status' }, 400);
+  }
+});
+
+/** Serahkan pesanan (AMBIL) — puncak alur 1.6.6. SATU transaction:
+ *   1. nota penjualan penuh dibuat lewat insertSale (omzet dikakui di sini;
+ *      item teks bebas tanpa potong stok — `lines` manual, cost 0),
+ *   2. pelunasan (bila ada) dicatat sebagai order_payment kind='pelunasan',
+ *   3. sisa yang belum dibayar dicatat ke ledger Hutang pelanggan,
+ *   4. status -> 'diambil' + sale_id + hutang_sisa.
+ *  Atribusi nota (sale_payments): pembayaran pesanan diagregat per metode,
+ *  sisa hutang menempel ke metode penyerahan (pola nota hutang POS:
+ *  diatribusi penuh) — Σ baris = total nota, invarian split 1.6.5 dijaga. */
+app.post('/api/orders/:id/take', async (c) => {
+  try {
+    const body = await c.req.json();
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+    const o = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id) as
+      { id: number; order_no: string; status: string; total: number; sisa: number; customer_id: number; note: string } | undefined;
+    if (!o) return c.json({ error: 'tidak ditemukan' }, 404);
+    if (o.status === 'diambil') return c.json({ error: 'pesanan sudah diambil' }, 400);
+    if (o.status === 'batal') return c.json({ error: 'pesanan sudah dibatalkan' }, 400);
+    const method = String(body?.method ?? '');
+    if (!METODE_ORDER.includes(method)) {
+      return c.json({ error: `metode pembayaran tidak dikenal: ${method || '(kosong)'}` }, 400);
+    }
+    // `diterima` = uang fisik diserahkan pelanggan SAAT INI (>= 0; lebih dari
+    // sisa = ada kembalian; kurang = sisanya masuk Hutang). Rupiah bulat.
+    const diterima = Number(body?.diterima ?? 0);
+    if (!Number.isInteger(diterima) || diterima < 0) {
+      return c.json({ error: 'uang diterima harus rupiah bulat >= 0' }, 400);
+    }
+    const sErr = cekShiftOpsional(body?.shift_id);
+    if (sErr) return c.json({ error: sErr }, 400);
+    const cashier = body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir';
+    const hasil = transaksi(() => {
+      const sisa = o.sisa;
+      const bayar = Math.min(diterima, sisa);       // yang benar-benar menutup tagihan
+      const kembalian = diterima - bayar;           // uang lebih -> dikembalikan
+      const hutang = sisa - bayar;                  // sisa -> ledger Hutang
+      const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id')
+        .all(id) as { name: string; qty: number; price: number; note: string }[];
+      const dpRows = db.prepare(
+        `SELECT method, SUM(CASE WHEN kind='refund' THEN -amount ELSE amount END) AS amount
+           FROM order_payments WHERE order_id = ? GROUP BY method HAVING amount != 0`,
+      ).all(id) as { method: string; amount: number }[];
+      // Peta atribusi per metode: DP + pelunasan sekarang + sisa hutang
+      // (menempel metode penyerahan). Σ = total nota — invarian dijaga.
+      const peta = new Map<string, number>();
+      for (const d of dpRows) peta.set(d.method, (peta.get(d.method) ?? 0) + d.amount);
+      if (bayar > 0) peta.set(method, (peta.get(method) ?? 0) + bayar);
+      if (hutang > 0) peta.set(method, (peta.get(method) ?? 0) + hutang);
+      const payments = [...peta].map(([m, amount]) => ({ method: m, amount }));
+      const saleId = randomUUID();
+      // insertSale mengembalikan `row: unknown` (tipe union dup/non-dup) —
+      // cast ke bentuk minimal yang dipakai di sini (id + invoice_no).
+      const { row: sale } = insertSale({
+        id: saleId,
+        shift_id: body?.shift_id ?? null,
+        pay_method: method,
+        discount: 0,
+        cash_in: o.total, // diabaikan saat payments[] dikirim — nota dianggap terbayar penuh
+        cashier,
+        customer_id: o.customer_id,
+        note: o.note,     // catatan pesanan ikut jadi catatan transaksi nota
+        items: items.map((it) => ({ name: it.name, qty: it.qty, price: it.price, note: it.note })),
+        ...(payments.length > 0 ? { payments } : {}),
+      }) as { row: { id: string; invoice_no: string } };
+      if (bayar > 0) {
+        db.prepare(
+          `INSERT INTO order_payments (order_id, kind, method, amount, shift_id, cashier, note)
+           VALUES (?, 'pelunasan', ?, ?, ?, ?, ?)`,
+        ).run(id, method, bayar, body?.shift_id ?? null, cashier, `Pelunasan ${o.order_no}`);
+      }
+      if (hutang > 0) {
+        // Ledger Hutang (keputusan pemilik #3): charge dengan nomor nota +
+        // nomor pesanan supaya kasir menemukannya di halaman Hutang.
+        db.prepare(
+          `INSERT INTO customer_debts (customer_id, type, amount, note) VALUES (?, 'charge', ?, ?)`,
+        ).run(o.customer_id, hutang, `Nota ${sale.invoice_no} — sisa pesanan ${o.order_no}`);
+      }
+      db.prepare(
+        `UPDATE orders SET status='diambil', taken_at=datetime('now'), updated_at=datetime('now'),
+           sale_id=?, hutang_sisa=? WHERE id=?`,
+      ).run(saleId, hutang, id);
+      return { sale, kembalian, hutang, bayar };
+    })();
+    catatAudit(c, 'update', 'order', id, {
+      status: 'diambil', sale_id: hasil.sale.id, invoice_no: hasil.sale.invoice_no,
+      diterima, kembalian: hasil.kembalian, hutang: hasil.hutang,
+    });
+    const segar = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
+    return c.json({ data: { order: segar, sale: hasil.sale, kembalian: hasil.kembalian, hutang: hasil.hutang } });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal serahkan pesanan' }, 400);
+  }
+});
+
+/** Batalkan pesanan (koreksi sebelum diambil). DP yang sudah diterima
+ *  DIKEMBALIKAN lewat baris order_payments kind='refund' (uang keluar —
+ *  mengurangi agregat laci shift penerima refund). Pesanan yang sudah
+ *  diambil TIDAK bisa dibatalkan: koreksi barang lewat Retur. */
+app.post('/api/orders/:id/cancel', async (c) => {
+  try {
+    const body = await c.req.json();
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+    const o = db.prepare('SELECT id, status FROM orders WHERE id = ?').get(id) as
+      { id: number; status: string } | undefined;
+    if (!o) return c.json({ error: 'tidak ditemukan' }, 404);
+    if (o.status === 'diambil') {
+      return c.json({ error: 'pesanan sudah diambil — barang/jasanya sekarang tercatat di Riwayat; koreksi lewat Retur' }, 400);
+    }
+    if (o.status === 'batal') return c.json({ error: 'pesanan sudah dibatalkan' }, 400);
+    const batalNote = String(body?.note ?? '').trim();
+    if (batalNote.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    const method = String(body?.method ?? 'tunai');
+    if (!METODE_ORDER.includes(method)) {
+      return c.json({ error: `metode pembayaran tidak dikenal: ${method || '(kosong)'}` }, 400);
+    }
+    const sErr = cekShiftOpsional(body?.shift_id);
+    if (sErr) return c.json({ error: sErr }, 400);
+    const refund = transaksi(() => {
+      const net = (db.prepare(
+        `SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount ELSE amount END),0) AS d
+           FROM order_payments WHERE order_id = ?`,
+      ).get(id) as { d: number }).d;
+      if (net > 0) {
+        db.prepare(
+          `INSERT INTO order_payments (order_id, kind, method, amount, shift_id, cashier, note)
+           VALUES (?, 'refund', ?, ?, ?, ?, ?)`,
+        ).run(id, method, net, body?.shift_id ?? null, body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir',
+          'Refund pembatalan pesanan');
+      }
+      db.prepare(
+        `UPDATE orders SET status='batal', batal_at=datetime('now'), updated_at=datetime('now'), batal_note=? WHERE id=?`,
+      ).run(batalNote, id);
+      return net;
+    })();
+    catatAudit(c, 'update', 'order', id, { status: 'batal', refund });
+    const segar = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
+    return c.json({ data: { order: segar, refund } });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal batalkan pesanan' }, 400);
+  }
 });
 
 // ---------- topup & tarik tunai ----------
@@ -3422,13 +3828,20 @@ function laporanRentang(dari: string, sampai: string) {
      FROM purchases WHERE status = 'received' AND ${dl('received_at')}`,
   ).get(...ps) as { n: number; total: number };
   // Piutang (butir credit Z-report Aronium): TERBENTUK = porsi tunai tak
-  // masuk laci (CASE persis penanda sisa_hutang); TERBAYAR = payment ledger.
+  // masuk laci (CASE persis penanda sisa_hutang) + hutang serah pesanan jasa
+  // (butir ROADMAP 1.6.6, 2026-10-19: orders.hutang_sisa saat diserahkan —
+  // piutang baru hanya tercatat sekali di hari SERAH, bukan hari DP);
+  // TERBAYAR = payment ledger (termasuk pelunasan hutang pesanan).
   const piutangBaru = (db.prepare(
     `SELECT COALESCE(SUM(CASE WHEN pay_method='tunai' AND total > cash_in
        AND customer_id IS NOT NULL AND customer_name <> 'Pelanggan Umum'
       THEN total - cash_in ELSE 0 END),0) AS t
      FROM sales WHERE ${dl('created_at')}`,
-  ).get(...ps) as { t: number }).t;
+  ).get(...ps) as { t: number }).t
+    + (db.prepare(
+      `SELECT COALESCE(SUM(hutang_sisa),0) AS t FROM orders
+        WHERE status = 'diambil' AND hutang_sisa > 0 AND ${dl('taken_at')}`,
+    ).get(...ps) as { t: number }).t;
   const piutangBayar = (db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS t FROM customer_debts
      WHERE type = 'payment' AND ${dl('created_at')}`,

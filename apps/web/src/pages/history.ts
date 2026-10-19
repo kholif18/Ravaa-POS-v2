@@ -56,6 +56,10 @@ export type SaleRow = {
    *  Sumber label linimasa ("Tunai + QRIS"); rincian nominal per metode
    *  ada di `GET /api/sales/:id.payments`. */
   pay_methods?: string | null;
+  /** Nomor pesanan jasa (butir 1.6.6, 2026-10-19): terisi bila nota ini
+   *  lahir dari serah pesanan (orders.sale_id) — ditampilkan di rincian
+   *  supaya uang nota bisa dilacak balik ke pesanannya. */
+  order_no?: string | null;
 };
 
 type TopupRow = {
@@ -365,6 +369,7 @@ function detailJual(s: SaleRow): string {
         </div>` : ''}
       ${ket('Kasir', esc(s.cashier))}
       ${ket('Pelanggan', esc((s.customer_name ?? '').trim() || 'Pelanggan Umum'))}
+      ${s.order_no ? ket('Pesanan', esc(s.order_no)) : ''}
       ${ket('Shift', s.shift_id ? `#${s.shift_id}` : '—')}
       <div class="mt-2 text-[11px] leading-relaxed text-gray-400 dark:text-gray-500">
         Nota ${esc(s.invoice_no ?? s.id.slice(0, 8))}<br />${esc(waktu(s.created_at))}

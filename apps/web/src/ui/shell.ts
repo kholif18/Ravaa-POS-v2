@@ -2,7 +2,7 @@ import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 import { akunTersimpan, type Peran } from './auth';
 
-export type AdminRoute = 'dashboard' | 'products' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'kas-masuk' | 'purchases' | 'shifts' | 'settings' | 'users' | 'audit';
+export type AdminRoute = 'dashboard' | 'products' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'orders' | 'customers' | 'debts' | 'reports' | 'expenses' | 'kas-masuk' | 'purchases' | 'shifts' | 'settings' | 'users' | 'audit';
 // login & ubah-sandi dirender TANPA shell (layar penuh) — bukan admin.
 // profil = halaman shell SEMUA peran (edit nama sendiri + pref perangkat).
 // labels (refactor 2026-10-17) = layar penuh TANPA sidebar ala POS: printer
@@ -35,6 +35,10 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
     // pelanggan -> piutang.
     group: 'Penjualan',
     items: [
+      // Pesanan jasa + DP (butir ROADMAP 1.6.6, 2026-10-19): order dulu,
+      // dikerjakan, lalu diserahkan (omzet dikakui saat serah). Semua peran —
+      // kasir yang menerima & menyerahkan pesanan di depan.
+      { route: 'orders', label: 'Pesanan', icon: 'clipboard', roles: SEMUA },
       // Linimasa penjualan + topup/tarik per hari (baru 2026-09-30).
       { route: 'history', label: 'Riwayat transaksi', icon: 'receipt', roles: SEMUA },
       // Retur penjualan (Tahap 2, 2026-10-11): barang kembali + uang kembali.
@@ -98,6 +102,7 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   purchases: 'Pembelian',
   history: 'Riwayat transaksi',
   returns: 'Retur',
+  orders: 'Pesanan',
   customers: 'Pelanggan',
   debts: 'Hutang',
   reports: 'Laporan',
@@ -124,6 +129,7 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   purchases: ['Barang', 'Pembelian'],
   history: ['Penjualan', 'Riwayat transaksi'],
   returns: ['Penjualan', 'Retur'],
+  orders: ['Penjualan', 'Pesanan'],
   customers: ['Penjualan', 'Pelanggan'],
   debts: ['Penjualan', 'Hutang'],
   reports: ['Keuangan', 'Laporan'],
@@ -145,6 +151,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   purchases: 'Nota kulakan PO: order, terima (stok masuk), bayar — tunai penuh bawaan.',
   history: 'Linimasa penjualan dan topup/tarik per hari, lengkap dengan isi notanya.',
   returns: 'Barang kembali + uang kembali ke pelanggan — mengurangi laci bila terikat shift.',
+  orders: 'Pesanan jasa: dikerjakan dulu, omzet tercatat saat diserahkan — DP dan sisa hubungkan ke Hutang.',
   customers: 'Kontak pembeli — dipakai untuk mencatat hutang di halaman Hutang.',
   debts: 'Buku piutang: catat siapa berhutang dan pembayarannya.',
   reports: 'Omzet, laba, HPP, rekap metode bayar, produk terlaris, dan stok menipis.',

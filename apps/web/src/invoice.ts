@@ -345,18 +345,26 @@ function tglRekap(iso: string | null): string {
  *  selisih). Kas seharusnya dihitung ulang di sini? TIDAK — pemanggil
  *  mengirim angka final? Kontrak: fungsi ini MENGHITUNG dari baris (rumus
  *  kasSeharusnya ada di shift-tutup, tak diimpor agar invoice.ts tetap
- *  mandiri): modal + (omzet − hutang) + topup + piutang + kas masuk
- *  (1.6.2, 2026-10-19) − expense − retur − purchase. Rumus ditulis SEKALI
- *  di sini + SEKALI di kasSeharusnya — duplikasi disengaja & ditandai; bila
- *  rumus berubah, ubah keduanya (dicek test rekap: angka PDF = angka dialog). */
+ *  mandiri): modal + (omzet − hutang − omzet nota pesanan) + uang pesanan
+ *  masuk + topup + piutang + kas masuk (1.6.2, 2026-10-19) − expense − retur
+ *  − purchase. Pesanan jasa (1.6.6, 2026-10-19): nota take ikut terhitung di
+ *  `omzet` padahal uangnya lewat `order_masuk_total` — dikurangkan di sini.
+ *  Rumus ditulis SEKALI di sini + SEKALI di kasSeharusnya — duplikasi
+ *  disengaja & ditandai; bila rumus berubah, ubah keduanya (dicek test
+ *  rekap: angka PDF = angka dialog). */
 export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): string {
-  const kasHarus = s.modal_awal + (s.omzet - (s.hutang_baru ?? 0))
-    + s.topup_nominal + s.topup_admin + (s.piutang_bayar ?? 0) + (s.kas_masuk_total ?? 0)
+  const orderOmzet = s.order_omzet_total ?? 0;
+  const kasHarus = s.modal_awal + (s.omzet - (s.hutang_baru ?? 0) - orderOmzet)
+    + (s.order_masuk_total ?? 0) + s.topup_nominal + s.topup_admin + (s.piutang_bayar ?? 0)
+    + (s.kas_masuk_total ?? 0)
     - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
   const d = fisik !== null ? fisik - kasHarus : null;
   const nota = s.inv_awal && s.inv_akhir ? `${s.inv_awal} – ${s.inv_akhir}` : 'Tanpa penjualan';
   const R = (label: string, nilai: number, kuat = false) =>
     `<tr><td>${label}</td><td class="r"${kuat ? ' style="font-weight:700"' : ''}>${rpNum(nilai)}</td></tr>`;
+  // Baris bernilai teks siap-pakai (tanda minus di depan, mis. pengurang).
+  const S = (label: string, nilaiTeks: string) =>
+    `<tr><td>${label}</td><td class="r">${nilaiTeks}</td></tr>`;
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -419,6 +427,8 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
       ${R('&nbsp;&nbsp;QRIS', s.qris)}
       ${R('&nbsp;&nbsp;Transfer', s.transfer)}
       ${R('Diskon', s.diskon_total ?? 0)}
+      ${R('Uang pesanan masuk', s.order_masuk_total ?? 0)}
+      ${S('Nota pesanan (keluar)', orderOmzet > 0 ? `-${rpNum(orderOmzet)}` : rpNum(0))}
       ${R('Topup nominal', s.topup_nominal)}
       ${R('Topup admin', s.topup_admin)}
       ${R('Tarik nominal', s.tarik_nominal)}

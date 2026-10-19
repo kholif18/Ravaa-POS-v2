@@ -317,7 +317,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 |---|---|---|---|---|
 | 4.1 | **Split payment** (tunai+QRIS satu nota) | **✅ selesai 2026-10-19** — §1.6.5 | Kasir Pintar (split bill/join), Olsera (F&B) | Tabel `sale_payments` (Σ = total) + laporan byMethod + modal 2 metode lebar `wider` |
 | 4.2 | **Metode bayar e-wallet + opsi MDR** | **❌ tidak perlu** — tanpa payment gateway; QRIS/transfer manual cukup | KP/Olsera/Loyverse | Konteks: MDR QRIS ≤Rp100 rb = 0% sejak 1 Okt 2026 (BI) |
-| 4.3 | **Pesanan jasa + status/DP** | **✅ dikerjakan** — §1.6.6 | KP vertical Bengkel | Order → dikerjakan → diambil; DP; domain cetak/servis laptop |
+| 4.3 | **Pesanan jasa + status/DP** | **✅ selesai 2026-10-19** — §1.6.6 | KP vertical Bengkel | Order → dikerjakan → diambil; DP; domain cetak/servis laptop; omzet saat serah, item tanpa potong stok |
 | 4.4 | **Scan barcode kamera HP** | **✅ selesai 2026-10-19** — §1.6.1 | Loyverse | API browser (`BarcodeDetector`) tanpa dependensi; butuh konteks aman (HTTPS/localhost) |
 | 4.5 | **Kas masuk (di luar penjualan)** | **✅ selesai 2026-10-19** — §1.6.2 | KP, Olsera | Pasangan Pengeluaran; laci/expected-cash + laporan |
 | 4.6 | **Cetak/ekspor nota PO** | **✅ selesai 2026-10-19** — §1.6.3 | KP (nota pembelian), Loyverse | Pola dokumen A4 + tombol di sub-halaman PO |

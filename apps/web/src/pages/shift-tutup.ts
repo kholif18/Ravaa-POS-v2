@@ -24,10 +24,19 @@
 //   9. Kas masuk (butir ROADMAP 1.6.2, 2026-10-19) -> laci NAIK (injeksi
 //      modal / koreksi laci; hanya yang terikat shift ini — pasangan
 //      pengeluaran butir 4).
+//  10. Pesanan jasa (butir ROADMAP 1.6.6, 2026-10-19) -> DUA suku:
+//      `order_masuk_total` (Σ dp + pelunasan − refund shift ini) laci NAIK,
+//      dan `order_omzet_total` (nilai nota penjualan yang lahir dari take,
+//      link orders.sale_id) DIKURANGKAN dari omzet — nota pesanan ikut
+//      terhitung di `omzet` (semua sales shift ini), padahal uangnya sudah
+//      dibawa suku order_masuk; tanpa pengurangan ini uang pesanan dobel.
+//      (Sisa hutang saat serah TIDAK ikut `hutang_baru`: selisihnya sudah
+//      tercermin di order_masuk < order_omzet — jangan kurangkan dua kali.)
 // Jadi:
-//   kas seharusnya = modal_awal + (omzet − hutang_baru) + (topup nominal+admin)
-//                    + piutang_bayar + kas masuk − pengeluaran − retur
-//                    − pembelian (terbayar, shift ini)
+//   kas seharusnya = modal_awal + (omzet − hutang_baru − order_omzet)
+//                    + order_masuk + (topup nominal+admin) + piutang_bayar
+//                    + kas masuk − pengeluaran − retur − pembelian
+//                    (terbayar, shift ini)
 //   selisih        = modal_akhir − kas seharusnya
 // Rumusnya ada di DUA fungsi kecil di bawah (kasSeharusnya/hitungSelisih) —
 // bila keputusan berubah, ubah di situ, jangan menyebar ke tempat lain.
@@ -62,6 +71,13 @@ export type ShiftRow = {
   n_kas_masuk: number; kas_masuk_total: number;
   n_retur: number; retur_total: number;
   n_purchase: number; purchase_total: number;
+  /** Pesanan jasa (butir ROADMAP 1.6.6, 2026-10-19): uang pesanan yang MASUK
+   *  laci shift ini (Σ dp + pelunasan − refund) — laci NAIK. */
+  order_masuk_total: number;
+  /** Nilai nota penjualan yang lahir dari take pesanan (orders.sale_id)
+   *  yang terikat shift ini — DIKURANGKAN dari omzet (uangnya sudah dihitung
+   *  lewat order_masuk_total, kalau tidak akan dobel). */
+  order_omzet_total: number;
   /** Nota pertama/terakhir shift (MIN/MAX invoice_no, NULL bila tanpa jual). */
   inv_awal: string | null; inv_akhir: string | null;
   /** Diskon shift = transaksi + per baris (rumus SAMA dengan reports/daily). */
@@ -79,13 +95,15 @@ function errMsg(e: unknown): string {
 
 /** Kas yang SEHARUSNYA ada di laci menurut keputusan pemilik 2026-10-01
  *  (lihat komentar kepala file) + Tahap 1–3 (2026-10-11) + kas masuk
- *  (1.6.2, 2026-10-19) + rekap Z-report: modal awal + (omzet − hutang
- *  terbentuk, karena porsi hutang tak masuk laci) + topup (nominal + admin)
- *  + piutang terbayar + kas masuk − pengeluaran − retur − pembelian
- *  (terbayar, shift ini). Tarik tunai sengaja TIDAK ikut.
+ *  (1.6.2, 2026-10-19) + pesanan jasa (1.6.6, 2026-10-19) + rekap Z-report:
+ *  modal awal + (omzet − hutang terbentuk − omzet nota pesanan, karena omzet
+ *  nota pesanan uangnya lewat `order_masuk_total`) + uang pesanan masuk +
+ *  topup (nominal + admin) + piutang terbayar + kas masuk − pengeluaran −
+ *  retur − pembelian (terbayar, shift ini). Tarik tunai sengaja TIDAK ikut.
  *  `?? 0` = baris lama/server lama tanpa kolom baru (kontrak aditif). */
 export function kasSeharusnya(s: ShiftRow): number {
-  return s.modal_awal + (s.omzet - (s.hutang_baru ?? 0)) + s.topup_nominal + s.topup_admin
+  return s.modal_awal + (s.omzet - (s.hutang_baru ?? 0) - (s.order_omzet_total ?? 0))
+    + (s.order_masuk_total ?? 0) + s.topup_nominal + s.topup_admin
     + (s.piutang_bayar ?? 0) + (s.kas_masuk_total ?? 0)
     - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
 }
@@ -122,6 +140,10 @@ export function bangunStrukRekap(s: ShiftRow, toko: string, fisik: number | null
     { kiri: '  QRIS', kanan: rp(s.qris) },
     { kiri: '  Transfer', kanan: rp(s.transfer) },
     { kiri: 'Diskon', kanan: rp(s.diskon_total ?? 0) },
+    // Pesanan jasa (1.6.6): uang masuk laci (+, DP/pelunasan) vs nota yang
+    // lahir dari serah (−, uangnya sudah di suku pertama — cegah dobel).
+    { kiri: 'Uang pesanan masuk', kanan: rp(s.order_masuk_total ?? 0) },
+    { kiri: 'Nota pesanan (keluar)', kanan: (s.order_omzet_total ?? 0) > 0 ? `-${rp(s.order_omzet_total)}` : rp(0) },
     { kiri: 'Topup nominal', kanan: rp(s.topup_nominal) },
     { kiri: 'Topup admin', kanan: rp(s.topup_admin) },
     { kiri: 'Tarik nominal', kanan: rp(s.tarik_nominal) },
@@ -225,8 +247,10 @@ async function rekapPascaTutup(id: number, onSelesai: () => void | Promise<void>
 export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<void>): void {
   const nonTunai = s.omzet - s.tunai;
   const kasHarus = kasSeharusnya(s);
+  // `nilai` negatif tampil dengan tanda minus di depan (baris pengurang
+  // seperti omzet nota pesanan yang dipindah ke suku uang pesanan masuk).
   const baris = (label: string, nilai: number, kelas = '') =>
-    `<div class="flex justify-between gap-2"><span>${label}</span><b class="tabular-nums text-gray-900 dark:text-white ${kelas}">${rp(nilai)}</b></div>`;
+    `<div class="flex justify-between gap-2"><span>${label}</span><b class="tabular-nums text-gray-900 dark:text-white ${kelas}">${nilai < 0 ? `−${rp(Math.abs(nilai))}` : rp(nilai)}</b></div>`;
   openModal({
     title: `Tutup shift #${s.id} — ${s.cashier}`,
     okLabel: 'Tutup shift',
@@ -238,6 +262,7 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         ${baris('QRIS', s.qris)}
         ${baris('Transfer', s.transfer)}
         ${nonTunai !== s.qris + s.transfer ? baris('Metode lain', s.omzet - s.tunai - s.qris - s.transfer) : ''}
+        ${(s.order_masuk_total ?? 0) > 0 || (s.order_omzet_total ?? 0) > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pesanan jasa — omzet & uang masuk</div>${baris('Uang pesanan masuk (DP/pelunasan)', s.order_masuk_total ?? 0)}${baris('Nilai nota pesanan (keluar dari omzet)', -(s.order_omzet_total ?? 0))}` : ''}
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Topup — pelanggan bayar, laci naik</div>
         ${baris('Nominal', s.topup_nominal)}
         ${baris('Admin', s.topup_admin)}
@@ -270,10 +295,11 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         <b id="sh-selisih" class="ml-1 tabular-nums">—</b>
       </p>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-        Kas seharusnya = modal awal + (omzet − hutang terbentuk) + topup
-        (nominal + admin) + piutang terbayar + kas masuk − pengeluaran −
-        retur − pembelian (terbayar) shift ini, sesuai keputusan pemilik
-        2026-10-01 + Tahap 1–3 (2026-10-11) + kas masuk (1.6.2, 2026-10-19) +
+        Kas seharusnya = modal awal + (omzet − hutang terbentuk − omzet nota
+        pesanan) + uang pesanan masuk + topup (nominal + admin) + piutang
+        terbayar + kas masuk − pengeluaran − retur − pembelian (terbayar)
+        shift ini, sesuai keputusan pemilik 2026-10-01 + Tahap 1–3
+        (2026-10-11) + kas masuk (1.6.2) + pesanan jasa (1.6.6, 2026-10-19) +
         rekap Z-report. Tarik tunai tidak mengurangi laci — hanya dicatat
         sebagai info.
       </p>`,

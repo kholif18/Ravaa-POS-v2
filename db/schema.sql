@@ -441,6 +441,80 @@ CREATE TABLE IF NOT EXISTS kas_masuk (
 CREATE INDEX IF NOT EXISTS idx_kas_masuk_tanggal ON kas_masuk(created_at);
 CREATE INDEX IF NOT EXISTS idx_kas_masuk_shift ON kas_masuk(shift_id);
 
+-- Pesanan jasa (butir ROADMAP 1.6.6, ACC pemilik 19 Okt 2026, halaman
+-- #/orders): cetak/desain/service — order dulu, dikerjakan, diambil.
+-- Model uang (5 keputusan pemilik, dikonfirmasi 2026-10-19):
+--   1. Omzet DIKAKUI SAAT DIAMBIL — nota penjualan penuh dibuat saat
+--      pesanan diserahkan (`orders.sale_id`), DP = uang muka.
+--   2. Item pesanan = teks bebas (nama+qty+harga) — stok TIDAK dipotong.
+--   3. Sisa yang belum dibayar saat diambil dicatat ke ledger Hutang
+--      pelanggan (`orders.hutang_sisa` = angka penanda, ledger tetap).
+--   4. Pembayaran (DP & pelunasan) satu metode: tunai|qris|transfer.
+--   5. Nota pesanan dicetak thermal 58mm (klien).
+-- Uang tiap pembayaran terikat shift saat DITERIMA (`order_payments.shift_id`)
+-- — agregat `order_masuk_total` MENAMBAH laci, dan nota pesanan dikeluarkan
+-- dari hitungan laci lewat `order_omzet_total` (uangnya sudah dicatat di
+-- pembayaran; lihat kasSeharusnya() shift-tutup.ts).
+CREATE TABLE IF NOT EXISTS orders (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Nomor OTOMATIS `ORD-YYMMDD-NNN` (urut harian UTC, pola invoice_no).
+  order_no      TEXT UNIQUE,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  customer_id   INTEGER NOT NULL REFERENCES customers(id),
+  customer_name TEXT NOT NULL DEFAULT '',   -- snapshot (pola sales.customer_name)
+  status        TEXT NOT NULL DEFAULT 'dikerjakan'
+                CHECK (status IN ('dikerjakan', 'selesai', 'diambil', 'batal')),
+  total         INTEGER NOT NULL DEFAULT 0 CHECK (total >= 0),
+  note          TEXT NOT NULL DEFAULT '',   -- maks 200 char (aturan catatan)
+  cashier       TEXT NOT NULL DEFAULT 'kasir',
+  -- Diisi saat status -> 'diambil': waktu penyerahan, nota penjualan yang
+  -- terbit (TANPA FK — sales dibuat di transaction yang sama, kolom ini
+  -- hanya jembatan; query laci ikut lewat kolom ini), dan sisa yang
+  -- dicatat ke Hutang pelanggan.
+  taken_at      TEXT,
+  sale_id       TEXT,
+  hutang_sisa   INTEGER NOT NULL DEFAULT 0,
+  -- Diisi saat status -> 'batal' (koreksi sebelum diambil; DP dikembalikan
+  -- lewat baris order_payments kind='refund').
+  batal_at      TEXT,
+  batal_note    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_sale ON orders(sale_id);
+
+-- Baris item pesanan — TEKS BEBAS (keputusan pemilik: tanpa potong stok).
+CREATE TABLE IF NOT EXISTS order_items (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  name     TEXT NOT NULL,
+  qty      REAL NOT NULL CHECK (qty > 0),
+  price    INTEGER NOT NULL CHECK (price >= 0),
+  amount   INTEGER NOT NULL,   -- round(qty * price), DI-SNAPSHOT
+  note     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+
+-- Pembayaran pesanan — SATU ledger uang untuk pesanan (DP, pelunasan saat
+-- diambil, refund saat batal). `amount` SELALU positif; `kind='refund'`
+-- artinya uang KELUAR (mengurangi agregat order_masuk_total di GET
+-- /api/shifts). `shift_id` opsional (pola expenses): hanya yang terikat
+-- shift yang menggerakkan laci shift itu.
+CREATE TABLE IF NOT EXISTS order_payments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  kind       TEXT NOT NULL CHECK (kind IN ('dp', 'pelunasan', 'refund')),
+  method     TEXT NOT NULL,      -- tunai | qris | transfer
+  amount     INTEGER NOT NULL CHECK (amount > 0),
+  shift_id   INTEGER REFERENCES shifts(id),
+  cashier    TEXT NOT NULL DEFAULT 'kasir',
+  note       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_order_payments_order ON order_payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_payments_shift ON order_payments(shift_id);
+
 -- Ledger hutang per pelanggan — SATU tabel mutasi dua arah, bukan saldo tersimpan.
 -- type 'charge'  = pelanggan berhutang (beli belum bayar)
 -- type 'payment' = pembayaran pelanggan
