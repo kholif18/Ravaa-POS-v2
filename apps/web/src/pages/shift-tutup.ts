@@ -21,10 +21,13 @@
 //   8. Piutang TERBAYAR ke laci shift ini -> laci NAIK (ala "credit payments
 //      collected" Z-report butir 7-8; ledger diikat lewat periode
 //      opened_at..closed_at karena tak punya shift_id).
+//   9. Kas masuk (butir ROADMAP 1.6.2, 2026-10-19) -> laci NAIK (injeksi
+//      modal / koreksi laci; hanya yang terikat shift ini — pasangan
+//      pengeluaran butir 4).
 // Jadi:
 //   kas seharusnya = modal_awal + (omzet − hutang_baru) + (topup nominal+admin)
-//                    + piutang_bayar − pengeluaran − retur − pembelian
-//                    (terbayar, shift ini)
+//                    + piutang_bayar + kas masuk − pengeluaran − retur
+//                    − pembelian (terbayar, shift ini)
 //   selisih        = modal_akhir − kas seharusnya
 // Rumusnya ada di DUA fungsi kecil di bawah (kasSeharusnya/hitungSelisih) —
 // bila keputusan berubah, ubah di situ, jangan menyebar ke tempat lain.
@@ -45,8 +48,8 @@ import { kirimPrint, rp, strukUntuk, type Struk } from '../escpos';
 import { cetakRekapShift } from '../invoice';
 
 /** Baris `GET /api/shifts` (kontrak lengkap dengan agregat subquery —
- *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran, retur,
- *  pembelian + rekap Z-report: rentang nota, diskon, hutang, piutang). */
+ *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran, kas masuk,
+ *  retur, pembelian + rekap Z-report: rentang nota, diskon, hutang, piutang). */
 export type ShiftRow = {
   id: number; opened_at: string; closed_at: string | null;
   modal_awal: number; modal_akhir: number | null; cashier: string; status: string;
@@ -55,6 +58,8 @@ export type ShiftRow = {
   topup_nominal: number; topup_admin: number;
   tarik_nominal: number; tarik_admin: number;
   n_expense: number; expense_total: number;
+  /** Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19) — menambah laci. */
+  n_kas_masuk: number; kas_masuk_total: number;
   n_retur: number; retur_total: number;
   n_purchase: number; purchase_total: number;
   /** Nota pertama/terakhir shift (MIN/MAX invoice_no, NULL bila tanpa jual). */
@@ -73,14 +78,15 @@ function errMsg(e: unknown): string {
 }
 
 /** Kas yang SEHARUSNYA ada di laci menurut keputusan pemilik 2026-10-01
- *  (lihat komentar kepala file) + Tahap 1–3 (2026-10-11) + rekap Z-report:
- *  modal awal + (omzet − hutang terbentuk, karena porsi hutang tak masuk
- *  laci) + topup (nominal + admin) + piutang terbayar − pengeluaran − retur
- *  − pembelian (terbayar, shift ini). Tarik tunai sengaja TIDAK ikut.
+ *  (lihat komentar kepala file) + Tahap 1–3 (2026-10-11) + kas masuk
+ *  (1.6.2, 2026-10-19) + rekap Z-report: modal awal + (omzet − hutang
+ *  terbentuk, karena porsi hutang tak masuk laci) + topup (nominal + admin)
+ *  + piutang terbayar + kas masuk − pengeluaran − retur − pembelian
+ *  (terbayar, shift ini). Tarik tunai sengaja TIDAK ikut.
  *  `?? 0` = baris lama/server lama tanpa kolom baru (kontrak aditif). */
 export function kasSeharusnya(s: ShiftRow): number {
   return s.modal_awal + (s.omzet - (s.hutang_baru ?? 0)) + s.topup_nominal + s.topup_admin
-    + (s.piutang_bayar ?? 0)
+    + (s.piutang_bayar ?? 0) + (s.kas_masuk_total ?? 0)
     - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
 }
 
@@ -122,6 +128,7 @@ export function bangunStrukRekap(s: ShiftRow, toko: string, fisik: number | null
     { kiri: 'Tarik admin', kanan: rp(s.tarik_admin) },
     { kiri: `Retur (${s.n_retur})`, kanan: rp(s.retur_total) },
     { kiri: `Pengeluaran (${s.n_expense})`, kanan: rp(s.expense_total) },
+    { kiri: `Kas masuk (${s.n_kas_masuk})`, kanan: rp(s.kas_masuk_total) },
     { kiri: `Pembelian (${s.n_purchase})`, kanan: rp(s.purchase_total) },
     { kiri: 'Hutang terbentuk', kanan: rp(s.hutang_baru ?? 0) },
     { kiri: 'Piutang terbayar', kanan: rp(s.piutang_bayar ?? 0) },
@@ -238,6 +245,7 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         ${baris('Nominal', s.tarik_nominal)}
         ${baris('Admin', s.tarik_admin)}
         ${s.n_expense > 0 || s.expense_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pengeluaran — mengurangi laci</div>${baris(`Kas keluar (${s.n_expense} catatan)`, s.expense_total)}` : ''}
+        ${s.n_kas_masuk > 0 || s.kas_masuk_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kas masuk — menambah laci</div>${baris(`Kas masuk (${s.n_kas_masuk} catatan)`, s.kas_masuk_total)}` : ''}
         ${s.n_retur > 0 || s.retur_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Retur — uang kembali, mengurangi laci</div>${baris(`Kembali ke pelanggan (${s.n_retur} retur)`, s.retur_total)}` : ''}
         ${s.n_purchase > 0 || s.purchase_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pembelian — kulakan tunai, mengurangi laci</div>${baris(`Bayar supplier (${s.n_purchase} nota)`, s.purchase_total)}` : ''}
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Piutang (butir Z-report: credit)</div>
@@ -263,10 +271,11 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
       </p>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
         Kas seharusnya = modal awal + (omzet − hutang terbentuk) + topup
-        (nominal + admin) + piutang terbayar − pengeluaran − retur −
-        pembelian (terbayar) shift ini, sesuai keputusan pemilik 2026-10-01 +
-        Tahap 1–3 + rekap Z-report (2026-10-11). Tarik tunai tidak mengurangi
-        laci — hanya dicatat sebagai info.
+        (nominal + admin) + piutang terbayar + kas masuk − pengeluaran −
+        retur − pembelian (terbayar) shift ini, sesuai keputusan pemilik
+        2026-10-01 + Tahap 1–3 (2026-10-11) + kas masuk (1.6.2, 2026-10-19) +
+        rekap Z-report. Tarik tunai tidak mengurangi laci — hanya dicatat
+        sebagai info.
       </p>`,
     onMount: ({ el, ok, close }) => {
       const akhir = el.querySelector('#sh-akhir') as HTMLInputElement;

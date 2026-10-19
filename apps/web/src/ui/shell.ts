@@ -2,7 +2,7 @@ import { icon, type IconName } from './icons';
 import { getCashier, initials, logout, openProfileModal } from './user';
 import { akunTersimpan, type Peran } from './auth';
 
-export type AdminRoute = 'dashboard' | 'products' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'purchases' | 'shifts' | 'settings' | 'users' | 'audit';
+export type AdminRoute = 'dashboard' | 'products' | 'satuan' | 'stock' | 'suppliers' | 'history' | 'returns' | 'customers' | 'debts' | 'reports' | 'expenses' | 'kas-masuk' | 'purchases' | 'shifts' | 'settings' | 'users' | 'audit';
 // login & ubah-sandi dirender TANPA shell (layar penuh) — bukan admin.
 // profil = halaman shell SEMUA peran (edit nama sendiri + pref perangkat).
 // labels (refactor 2026-10-17) = layar penuh TANPA sidebar ala POS: printer
@@ -68,6 +68,9 @@ export const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
       // Kas keluar operasional (Tahap 1, 2026-10-11): mengurangi laci bila
       // terikat shift (lihat kasSeharusnya di shift-tutup.ts).
       { route: 'expenses', label: 'Pengeluaran', icon: 'coins', roles: MILIK },
+      // Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19): injeksi
+      // modal/koreksi laci — menambah laci bila terikat shift.
+      { route: 'kas-masuk', label: 'Kas masuk', icon: 'wallet', roles: MILIK },
       { route: 'shifts', label: 'Shift Kasir', icon: 'shifts', roles: SEMUA },
     ],
   },
@@ -99,6 +102,7 @@ export const ROUTE_TITLES: Record<AdminRoute, string> = {
   debts: 'Hutang',
   reports: 'Laporan',
   expenses: 'Pengeluaran',
+  'kas-masuk': 'Kas masuk',
   shifts: 'Shift Kasir',
   settings: 'Pengaturan',
   users: 'Pengguna',
@@ -124,6 +128,7 @@ export const ROUTE_CRUMB: Record<AdminRoute, string[]> = {
   debts: ['Penjualan', 'Hutang'],
   reports: ['Keuangan', 'Laporan'],
   expenses: ['Keuangan', 'Pengeluaran'],
+  'kas-masuk': ['Keuangan', 'Kas masuk'],
   shifts: ['Keuangan', 'Shift Kasir'],
   settings: ['Sistem', 'Pengaturan'],
   users: ['Sistem', 'Pengguna'],
@@ -144,6 +149,7 @@ export const ROUTE_SUBS: Record<AdminRoute, string> = {
   debts: 'Buku piutang: catat siapa berhutang dan pembayarannya.',
   reports: 'Omzet, laba, HPP, rekap metode bayar, produk terlaris, dan stok menipis.',
   expenses: 'Kas keluar operasional — mengurangi laci bila terikat shift.',
+  'kas-masuk': 'Kas masuk non-penjualan — menambah laci bila terikat shift.',
   shifts: 'Riwayat shift + buka/tutup shift dengan modal awal & modal akhir.',
   settings: 'Aturan yang berlaku untuk semua device kasir, disimpan di server.',
   users: 'Akun kasir & pemilik: tambah, atur peran, reset sandi, nonaktifkan.',

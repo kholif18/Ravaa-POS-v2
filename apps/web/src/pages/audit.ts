@@ -98,6 +98,7 @@ const ENTITAS_LABEL: Record<string, string> = {
   setting: 'Pengaturan',
   stock: 'Stok',
   expense: 'Pengeluaran',
+  kas_masuk: 'Kas masuk',
   debt: 'Hutang',
   return: 'Retur',
   backup: 'Backup',
@@ -109,7 +110,7 @@ function entitasLabel(e: string): string {
 }
 
 function renderPage(): string {
-  const opsiEntitas = ['', 'product', 'category', 'unit', 'customer', 'supplier', 'user', 'setting', 'stock', 'expense', 'debt', 'return', 'backup', 'session'];
+  const opsiEntitas = ['', 'product', 'category', 'unit', 'customer', 'supplier', 'user', 'setting', 'stock', 'expense', 'kas_masuk', 'debt', 'return', 'backup', 'session'];
   return `
   <div class="space-y-3">
     <div class="card">

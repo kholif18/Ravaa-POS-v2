@@ -10,6 +10,7 @@ import { mountCustomersPage } from './pages/customers';
 import { mountSuppliersPage } from './pages/suppliers';
 import { mountPurchasesPage } from './pages/purchases';
 import { mountExpensesPage } from './pages/expenses';
+import { mountKasMasukPage } from './pages/kas-masuk';
 import { mountDebtsPage } from './pages/debts';
 import { mountShiftsPage } from './pages/shifts';
 import { mountSettingsPage } from './pages/settings';
@@ -134,6 +135,9 @@ async function render(): Promise<void> {
   } else if (route === 'expenses') {
     // Pengeluaran: kas keluar operasional per hari, state sendiri.
     void mountExpensesPage(page);
+  } else if (route === 'kas-masuk') {
+    // Kas masuk: kas non-penjualan (injeksi modal/koreksi laci), state sendiri.
+    void mountKasMasukPage(page);
   } else if (route === 'debts') {
     // Hutang: ledger piutang, state sendiri (ringkasan + rincian + catat).
     void mountDebtsPage(page);

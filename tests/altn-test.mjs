@@ -64,6 +64,7 @@ console.log('=== B. Halaman modal satu per satu ===');
 for (const [hash, judul, label] of [
   ['#/debts', 'Catat hutang baru', 'Hutang'],
   ['#/expenses', 'Catat Pengeluaran', 'Pengeluaran'],
+  ['#/kas-masuk', 'Catat Kas masuk', 'Kas masuk'],
   ['#/users', 'Tambah Pengguna', 'Pengguna'],
   ['#/satuan', 'Tambah Satuan', 'Satuan'],
   ['#/shifts', 'Buka shift', 'Shift'],

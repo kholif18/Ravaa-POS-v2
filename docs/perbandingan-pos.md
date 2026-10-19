@@ -229,10 +229,10 @@ AI forecasting.
   aging; rekap pembelian harian.
 * **Retur & kas**: retur penjualan dari nota / manual + pembatalan (stok
   kembali, uang kembali); pengeluaran kas (terikat shift atau di luar shift);
-  pembayaran piutang. *(Kas masuk belum ada — ACC 19 Okt 2026, dijadwalkan.)*
+  kas masuk non-penjualan (§1.6.2, 2026-10-19); pembayaran piutang.
 * **Shift**: buka/tutup dengan rumus expected-cash lengkap (topup, QRIS/
-  transfer, retur, pembelian, hutang baru, piutang bayar); rekap X/Z
-  (thermal + PDF).
+  transfer, retur, pembelian, hutang baru, piutang bayar, kas masuk); rekap
+  X/Z (thermal + PDF).
 * **Laporan** (7 menu): Harian (grafik per jam) · Laba (per hari + per
   nota) · Kasir · Produk · Kategori · Piutang · Stok; tiap menu CSV +
   cetak/PDF; dashboard.
@@ -294,7 +294,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 |---|---|---|---|---|---|---|
 | Manajemen pelanggan + riwayat | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** |
 | Loyalitas / poin | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ sengaja (§5) |
-| Kas masuk & keluar (non-penjualan) | · | · | ✓ | ✓ | · | ~ (keluar ✓; masuk ⟳ ACC 19 Okt 2026, 4.5) |
+| Kas masuk & keluar (non-penjualan) | · | · | ✓ | ✓ | · | **✓** (keluar + masuk, 19 Okt 2026) |
 | Absensi karyawan | · | · | ✓ | ✓ | ✓ (add-on) | ✗ kandidat 4.14 (belum dibahas) |
 | Laporan + export (CSV/Excel) | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** (7 menu) |
 | Laporan terjadwal email/WA | · | ✓ (berbayar) | · | ✓ | · | ✗ sengaja (§5) |
@@ -319,7 +319,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.2 | **Metode bayar e-wallet + opsi MDR** | **❌ tidak perlu** — tanpa payment gateway; QRIS/transfer manual cukup | KP/Olsera/Loyverse | Konteks: MDR QRIS ≤Rp100 rb = 0% sejak 1 Okt 2026 (BI) |
 | 4.3 | **Pesanan jasa + status/DP** | **✅ dikerjakan** — §1.6.6 | KP vertical Bengkel | Order → dikerjakan → diambil; DP; domain cetak/servis laptop |
 | 4.4 | **Scan barcode kamera HP** | **✅ selesai 2026-10-19** — §1.6.1 | Loyverse | API browser (`BarcodeDetector`) tanpa dependensi; butuh konteks aman (HTTPS/localhost) |
-| 4.5 | **Kas masuk (di luar penjualan)** | **✅ dikerjakan** — §1.6.2 | KP, Olsera | Pasangan Pengeluaran; laci/expected-cash + laporan |
+| 4.5 | **Kas masuk (di luar penjualan)** | **✅ selesai 2026-10-19** — §1.6.2 | KP, Olsera | Pasangan Pengeluaran; laci/expected-cash + laporan |
 | 4.6 | **Cetak/ekspor nota PO** | **✅ dikerjakan** — §1.6.3 | KP (nota pembelian), Loyverse | Pola dokumen A4 + tombol di sub-halaman PO |
 | 4.7 | **Price list per pelanggan** | **❌ tidak perlu** ("sepertinya tidak butuh") | Aronium (plugin) | Tier ecer/grosir + borongan qty dianggap cukup |
 | 4.8 | **Bundling / paket produk** | **❌ tidak perlu** ("sepertinya tidak butuh") | Kasir Pintar (paket/bahan baku) | — |

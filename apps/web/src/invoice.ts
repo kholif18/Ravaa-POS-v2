@@ -326,13 +326,13 @@ function tglRekap(iso: string | null): string {
  *  selisih). Kas seharusnya dihitung ulang di sini? TIDAK — pemanggil
  *  mengirim angka final? Kontrak: fungsi ini MENGHITUNG dari baris (rumus
  *  kasSeharusnya ada di shift-tutup, tak diimpor agar invoice.ts tetap
- *  mandiri): modal + (omzet − hutang) + topup + piutang − expense − retur
- *  − purchase. Rumus ditulis SEKALI di sini + SEKALI di kasSeharusnya —
- *  duplikasi disengaja & ditandai; bila rumus berubah, ubah keduanya
- *  (dicek test rekap: angka PDF = angka dialog). */
+ *  mandiri): modal + (omzet − hutang) + topup + piutang + kas masuk
+ *  (1.6.2, 2026-10-19) − expense − retur − purchase. Rumus ditulis SEKALI
+ *  di sini + SEKALI di kasSeharusnya — duplikasi disengaja & ditandai; bila
+ *  rumus berubah, ubah keduanya (dicek test rekap: angka PDF = angka dialog). */
 export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): string {
   const kasHarus = s.modal_awal + (s.omzet - (s.hutang_baru ?? 0))
-    + s.topup_nominal + s.topup_admin + (s.piutang_bayar ?? 0)
+    + s.topup_nominal + s.topup_admin + (s.piutang_bayar ?? 0) + (s.kas_masuk_total ?? 0)
     - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
   const d = fisik !== null ? fisik - kasHarus : null;
   const nota = s.inv_awal && s.inv_akhir ? `${s.inv_awal} – ${s.inv_akhir}` : 'Tanpa penjualan';
@@ -406,6 +406,7 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
       ${R('Tarik admin', s.tarik_admin)}
       ${R(`Retur (${s.n_retur})`, s.retur_total)}
       ${R(`Pengeluaran (${s.n_expense})`, s.expense_total)}
+      ${R(`Kas masuk (${s.n_kas_masuk})`, s.kas_masuk_total)}
       ${R(`Pembelian (${s.n_purchase})`, s.purchase_total)}
       ${R('Hutang terbentuk', s.hutang_baru ?? 0)}
       ${R('Piutang terbayar', s.piutang_bayar ?? 0)}

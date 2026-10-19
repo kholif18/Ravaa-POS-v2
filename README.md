@@ -960,16 +960,25 @@ npm run dev:api
     (UNIQUE INDEX `idx_shifts_open_cashier`) — pesan server langsung ditampilkan.
   - **Tutup shift**: dialog menampilkan rincian lengkap — modal awal,
     penjualan per metode (tunai/QRIS/transfer), topup terpisah nominal +
-    admin, tarik tunai sebagai catatan di luar hitungan — lalu input modal
-    akhir dengan **selisih live** terhadap **kas seharusnya di laci**
-    (keputusan pemilik 2026-10-01, ROADMAP §1.3):
-    `kas seharusnya = modal_awal + penjualan (semua metode) + topup
-    (nominal + admin)`; `selisih = modal_akhir − kas seharusnya`.
+    admin, tarik tunai sebagai catatan di luar hitungan, pengeluaran/retur/
+    pembelian terikat shift, kas masuk non-penjualan, hingga rekap Z-report
+    — lalu input modal akhir dengan **selisih live** terhadap **kas
+    seharusnya di laci** (keputusan pemilik 2026-10-01, ROADMAP §1.3):
+    `kas seharusnya = modal_awal + (omzet − hutang terbentuk) + topup
+    (nominal + admin) + piutang terbayar + kas masuk − pengeluaran − retur
+    − pembelian (terbayar)`; `selisih = modal_akhir − kas seharusnya`.
     Tarik tunai sengaja tidak mengurangi laci (hanya dicatat). Rumus ada di
-    `kasSeharusnya()` + `hitungSelisih()` di `apps/web/src/pages/shifts.ts`
+    `kasSeharusnya()` + `hitungSelisih()` di `apps/web/src/pages/shift-tutup.ts`
     — bila keputusan berubah, ubah di situ saja.
   - Shift `kasir` yang dipakai layar POS tidak tersentuh oleh halaman ini
     (test memakai kasir uji sendiri).
+* **Kas masuk non-penjualan** (`#/kas-masuk`, menu **Kas masuk** di sidebar,
+  butir ROADMAP 1.6.2, 2026-10-19) — pencatat uang TUNAI yang **masuk** ke
+  laci di luar penjualan (injeksi modal, koreksi laci, setoran pemilik):
+  pasangan halaman **Pengeluaran** dengan arah berlawanan. Terikat shift =
+  **menambah** kas seharusnya di dialog tutup shift + rekap Z (thermal/PDF);
+  di luar shift tetap tercatat + masuk laporan harian (kartu/CSV/cetak).
+  Bukan omzet, bukan mutasi stok, dan tidak menggerus laba.
 * **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — dua kartu saklar
   server, kartu kop toko, kartu preferensi device, masing-masing dengan
   penjelasan sendiri (bukan lagi satu kartu):
@@ -1171,7 +1180,8 @@ npm run dev:api
   Alt + N untuk membuka modal buat baru atau masuk ke halaman buat baru pada
   masing-masing tampilan guna mempercepat kinerja"*. Satu listener global
   (`ui/aksi-baru.ts`, registry): di **Pelanggan, Supplier, Hutang (catat
-  hutang), Pengeluaran, Pengguna, Satuan, Produk, Retur (retur manual), dan
+  hutang), Pengeluaran, Kas masuk, Pengguna, Satuan, Produk, Retur (retur
+  manual), dan
   Shift (buka shift)** pintasan membuka modal form barunya; di **Pembelian**
   masuk **halaman Buat PO** (`#/purchases/baru`). Tombol buat baru di
   halaman-halaman itu memuat badge `<kbd>Alt+N</kbd>` sebagai penanda. Saat

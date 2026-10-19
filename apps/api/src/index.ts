@@ -1733,6 +1733,13 @@ app.get('/api/shifts', (c) => {
             -- tetap tercatat + masuk laporan harian, bukan hitungan laci.
             (SELECT COUNT(*) FROM expenses e WHERE e.shift_id = s.id) AS n_expense,
             (SELECT COALESCE(SUM(e.jumlah),0) FROM expenses e WHERE e.shift_id = s.id) AS expense_total,
+            -- Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19):
+            -- kas MASUK ke laci di luar penjualan (injeksi modal / koreksi
+            -- laci) — MENAMBAH expected-cash di kasSeharusnya() (shift-tutup.ts).
+            -- Hanya yang terikat shift_id ini; yang NULL (di luar shift) tetap
+            -- tercatat + masuk laporan harian, bukan hitungan laci.
+            (SELECT COUNT(*) FROM kas_masuk k WHERE k.shift_id = s.id) AS n_kas_masuk,
+            (SELECT COALESCE(SUM(k.jumlah),0) FROM kas_masuk k WHERE k.shift_id = s.id) AS kas_masuk_total,
             -- Retur tunai (Tahap 2, 2026-10-11): uang KEMBALI ke pelanggan —
             -- mengurangi expected-cash di kasSeharusnya() (keputusan pemilik
             -- (a)). Hanya yang terikat shift_id ini.
@@ -2274,6 +2281,70 @@ app.delete('/api/expenses/:id', hanyaOwner, (c) => {
   if (!ada) return c.json({ error: 'pengeluaran tidak ada' }, 404);
   db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
   catatAudit(c, 'delete', 'expense', id);
+  return c.json({ data: { id, deleted: true } });
+});
+
+// ---------- kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19) ----------
+// PASANGAN pengeluaran kas: uang TUNAI MASUK ke laci di luar penjualan
+// (injeksi modal, koreksi laci, setoran pemilik). Bukan omzet, bukan mutasi
+// stok (tidak menyentuh products.version), tidak menggerus laba — tapi
+// MENAMBAH laci: agregat `kas_masuk_total` dibaca rumus kasSeharusnya() di
+// shift-tutup.ts, rekap hariannya tampil di GET /api/reports/daily
+// (`kas_masuk`). `shift_id` OPSIONAL (pola expenses): NULL = di luar shift —
+// tetap tercatat + masuk laporan harian, hanya tidak menambah laci shift
+// mana pun.
+app.get('/api/kas-masuk', hanyaOwner, (c) => {
+  const h = bacaHari((k) => c.req.query(k));
+  if (!h.ok) return c.json({ error: h.error }, 400);
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM kas_masuk WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { n: number }).n;
+  const data = db.prepare(
+    `SELECT * FROM kas_masuk WHERE date(created_at)=date(?) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+  ).all(h.hari, h.limit, h.offset);
+  const jumlahHari = (db.prepare(`SELECT COALESCE(SUM(jumlah),0) AS t FROM kas_masuk WHERE date(created_at)=date(?)`)
+    .get(h.hari) as { t: number }).t;
+  return c.json({ data, total, jumlah: jumlahHari });
+});
+
+app.post('/api/kas-masuk', hanyaOwner, async (c) => {
+  try {
+    const body = await c.req.json();
+    const kategori = String(body?.kategori ?? '').trim();
+    const note = String(body?.note ?? '').trim();
+    const jumlah = Number(body?.jumlah ?? 0);
+    if (!kategori) return c.json({ error: 'kategori kas masuk wajib diisi' }, 400);
+    if (!Number.isInteger(jumlah) || jumlah <= 0) return c.json({ error: 'jumlah harus rupiah bulat > 0' }, 400);
+    if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    // shift_id opsional; bila dikirim harus shift yang benar-benar ada.
+    const rawShift = body?.shift_id;
+    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
+    if (shiftId !== null) {
+      if (!Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
+      const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(shiftId) as { id: number } | undefined;
+      if (!ada) return c.json({ error: 'shift tidak dikenal' }, 400);
+    }
+    const row = db
+      .prepare(
+        `INSERT INTO kas_masuk (kategori, jumlah, note, cashier, shift_id)
+         VALUES (?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(kategori, jumlah, note, String(body?.cashier ?? '').trim() || 'kasir', shiftId);
+    catatAudit(c, 'create', 'kas_masuk', (row as { id: number }).id, { kategori, jumlah });
+    return c.json({ data: row }, 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan kas masuk' }, 400);
+  }
+});
+
+// Hapus catatan salah ketik (pola DELETE /api/expenses/:id — sengaja tanpa
+// cek saldo: menghapus kas masuk mengurangi kas, itu memang maksud koreksi).
+app.delete('/api/kas-masuk/:id', hanyaOwner, (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const ada = db.prepare('SELECT id FROM kas_masuk WHERE id = ?').get(id) as { id: number } | undefined;
+  if (!ada) return c.json({ error: 'kas masuk tidak ada' }, 404);
+  db.prepare('DELETE FROM kas_masuk WHERE id = ?').run(id);
+  catatAudit(c, 'delete', 'kas_masuk', id);
   return c.json({ data: { id, deleted: true } });
 });
 
@@ -3120,6 +3191,12 @@ function laporanRentang(dari: string, sampai: string) {
     `SELECT COUNT(*) AS n, COALESCE(SUM(jumlah),0) AS total
      FROM expenses WHERE ${dl('created_at')}`,
   ).get(...ps) as { n: number; total: number };
+  // Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19) — pasangan
+  // pengeluaran; dilaporkan TERPISAH, tidak menambah omzet/laba.
+  const kasMasuk = db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(jumlah),0) AS total
+     FROM kas_masuk WHERE ${dl('created_at')}`,
+  ).get(...ps) as { n: number; total: number };
   // Retur (Tahap 2, 2026-10-11) — dilaporkan TERPISAH + dipakai kartu
   // "Omzet bersih" (keputusan (c) hybrid: kotor + retur + bersih). Total =
   // uang kembali (SUM returns.total), bukan qty.
@@ -3147,7 +3224,7 @@ function laporanRentang(dari: string, sampai: string) {
      WHERE type = 'payment' AND ${dl('created_at')}`,
   ).get(...ps) as { t: number }).t;
   return {
-    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, retur, purchase, byHour, byCategory,
+    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, kas_masuk: kasMasuk, retur, purchase, byHour, byCategory,
     piutang: { baru: piutangBaru, bayar: piutangBayar },
   };
 }

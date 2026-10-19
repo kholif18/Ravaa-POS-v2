@@ -85,6 +85,9 @@ type Laporan = {
   /** Pengeluaran kas hari itu (Tahap 1, 2026-10-11) — opsional supaya halaman
    *  tetap jalan melawan server lama yang belum mengirimkannya. */
   expense?: { n: number; total: number };
+  /** Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19) — pasangan
+   *  pengeluaran; opsional dengan alasan yang sama. */
+  kas_masuk?: { n: number; total: number };
   /** Retur hari itu (Tahap 2, 2026-10-11) — total = uang kembali. Opsional
    *  dengan alasan yang sama. Dipakai kartu Retur + Omzet bersih (hybrid). */
   retur?: { n: number; total: number };
@@ -197,6 +200,7 @@ const periode = () => `${state.from} s/d ${state.to}`;
 
 function ringkasan(l: Laporan): string {
   const exp = l.expense ?? { n: 0, total: 0 };
+  const km = l.kas_masuk ?? { n: 0, total: 0 };
   const ret = l.retur ?? { n: 0, total: 0 };
   const po = l.purchase ?? { n: 0, total: 0 };
   // Hybrid keputusan (c): Omzet KOTOR + Retur terpisah + Omzet bersih.
@@ -212,6 +216,7 @@ function ringkasan(l: Laporan): string {
     // Pengeluaran kas (Tahap 1) — dilaporkan TERPISAH, tidak menggerus laba
     // (laba = laba kotor dagang). Link ke halaman catatnya.
     { label: 'Pengeluaran', nilai: rp(exp.total), sub: `${exp.n} catatan · kas keluar`, link: '#/expenses' },
+    { label: 'Kas masuk', nilai: rp(km.total), sub: `${km.n} catatan · kas masuk`, link: '#/kas-masuk' },
     // Pembelian diterima (Tahap 3) — nilai kulakan masuk hari itu.
     { label: 'Pembelian', nilai: rp(po.total), sub: `${po.n} nota diterima`, link: '#/purchases' },
   ];
@@ -774,6 +779,7 @@ function csvHarian(): (string | number)[][] {
     ['Retur', ret.total],
     ['Omzet bersih', l.sales.omzet - ret.total],
     ['Pengeluaran', (l.expense ?? { n: 0, total: 0 }).total],
+    ['Kas masuk', (l.kas_masuk ?? { n: 0, total: 0 }).total],
     ['Pembelian diterima', (l.purchase ?? { n: 0, total: 0 }).total],
     [],
     ['Penjualan per jam (UTC)'],
@@ -908,6 +914,7 @@ async function cetakHarian(): Promise<void> {
     ['HPP', rp(l.hpp)],
     ['Diskon', rp(l.sales.diskon)],
     ['Pengeluaran', rp((l.expense ?? { n: 0, total: 0 }).total)],
+    ['Kas masuk', rp((l.kas_masuk ?? { n: 0, total: 0 }).total)],
     ['Pembelian diterima', rp((l.purchase ?? { n: 0, total: 0 }).total)],
     ...(teramai && teramai.n > 0
       ? [[`Jam teramai ${pad2(teramai.jam)}:00`, `${rp(teramai.omzet)} · ${teramai.n} trx`]]

@@ -393,6 +393,30 @@ CREATE TABLE IF NOT EXISTS expenses (
 CREATE INDEX IF NOT EXISTS idx_expenses_tanggal ON expenses(created_at);
 CREATE INDEX IF NOT EXISTS idx_expenses_shift ON expenses(shift_id);
 
+-- Kas masuk non-penjualan (butir ROADMAP 1.6.2, keputusan pemilik 19 Okt
+-- 2026, halaman #/kas-masuk): PASANGAN `expenses` — injeksi modal / koreksi
+-- laci. Uang TUNAI yang MASUK ke laci di luar penjualan, jadi MENAMBAH
+-- `kasSeharusnya()` di shift-tutup.ts (agregat `kas_masuk_total` di
+-- GET /api/shifts) dan tampil di laporan harian (`kas_masuk` di
+-- GET /api/reports/daily). TIDAK menyentuh `products.version` (bukan mutasi
+-- stok), bukan omzet, dan tidak menggerus laba (laba = omzet − HPP).
+CREATE TABLE IF NOT EXISTS kas_masuk (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Kategori bebas (pola expenses): 'Injeksi modal', 'Koreksi laci', ...
+  kategori    TEXT NOT NULL,
+  jumlah      INTEGER NOT NULL CHECK (jumlah > 0),  -- rupiah bulat, wajib > 0
+  note        TEXT NOT NULL DEFAULT '',             -- maks 200 char (aturan
+                                                    -- catatan, divalidasi server)
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  -- Shift yang menerima (opsional): NULL = di luar shift (mis. setor modal
+  -- pagi sebelum buka). Hanya yang terikat shift yang menambah laci shift
+  -- itu — yang NULL tetap tercatat + masuk laporan harian.
+  shift_id    INTEGER REFERENCES shifts(id)
+);
+CREATE INDEX IF NOT EXISTS idx_kas_masuk_tanggal ON kas_masuk(created_at);
+CREATE INDEX IF NOT EXISTS idx_kas_masuk_shift ON kas_masuk(shift_id);
+
 -- Ledger hutang per pelanggan — SATU tabel mutasi dua arah, bukan saldo tersimpan.
 -- type 'charge'  = pelanggan berhutang (beli belum bayar)
 -- type 'payment' = pembayaran pelanggan

@@ -1536,6 +1536,25 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            kini komentar `//` di atas `renderPage()`,
                            dijaga asersi anti-regresi `customer-debt-test.mjs`
                            ("tidak ada teks JSX bocor").
+apps/web/src/pages/kas-masuk.ts  Halaman #/kas-masuk (butir ROADMAP 1.6.2,
+                          2026-10-19, keputusan pemilik): kas TUNAI MASUK
+                          non-penjualan (injeksi modal/koreksi laci) —
+                          PASANGAN `expenses.ts` (toolbar tanggal + kartu
+                          total hari + tabel + pager + modal catat/hapus;
+                          id `#km-*`, hapus `data-km-del`). Server:
+                          `/api/kas-masuk` GET/POST/DELETE (hanyaOwner, audit
+                          entity `kas_masuk`); terikat shift = MENAMBAH laci
+                          (agregat `kas_masuk_total` di GET /api/shifts →
+                          `kasSeharusnya()`), yang NULL di luar shift; rekap
+                          harian `kas_masuk:{n,total}` di reports/daily
+                          (kartu + CSV + cetak menu Harian) dan blok "Kas
+                          masuk — menambah laci" di dialog tutup shift +
+                          baris rekap Z (thermal `bangunStrukRekap` + PDF
+                          `htmlRekapShift`). Alt+N terdaftar
+                          (ui/aksi-baru.ts). Catatan id: kartu total hari =
+                          `#km-jumlah`, input form = `#km-nominal` (sengaja
+                          beda supaya tidak kembar). Jangan menyentuh
+                          `products.version` / omzet / HPP.
 apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                           (**label harga DIHAPUS dari file ini 2026-10-17** —
                           refactor halaman Label ke cetak lembar browser,
@@ -1934,6 +1953,34 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       (`n_expense`/`expense_total` di `GET /api/shifts` → `kasSeharusnya()`
       di `shift-tutup.ts`); rekap harian di `GET /api/reports/daily`
       (`expense:{n,total}`, dilaporkan TERPISAH — tidak menggerus laba).
+  - **Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19, halaman
+    `#/kas-masuk`)** — PASANGAN pengeluaran: kas TUNAI MASUK ke laci di luar
+    penjualan (injeksi modal, koreksi laci, setoran pemilik). Bukan mutasi
+    stok (tidak menyentuh `products.version`), bukan omzet, dan bukan HPP
+    (laba = omzet − HPP, definisi tetap).
+    - `GET /api/kas-masuk?date=&limit=&offset=` ->
+      `{data:[{id,created_at,kategori,jumlah,note,cashier,shift_id}], total, jumlah}`
+      (filter tanggal + limit/offset via helper `bacaHari`, pola
+      `GET /api/expenses`; `jumlah` = SUM hari itu untuk kartu halaman).
+    - `POST /api/kas-masuk` `{kategori,jumlah>0 bulat,note?≤200,cashier?,shift_id?}`
+      -> 201. Pesan validasi: `"kategori kas masuk wajib diisi"`,
+      `"jumlah harus rupiah bulat > 0"`, `"catatan terlalu panjang (maks 200
+      karakter)"`, `"shift tidak dikenal"`; `shift_id` opsional — NULL = di
+      luar shift (tetap tercatat + masuk laporan, tak menambah laci mana
+      pun).
+    - `DELETE /api/kas-masuk/:id` (koreksi salah ketik, pola
+      `DELETE /api/expenses/:id` — tanpa cek saldo; menghapus kas masuk
+      mengurangi kas, itu memang maksud koreksi).
+    - Laci: yang terikat `shift_id` **MENAMBAH** expected-cash
+      (`n_kas_masuk`/`kas_masuk_total` di `GET /api/shifts` →
+      `kasSeharusnya()` di `shift-tutup.ts` + rumus kembar di
+      `htmlRekapShift`); rekap harian di `GET /api/reports/daily`
+      (`kas_masuk:{n,total}`, dilaporkan TERPISAH — tidak menambah
+      omzet/laba). Rekap cetak tutup shift (thermal `bangunStrukRekap` +
+      PDF `htmlRekapShift`) memuat baris `Kas masuk (n)`; dialog tutup
+      shift memuat blok "Kas masuk — menambah laci" bila ada.
+    - Audit: entity `kas_masuk` (create/delete); opsi filter entitas
+      halaman `#/audit` ikut memuatnya.
   - `GET /api/customer-debts?status=open|semua&limit=&offset=` -> `{data:[{customer_id,name,phone,charge,bayar,sisa,terakhir,umur_hari}], total, count, lewat30}`
     - **Ringkasan saldo per pelanggan** (tabel utama halaman `#/debts`).
       Read-only. `limit` default 50 maks 200 (2026-10-11); `total` TETAP
@@ -2213,7 +2260,8 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - **Cakupan instrumentasi**: produk (create/update/delete/restock/opname/
     import), kategori, satuan, pelanggan, supplier, hutang (charge/payment/
     hapus baris), user (create/update/reset sandi), settings, pengeluaran,
-    retur, pembelian (buat/terima/bayar/batal), backup + restore, dan
+    kas masuk (create/delete, butir 1.6.2), retur, pembelian (buat/terima/
+    bayar/batal), backup + restore, dan
     login/login-gagal. Penjualan/topup SENGAJA tidak diaudit per nota
     (sudah punya linimasa Riwayat + laporan) — jangan tambahkan tanpa
     permintaan.
@@ -2369,7 +2417,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
        dikurangkan (tanpa ini nota kredit selalu membuat selisih minus).
     8. Piutang TERBAYAR (rekap Z-report, 2026-10-11, butir 7-8 "credit
        payments collected"): laci **NAIK** `piutang_bayar`.
-    `kas seharusnya = modal_awal + (omzet − hutang_baru) + topup_nominal + topup_admin + piutang_bayar − expense_total − retur_total − purchase_total`
+    9. Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19): laci
+       **NAIK** `kas_masuk_total` (injeksi modal/koreksi laci; hanya yang
+       terikat shift ini — pasangan butir 4).
+    `kas seharusnya = modal_awal + (omzet − hutang_baru) + topup_nominal + topup_admin + piutang_bayar + kas_masuk_total − expense_total − retur_total − purchase_total`
     dan `selisih = modal_akhir − kas seharusnya`. Rumusnya di DUA fungsi
     `kasSeharusnya()` + `hitungSelisih()` (`apps/web/src/pages/shift-tutup.ts`)
     — bila keputusan berubah, ubah di situ; jangan menyebar ke tempat lain.
@@ -2590,7 +2641,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     topup hibrida yang harus jadi sub-baris di bawah induknya.
 * `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
 * `GET /api/reports/daily?date=YYYY-MM-DD`
-  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byHour,byCategory,byMethod,topup,topItems,lowStock,expense:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
+  -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byHour,byCategory,byMethod,topup,topItems,lowStock,expense:{n,total},kas_masuk:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
   - Bentuk dihitung SATU fungsi `laporanRentang(dari,sampai)` (2026-10-11) —
     daily = rentang 1 hari. `piutang` = hutang TERBENTUK (CASE sisa_hutang) +
     TERBAYAR (ledger payment), butir credit Z-report.
@@ -2795,7 +2846,27 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-19 (harga borongan per qty — butir ACC 3.5):**
+  **Migrasi terakhir 2026-10-19 (kas masuk non-penjualan — butir ROADMAP
+  1.6.2):** tabel BARU **`kas_masuk`** (SQL penuh di `db/schema.sql`; FK
+  `shifts.id`, CHECK `jumlah > 0`, indeks `created_at` + `shift_id`).
+  Murni tabel tambahan — `migrate()` (`CREATE TABLE IF NOT EXISTS`) cukup:
+  di DB dev sudah dijalankan lewat `npm run seed` (data lama utuh, tanpa
+  recreate; diverifikasi curl di API hidup). Install yang tidak boleh
+  di-seed karena alasan lain jalankan SQL yang sama:
+  ```sql
+  CREATE TABLE IF NOT EXISTS kas_masuk (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    kategori    TEXT NOT NULL,
+    jumlah      INTEGER NOT NULL CHECK (jumlah > 0),
+    note        TEXT NOT NULL DEFAULT '',
+    cashier     TEXT NOT NULL DEFAULT 'kasir',
+    shift_id    INTEGER REFERENCES shifts(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_kas_masuk_tanggal ON kas_masuk(created_at);
+  CREATE INDEX IF NOT EXISTS idx_kas_masuk_shift ON kas_masuk(shift_id);
+  ```
+  **Migrasi sebelumnya 2026-10-19 (harga borongan per qty — butir ACC 3.5):**
   tabel BARU **`product_borongan`** (SQL penuh di `db/schema.sql`; FK
   `products.id ON DELETE CASCADE`, `UNIQUE(product_id,qty)`, CHECK `qty>=2`
   dan `price>=0`). Ini murni tabel tambahan — `migrate()` (`CREATE TABLE IF
