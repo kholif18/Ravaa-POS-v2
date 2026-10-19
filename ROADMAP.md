@@ -240,10 +240,9 @@ butir yang sudah di-ACC pemilik.
 
 **Ditolak pemilik 2026-10-19** (jangan dikerjakan tanpa permintaan baru,
 rincian di §4.1): metode e-wallet + MDR · price list per pelanggan ·
-bundling/paket · varian produk · akses dari luar LAN (Tailscale).
-
-**Belum dibahas** (tetap kandidat, jangan diasumsikan): pengingat hutang via
-WA (4.12) · absensi staf (4.14).
+bundling/paket · varian produk · akses dari luar LAN (Tailscale) ·
+pengingat hutang via WA (4.12) · absensi staf (4.14) — "tidak perlu karena
+tidak membutuhkannya". Tidak ada kandidat "belum dibahas" tersisa.
 
 ---
 

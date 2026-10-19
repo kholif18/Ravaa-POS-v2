@@ -9,8 +9,10 @@ PO supplier, retur, dan backup — semuanya kini ada), menyegarkan harga pasar,
 serta menambahkan catatan kebijakan **MDR QRIS 0%** (efektif 1 Okt 2026).
 Riwayat v1 utuh tersimpan di git log dokumen ini.
 
-**Keputusan kandidat §4 (pemilik, 19 Okt 2026):** 7 butir disetujui untuk
-dikerjakan, 5 ditolak, 2 belum dibahas — rincian di §0 dan §4–§5.
+**Keputusan kandidat §4 (pemilik, 19 Okt 2026):** 7 butir disetujui dan
+SELESAI, 7 ditolak — tidak ada kandidat "belum dibahas" tersisa (pengingat
+hutang WA & absensi staf ikut ditolak: "tidak perlu karena tidak
+membutuhkannya") — rincian di §0 dan §4–§5.
 
 Dokumen ini bahan referensi pengembangan: memetakan **fitur yang dipakai
 banyak orang** di aplikasi POS populer, lalu memisahkan mana yang sudah
@@ -40,19 +42,21 @@ kode): login + peran (2026-10-11) · PO supplier + hutang supplier + aging
 (Tahap 3, 2026-10-11) · retur penjualan (Tahap 2, 2026-10-11) · pengeluaran
 kas (Tahap 1, 2026-10-11) · hutang pelanggan otomatis dari POS + aging +
 cetak A4 · harga borongan per qty (butir 3.5, 2026-10-19) · rekap X/Z tutup
-shift (2026-10-11) · 7 menu laporan + laba per nota/kategori + per jam + CSV +
-cetak (2026-10-17/18) · backup otomatis + manual + restore + jejak audit ·
+shift (2026-10-11) · 8 menu laporan + laba per nota/kategori + per jam + CSV +
+cetak (2026-10-17/19) · backup otomatis + manual + restore + jejak audit ·
 label harga barcode EAN/Code 128 A4/Folio (2026-10-17) · tampilan mobile POS
 (2026-10-17).
 
 **Keputusan pemilik 2026-10-19 atas kandidat §4 — dikerjakan (7):** scan
 barcode pakai kamera HP · kas masuk · cetak/ekspor nota PO · logo di struk
 thermal · split payment (§3.4) · pesanan jasa + DP/status · analitik
-lanjutan (valuasi stok/dead stock). **Ditolak (5):** metode e-wallet + MDR
+lanjutan (valuasi stok/dead stock). **Ditolak (7):** metode e-wallet + MDR
 (tanpa payment gateway — QRIS/transfer manual cukup) · price list per
 pelanggan · bundling/paket · varian produk · akses dari luar LAN
-(Tailscale/tunnel). **Belum dibahas:** pengingat hutang via WA · absensi
-staf. Status per baris di §4; antrian eksekusi di `ROADMAP.md` §1.6.
+(Tailscale/tunnel) · pengingat hutang via WA · absensi staf (keduanya 19 Okt
+2026: "tidak perlu karena tidak membutuhkannya"). Tidak ada kandidat §4 yang
+belum diputuskan. Status per baris di §4; antrian eksekusi di
+`ROADMAP.md` §1.6.
 
 **Sengaja tidak dikerjakan (keputusan tercatat — §5):** poin loyalitas
 (2026-10-18) · PPN/voucher (2026-10-06) · customer display (2026-10-06) ·
@@ -233,9 +237,9 @@ AI forecasting.
 * **Shift**: buka/tutup dengan rumus expected-cash lengkap (topup, QRIS/
   transfer, retur, pembelian, hutang baru, piutang bayar, kas masuk); rekap
   X/Z (thermal + PDF).
-* **Laporan** (7 menu): Harian (grafik per jam) · Laba (per hari + per
-  nota) · Kasir · Produk · Kategori · Piutang · Stok; tiap menu CSV +
-  cetak/PDF; dashboard.
+* **Laporan** (8 menu): Harian (grafik per jam) · Laba (per hari + per
+  nota) · Kasir · Produk · Kategori · Piutang · Stok · Analitik (valuasi
+  stok + tidak laku); tiap menu CSV + cetak/PDF; dashboard.
 * **Cetak**: struk ESC/POS 32 kolom (thermal) & 64 kolom (A4) — penjualan
   memakai invoice A4 browser; label harga A4/Folio dengan barcode
   EAN-13/EAN-8/Code 128; jeda cetak terpusat.
@@ -246,7 +250,7 @@ AI forecasting.
 **Keputusan pemilik 19 Okt 2026 (§4):** dikerjakan — scan kamera HP · kas
 masuk · cetak/ekspor PO · logo struk · split payment · pesanan jasa + DP ·
 analitik lanjutan; ditolak — e-wallet+MDR · price list · bundling · varian ·
-akses dari luar LAN; belum dibahas — pengingat hutang WA · absensi staf.
+akses dari luar LAN · pengingat hutang WA · absensi staf (tidak dibutuhkan).
 **Sengaja tidak (§5):** PPN · loyalitas · customer display · WA ·
 multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 
@@ -295,8 +299,8 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Manajemen pelanggan + riwayat | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** |
 | Loyalitas / poin | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ sengaja (§5) |
 | Kas masuk & keluar (non-penjualan) | · | · | ✓ | ✓ | · | **✓** (keluar + masuk, 19 Okt 2026) |
-| Absensi karyawan | · | · | ✓ | ✓ | ✓ (add-on) | ✗ kandidat 4.14 (belum dibahas) |
-| Laporan + export (CSV/Excel) | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** (7 menu) |
+| Absensi karyawan | · | · | ✓ | ✓ | ✓ (add-on) | ✗ ditolak 19 Okt 2026 (4.14) |
+| Laporan + export (CSV/Excel) | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** (8 menu) |
 | Laporan terjadwal email/WA | · | ✓ (berbayar) | · | ✓ | · | ✗ sengaja (§5) |
 | Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ✓ selesai 19 Okt 2026 (4.10) |
 | Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | **✓** |
@@ -326,9 +330,9 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.9 | **Varian produk** | **❌ tidak perlu** | KP, Olsera, Loyverse | Pola SKU terpisah (bungkus/ketengan) dipertahankan |
 | 4.10 | **Analitik lanjutan** (valuasi stok, dead stock) | **✅ selesai 2026-10-19** — §1.6.7 | Olsera "Analisa Bisnis", Loyverse add-on | Menu laporan Analitik + endpoint `GET /api/reports/analytics` (valuasi per kategori + tidak laku dalam rentang; CSV/Cetak) |
 | 4.11 | **Logo di struk thermal** | **✅ selesai 2026-10-19** — §1.6.4 | KP iOS, Aronium custom receipts | Raster ESC/POS (`GS v 0`) — uji kertas oleh pemilik |
-| 4.12 | **Pengingat hutang via WA** | **— belum dibahas** | kebiasaan pasar | Use-case beda dari WA rekap yang dicoret 2026-10-01 |
+| 4.12 | **Pengingat hutang via WA** | **❌ tidak perlu** (19 Okt 2026 — "tidak perlu karena tidak membutuhkannya") | kebiasaan pasar | Use-case beda dari WA rekap yang dicoret 2026-10-01; halaman Hutang + badge umur hutang sudah mencukupi |
 | 4.13 | **Akses dari luar LAN** | **❌ tidak perlu** | semua cloud | Opsi Tailscale/tunnel ditolak; tetap self-hosted LAN |
-| 4.14 | **Absensi staf** | **— belum dibahas** | KP StaffPlus, Olsera, Loyverse | Prioritas rendah di skala 1–2 kasir; login + shift sudah ada |
+| 4.14 | **Absensi staf** | **❌ tidak perlu** (19 Okt 2026 — "tidak perlu karena tidak membutuhkannya") | KP StaffPlus, Olsera, Loyverse | Login + shift sudah menutup kehadiran di skala 1–2 kasir |
 
 ---
 
@@ -361,6 +365,10 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
   konflik sadar dengan pola SKU terpisah bungkus/ketengan (AGENTS §1).
 * **Akses dari luar LAN (Tailscale/tunnel)** — ditolak 2026-10-19 ("tidak
   perlu"); Ravaa tetap self-hosted LAN.
+* **Pengingat hutang via WA & absensi staf** — ditolak pemilik 2026-10-19
+  ("tidak perlu karena tidak membutuhkannya"); halaman Hutang + badge umur
+  hutang sudah cukup untuk menagih, kehadiran tertutup oleh login + shift
+  kasir. Jangan diusulkan lagi.
 
 ---
 
@@ -376,7 +384,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
   ber-referensi nota, dan PO supplier.
 * v1: "hutang manual saja" → + otomatis dari POS (uang kurang), aging FIFO,
   cetak A4.
-* v1: "Laporan harian + dashboard 7 hari" → 7 menu laporan + laba per
+* v1: "Laporan harian + dashboard 7 hari" → 8 menu laporan + laba per
   nota/kategori + grafik per jam + CSV + cetak.
 * v1: "Backup harian (retensi 14)" → + restore dari UI (backup pengaman
   otomatis) + jejak audit + guard skema.
