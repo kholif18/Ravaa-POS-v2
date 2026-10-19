@@ -29,9 +29,9 @@ untuk tidak dikerjakan**.
 * Harga = snapshot halaman resmi. Angka bertanda *(riset v1)* belum
   diverifikasi ulang pada 2026-10-19.
 * Tabel: `✓` ada · `~` parsial/terbatas · `✗` tidak (Ravaa: "sengaja" =
-  keputusan §5) · `⟳` Ravaa = disetujui pemilik 19 Okt 2026, dijadwalkan
-  dikerjakan · `·` tidak muncul di sumber yang dibaca — **bukan** berarti
-  fiturnya tidak ada.
+  keputusan §5) · `·` tidak muncul di sumber yang dibaca — **bukan** berarti
+  fiturnya tidak ada. Seluruh butir §4 sudah berkeputusan & tuntas
+  (19 Okt 2026) — tidak ada butir "sedang dikerjakan".
 
 ---
 
@@ -215,15 +215,21 @@ AI forecasting.
   halaman Pengguna khusus owner; wajib ganti sandi; nav + rute disaring per
   peran; login (dan login gagal) masuk jejak audit.
 * **POS**: satu mode jual + baris Topup/Tarik di dalam keranjang (satu nota
-  hybrid); scan `Qty*Kode`, pintasan F1–F12, multi-satuan, diskon baris +
-  transaksi, catatan per baris & per nota, harga dinamis editable inline,
-  item manual, keranjang persisten, pending/hold, pelanggan + tier grosir,
-  **potongan borongan per qty otomatis** (3.5), **tampilan mobile** +
-  lapisan bayar fullscreen; fallback HP.
-* **Bayar**: tunai/QRIS/transfer; F12 bayar pas; **uang kurang → hutang
-  otomatis** (syarat: pelanggan terpilih bukan "Pelanggan Umum"); modal
-  resume pasca-bayar + cetak Thermal/A4; kick laci otomatis untuk tunai.
-  *(Split payment belum ada — ACC 19 Okt 2026, dijadwalkan.)*
+  hybrid); scan `Qty*Kode` + **scan barcode via kamera HP** (§1.6.1),
+  pintasan F1–F12, multi-satuan, diskon baris + transaksi, catatan per baris
+  & per nota, harga dinamis editable inline, item manual, keranjang
+  persisten, pending/hold, pelanggan + tier grosir, **potongan borongan per
+  qty otomatis** (3.5), **tampilan mobile** + lapisan bayar fullscreen;
+  fallback HP.
+* **Pesanan jasa** (§1.6.6): order → dikerjakan → selesai → serah (nota
+  penjualan penuh — omzet diakui saat serah) / batal (DP direfund); DP +
+  pelunasan + sisa → ledger Hutang; item teks bebas tanpa potong stok;
+  nomor `ORD-YYMMDD-NNN`.
+* **Bayar**: tunai/QRIS/transfer; **split payment 2 metode** (§1.6.5 —
+  atribusi `sale_payments`, Σ amount per nota selalu = total; tanpa jalur
+  hutang); F12 bayar pas; **uang kurang → hutang otomatis** (syarat:
+  pelanggan terpilih bukan "Pelanggan Umum"); modal resume pasca-bayar +
+  cetak Thermal/A4; kick laci otomatis untuk tunai.
 * **Master**: produk (foto, diskon, kadaluarsa, catatan, harga dinamis,
   grosir, borongan, multi-satuan, tombstone), kategori (`track_stock` /
   `use_expiry`), satuan, pelanggan (+tier, +umur hutang), supplier.
@@ -241,16 +247,18 @@ AI forecasting.
   nota) · Kasir · Produk · Kategori · Piutang · Stok · Analitik (valuasi
   stok + tidak laku); tiap menu CSV + cetak/PDF; dashboard.
 * **Cetak**: struk ESC/POS 32 kolom (thermal) & 64 kolom (A4) — penjualan
-  memakai invoice A4 browser; label harga A4/Folio dengan barcode
+  memakai invoice A4 browser; **logo toko di struk thermal** (§1.6.4 —
+  raster `GS v 0`, konversi di klien); label harga A4/Folio dengan barcode
   EAN-13/EAN-8/Code 128; jeda cetak terpusat.
 * **Data & keamanan**: backup harian + manual (retensi 14) + **restore dari
   UI** (backup pengaman otomatis) + jejak audit + guard skema saat boot +
   idempotensi uuid (retry offline aman).
 
-**Keputusan pemilik 19 Okt 2026 (§4):** dikerjakan — scan kamera HP · kas
-masuk · cetak/ekspor PO · logo struk · split payment · pesanan jasa + DP ·
-analitik lanjutan; ditolak — e-wallet+MDR · price list · bundling · varian ·
-akses dari luar LAN · pengingat hutang WA · absensi staf (tidak dibutuhkan).
+**Keputusan pemilik 19 Okt 2026 (§4):** dikerjakan & SELESAI — scan kamera
+HP · kas masuk · cetak/ekspor PO · logo struk · split payment · pesanan
+jasa + DP · analitik lanjutan; ditolak — e-wallet+MDR · price list ·
+bundling · varian · akses dari luar LAN · pengingat hutang WA · absensi
+staf (tidak dibutuhkan).
 **Sengaja tidak (§5):** PPN · loyalitas · customer display · WA ·
 multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 
@@ -267,6 +275,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Split payment / split bill | · | · | ✓ | ✓ | · | **✓** (2 metode, atribusi `sale_payments`) |
 | Metode bayar kustom / e-wallet (+MDR) | · | ✓ | ✓ | ✓ | ✓ | ✗ ditolak 19 Okt 2026 (4.2; kini 3 metode) |
 | Hutang/piutang pelanggan | ✓ | ✓ | ✓ | · | · | **✓** (+aging, +cetak A4) |
+| Pesanan jasa + DP/status (order → serah) | · | · | ✓ (vertical Bengkel) | ~ (Zenwel jasa) | · | **✓** (1.6.6 — omzet saat serah) |
 | Diskon baris & transaksi | ✓ | ✓ | ✓ | ✓ | · | **✓** (+borongan qty) |
 | Pajak (PPN) / service charge | ✓ | ✓ | ✓ | · | · | ✗ sengaja (§5) |
 | Laba per transaksi | ✓ | ✓ | ✓ | · | · | **✓** |
@@ -310,7 +319,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Aplikasi HP untuk kasir | · | ✗ | ✓ | ✓ | ✓ | **✓** (PWA mobile view) |
 
 > `Kandidat n` = butir daftar §4; status keputusan (19 Okt 2026) per baris di
-> §4. `⟳` = ACC pemilik — dijadwalkan dikerjakan. `Sengaja` = keputusan
+> §4 — seluruh butir sudah tuntas (dikerjakan/ditolak). `Sengaja` = keputusan
 > pemilik tercatat di §5. Sel Ravaa yang **tebal** = ada di kode sekarang.
 
 ---
