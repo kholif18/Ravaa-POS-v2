@@ -226,7 +226,7 @@ AI forecasting.
 * **Stok & pembelian**: restock dengan HPP rata-rata tertimbang, opname,
   riwayat stok ber-referensi nomor nota; **PO supplier**: buat → terima
   (stok masuk + `avg_cost`) → bayar bertahap / batal, hutang supplier +
-  aging; rekap pembelian harian.
+  aging; rekap pembelian harian; cetak nota PO A4 (§1.6.3, 2026-10-19).
 * **Retur & kas**: retur penjualan dari nota / manual + pembatalan (stok
   kembali, uang kembali); pengeluaran kas (terikat shift atau di luar shift);
   kas masuk non-penjualan (§1.6.2, 2026-10-19); pembayaran piutang.
@@ -320,7 +320,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.3 | **Pesanan jasa + status/DP** | **✅ dikerjakan** — §1.6.6 | KP vertical Bengkel | Order → dikerjakan → diambil; DP; domain cetak/servis laptop |
 | 4.4 | **Scan barcode kamera HP** | **✅ selesai 2026-10-19** — §1.6.1 | Loyverse | API browser (`BarcodeDetector`) tanpa dependensi; butuh konteks aman (HTTPS/localhost) |
 | 4.5 | **Kas masuk (di luar penjualan)** | **✅ selesai 2026-10-19** — §1.6.2 | KP, Olsera | Pasangan Pengeluaran; laci/expected-cash + laporan |
-| 4.6 | **Cetak/ekspor nota PO** | **✅ dikerjakan** — §1.6.3 | KP (nota pembelian), Loyverse | Pola dokumen A4 + tombol di sub-halaman PO |
+| 4.6 | **Cetak/ekspor nota PO** | **✅ selesai 2026-10-19** — §1.6.3 | KP (nota pembelian), Loyverse | Pola dokumen A4 + tombol di sub-halaman PO |
 | 4.7 | **Price list per pelanggan** | **❌ tidak perlu** ("sepertinya tidak butuh") | Aronium (plugin) | Tier ecer/grosir + borongan qty dianggap cukup |
 | 4.8 | **Bundling / paket produk** | **❌ tidak perlu** ("sepertinya tidak butuh") | Kasir Pintar (paket/bahan baku) | — |
 | 4.9 | **Varian produk** | **❌ tidak perlu** | KP, Olsera, Loyverse | Pola SKU terpisah (bungkus/ketengan) dipertahankan |

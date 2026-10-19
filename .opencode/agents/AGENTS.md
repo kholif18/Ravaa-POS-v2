@@ -1338,7 +1338,20 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           re-render); (5) rincian PO = **tabel barang**
                           (qty/harga beli/sub total) + tfoot
                           Total/Terbayar/Sisa hutang, catatan pindah ke kartu
-                          header. `tests/purchase-test.mjs` 42 asersi.
+                          header. **Cetak A4 nota PO (butir ROADMAP 1.6.3,
+                          2026-10-19, ACC pemilik)**: tombol "Cetak A4"
+                          `[data-po-cetak]` di kartu header rincian —
+                          dokumen cetak browser `htmlPoA4()`/`cetakPoA4()`
+                          (pola `cetakHutangA4` debts.ts: popup +
+                          `window.print()`, TANPA print-agent) memuat kop
+                          `store_*`, supplier snapshot, meta Nomor/Tanggal/
+                          Diterima/Kasir/Shift/Status, tabel barang, ringkas
+                          Total/Terbayar/Sisa (label kontekstual "Sisa
+                          (lunas)"/"Sisa hutang"/"Sisa (belum diterima)"/
+                          "Dibatalkan"), catatan + striping; popup diblokir/
+                          gagal = toast. `tests/purchase-test.mjs`
+                          44 asersi (section F uji popup: kop + supplier +
+                          nomor + baris + ringkas).
 apps/web/src/labelsheet.ts  **Model cetak label (baru 2026-10-17, refactor
                          halaman Label harga)**: LEMBAR label A4/Folio lewat
                          CETAK BROWSER (`window.print()` + `@page` mm), bukan
@@ -1936,6 +1949,16 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `purchase_total` di `GET /api/shifts` → `kasSeharusnya()`); rekap harian
       `GET /api/reports/daily` (`purchase:{n,total}` = nilai DITERIMA,
       by `received_at`, kartu ke-8 — tidak menggerus laba).
+    - **Cetak A4 nota PO (butir ROADMAP 1.6.3, 2026-10-19) — TANPA endpoint
+      baru**: dokumen dibangun klien di `purchases.ts` (`htmlPoA4`/
+      `cetakPoA4`, pola `cetakHutangA4` — popup + `window.print()` browser,
+      BUKAN print-agent/CUPS). Isi: kop `store_*`, supplier snapshot, meta
+      (Nomor `PO-<id>`/Tanggal/Diterima/Kasir/Shift/Status), tabel barang
+      qty/harga beli/sub total, ringkas Total/Terbayar/Sisa, catatan;
+      striping tabel + `print-color-adjust: exact`. Data di-fetch SEGAR saat
+      klik (`GET /api/purchases/:id` + `GET /api/settings`) sehingga nota
+      tercetak selalu cermin server; popup diblokir/gagal = toast, tidak
+      pernah mengubah data.
   - **Pengeluaran kas (Tahap 1, 2026-10-11, halaman `#/expenses`)** — kas
     TUNAI keluar operasional. Bukan mutasi stok (tidak menyentuh
     `products.version`) dan bukan HPP (laba = omzet − HPP, definisi tetap).

@@ -77,7 +77,7 @@ const SUITE = [
   ['expense-supplier-test.mjs', 34],
   ['kas-masuk-test.mjs', 23],
   ['retur-test.mjs', 44],
-  ['purchase-test.mjs', 42],
+  ['purchase-test.mjs', 44],
   ['pager-test.mjs', 19],
   ['altn-test.mjs', 18],
   ['tier-harga-test.mjs', 16],

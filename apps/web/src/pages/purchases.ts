@@ -16,6 +16,11 @@
 // POST /:id/pay (cicil sisa, maks total), POST /:id/cancel (order saja).
 // Kas keluar = `terbayar` di shift PO (agregat purchase_total → kasSeharusnya).
 //
+// **Cetak A4 nota PO (butir ROADMAP 1.6.3, ACC pemilik 19 Okt 2026)**: tombol
+// "Cetak A4" di rincian (`#/purchases/<id>`) membangun dokumen cetak browser
+// (kop `store_*`, supplier, item, Total/Terbayar/Sisa) — pola `cetakHutangA4`
+// debts.ts (popup + window.print, TANPA print-agent); gagal = toast.
+//
 // **Revisi layout 2026-10-17 kedua** (permintaan pemilik: "refactor desain
 // layout purchasing, PO, dan /#/purchases/190 agar lebih mudah dibaca" +
 // chip filter "seperti tidak terlihat, begitu juga di laporan" + "pencarian
@@ -262,6 +267,164 @@ function bindKembali(el: HTMLElement): void {
   );
 }
 
+/* ---------- DOKUMEN A4 (cetak/ekspor nota PO — butir ROADMAP 1.6.3) ---------- */
+
+type Toko = { store_name: string; store_address: string; store_phone: string; store_email: string };
+
+/** Tanggal/jam gaya Indonesia, zona waktu KASIR (bukan UTC) — pola
+ *  debts.ts/invoice.ts: created_at disimpan UTC (Z), diparse lalu tampil lokal. */
+function tglLokal(iso: string): string {
+  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) || iso.includes('T')
+    ? iso
+    : `${iso.replace(' ', 'T')}Z`;
+  return new Date(t).toLocaleString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+/** Seluruh dokumen nota PO jadi satu string HTML (A4, print-only) — pola
+ *  `htmlHutangA4` debts.ts: kop store_* + supplier + tabel barang +
+ *  ringkas Total/Terbayar/Sisa (striping, print-color-adjust: exact). */
+function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string {
+  const baris = items
+    .map((it, i) => `<tr>
+        <td class="c">${i + 1}</td>
+        <td>${esc(it.name)}</td>
+        <td class="r nowrap">${it.qty}</td>
+        <td class="r nowrap">${rp(it.harga_beli)}</td>
+        <td class="r nowrap">${rp(it.amount)}</td>
+      </tr>`)
+    .join('');
+
+  const sisa = Math.max(0, po.sisa);
+  const labelSisa = po.status === 'cancel'
+    ? 'Dibatalkan'
+    : po.status === 'order'
+      ? 'Sisa (belum diterima)'
+      : sisa > 0 ? 'Sisa hutang' : 'Sisa (lunas)';
+  const labelStatus = po.status === 'cancel' ? 'DIBATALKAN' : po.status === 'received' ? 'DITERIMA' : 'ORDER';
+
+  return `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Nota pembelian PO-${po.id} — ${esc(po.supplier_name || 'Tanpa supplier')}</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
+  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .alamat { margin-top: 4px; max-width: 60%; }
+  .baris-kop { display: flex; margin-top: 2px; }
+  .baris-kop .lbl { width: 72px; }
+  .logo { width: 66px; height: 66px; border-radius: 50%; background: #4a90d9; color: #fff;
+          font-size: 40px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
+  .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
+  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
+  .rincian .baris { display: flex; }
+  .rincian .baris .lbl { width: 96px; }
+  table.ledger { width: 100%; border-collapse: collapse; }
+  table.ledger th { font-size: 10px; padding: 5px 6px; border-top: 1px solid #444;
+                    border-bottom: 1px solid #444; text-align: left; }
+  table.ledger th.r, table.ledger td.r { text-align: right; }
+  table.ledger th.c, table.ledger td.c { text-align: center; }
+  table.ledger td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
+  table.ledger tbody tr:nth-child(even) td { background: #f3f3f3; }
+  .nowrap { white-space: nowrap; }
+  .kosong { padding: 14px 6px; color: #777; border-bottom: 1px solid #e2e2e2; }
+  table.ringkas { width: 55%; margin-left: auto; margin-top: 14px; border-collapse: collapse; }
+  table.ringkas td { padding: 5px 9px; border-bottom: 1px solid #999; }
+  table.ringkas td:first-child { font-weight: 700; }
+  table.ringkas td.r { text-align: right; white-space: nowrap; }
+  table.ringkas tr:nth-child(even) td { background: #f3f3f3; }
+  table.ringkas tr:last-child td { border-bottom: 1px solid #444; font-weight: 700; }
+  .status { display: inline-block; padding: 2px 8px; border: 1px solid #444; font-weight: 700; font-size: 10px; }
+  .catatan { margin-top: 14px; }
+  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+</style>
+</head>
+<body>
+  <div class="kop">
+    <div>
+      <div class="judul">NOTA PEMBELIAN</div>
+      <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
+      ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
+      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
+      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
+    </div>
+    <div class="logo" aria-hidden="true">R</div>
+  </div>
+  <hr>
+  <div class="meta">
+    <div>
+      <div class="ttl">Supplier</div>
+      <div>${esc(po.supplier_name || 'Tanpa supplier')}</div>
+    </div>
+    <div class="rincian">
+      <div class="baris"><span class="lbl">Nomor:</span><span>PO-${po.id}</span></div>
+      <div class="baris"><span class="lbl">Tanggal:</span><span>${esc(tglLokal(po.created_at))}</span></div>
+      ${po.received_at ? `<div class="baris"><span class="lbl">Diterima:</span><span>${esc(tglLokal(po.received_at))}</span></div>` : ''}
+      <div class="baris"><span class="lbl">Kasir:</span><span>${esc(po.cashier || '—')}</span></div>
+      ${po.shift_id ? `<div class="baris"><span class="lbl">Shift:</span><span>#${po.shift_id}</span></div>` : ''}
+      <div class="baris"><span class="lbl">Status:</span><span class="status">${labelStatus}</span></div>
+    </div>
+  </div>
+  ${
+    items.length === 0
+      ? `<div class="kosong">Tidak ada barang pada nota ini.</div>`
+      : `<table class="ledger">
+    <thead>
+      <tr>
+        <th class="c" style="width:34px">#</th>
+        <th>Barang</th>
+        <th class="r" style="width:64px">Qty</th>
+        <th class="r" style="width:120px">Harga beli</th>
+        <th class="r" style="width:120px">Sub total</th>
+      </tr>
+    </thead>
+    <tbody>${baris}</tbody>
+  </table>`
+  }
+  <table class="ringkas">
+    <tbody>
+      <tr><td>Total</td><td class="r">${rp(po.total)}</td></tr>
+      <tr><td>Terbayar</td><td class="r">${rp(po.terbayar)}</td></tr>
+      <tr><td>${labelSisa}</td><td class="r">${rp(sisa)}</td></tr>
+    </tbody>
+  </table>
+  ${po.note ? `<div class="catatan">Catatan: ${esc(po.note)}</div>` : ''}
+  <div class="foot">Dicetak dari Ravaa POS &middot; ${esc(tglCetak)}</div>
+  <script>
+    // Cetak otomatis begitu dokumen siap (pola invoice.ts/debts.ts). Tab sengaja
+    // tidak ditutup supaya bisa print ulang.
+    window.addEventListener('load', function () { window.print(); });
+  </script>
+</body>
+</html>`;
+}
+
+/** Ambil nota + kop lalu buka tab cetak A4. Lempar Error bila API tak
+ *  terjangkau / popup diblokir — pemanggil hanya memberi toast. */
+async function cetakPoA4(id: number): Promise<void> {
+  const [det, set] = await Promise.all([
+    apiGet<{ data: { purchase: Po; items: PoItem[] } }>(`/api/purchases/${id}`),
+    apiGet<{ data: Toko }>('/api/settings'),
+  ]);
+  const tglCetak = new Date().toLocaleString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  const html = htmlPoA4(det.data.purchase, det.data.items, set.data, tglCetak);
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak A4');
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
 /* ---------- RINCIAN (halaman #/purchases/<id>) ---------- */
 
 function detailHtml(po: Po, items: PoItem[]): string {
@@ -306,6 +469,7 @@ function detailHtml(po: Po, items: PoItem[]): string {
         ${kembaliBtnHtml()}
         <h2 class="text-base font-bold">PO-${po.id} — ${esc(po.supplier_name || 'Tanpa supplier')}</h2>
         ${badge(po)}
+        <button type="button" data-po-cetak class="btn btn-ghost ml-auto">${icon('print')}<span>Cetak A4</span></button>
       </div>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">dibuat ${esc(po.created_at)}${po.received_at ? ` · diterima ${esc(po.received_at)}` : ''}${po.shift_id ? ` · Shift #${po.shift_id}` : ''}</p>
       ${po.note ? `<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Catatan: ${esc(po.note)}</p>` : ''}
@@ -371,6 +535,10 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
   const { purchase: po, items } = data;
   el.innerHTML = detailHtml(po, items);
   bindKembali(el);
+
+  el.querySelector<HTMLElement>('[data-po-cetak]')?.addEventListener('click', () => {
+    cetakPoA4(po.id).catch((e) => toast(`Gagal mencetak: ${errMsg(e)}`, 'error'));
+  });
 
   el.querySelector<HTMLElement>('[data-po-batal]')?.addEventListener('click', async () => {
     const yes = await confirmDialog({

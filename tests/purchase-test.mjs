@@ -198,6 +198,42 @@ for (let i = 0; i < 40; i++) {
   if (poStatus === 'received') break;
 }
 chk('terima lunas via halaman -> status received', poStatus === 'received', poStatus);
+
+console.log('=== F. Cetak A4 nota PO ===');
+// Buka PO o1 (dibuat via API, punya supplier snapshot "UjiPO Sup Tetap", sudah
+// diterima lunas) — dokumen harus memuat kop, supplier, nomor, item, ringkas.
+await p.goto(`http://localhost:5656/#/purchases/${o1.json.data.purchase.id}`, { waitUntil: 'networkidle' });
+await p.waitForSelector('[data-po-cetak]', { timeout: 10000 });
+await p.waitForTimeout(400);
+// Stub window.print di SELURUH context sebelum popup (pola customer-debt-test)
+// — dokumen A4 memanggil print() otomatis saat load.
+await p.context().addInitScript(() => { window.print = () => {}; });
+const [popPo] = await Promise.all([
+  p.waitForEvent('popup'),
+  p.click('[data-po-cetak]'),
+]);
+await popPo.waitForLoadState('domcontentloaded');
+const a4po = await popPo.evaluate((id) => {
+  const css = document.querySelector('style')?.textContent ?? '';
+  const tbl = document.querySelector('table.ledger');
+  const rk = document.querySelector('table.ringkas');
+  return {
+    judul: document.body.innerHTML.includes('NOTA PEMBELIAN'),
+    supplier: document.body.innerHTML.includes('UjiPO Sup Tetap'),
+    nomor: document.body.innerHTML.includes(`PO-${id}`),
+    barisBarang: tbl ? tbl.querySelectorAll('tbody tr').length : 0,
+    stripe: css.includes('table.ledger tbody tr:nth-child(even)'),
+    ringkas: rk ? [...rk.querySelectorAll('tbody tr')].map((r) => r.innerText.replace(/\s+/g, ' ')) : [],
+  };
+}, o1.json.data.purchase.id);
+chk('A4 PO: kop + supplier + nomor + baris barang + striping',
+  a4po.judul && a4po.supplier && a4po.nomor && a4po.barisBarang === 1 && a4po.stripe,
+  JSON.stringify({ ...a4po, ringkas: undefined }));
+chk('ringkas A4 = Total/Terbayar/Sisa (lunas) Rp2.000',
+  a4po.ringkas.length === 3 && a4po.ringkas[0].includes('Total') && /Rp2\.000/.test(a4po.ringkas[0])
+    && a4po.ringkas[2].includes('Sisa (lunas)'), JSON.stringify(a4po.ringkas));
+await popPo.close().catch(() => {});
+
 await p.click('[data-po-kembali]');
 await p.waitForSelector('#po-body', { timeout: 10000 });
 chk('tombol Kembali -> daftar', /#\/purchases$/.test(p.url()), p.url());
