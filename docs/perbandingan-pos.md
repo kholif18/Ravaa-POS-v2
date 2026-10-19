@@ -9,6 +9,9 @@ PO supplier, retur, dan backup — semuanya kini ada), menyegarkan harga pasar,
 serta menambahkan catatan kebijakan **MDR QRIS 0%** (efektif 1 Okt 2026).
 Riwayat v1 utuh tersimpan di git log dokumen ini.
 
+**Keputusan kandidat §4 (pemilik, 19 Okt 2026):** 7 butir disetujui untuk
+dikerjakan, 5 ditolak, 2 belum dibahas — rincian di §0 dan §4–§5.
+
 Dokumen ini bahan referensi pengembangan: memetakan **fitur yang dipakai
 banyak orang** di aplikasi POS populer, lalu memisahkan mana yang sudah
 setara, mana kandidat terbuka, dan mana yang **sudah diputuskan pemilik
@@ -24,7 +27,8 @@ untuk tidak dikerjakan**.
 * Harga = snapshot halaman resmi. Angka bertanda *(riset v1)* belum
   diverifikasi ulang pada 2026-10-19.
 * Tabel: `✓` ada · `~` parsial/terbatas · `✗` tidak (Ravaa: "sengaja" =
-  keputusan §5) · `·` tidak muncul di sumber yang dibaca — **bukan** berarti
+  keputusan §5) · `⟳` Ravaa = disetujui pemilik 19 Okt 2026, dijadwalkan
+  dikerjakan · `·` tidak muncul di sumber yang dibaca — **bukan** berarti
   fiturnya tidak ada.
 
 ---
@@ -41,13 +45,14 @@ cetak (2026-10-17/18) · backup otomatis + manual + restore + jejak audit ·
 label harga barcode EAN/Code 128 A4/Folio (2026-10-17) · tampilan mobile POS
 (2026-10-17).
 
-**Kandidat yang masih terbuka (belum diputuskan — daftar §4):** split
-payment (3.4, sudah "dipertimbangkan") · metode e-wallet + opsi MDR ·
-pesanan jasa ber-status/DP (analog "bengkel" Kasir Pintar — relevan untuk
-service laptop) · scan barcode pakai kamera HP · kas masuk · cetak/ekspor
-nota PO · price list per pelanggan · bundling/paket · varian produk ·
-analitik lanjutan (valuasi stok/dead stock) · logo di struk thermal ·
-pengingat hutang via WA · akses dari luar LAN · absensi staf.
+**Keputusan pemilik 2026-10-19 atas kandidat §4 — dikerjakan (7):** scan
+barcode pakai kamera HP · kas masuk · cetak/ekspor nota PO · logo di struk
+thermal · split payment (§3.4) · pesanan jasa + DP/status · analitik
+lanjutan (valuasi stok/dead stock). **Ditolak (5):** metode e-wallet + MDR
+(tanpa payment gateway — QRIS/transfer manual cukup) · price list per
+pelanggan · bundling/paket · varian produk · akses dari luar LAN
+(Tailscale/tunnel). **Belum dibahas:** pengingat hutang via WA · absensi
+staf. Status per baris di §4; antrian eksekusi di `ROADMAP.md` §1.6.
 
 **Sengaja tidak dikerjakan (keputusan tercatat — §5):** poin loyalitas
 (2026-10-18) · PPN/voucher (2026-10-06) · customer display (2026-10-06) ·
@@ -214,7 +219,7 @@ AI forecasting.
 * **Bayar**: tunai/QRIS/transfer; F12 bayar pas; **uang kurang → hutang
   otomatis** (syarat: pelanggan terpilih bukan "Pelanggan Umum"); modal
   resume pasca-bayar + cetak Thermal/A4; kick laci otomatis untuk tunai.
-  *(Split payment belum ada.)*
+  *(Split payment belum ada — ACC 19 Okt 2026, dijadwalkan.)*
 * **Master**: produk (foto, diskon, kadaluarsa, catatan, harga dinamis,
   grosir, borongan, multi-satuan, tombstone), kategori (`track_stock` /
   `use_expiry`), satuan, pelanggan (+tier, +umur hutang), supplier.
@@ -224,7 +229,7 @@ AI forecasting.
   aging; rekap pembelian harian.
 * **Retur & kas**: retur penjualan dari nota / manual + pembatalan (stok
   kembali, uang kembali); pengeluaran kas (terikat shift atau di luar shift);
-  pembayaran piutang. *(Kas masuk belum ada.)*
+  pembayaran piutang. *(Kas masuk belum ada — ACC 19 Okt 2026, dijadwalkan.)*
 * **Shift**: buka/tutup dengan rumus expected-cash lengkap (topup, QRIS/
   transfer, retur, pembelian, hutang baru, piutang bayar); rekap X/Z
   (thermal + PDF).
@@ -238,10 +243,10 @@ AI forecasting.
   UI** (backup pengaman otomatis) + jejak audit + guard skema saat boot +
   idempotensi uuid (retry offline aman).
 
-**Belum ada — kandidat §4 (bukan keputusan):** split payment · metode
-e-wallet + MDR · pesanan jasa ber-status/DP · scan kamera HP · kas masuk ·
-cetak/ekspor PO · price list per pelanggan · bundling · varian · analitik
-lanjutan · logo struk.
+**Keputusan pemilik 19 Okt 2026 (§4):** dikerjakan — scan kamera HP · kas
+masuk · cetak/ekspor PO · logo struk · split payment · pesanan jasa + DP ·
+analitik lanjutan; ditolak — e-wallet+MDR · price list · bundling · varian ·
+akses dari luar LAN; belum dibahas — pengingat hutang WA · absensi staf.
 **Sengaja tidak (§5):** PPN · loyalitas · customer display · WA ·
 multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 
@@ -255,8 +260,8 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 |---|---|---|---|---|---|---|
 | Login multi-user + peran | ✓ | ✓ | ✓ | ✓ | ~ | **✓** (owner/kasir) |
 | Multi-outlet + transfer stok | ✓ | · | ✓ | ✓ | ✓ | ✗ sengaja (§5) |
-| Split payment / split bill | · | · | ✓ | ✓ | · | ✗ kandidat 4.1 |
-| Metode bayar kustom / e-wallet (+MDR) | · | ✓ | ✓ | ✓ | ✓ | ✗ kandidat 4.2 (kini 3 metode) |
+| Split payment / split bill | · | · | ✓ | ✓ | · | ⟳ ACC 19 Okt 2026 (4.1) |
+| Metode bayar kustom / e-wallet (+MDR) | · | ✓ | ✓ | ✓ | ✓ | ✗ ditolak 19 Okt 2026 (4.2; kini 3 metode) |
 | Hutang/piutang pelanggan | ✓ | ✓ | ✓ | · | · | **✓** (+aging, +cetak A4) |
 | Diskon baris & transaksi | ✓ | ✓ | ✓ | ✓ | · | **✓** (+borongan qty) |
 | Pajak (PPN) / service charge | ✓ | ✓ | ✓ | · | · | ✗ sengaja (§5) |
@@ -270,9 +275,9 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Fitur | KulaPOS | Aronium | Kasir Pintar | Olsera | Loyverse | RavaaPOS v2 |
 |---|---|---|---|---|---|---|
 | Multi-satuan jual (pack/dus) | ~ | · | ✓ | · | · | **✓** |
-| Varian produk | · | · | ✓ | ✓ | ✓ | ~ (duplikat SKU manual) |
+| Varian produk | · | · | ✓ | ✓ | ✓ | ~ (duplikat SKU manual; 4.9 ditolak 19 Okt 2026) |
 | Harga bertingkat per qty / grosir | · | ~ | ✓ | ✓ | · | **✓** (borongan + tier grosir) |
-| Price list khusus per pelanggan | · | ✓ (plugin) | ✓ | · | · | ✗ kandidat 4.7 (kini tier saja) |
+| Price list khusus per pelanggan | · | ✓ (plugin) | ✓ | · | · | ✗ ditolak 19 Okt 2026 (4.7; kini tier saja) |
 | Kadaluarsa + peringatan | ✓ | ✓ (plugin) | ~ | · | · | **✓** (per kategori) |
 | Restock + HPP rata-rata tertimbang | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** |
 | Opname / hitung fisik | ✓ | ✓ | ✓ | · | ✓ | **✓** |
@@ -281,7 +286,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Retur pelanggan | ✓ | ~ | · | · | · | **✓** |
 | Retur/batal ke supplier | ✓ | · | · | · | · | ~ (PO batal saja) |
 | Cetak label/barcode | ✓ | · | · | ✓ | ✓ | **✓** (EAN/Code 128) |
-| Bundling / paket produk | · | · | ✓ | · | · | ✗ kandidat 4.8 |
+| Bundling / paket produk | · | · | ✓ | · | · | ✗ ditolak 19 Okt 2026 (4.8) |
 
 ### 3.3 Pelanggan, kas, laporan, platform
 
@@ -289,40 +294,41 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 |---|---|---|---|---|---|---|
 | Manajemen pelanggan + riwayat | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** |
 | Loyalitas / poin | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ sengaja (§5) |
-| Kas masuk & keluar (non-penjualan) | · | · | ✓ | ✓ | · | ~ (keluar ✓; masuk kandidat 4.5) |
-| Absensi karyawan | · | · | ✓ | ✓ | ✓ (add-on) | ✗ kandidat 4.14 |
+| Kas masuk & keluar (non-penjualan) | · | · | ✓ | ✓ | · | ~ (keluar ✓; masuk ⟳ ACC 19 Okt 2026, 4.5) |
+| Absensi karyawan | · | · | ✓ | ✓ | ✓ (add-on) | ✗ kandidat 4.14 (belum dibahas) |
 | Laporan + export (CSV/Excel) | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** (7 menu) |
 | Laporan terjadwal email/WA | · | ✓ (berbayar) | · | ✓ | · | ✗ sengaja (§5) |
-| Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ✗ kandidat 4.10 |
+| Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ⟳ ACC 19 Okt 2026 (4.10) |
 | Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | **✓** |
 | Tanpa langganan (server sendiri) | ✗ | ✓ (Lite) | ✗ | ✗ | ~ (inti gratis) | **✓** |
-| Scan barcode kamera HP | · | · | · | · | ✓ | ✗ kandidat 4.4 |
+| Scan barcode kamera HP | · | · | · | · | ✓ | ⟳ ACC 19 Okt 2026 (4.4) |
 | Customer display | · | · | ✓ | · | ✓ (gratis) | ✗ sengaja (§5) |
 | Aplikasi HP untuk kasir | · | ✗ | ✓ | ✓ | ✓ | **✓** (PWA mobile view) |
 
-> `Kandidat n` = butir daftar §4 (belum diputuskan). `Sengaja` = keputusan
+> `Kandidat n` = butir daftar §4; status keputusan (19 Okt 2026) per baris di
+> §4. `⟳` = ACC pemilik — dijadwalkan dikerjakan. `Sengaja` = keputusan
 > pemilik tercatat di §5. Sel Ravaa yang **tebal** = ada di kode sekarang.
 
 ---
 
-## 4. Gap terbuka RavaaPOS (kandidat — belum ada keputusan)
+## 4. Gap terbuka RavaaPOS (keputusan pemilik 19 Okt 2026)
 
-| # | Kandidat | Referensi pasar | Catatan (biaya/risiko) |
-|---|---|---|---|
-| 4.1 | **Split payment** (tunai+QRIS satu nota) | Kasir Pintar (split bill/join), Olsera (F&B) | **Sudah "dipertimbangkan" pemilik 2026-10-18 (belum ACC)** — ROADMAP 3.4; butuh tabel `sale_payments` + laporan byMethod |
-| 4.2 | **Metode bayar e-wallet + opsi MDR** | KP/Olsera/Loyverse | POS kini 3 metode (tunai/QRIS/transfer); konteks: MDR QRIS ≤Rp100 rb = 0% sejak 1 Okt 2026 (BI) |
-| 4.3 | **Pesanan jasa + status/DP** | KP vertical Bengkel | Paling spesifik domain toko (cetak/servis laptop): order → dikerjakan → diambil; sekarang jasa = kategori `track_stock=0` + catatan baris |
-| 4.4 | **Scan barcode kamera HP** | Loyverse | Fallback HP kasir; grep repo = tidak ada `getUserMedia`/`BarcodeDetector`; bisa tanpa dependensi (API browser) |
-| 4.5 | **Kas masuk (di luar penjualan)** | KP, Olsera | Pengeluaran sudah ada — ini pasangannya |
-| 4.6 | **Cetak/ekspor nota PO** | KP (nota pembelian), Loyverse | `purchases.ts` belum punya cetak/ekspor (grep 0 hasil); kecil, pola `cetakLaporan`/invoice A4 |
-| 4.7 | **Price list per pelanggan** | Aronium (plugin) | Sekarang hanya tier ecer/grosir (`customers.tier`) |
-| 4.8 | **Bundling / paket produk** | Kasir Pintar (paket/bahan baku) | Saat ini dijual manual baris-per-baris |
-| 4.9 | **Varian produk** | KP, Olsera, Loyverse | Konflik sadar: rokok bungkus vs ketengan = SKU terpisah; hanya jalan bila tidak merusak aturan itu |
-| 4.10 | **Analitik lanjutan** (valuasi stok, dead stock) | Olsera "Analisa Bisnis", Loyverse add-on | Saat ini 7 menu + CSV; alert `min_stock` sudah ada |
-| 4.11 | **Logo di struk thermal** | KP iOS, Aronium custom receipts | Butuh ESC/POS bitmap raster — uji kertas dulu |
-| 4.12 | **Pengingat hutang via WA** | kebiasaan pasar | **Use-case beda** dari WA rekap yang dicoret 2026-10-01; butuh keputusan pemilik baru |
-| 4.13 | **Akses dari luar LAN** | semua cloud | Ravaa self-hosted = LAN; opsi VPN mesh/tunnel; belum diputuskan |
-| 4.14 | **Absensi staf** | KP StaffPlus, Olsera, Loyverse | Prioritas rendah di skala 1–2 kasir; login + shift sudah ada |
+| # | Kandidat | Keputusan 19 Okt 2026 | Referensi pasar | Catatan (biaya/risiko) |
+|---|---|---|---|---|
+| 4.1 | **Split payment** (tunai+QRIS satu nota) | **✅ dikerjakan** — `ROADMAP.md` §1.6.5 | Kasir Pintar (split bill/join), Olsera (F&B) | Butuh tabel `sale_payments` + laporan byMethod |
+| 4.2 | **Metode bayar e-wallet + opsi MDR** | **❌ tidak perlu** — tanpa payment gateway; QRIS/transfer manual cukup | KP/Olsera/Loyverse | Konteks: MDR QRIS ≤Rp100 rb = 0% sejak 1 Okt 2026 (BI) |
+| 4.3 | **Pesanan jasa + status/DP** | **✅ dikerjakan** — §1.6.6 | KP vertical Bengkel | Order → dikerjakan → diambil; DP; domain cetak/servis laptop |
+| 4.4 | **Scan barcode kamera HP** | **✅ dikerjakan** — §1.6.1 | Loyverse | API browser (`BarcodeDetector`) tanpa dependensi; butuh konteks aman (HTTPS/localhost) |
+| 4.5 | **Kas masuk (di luar penjualan)** | **✅ dikerjakan** — §1.6.2 | KP, Olsera | Pasangan Pengeluaran; laci/expected-cash + laporan |
+| 4.6 | **Cetak/ekspor nota PO** | **✅ dikerjakan** — §1.6.3 | KP (nota pembelian), Loyverse | Pola dokumen A4 + tombol di sub-halaman PO |
+| 4.7 | **Price list per pelanggan** | **❌ tidak perlu** ("sepertinya tidak butuh") | Aronium (plugin) | Tier ecer/grosir + borongan qty dianggap cukup |
+| 4.8 | **Bundling / paket produk** | **❌ tidak perlu** ("sepertinya tidak butuh") | Kasir Pintar (paket/bahan baku) | — |
+| 4.9 | **Varian produk** | **❌ tidak perlu** | KP, Olsera, Loyverse | Pola SKU terpisah (bungkus/ketengan) dipertahankan |
+| 4.10 | **Analitik lanjutan** (valuasi stok, dead stock) | **✅ dikerjakan** — §1.6.7 | Olsera "Analisa Bisnis", Loyverse add-on | Menu laporan baru + endpoint server |
+| 4.11 | **Logo di struk thermal** | **✅ dikerjakan** — §1.6.4 | KP iOS, Aronium custom receipts | Raster ESC/POS (`GS v 0`) — uji kertas dulu |
+| 4.12 | **Pengingat hutang via WA** | **— belum dibahas** | kebiasaan pasar | Use-case beda dari WA rekap yang dicoret 2026-10-01 |
+| 4.13 | **Akses dari luar LAN** | **❌ tidak perlu** | semua cloud | Opsi Tailscale/tunnel ditolak; tetap self-hosted LAN |
+| 4.14 | **Absensi staf** | **— belum dibahas** | KP StaffPlus, Olsera, Loyverse | Prioritas rendah di skala 1–2 kasir; login + shift sudah ada |
 
 ---
 
@@ -345,6 +351,16 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
   domain ATK/cetak/jasa.
 * **AI forecasting** — versi cukup = alert `min_stock` + laporan per jam
   (dua-duanya sudah ada).
+* **Metode bayar e-wallet (OVO/GoPay/DANA/ShopeePay) + jejak MDR** — ditolak
+  pemilik 2026-10-19: toko pribadi, tidak ada payment gateway; QRIS/transfer
+  manual ("klik konfirmasi") sudah cukup.
+* **Price list khusus per pelanggan** — ditolak 2026-10-19 ("sepertinya tidak
+  butuh"); tier ecer/grosir + harga borongan per qty sudah menutup kebutuhan.
+* **Bundling/paket produk** — ditolak 2026-10-19 ("sepertinya tidak butuh").
+* **Varian produk (ukuran/warna)** — ditolak 2026-10-19 ("tidak perlu");
+  konflik sadar dengan pola SKU terpisah bungkus/ketengan (AGENTS §1).
+* **Akses dari luar LAN (Tailscale/tunnel)** — ditolak 2026-10-19 ("tidak
+  perlu"); Ravaa tetap self-hosted LAN.
 
 ---
 
@@ -382,7 +398,8 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
   berlangganan membayar lisensi + beberapa menambahkan biaya per toko/
   karyawan (Loyverse) atau per paket (Olsera/Kasir Pintar).
 * **Akses dari luar toko**: kompetitor cloud bisa dibuka dari mana saja;
-  Ravaa saat ini LAN (Caddy) — opsi VPN/tunnel masuk kandidat 4.13.
+  Ravaa saat ini LAN (Caddy) — opsi VPN/tunnel **ditolak pemilik 19 Okt
+  2026** (4.13); tetap self-hosted LAN.
 
 ---
 

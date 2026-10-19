@@ -220,6 +220,31 @@ butir yang sudah di-ACC pemilik.
 - **Bersih-bersih:** `bukaDialogRentang`/`openModal` dihapus dari reports.ts;
   docs diperbarui (AGENTS §2/§3 + README).
 
+### 1.6 Antrian implementasi — keputusan pemilik 2026-10-19 (usulan baru)
+
+> Jawaban pemilik atas 12 usulan prioritas (`docs/perbandingan-pos.md` §4;
+> daftar bernomor dikirim 2026-10-19 lewat chat). **7 butir ACC** — dikerjakan
+> satu per satu (satu butir = satu commit, aturan §3.4); **5 butir ditolak**
+> (dirinci di §4.1). Status per baris ikut diperbarui di
+> `docs/perbandingan-pos.md` §4–§5.
+
+| # | Butir (kandidat §4) | Scope kunci | Status |
+|---|---------------------|-------------|--------|
+| 1.6.1 | **Scan barcode kamera HP** (4.4) | `getUserMedia` + `BarcodeDetector` (API browser, tanpa dependensi); tombol di scan bar POS & header mobile; hasil deteksi masuk ke alur `#pos-q` yang sama (`Qty*Kode` tetap jalan). Konteks aman (HTTPS/localhost) wajib — pesan jelas bila diblokir | dijadwalkan |
+| 1.6.2 | **Kas masuk** (4.5) | Pasangan Pengeluaran: kas masuk non-penjualan (injeksi modal/koreksi laci) terikat shift opsional; laci **NAIK** di `kasSeharusnya()`; rekap harian + Z-report ikut | dijadwalkan |
+| 1.6.3 | **Cetak/ekspor nota PO** (4.6) | Dokumen PO A4 (kop `store_*`, supplier, item, total/terbayar/sisa) lewat `window.print()` (pola `cetakInvoice`/`cetakHutangA4`) + tombol di sub-halaman `#/purchases/<id>` | dijadwalkan |
+| 1.6.4 | **Logo di struk thermal** (4.11) | Unggah logo di Sistem (file di `img/`, pola avatar — bukan localStorage); raster ESC/POS `GS v 0` dikonversi di klien & disisipkan di awal struk thermal semua jalur cetak; uji kertas oleh pemilik | dijadwalkan |
+| 1.6.5 | **Split payment** (4.1 / 3.4) | Tabel `sale_payments` + `payments[]` di `POST /api/sales`; modal bayar menerima 2+ metode; laporan byMethod, rumus laci/laba, struk/invoice, resume & Riwayat ikut | dijadwalkan |
+| 1.6.6 | **Pesanan jasa + DP/status** (4.3) | Pesanan cetak/desain/service: pelanggan, item (produk/manual), DP, status (dikerjakan → selesai/diambil); nota pesanan cetak; uang masuk ikut laci. Desain detail dikonfirmasi ke pemilik saat mulai | dijadwalkan |
+| 1.6.7 | **Analitik lanjutan** (4.10) | Menu laporan **Analitik** (registry `MENUS`): valuasi persediaan (HPP vs harga jual, per kategori) + produk tidak laku N hari (dead stock) + CSV/Cetak | dijadwalkan |
+
+**Ditolak pemilik 2026-10-19** (jangan dikerjakan tanpa permintaan baru,
+rincian di §4.1): metode e-wallet + MDR · price list per pelanggan ·
+bundling/paket · varian produk · akses dari luar LAN (Tailscale).
+
+**Belum dibahas** (tetap kandidat, jangan diasumsikan): pengingat hutang via
+WA (4.12) · absensi staf (4.14).
+
 ---
 
 ## 2. Fase 2 — Analitik (setelah Fase 1)
@@ -238,12 +263,12 @@ butir yang sudah di-ACC pemilik.
 
 | # | Butir | Sumber ide | Keputusan yang dibutuhkan |
 |---|-------|-----------|---------------------------|
-| 3.1 | **Pelanggan (tabel `customers`)** — nama/no HP di nota, riwayat belanja | Kasir Pintar "Manajemen Pelanggan" (free), semua app Indonesia | Wajib opsional? integrasi ke struk? |
+| 3.1 | **Pelanggan (tabel `customers`)** — **SELESAI 2026-10-04** | Kasir Pintar "Manajemen Pelanggan" (free), semua app Indonesia | Terjawab: opsional (201), tampil di struk/invoice lewat snapshot `customer_name`; tier menyusul 2026-10-11 |
 | 3.2 | **Loyalty poin** — **DIBATALKAN pemilik 2026-10-18 ("tidak butuh")** | Kasir Pintar (plugin), Moka CRM, tren 2026 | — (tidak dikerjakan) |
-| 3.3 | **Hutang/piutang tempo** | Kasir Pintar free "Hutang/Piutang", Aronium "credit payments" | Siapa yang boleh nyicil (langganan kantor?) |
-| 3.4 | **Split payment** (tunai+QRIS satu nota) — **DIPERTIMBANGKAN pemilik 2026-10-18 (belum di-ACC)** | Tren 2026, Erzap/Moka | Skema `sale_payments` baru + laporan byMethod |
+| 3.3 | **Hutang/piutang tempo** — **SELESAI 2026-10-04** (ledger + aging FIFO + cetak A4) | Kasir Pintar free "Hutang/Piutang", Aronium "credit payments" | Terjawab: cicilan bebas ≤ sisa (lebih = 400); POS auto-catat hutang saat uang kurang + pelanggan valid |
+| 3.4 | **Split payment** (tunai+QRIS satu nota) — **ACC pemilik 2026-10-19** | Tren 2026, Erzap/Moka | Masuk antrian **§1.6.5** — skema `sale_payments` + laporan byMethod |
 | 3.5 | **Harga bertingkat per jumlah qty** — **SELESAI 2026-10-19** (tabel `product_borongan` + API `borongan` + blok form produk + potongan otomatis POS) | Kasir Pintar "Tipe Harga", Olsera harga grosir + pertanyaan pemilik 2026-10-18 saat membedah form "Satuan jual" (*"jika qty tercapai harga juga berubah?"*) | Terjawab — keputusan pemilik 2026-10-18/19 (3 opsi rekomendasi dipilih); detail + implementasi di bawah |
-| 3.6 | **Supplier & riwayat pembelian (PO)** | Kasir Pintar free, Loyverse purchase order | Cukup nama supplier di `restock`? |
+| 3.6 | **Supplier & riwayat pembelian (PO)** — **SELESAI Tahap 3, 2026-10-11** | Kasir Pintar free, Loyverse purchase order | Terjawab: master `suppliers` penuh + PO (order → terima → bayar/cancel) + hutang supplier + aging |
 
 ### 3.5 Harga bertingkat per jumlah qty — **SELESAI 2026-10-19**
 - **Keputusan pemilik 2026-10-19 (semua opsi rekomendasi dipilih):**
@@ -296,8 +321,21 @@ butir yang sudah di-ACC pemilik.
   versi cukup = alert `min_stock` (sudah ada) + laporan per jam (2.1).
 - **Email reporting terjadwal (Aronium $30/thn)** — butuh SMTP; jalur
   WhatsApp (1.1) sudah menutup kebutuhan rekap pemilik.
-- **Refund/retur jual** — keputusan lama tetap berlaku: riwayat bersifat
-  catatan (koreksi = opname + transaksi baru); diagnostik dulu sebelum membuka.
+- ~~**Refund/retur jual**~~ — **SELESAI Tahap 2 (2026-10-11)**: retur dari
+  nota + retur manual + pembatalan (stok kembali, uang kembali); koreksi lain
+  tetap lewat opname.
+
+### 4.1 Ditolak pemilik 2026-10-19 (hasil keputusan atas usulan baru)
+
+- **Metode bayar e-wallet + jejak MDR** (kandidat 4.2) — toko pribadi, tidak
+  ada payment gateway; QRIS/transfer manual (klik konfirmasi) sudah cukup.
+- **Price list khusus per pelanggan** (4.7) — "sepertinya tidak butuh";
+  tier ecer/grosir + harga borongan per qty dianggap cukup.
+- **Bundling/paket produk** (4.8) — "sepertinya tidak butuh".
+- **Varian produk** (4.9) — tidak perlu; pola SKU terpisah (rokok
+  bungkus/ketengan) + multi-satuan tetap dipertahankan.
+- **Akses dari luar LAN (Tailscale/tunnel)** (4.13) — tidak perlu (19 Okt
+  2026); tetap self-hosted LAN.
 
 ---
 
