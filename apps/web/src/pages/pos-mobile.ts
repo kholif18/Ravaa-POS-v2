@@ -429,6 +429,10 @@ export function pmShellHtml(ctx: PosMobileCtx): string {
           </div>
           <div id="pos-results" class="suggest hidden" role="listbox" aria-label="Hasil pencarian produk"></div>
         </div>
+        <!-- Pemindai kamera (butir ROADMAP 1.6.1, 2026-10-19): id sama dengan
+             tombol desktop — hanya satu shell di DOM; listener satu di
+             bindCart() pos.ts. Hasil deteksi masuk ke jalur #pos-q yang sama. -->
+        <button type="button" id="pos-scan-kamera" class="btn btn-ghost pm-iconbtn" title="Pindai barcode dengan kamera" aria-label="Pindai barcode dengan kamera">${icon('camera')}</button>
         <button type="button" id="pos-qty" class="btn btn-ghost pm-qtychip${ctx.qtyNext > 1 ? ' !border-primary !text-primary' : ''}" title="Qty untuk item BERIKUTNYA, dipakai sekali lalu kembali ke 1">Qty ${ctx.qtyNext}</button>
       </div>
       <div class="pm-headrow">

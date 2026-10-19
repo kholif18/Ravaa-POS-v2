@@ -190,6 +190,13 @@ apps/web/src/pos.css    File gaya KHUSUS POS (baru 2026-10-09 — keputusan
                            diuji `tests/pos-ibar-test.mjs` (7 asersi: light/
                            dark/hover + guard tombol ⬅ header MOBILE yang
                            SENGAJA tidak ikut putih — latarnya putih).
+                           **`.sk-*` pemindai kamera (2026-10-19, butir
+                           ROADMAP 1.6.1)**: overlay `.sk-overlay` (fixed
+                           inset-0 z-50, di bawah toast z-60; elemen dibuat
+                           `ui/scan-kamera.ts` dan nempel di `document.body`
+                           — elemennya sendiri membawa `pos-scope`) +
+                           `.sk-panel`/`.sk-head`/`.sk-view`/`.sk-frame`/
+                           `.sk-hint`.
 apps/web/src/pos-mobile.css  Gaya KHUSUS tampilan MOBILE POS (baru 2026-10-17,
                           pasangan `pages/pos-mobile.ts`; pola sama dengan
                           pos.css). SELURUH aturan `.pm-*`: kerangka aplikasi
@@ -270,7 +277,13 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            cari — input memuat **badge `<kbd>F1</kbd>` di ujung
                            kanan** (`pr-14` + span absolut; putaran 8 2026-10-04,
                            penanda shortcut fokus scan ala KulaPOS
-                           `[F1/Cmd+K]`) —
+                           `[F1/Cmd+K]`), **tombol `#pos-scan-kamera`** (butir
+                           ROADMAP 1.6.1, 2026-10-19 — modul
+                           `ui/scan-kamera.ts`; id SAMA di scan bar desktop &
+                           header mobile, listener satu di `bindCart`; hasil
+                           deteksi memakai alur `bacaQtyKode` → `queryResults`
+                           → `addActive` milik Enter, jadi `Qty*Kode` tetap
+                           jalan) —
                            (**sintaks `Qty*Kode`**: `3*PRD00001` = 3 pcs —
                            `bacaQtyKode()`, qty eksplisit menang atas chip
                            Qty/F4 dan sengaja TIDAK mengosongkan preset itu;
@@ -1030,7 +1043,8 @@ apps/web/src/pages/pos-mobile.ts  UI POS versi MOBILE (baru 2026-10-17) —
                           → pos-mobile.ts (pos-mobile hanya `import type`
                           CartLine/TopupLine dari './pos'; jangan pernah balik
                           — impor melingkar runtime); (c) id/data-act SAMA
-                          dengan desktop (`#pos-q`, `#pos-rows`, `#pos-bayar`,
+                          dengan desktop (`#pos-q`, `#pos-scan-kamera`,
+                          `#pos-rows`, `#pos-bayar`,
                           `data-act inc/dec/qty/price/disc/unit/note/del/
                           topup-del`) — seluruh binder pos.ts (bindCart/
                           bindSidebar/bindPintasan) bekerja apa adanya, JANGAN
@@ -1689,6 +1703,27 @@ apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                            panel Sistem + scan bar
                            POS + strukUntuk() + halaman Label — jangan baca
                            localStorage langsung dari halaman lain.
+apps/web/src/ui/scan-kamera.ts  **Pemindai barcode lewat kamera HP** (butir
+                           ROADMAP 1.6.1, keputusan pemilik 2026-10-19) —
+                           API browser murni `getUserMedia` + `BarcodeDetector`,
+                           TANPA dependensi. Ekspor: `dukunganScanKamera()`
+                           (pesan kenapa belum bisa — konteks tidak aman /
+                           tanpa getUserMedia / `typeof BarcodeDetector !==
+                           'function'`), `scanKameraTerbuka()` (guard
+                           `bindPintasan` POS), `tutupScanKamera()` (dipanggil
+                           `unmountPosPage`), `bukaScanKamera(onHasil)` —
+                           overlay `.sk-*` nempel di `document.body` (bukan
+                           di host POS), deteksi ~140ms dengan format = irisan
+                           `getSupportedFormats()` ∩ EAN/Code128 (label toko),
+                           Esc via listener capture, track kamera SELALU
+                           di-stop saat tutup. `video.play()` SENGAJA tidak
+                           di-await — terbukti hang di headless (overlay macet
+                           di "Meminta izin kamera…"). Konteks aman
+                           (HTTPS/localhost) wajib; akses via http://IP-LAN
+                           dijawab toast penjelas, bukan tombol diam.
+                           Diuji `tests/scan-kamera-test.mjs` (16 asersi:
+                           stub kamera+detektor; desktop `Qty*Kode`, header
+                           mobile, dan konteks tanpa BarcodeDetector).
 apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
                          adanya), hariIni()/geser()/tglPanjang()/tglPendek()/
                          hariPendek() + **awalMinggu()/awalBulan()/akhirBulan()**

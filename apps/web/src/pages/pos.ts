@@ -43,6 +43,7 @@ import { cetakInvoice } from '../invoice';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
 import { toast } from '../ui/toast';
 import { openModal, type ModalHandle } from '../ui/modal';
+import { bukaScanKamera, scanKameraTerbuka, tutupScanKamera } from '../ui/scan-kamera';
 import { icon, type IconName } from '../ui/icons';
 import { AMBAT_EXPIRY, statusExpiry, tglExpiry } from '../ui/expiry';
 import { dialogTutupShift, type ShiftRow } from './shift-tutup';
@@ -1388,6 +1389,11 @@ function cartHtml(): string {
             <span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2">${kbd('F1')}</span>
             <div id="pos-results" class="suggest hidden" role="listbox" aria-label="Hasil pencarian produk"></div>
           </div>
+          <!-- Pemindai kamera (butir ROADMAP 1.6.1, 2026-10-19): perangkat HP
+               kasir yang tidak punya scanner gun. Hasil deteksi masuk lewat
+               jalur yang SAMA dengan Enter di kolom scan (listener di
+               bindCart()); id sama dengan tombol header mobile. -->
+          <button type="button" id="pos-scan-kamera" class="btn btn-ghost" title="Pindai barcode dengan kamera (HP/webcam) — hasil masuk seperti scan biasa">${icon('camera')}<span>Kamera</span></button>
           <button type="button" id="pos-cari" class="btn btn-ghost" title="Cari produk penuh">${icon('search')}<span>Cari</span>${kbd('F3')}</button>
           <!-- Ukuran DISAMAKAN dengan tombol Cari/F3 di sebelahnya (permintaan
                pemilik 2026-10-04) — dulu kelas chip jadi lebih pendek/menempel. -->
@@ -4343,6 +4349,10 @@ function bindPintasan(): void {
       // ditutup (lihat sweetalert2: `container.remove()`), jadi keberadaannya
       // = dialog sedang tampil. Toast repo memakai #toast-root sendiri.
       if (document.querySelector('.swal2-container .swal2-popup:not(.swal2-toast)')) return;
+      // Pemindai kamera terbuka (butir 1.6.1) = seluruh pintasan POS dilepas;
+      // overlay punya Esc sendiri (capture di scan-kamera.ts). Tanpa guard
+      // ini F2/F10/F12 bisa membayar lewat belakang overlay.
+      if (scanKameraTerbuka()) return;
       // Guard modal: modal LAIN (Pending, layar cari, konfirmasi, …) = semua
       // pintasan POS dilepas — modal punya aturan Enter/Esc sendiri.
       // PENGECUALIAN = FORM BAYAR (dikenali dari tombol OK-nya, #pos-pay):
@@ -4517,6 +4527,31 @@ function bindCart(): void {
   // Chip Qty (setel qty item berikutnya, F4) & tombol Cari (layar cari, F3).
   host!.querySelector('#pos-qty')?.addEventListener('click', () => void setQtyNext());
   host!.querySelector('#pos-cari')?.addEventListener('click', openCariProduk);
+  // Pemindai kamera (butir 1.6.1): tombol di scan bar desktop & header mobile
+  // (id sama — hanya satu shell di DOM per paint()). Hasil deteksi memakai
+  // alur PERSIS jalur Enter di kolom scan: bacaQtyKode -> queryResults ->
+  // addActive, jadi `Qty*Kode` dari kamera tetap jalan dan semua aturan baris
+  // (merge qty, harga dinamis, satuan) berlaku tanpa jalur kedua.
+  host!.querySelector('#pos-scan-kamera')?.addEventListener('click', () => {
+    void bukaScanKamera((kode) => {
+      if (q) q.value = kode;
+      const qtyKode = bacaQtyKode(kode);
+      const cari = (qtyKode ? qtyKode.q : kode).trim();
+      results = queryResults(cari);
+      active = 0;
+      if (!results.length) {
+        toast(`Produk "${cari}" tidak ditemukan`, 'warning');
+        focusScan();
+        return;
+      }
+      if (qtyKode && !(qtyKode.qty >= 1)) {
+        toast('Qty minimal 1', 'warning');
+        focusScan();
+        return;
+      }
+      addActive(cari, undefined, qtyKode ? qtyKode.qty : undefined);
+    });
+  }, { signal });
   // Info bar (#pos-cust-cari, #pos-shift-tutup) dipasang di paint().
   const q = host!.querySelector<HTMLInputElement>('#pos-q');
   const box = host!.querySelector<HTMLElement>('#pos-results');
@@ -4708,6 +4743,9 @@ export function unmountPosPage(): void {
   // Form bayar menempel di document.body (bukan di host) — tanpa ditutup di
   // sini ia ikut tertinggal menutupi halaman berikutnya.
   tutupBayar();
+  // Pemindai kamera (butir 1.6.1): overlay nempel di document.body & track
+  // kamera tetap hidup walau DOM-nya dihapus — wajib dimatikan eksplisit.
+  tutupScanKamera();
   results = [];
   host = null;
   shift = null;

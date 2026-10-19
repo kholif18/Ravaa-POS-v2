@@ -301,7 +301,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ⟳ ACC 19 Okt 2026 (4.10) |
 | Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | **✓** |
 | Tanpa langganan (server sendiri) | ✗ | ✓ (Lite) | ✗ | ✗ | ~ (inti gratis) | **✓** |
-| Scan barcode kamera HP | · | · | · | · | ✓ | ⟳ ACC 19 Okt 2026 (4.4) |
+| Scan barcode kamera HP | · | · | · | · | ✓ | **✓** (selesai 19 Okt 2026; 4.4) |
 | Customer display | · | · | ✓ | · | ✓ (gratis) | ✗ sengaja (§5) |
 | Aplikasi HP untuk kasir | · | ✗ | ✓ | ✓ | ✓ | **✓** (PWA mobile view) |
 
@@ -318,7 +318,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.1 | **Split payment** (tunai+QRIS satu nota) | **✅ dikerjakan** — `ROADMAP.md` §1.6.5 | Kasir Pintar (split bill/join), Olsera (F&B) | Butuh tabel `sale_payments` + laporan byMethod |
 | 4.2 | **Metode bayar e-wallet + opsi MDR** | **❌ tidak perlu** — tanpa payment gateway; QRIS/transfer manual cukup | KP/Olsera/Loyverse | Konteks: MDR QRIS ≤Rp100 rb = 0% sejak 1 Okt 2026 (BI) |
 | 4.3 | **Pesanan jasa + status/DP** | **✅ dikerjakan** — §1.6.6 | KP vertical Bengkel | Order → dikerjakan → diambil; DP; domain cetak/servis laptop |
-| 4.4 | **Scan barcode kamera HP** | **✅ dikerjakan** — §1.6.1 | Loyverse | API browser (`BarcodeDetector`) tanpa dependensi; butuh konteks aman (HTTPS/localhost) |
+| 4.4 | **Scan barcode kamera HP** | **✅ selesai 2026-10-19** — §1.6.1 | Loyverse | API browser (`BarcodeDetector`) tanpa dependensi; butuh konteks aman (HTTPS/localhost) |
 | 4.5 | **Kas masuk (di luar penjualan)** | **✅ dikerjakan** — §1.6.2 | KP, Olsera | Pasangan Pengeluaran; laci/expected-cash + laporan |
 | 4.6 | **Cetak/ekspor nota PO** | **✅ dikerjakan** — §1.6.3 | KP (nota pembelian), Loyverse | Pola dokumen A4 + tombol di sub-halaman PO |
 | 4.7 | **Price list per pelanggan** | **❌ tidak perlu** ("sepertinya tidak butuh") | Aronium (plugin) | Tier ecer/grosir + borongan qty dianggap cukup |

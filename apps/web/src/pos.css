@@ -419,4 +419,38 @@
   .struk-muka .struk-merah {
     @apply font-bold text-red-700;
   }
+
+  /* ---------- Pemindai barcode kamera (`#pos-scan-kamera` — butir ROADMAP
+     1.6.1, keputusan pemilik 2026-10-19) ----------
+     Overlay nempel di document.body (di luar .pos-scope halaman) — elemen
+     overlay itu sendiri yang membawa kelas pos-scope. Warna HANYA dari token
+     @theme styles.css (aturan frontend-pos: dilarang warna baru). */
+  .sk-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-gray-950/80 p-4 backdrop-blur-sm;
+  }
+  .sk-panel {
+    @apply w-full max-w-md overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-pop dark:border-gray-700 dark:bg-gray-800;
+  }
+  .sk-head {
+    @apply flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-700;
+  }
+  .sk-judul {
+    @apply flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-gray-100;
+  }
+  .sk-judul svg {
+    @apply size-4 text-primary;
+  }
+  .sk-view {
+    @apply relative aspect-[4/3] w-full overflow-hidden bg-black;
+  }
+  .sk-video {
+    @apply h-full w-full object-cover;
+  }
+  /* Bingkai bidik — garis bantu arah kamera, bukan hiasan. */
+  .sk-frame {
+    @apply pointer-events-none absolute inset-[12%] rounded-xl border-2 border-white/70;
+  }
+  .sk-hint {
+    @apply px-3 py-2 text-sm text-gray-600 dark:text-gray-300;
+  }
 }

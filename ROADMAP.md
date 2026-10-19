@@ -230,7 +230,7 @@ butir yang sudah di-ACC pemilik.
 
 | # | Butir (kandidat §4) | Scope kunci | Status |
 |---|---------------------|-------------|--------|
-| 1.6.1 | **Scan barcode kamera HP** (4.4) | `getUserMedia` + `BarcodeDetector` (API browser, tanpa dependensi); tombol di scan bar POS & header mobile; hasil deteksi masuk ke alur `#pos-q` yang sama (`Qty*Kode` tetap jalan). Konteks aman (HTTPS/localhost) wajib — pesan jelas bila diblokir | dijadwalkan |
+| 1.6.1 | **Scan barcode kamera HP** (4.4) | `getUserMedia` + `BarcodeDetector` (API browser, tanpa dependensi); tombol di scan bar POS & header mobile; hasil deteksi masuk ke alur `#pos-q` yang sama (`Qty*Kode` tetap jalan). Konteks aman (HTTPS/localhost) wajib — pesan jelas bila diblokir | **SELESAI 2026-10-19** |
 | 1.6.2 | **Kas masuk** (4.5) | Pasangan Pengeluaran: kas masuk non-penjualan (injeksi modal/koreksi laci) terikat shift opsional; laci **NAIK** di `kasSeharusnya()`; rekap harian + Z-report ikut | dijadwalkan |
 | 1.6.3 | **Cetak/ekspor nota PO** (4.6) | Dokumen PO A4 (kop `store_*`, supplier, item, total/terbayar/sisa) lewat `window.print()` (pola `cetakInvoice`/`cetakHutangA4`) + tombol di sub-halaman `#/purchases/<id>` | dijadwalkan |
 | 1.6.4 | **Logo di struk thermal** (4.11) | Unggah logo di Sistem (file di `img/`, pola avatar — bukan localStorage); raster ESC/POS `GS v 0` dikonversi di klien & disisipkan di awal struk thermal semua jalur cetak; uji kertas oleh pemilik | dijadwalkan |

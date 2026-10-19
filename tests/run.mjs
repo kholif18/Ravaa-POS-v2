@@ -90,6 +90,7 @@ const SUITE = [
   ['pos-ibar-test.mjs', 7],
   ['suggest-hover-test.mjs', 5],
   ['pos-mobile-test.mjs', 43],
+  ['scan-kamera-test.mjs', 16],
   ['profil-test.mjs', 18],
   ['login-test.mjs', 26],
   ['aging-test.mjs', 21],
