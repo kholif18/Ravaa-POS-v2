@@ -91,6 +91,7 @@ await w('#h-amount', '50000');
 await w('#h-note', 'beli ATK uji');
 await p.click('.modal [data-ok]'); await p.waitForTimeout(1200);
 chk('modal tertutup setelah sukses', (await p.locator('.modal').count()) === 0);
+chk('charge TIDAK menawarkan bukti pembayaran', (await p.locator('.swal2-container').count()) === 0);
 const led0 = await api(`/api/customer-debts/${papa.id}`);
 chk('ledger berisi charge 50000', led0.data.rows.length === 1 && led0.data.rows[0].type === 'charge' && led0.data.rows[0].amount === 50000,
   JSON.stringify(led0.data.rows));
@@ -107,9 +108,27 @@ console.log('=== 7. Catat bayar sah, lalu bayar MELEBIHI sisa -> 400 ===');
 chk('tombol global "Catat bayar" sudah dihapus', await p.locator('#hutang-bayar').count() === 0);
 await p.click(`[data-bayar="${papa.id}"]`); await p.waitForSelector('.modal');
 await w('#h-amount', '20000');
-await p.click('.modal [data-ok]'); await p.waitForTimeout(1200);
+await p.click('.modal [data-ok]');
+await p.waitForSelector('.swal2-container .swal2-popup', { timeout: 10000 });
+const bukti = await p.evaluate(() => ({
+  judul: document.querySelector('.swal2-title')?.textContent?.trim() ?? '',
+  tombol: [...document.querySelectorAll('.swal2-actions button')]
+    .map((b) => b.textContent?.trim() ?? '').filter(Boolean),
+  isi: (document.querySelector('.swal2-html-container')?.textContent ?? '').replace(/\s+/g, ' '),
+}));
+chk('pembayaran menawarkan bukti [Thermal][A4][Batal] + sisa setelah',
+  /Pembayaran hutang tercatat/.test(bukti.judul)
+  && JSON.stringify(bukti.tombol) === JSON.stringify(['Thermal', 'A4', 'Batal'])
+  && bukti.isi.includes('Sisa setelah') && bukti.isi.includes('30.000'),
+  JSON.stringify(bukti));
 const led1 = await api(`/api/customer-debts/${papa.id}`);
 chk('sisa turun jadi 30000', led1.data.sisa === 30000, String(led1.data.sisa));
+const bayar7 = led1.data.rows.find((r) => r.type === 'payment');
+chk('pembayaran tercatat pada shift aktif + nama kasir',
+  Number.isInteger(bayar7?.shift_id) && String(bayar7?.cashier ?? '').trim() !== '',
+  JSON.stringify(bayar7));
+await p.click('.swal2-cancel'); // Batal cetak — mutasi sudah tersimpan
+await p.waitForTimeout(400);
 await p.click(`[data-bayar="${papa.id}"]`); await p.waitForSelector('.modal');
 await w('#h-amount', '999999');
 await p.click('.modal [data-ok]'); await p.waitForTimeout(1200);

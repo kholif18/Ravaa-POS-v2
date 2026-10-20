@@ -125,6 +125,18 @@ npm run dev:api
    **manual di halaman ini** *dan* **otomatis dari POS** sejak putaran 12
    (uang kurang/0 + pelanggan valid -> `charge` `Nota <invoice_no> — sisa
    bayar POS`; lihat butir Hutang di POS).
+  - **Atribusi laci + bukti pembayaran (Paket A, 2026-10-20)**: setiap
+    catat bayar menanyakan shift terbuka kasir tepat sebelum POST dan
+    menyimpan `shift_id` + `cashier` di baris ledger — pembayaran masuk
+    laci shift itu (dialog tutup shift), sedangkan pembayaran di luar shift
+    tetap tercatat tanpa menggerakkan shift mana pun. Baris lama tetap
+    dihitung lewat fallback periode shift (tanpa backfill).
+  - Setelah **pembayaran** sukses (bukan catat hutang) muncul dialog
+    **[Thermal] [A4] [Batal]**: Thermal mengirim bukti lewat print-agent
+    (jeda cetak tetap berlaku), A4 membuka dokumen browser dengan kop+logo
+    toko. Isi memakai ledger segar (`Sisa sebelum`/`Sisa setelah`, kasir &
+    shift); gagal cetak hanya toast, mutasi tidak pernah dibatalkan.
+    Dialog rincian juga menampilkan `Shift #N · kasir` per mutasi.
 * **Pengingat umur hutang (aging, 2026-10-16)**: bantu pemilik melihat
   piutang/hutang yang mengendap — di `#/debts` ada **chip "n lewat 30 hari"**
   + **badge umur per baris** (hutang TERTUA yang masih terbuka, FIFO: charge
@@ -1015,7 +1027,11 @@ npm run dev:api
     pesanan) + uang pesanan masuk + topup (nominal + admin) + piutang
     terbayar + kas masuk − pengeluaran − retur − pembelian (terbayar)`;
     `selisih = modal_akhir − kas seharusnya`.
-    Tarik tunai sengaja tidak mengurangi laci (hanya dicatat). Rumus ada di
+    Sejak Paket A (2026-10-20) `piutang terbayar` dihitung dari pembayaran
+    hutang yang **terikat `shift_id` ini**; baris lama tanpa atribusi tetap
+    dibaca lewat periode shift, sedangkan pembayaran baru di luar shift tidak
+    pernah masuk laci shift lain. Tarik tunai sengaja tidak mengurangi laci
+    (hanya dicatat). Rumus ada di
     `kasSeharusnya()` + `hitungSelisih()` di `apps/web/src/pages/shift-tutup.ts`
     — bila keputusan berubah, ubah di situ saja.
   - Shift `kasir` yang dipakai layar POS tidak tersentuh oleh halaman ini
@@ -1113,16 +1129,20 @@ npm run dev:api
     **Cetak struk otomatis** + pilihan layout struk (**Thermal 58mm** /
     **Epson L3110 (A4)**, lihat bagan struk di atas). TIDAK lewat API: semuanya
     disimpan di browser device ini (localStorage `ravaa.cetak`,
-    `ravaa.struklayout`, `ravaa.printagent`, `ravaa.lacikick`, lihat
-    `apps/web/src/ui/print-pref.ts`) — karena dua PC bisa menempel pada printer
-    yang berbeda, dan HP fallback mungkin tanpa printer sama sekali. Sejak
+    `ravaa.struklayout`, `ravaa.printagent`, `ravaa.lacikick`,
+    `ravaa.lacibytes`, lihat `apps/web/src/ui/print-pref.ts`) — karena dua PC
+    bisa menempel pada printer yang berbeda, dan HP fallback mungkin tanpa
+    printer sama sekali. Sejak
     putaran 11 (2026-10-05) saklar **hanya mengizinkan pengiriman ke printer** —
     modal resume + pilihan cetak tetap muncul setiap penjualan (lihat "Modal
     resume" di atas). Kartu ini juga memuat **alamat print-agent** (`#set-agent`;
     bawaan `http://localhost:9100`, isi IP PC kasir bila agent berjalan di
-    perangkat lain, kosong = kembali ke bawaan) dan **saklar kick laci saat
+    perangkat lain, kosong = kembali ke bawaan), **saklar kick laci saat
     tunai** (`#set-laci`, bawaan nyala; matikan di device yang printernya tidak
-    tersambung laci — penjualan tunai tetap tercatat, laci dibuka manual).
+    tersambung laci — penjualan tunai tetap tercatat, laci dibuka manual), dan
+    **perintah kick laci hex per device** (`#set-laci-bytes`, bawaan Epson
+    `1B 70 00 19 FA`; spasi/koma/`0x` diterima, kosong = kembali ke bawaan —
+    berguna untuk printer/laci yang butuh pin/parameter berbeda).
   - **Backup data** (tidak berubah sejak awal, ditambah **Pulihkan** 2026-10-16):
     tombol **Backup sekarang** + daftar file (Unduh per baris). Sejak
     2026-10-16 tiap baris juga punya tombol merah **Pulihkan** — swal

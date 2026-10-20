@@ -177,7 +177,9 @@ await pasangToken(page);
   try {
     await page.goto(`${WEB}/#/shifts`, { waitUntil: 'load' });
     await page.waitForTimeout(1600);
-    const nBaris = Math.min(semua.body.total, 200);
+    // Pager bawaan = 20 baris/halaman (`PAGE_SIZE` ui/pager.ts) — bukan 200.
+    // Server boleh punya ratusan shift, UI tetap menampilkan satu halaman.
+    const nBaris = Math.min(semua.body.total, 20);
     ok(`tabel menampilkan ${nBaris} baris (Semua)`,
       (await page.locator('#sh-body tbody tr').count()) === nBaris,
       `ada=${await page.locator('#sh-body tbody tr').count()} harap=${nBaris}`);
@@ -187,8 +189,9 @@ await pasangToken(page);
     await page.click('[data-f="open"]');
     await page.waitForTimeout(800);
     const barisOpen = await page.locator('#sh-body tbody tr').allInnerTexts();
+    const nOpen = Math.min(open.body.data.length, 20);
     ok('filter Terbuka: semua baris badge Terbuka',
-      barisOpen.length === open.body.data.length && barisOpen.every((t) => t.includes('Terbuka')),
+      barisOpen.length === nOpen && barisOpen.every((t) => t.includes('Terbuka')),
       `baris=${barisOpen.length} api=${open.body.data.length}`);
 
     console.log('=== D. Buka shift (UI) -> POST /api/shifts/open ===');

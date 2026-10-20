@@ -79,11 +79,34 @@ await pasangToken(page);
   ok('rentang nota terisi (awal = akhir, 1 nota)', !!inv && b1.inv_awal === b1.inv_akhir, inv);
   ok('hutang_baru = 3000 (9000-6000, diskon 1000 ikut total)', b1.hutang_baru === 3000, `hutang=${b1.hutang_baru}`);
   ok('diskon_total = 1000 (transaksi)', b1.diskon_total === 1000, `diskon=${b1.diskon_total}`);
-  // Charge 5000 lalu bayar 2000 -> piutang terbayar 2000 (periode shift uji).
-  await post('/api/customer-debts', { customer_id: custId, type: 'charge', amount: 5000 });
-  await post('/api/customer-debts', { customer_id: custId, type: 'payment', amount: 2000 });
+  // Charge 5000 lalu bayar 2000 -> piutang terbayar 2000 (payment terikat
+  // shift ini, Paket A 2026-10-20).
+  await post('/api/customer-debts', {
+    customer_id: custId, type: 'charge', amount: 5000,
+    cashier: KASIR_UJI, shift_id: shiftId,
+  });
+  await post('/api/customer-debts', {
+    customer_id: custId, type: 'payment', amount: 2000,
+    cashier: KASIR_UJI, shift_id: shiftId,
+  });
   const b2 = (await get(`/api/shifts?cashier=${encodeURIComponent(KASIR_UJI)}`)).body.data[0];
-  ok('piutang_bayar = 2000', b2.piutang_bayar === 2000, `bayar=${b2.piutang_bayar}`);
+  ok('piutang_bayar = 2000 (payment terikat shift)', b2.piutang_bayar === 2000, `bayar=${b2.piutang_bayar}`);
+  // Baris LAMA tanpa atribusi (shift_id NULL + cashier '') tetap dihitung
+  // lewat fallback periode shift — bukti kompatibilitas tanpa backfill.
+  sql(`INSERT INTO customer_debts (customer_id, type, amount, note)
+       VALUES (${custId}, 'payment', 300, 'legacy-fallback-paket-a');`);
+  const legacyId = Number(sql(`SELECT id FROM customer_debts
+    WHERE customer_id = ${custId} AND note = 'legacy-fallback-paket-a';`));
+  const bLegacy = (await get(`/api/shifts?cashier=${encodeURIComponent(KASIR_UJI)}`)).body.data[0];
+  ok('baris lama (cashier kosong) ikut fallback periode = 2300', bLegacy.piutang_bayar === 2300,
+    `bayar=${bLegacy.piutang_bayar}`);
+  sql(`DELETE FROM customer_debts WHERE id = ${legacyId};`);
+  // Payment BARU di luar shift: API menyimpan cashier non-kosong -> TIDAK
+  // boleh jatuh ke laci shift yang sedang terbuka.
+  await post('/api/customer-debts', { customer_id: custId, type: 'payment', amount: 500 });
+  const bLuar = (await get(`/api/shifts?cashier=${encodeURIComponent(KASIR_UJI)}`)).body.data[0];
+  ok('payment baru di luar shift TIDAK masuk laci = tetap 2000', bLuar.piutang_bayar === 2000,
+    `bayar=${bLuar.piutang_bayar}`);
   ok('tunai/omzet ikut (9000 = 10000-1000 diskon)', b2.tunai === 9000 && b2.omzet === 9000, `tunai=${b2.tunai} omzet=${b2.omzet}`);
 
   console.log('=== B. Dialog: piutang + tombol cetak X ===');

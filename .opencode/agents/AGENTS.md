@@ -1679,7 +1679,7 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           (diuji asersi "hanya area konten yang menggulir" +
                           "menu seksi kiri menempel").
                           SEMUA id & logika lama dipertahankan (kontrak
-                          `tests/settings-ui-test.mjs` **45 asersi**). Rincian:
+                          `tests/settings-ui-test.mjs` **49 asersi**). Rincian:
                           * **Cari** client-side tanpa API: semua kata wajib
                             cocok di `data-cari`+textContent; filter memakai
                             `style.display` — BUKAN atribut `hidden` (kartu
@@ -1852,6 +1852,29 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            `logoA4Html`/`CSS_LOGO_A4` dari `invoice.ts`** —
                            revisi pemilik 19 Okt 2026). Hutang DICATAT
                            MANUAL di sini — POS tidak punya mode piutang.
+                           **Atribusi laci + bukti pembayaran (Paket A,
+                           2026-10-20)**: mount & setiap POST memanggil
+                           `loadShift()` (`GET /api/shifts/open?cashier=`)
+                           — mount paralel dengan `load()`, dan tepat
+                           sebelum POST supaya shift yang baru dibuka/ditutup
+                           tidak memakai state basi. Payload selalu mengirim
+                           `cashier` + `shift_id`; gagal lookup = `null`
+                           (di luar shift), TIDAK memblokir pencatatan uang.
+                           Setelah `type='payment'` sukses barulah
+                           `tawarkanBuktiPembayaran()` membuka
+                           `choiceDialog` **[Thermal] [A4] [Batal]** —
+                           `charge` TIDAK pernah menawarkan bukti. Isi
+                           dibangun dari ledger SEGAR
+                           (`GET /api/customer-debts/:id`, sumber
+                           `sisa sebelum = sisa + amount`), thermal lewat
+                           `strukUntukTercetak()` + print-agent (jeda cetak
+                           tetap berlaku, saklar auto-print TIDAK disyaratkan),
+                           A4 lewat popup + `logoA4Html`/`footerDokumenA4`
+                           bersama. Gagal cetak/muat bukti hanya toast —
+                           mutasi yang sudah tersimpan tidak pernah dibatalkan.
+                           Dialog rincian menampilkan sub-baris
+                           `Shift #N · kasir` (atau `di luar shift`) di
+                           kolom waktu tiap mutasi.
                            **Layout A4 (putaran 15, 2026-10-06)**: ringkas
                            bawah **`Total dihutang` / `Total dibayar` /
                            `Sisa hutang` (atau `Sisa (lunas)`)** = **`<table
@@ -1970,7 +1993,8 @@ apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                            tetap identik byte-per-byte. Isinya dibangun
                            `teksJumlahItem()` (ui/identitas-struk.ts) sesuai
                            opsi server `receipt_show_items`; diuji
-                           `tests/escpos-test.ts` (59 asersi).
+                           `tests/escpos-test.ts` (70 asersi; termasuk parser
+                           hex perintah kick laci per device).
                            Berisi: struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
                            dua kolom, kirimPrint() + urlAgent() ->
                            getAgentUrl() (`ravaa.printagent`, default :9100).
@@ -2208,6 +2232,22 @@ apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                            default NYALA)**: `bukaLaciOtomatis()` POS melewati
                            kick laci saat device mematikannya (printer tanpa
                            laci); saklar `#set-laci`.
+                           **Perintah kick laci per device (Paket A,
+                           2026-10-20)**: `KEY_LACI_BYTES = 'ravaa.lacibytes'`
+                           + `LACI_BAWAAN`/`LACI_BAWAAN_HEX` (Epson
+                           `1B 70 00 19 FA`), `MAKS_LACI_BYTES = 64`,
+                           parser murni `parseDrawerKickBytes()` (menerima
+                           spasi/koma/`0x`/rapat; token selain 00..FF,
+                           kosong, >64 = `null`), `laciBytesHex()`,
+                           `getDrawerKickBytes()` (kunci absen/rusak =
+                           bawaan), `getDrawerKickHex()` dan
+                           `setDrawerKickBytes()` (teks kosong = hapus kunci
+                           & kembali bawaan; format salah = `false` tanpa
+                           mengubah nilai lama). `bukaLaci(bytes?)` di
+                           `escpos.ts` memakai byte tersimpan; parameter
+                           opsional hanya untuk test/pemaksa. Nilai rusak
+                           TIDAK boleh membuat penjualan tunai gagal —
+                           semuanya jatuh ke perintah Epson.
                            **`getPrintPause/setPrintPause` (`ravaa.printpause`,
                            pemilik 2026-10-06 "jangan print dulu sebelum saya
                            perintah — menghabiskan kertas")**: default **PAUSED**
@@ -2296,7 +2336,7 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        pre-existing (bukan regresi kode); `recap-test` sama
                        tapi cleanup-nya ter-catch.
                        **Halaman Pengaturan**: `tests/settings-ui-test.mjs`
-                       (45 asersi) — layout dua kolom ala Laporan (toolbar
+                       (49 asersi) — layout dua kolom ala Laporan (toolbar
                        kanan, menu kiri sticky, satu scroller `.page`), panel
                        mode (nav seksi + `aria-current`),
                        cari multi-kata (logo / alamat email / printer / tanpa
@@ -2306,8 +2346,9 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        Perangkat & cetak), pratinjau struk live, tombol Tes
                        cetak (route `**/print` di-mock — jeda aktif = nol
                        request, jeda mati = payload "TES CETAK"), preferensi
-                       device print-agent + kick laci (ditulis & dipulihkan),
-                       Ctrl+K.
+                       device print-agent + kick laci (ditulis & dipulihkan)
+                       + validasi/normalisasi perintah kick laci hex
+                       (`#set-laci-bytes`, kosong = bawaan Epson), Ctrl+K.
                        READ-ONLY terhadap settings server; hanya preferensi
                        localStorage device uji yang dipulihkan.
 infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + Caddyfile
@@ -2619,15 +2660,29 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `#hutang-lewat` halaman Hutang). Keduanya dihitung dari ledger saat
       baca (prinsip yang sama: tidak ada saldo tersimpan).
   - `GET /api/customer-debts/:customerId` ->
-    `{data:{customer:{id,name,phone,note,...}, rows:[{id,customer_id,type,amount,note,created_at,sisa}], charge, bayar, sisa}}`
+    `{data:{customer:{id,name,phone,note,...}, rows:[{id,customer_id,type,amount,note,created_at,sisa,shift_id,cashier}], charge, bayar, sisa}}`
     - Rincian ledger satu pelanggan; `rows` urut **terbaru di atas** (DESC),
       tiap baris membawa `sisa` **berjalan setelah baris itu** (dihitung dari
       terlama dulu lalu dibalik — jadi "sisa setelah mutasi ini" masuk akal).
+    - **`shift_id` + `cashier` (Paket A, 2026-10-20)**: atribusi laci baris
+      mutasi. Baris lama = `shift_id null` + `cashier ''`; baris baru selalu
+      ber-cashier non-kosong (default `'kasir'`), `shift_id` null = di luar
+      shift. Sumber sub-baris `Shift #N · kasir` di dialog rincian.
     - 404 bila pelanggan tak ada; `:customerId` harus integer -> 400.
-  - `POST /api/customer-debts` `{customer_id,type:charge|payment,amount>0,note?}` -> 201 `{data:<baris>}`
+  - `POST /api/customer-debts` `{customer_id,type:charge|payment,amount>0,note?,shift_id?,cashier?}` -> 201 `{data:<baris>}`
     - Validasi (semua 400): `type` harus persis `charge`|`payment`; `amount`
       angka bulat `> 0` (rupiah bulat — desimal ditolak); `note` maks 200
       karakter; pelanggan tidak ada -> **404**.
+    - **`shift_id` opsional (Paket A, 2026-10-20)** — pola
+      `cekShiftOpsional` expenses: absen/null/`''` = di luar shift (tetap
+      tercatat, tidak menggerakkan laci mana pun); dikirim harus integer &
+      shift ada, selain itu 400 `"shift_id harus integer"` /
+      `"shift tidak dikenal"`. `cashier` opsional, di-trim, default
+      `'kasir'` — **semua baris BARU menyimpan cashier non-kosong**; itulah
+      pembeda dari baris lama sehingga fallback periode waktu di GET
+      /api/shifts tidak pernah memungut pembayaran baru di luar shift.
+      Keduanya ikut dicatat di audit (`entity: debt`, detail
+      `shift_id`/`cashier`).
     - **`payment` > sisa -> 400** `"pembayaran melebihi sisa hutang (sisa RpX)"`
       (uang lebih dari utang memang tidak ada; keputusan jadi saldo kredit/
       awal = wewenang pemilik, ditunda). Check + insert dijalankan dalam
@@ -3072,8 +3127,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `sales.diskon` reports/daily), `hutang_baru` (SUM CASE `sisa_hutang`
     persis GET /api/sales — porsi tunai tak masuk laci; **TIDAK termasuk
     order hutang**), `piutang_bayar`
-    (SUM `customer_debts` payment dalam periode opened..closed — ledger tak
-    punya shift_id; masuk laci). Semua 2026-10-11, rekap Z-report.
+    (SUM `customer_debts` payment **`shift_id = s.id`** — atribusi eksak
+    sejak Paket A 2026-10-20; baris LAMA `shift_id IS NULL AND cashier = ''`
+    tetap fallback periode opened..closed, SENGAJA tanpa backfill; pembayaran
+    baru di luar shift ber-cashier non-kosong jadi tidak pernah memungut
+    laci shift lain. Masuk laci). Semua 2026-10-11, rekap Z-report.
     **Sejak 1.6.6 (2026-10-19)** dua agregat pesanan: `order_masuk_total`
     (SUM `order_payments` shift ini — dp + pelunasan − refund) dan
     `order_omzet_total` (SUM `sales.total` nota ber-link pesanan lewat
@@ -3646,7 +3704,27 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-19 (pesanan jasa + DP/serah — butir ROADMAP
+  **Migrasi terakhir 2026-10-20 (atribusi laci pembayaran hutang — Paket A):**
+  dua kolom BARU **`customer_debts.shift_id`** (`INTEGER REFERENCES
+  shifts(id)`, NULL = di luar shift) + **`customer_debts.cashier`**
+  (`TEXT NOT NULL DEFAULT ''`) dan indeks **`idx_customer_debts_shift`**.
+  Kolom `cashier` sengaja default `''` HANYA untuk baris lama; semua baris
+  baru lewat API menyimpan cashier non-kosong. **Bukan tabel baru**, jadi
+  `migrate()` (`CREATE TABLE IF NOT EXISTS`) TIDAK menambahkannya ke DB
+  lama — wajib ALTER manual. Backup dev sudah dibuat dengan
+  `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM INTO
+  'apps/api/data/data.db.bak.paket-a'` (integrity `ok`), lalu ALTER
+  dijalankan di API mati; data lama utuh. Install lain jalankan SQL yang
+  sama:
+  ```sql
+  ALTER TABLE customer_debts ADD COLUMN shift_id INTEGER REFERENCES shifts(id);
+  ALTER TABLE customer_debts ADD COLUMN cashier TEXT NOT NULL DEFAULT '';
+  CREATE INDEX IF NOT EXISTS idx_customer_debts_shift ON customer_debts(shift_id);
+  ```
+  Jangan backfill baris lama: fallback periode waktu di GET /api/shifts
+  justru bergantung pada marker `shift_id IS NULL AND cashier = ''`; bila
+  diisi massal, pembayaran lama bisa hilang dari rekap atau pindah shift.
+  **Migrasi sebelumnya 2026-10-19 (pesanan jasa + DP/serah — butir ROADMAP
   1.6.6):** tiga tabel BARU **`orders` / `order_items` / `order_payments`**
   (SQL penuh di `db/schema.sql` §"Pesanan jasa"; FK `orders.customer_id ->
   customers.id`, anak-anak `order_id -> orders.id ON DELETE CASCADE`,

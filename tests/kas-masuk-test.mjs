@@ -101,6 +101,9 @@ chk('hapus via konfirmasi -> baris hilang + total turun', !(await p.textContent(
 
 console.log('=== E. Dialog tutup shift memuat blok Kas masuk ===');
 await p.goto('http://localhost:5656/#/shifts', { waitUntil: 'networkidle' });
+// Pager bawaan 20 baris — shift runner bisa lebih tua dari 20 shift terakhir.
+// Saring "Terbuka" dulu supaya baris shift yang masih open pasti tampil.
+await p.click('[data-f="open"]');
 await p.waitForSelector(`#sh-body tbody tr[data-shift="${kasirId}"]`, { timeout: 15000 });
 await p.click(`#sh-body tbody tr[data-shift="${kasirId}"] [data-tutup]`);
 await p.waitForTimeout(400);

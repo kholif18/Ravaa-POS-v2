@@ -149,6 +149,8 @@ await pasangToken(page);
   page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.text()}`); });
   try {
     await page.goto(`${WEB}/#/settings`, { waitUntil: 'load' });
+    // Panel mode: hanya seksi aktif yang tampil — pindah ke Data dulu.
+    await page.click('[data-set-nav="data"]');
     await page.waitForSelector('#set-backup', { timeout: 8000 });
     const judul = await page.locator('.card h3', { hasText: 'Backup data' }).count();
     ok('kartu "Backup data" tampil', judul === 1, `jumlah=${judul}`);
@@ -175,6 +177,9 @@ await pasangToken(page);
     // Kartu "Cetak struk" — preferensi per-device (localStorage lewat
     // ui/print-pref.ts), bukan POST /api/settings. Diuji di sini karena satu
     // halaman dengan kartu Backup; API tidak disentuh, jadi aman di tengah test.
+    // Panel mode: kartu Cetak struk ada di seksi Perangkat & cetak.
+    await page.click('[data-set-nav="perangkat"]');
+    await page.waitForSelector('#set-cetak', { timeout: 8000 });
     const judulCetak = await page.locator('.card h3', { hasText: 'Cetak struk' }).count();
     ok('kartu "Cetak struk" tampil', judulCetak === 1, `jumlah=${judulCetak}`);
     ok('saklar #set-cetak & select #set-layout ada',

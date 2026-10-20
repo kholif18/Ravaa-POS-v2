@@ -90,6 +90,8 @@ try {
 
   console.log('=== B. UI Sistem: pratinjau + ganti + hapus ===');
   await page.goto(`${WEB}/#/settings`, { waitUntil: 'networkidle' });
+  // Panel mode: kartu Identitas toko ada di seksi Toko, bukan seksi awal.
+  await page.click('[data-set-nav="toko"]');
   await page.waitForSelector('#set-logo-wadah', { timeout: 15000 });
   await page.waitForTimeout(600);
   ok('pratinjau logo tampil di kartu toko',

@@ -22,8 +22,82 @@ export const KEY_LAYOUT = 'ravaa.struklayout';
 export const KEY_PAUSE = 'ravaa.printpause';
 export const KEY_AGENT = 'ravaa.printagent';
 export const KEY_LACI = 'ravaa.lacikick';
+export const KEY_LACI_BYTES = 'ravaa.lacibytes';
 
 export const AGENT_BAWAAN = 'http://localhost:9100';
+
+/** Perintah kick laci bawaan Epson: `ESC p 0 25 250`
+ *  (0x1B 0x70 0x00 0x19 0xFA). Dulu di-hardcode di `bukaLaci()`; kini dapat
+ *  diganti per device dari kartu "Cetak struk" — sebagian printer/laci butuh
+ *  pin/parameter berbeda. */
+export const LACI_BAWAAN: readonly number[] = [0x1b, 0x70, 0x00, 0x19, 0xfa];
+export const LACI_BAWAAN_HEX = LACI_BAWAAN.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+/** Batas wajar: perintah kick bukan tempat menempel payload besar. */
+export const MAKS_LACI_BYTES = 64;
+
+/** Parse teks hex perintah laci. Menerima `1B 70 00 19 FA`, `0x1B,0x70,...`,
+ *  atau deretan rapat `1B700019FA`. Mengembalikan `null` untuk teks kosong,
+ *  token bukan byte 00..FF, atau lebih dari `MAKS_LACI_BYTES` — pemanggil
+ *  menampilkan pesan validasi, bukan diam-diam memakai perintah salah. */
+export function parseDrawerKickBytes(teks: string): number[] | null {
+  const bersih = teks.trim();
+  if (!bersih) return null;
+  let token: string[];
+  if (/^[0-9a-f]{4,}$/i.test(bersih) && bersih.length % 2 === 0) {
+    token = bersih.match(/.{2}/g) ?? [];
+  } else {
+    token = bersih
+      .split(/[\s,]+/)
+      .map((p) => p.trim().replace(/^0x/i, ''))
+      .filter(Boolean);
+  }
+  if (!token.length || token.length > MAKS_LACI_BYTES) return null;
+  if (token.some((p) => !/^[0-9a-f]{1,2}$/i.test(p))) return null;
+  return token.map((p) => parseInt(p, 16));
+}
+
+/** Teks hex ternormalisasi (huruf besar, satu spasi) untuk isi input. */
+export function laciBytesHex(bytes: readonly number[]): string {
+  return bytes.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+/** Perintah kick laci device ini. Kunci absen/rusak = perintah Epson bawaan;
+ *  kegagalan baca localStorage tidak boleh membuat penjualan tunai gagal. */
+export function getDrawerKickBytes(): number[] {
+  try {
+    return parseDrawerKickBytes(localStorage.getItem(KEY_LACI_BYTES) ?? '') ?? [...LACI_BAWAAN];
+  } catch {
+    return [...LACI_BAWAAN];
+  }
+}
+
+/** Nilai untuk ditampilkan di input pengaturan. */
+export function getDrawerKickHex(): string {
+  return laciBytesHex(getDrawerKickBytes());
+}
+
+/** Simpan perintah laci. Teks kosong = hapus preferensi (kembali ke Epson
+ *  bawaan) dan tetap dianggap sukses. Format salah = `false`, nilai lama
+ *  TIDAK diubah. */
+export function setDrawerKickBytes(teks: string): boolean {
+  const bersih = teks.trim();
+  if (!bersih) {
+    try {
+      localStorage.removeItem(KEY_LACI_BYTES);
+    } catch {
+      /* private mode: panggilan berikutnya tetap jatuh ke bawaan */
+    }
+    return true;
+  }
+  const bytes = parseDrawerKickBytes(bersih);
+  if (!bytes) return false;
+  try {
+    localStorage.setItem(KEY_LACI_BYTES, laciBytesHex(bytes));
+  } catch {
+    /* private mode: preferensi tidak persisten, tapi sesi ini tetap jalan */
+  }
+  return true;
+}
 
 /** JEDA SEMUA CETAK — keputusan pemilik 2026-10-06: *"jangan print dulu sebelum
  *  saya perintah … menghabiskan kertas terus"*. Selama `true`,

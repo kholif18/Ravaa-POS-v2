@@ -14,14 +14,18 @@
 
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
-import { rp } from '../escpos';
+import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { icon } from '../ui/icons';
-import { confirmDialog } from '../ui/confirm';
+import { choiceDialog, confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
 import { pasangAksiBaru } from '../ui/aksi-baru';
-// Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026).
+import { getCashier, getToko } from '../ui/user';
+import {
+  footerStruk, syncDariServerSettings,
+} from '../ui/identitas-struk';
+// Slot logo & footer bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026).
 import { CSS_LOGO_A4, footerDokumenA4, logoA4Html } from '../invoice';
 
 type Ringkasan = {
@@ -45,6 +49,9 @@ type Baris = {
   note: string;
   created_at: string;
   sisa: number;
+  /** Atribusi laci (Paket A, 2026-10-20). Baris lama = null + ''. */
+  shift_id?: number | null;
+  cashier?: string;
 };
 
 type Rincian = {
@@ -72,6 +79,10 @@ const state = {
   offset: 0,
   loading: true,
   error: '',
+  /** Shift terbuka kasir ini saat halaman dimuat / pembayaran dikirim.
+   *  null = di luar shift — pembayaran tetap tercatat, tapi tidak menggerakkan
+   *  laci shift mana pun (baris baru selalu ber-cashier non-kosong). */
+  shiftId: null as number | null,
 };
 
 let host: HTMLElement | null = null;
@@ -85,6 +96,19 @@ function esc(s: unknown): string {
 function errMsg(e: unknown): string {
   if (e instanceof HttpError) return e.message;
   return e instanceof Error ? e.message : 'terjadi kesalahan';
+}
+
+/** Shift terbuka kasir ini (pola expenses.ts). Gagal/jaringan putus = NULL
+ *  (di luar shift), bukan error halaman: pembayaran tetap harus bisa dicatat. */
+async function loadShift(): Promise<void> {
+  try {
+    const r = await apiGet<{ data: { id: number } | null }>(
+      `/api/shifts/open?cashier=${encodeURIComponent(getCashier())}`,
+    );
+    state.shiftId = r.data?.id ?? null;
+  } catch {
+    state.shiftId = null;
+  }
 }
 
 // Catatan (2026-10-04): tombol "Catat bayar" GLOBAL pernah ada di blok aksi
@@ -415,6 +439,220 @@ async function cetakHutangA4(customerId: number): Promise<void> {
   w.document.close();
 }
 
+/* ---------- BUKTI PEMBAYARAN (Paket A, 2026-10-20) ----------
+   Setelah pembayaran hutang sukses, kasir ditawari [Thermal] [A4] [Batal]
+   (pola dialog resume POS). Isi dibangun dari LEDGER SEGAR: baris pembayaran
+   membawa `sisa` berjalan setelah mutasi, jadi `sisa sebelum = sisa + amount`.
+   Thermal lewat print-agent (jeda cetak tetap menghormati getPrintPause) dan
+   A4 lewat browser print + helper logo/footer bersama invoice.ts. Cetak gagal
+   TIDAK pernah membatalkan pembayaran yang sudah tersimpan. */
+
+function sisaSebelumBaris(b: Baris): number {
+  return Math.max(0, b.sisa + b.amount);
+}
+
+function waktuCetakLokal(): string {
+  return new Date().toLocaleString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function strukBuktiPembayaran(r: Rincian, b: Baris): Struk {
+  const sebelum = sisaSebelumBaris(b);
+  const sesudah = Math.max(0, b.sisa);
+  const kasir = (b.cashier ?? '').trim() || '—';
+  const shift = b.shift_id ? `Shift #${b.shift_id}` : 'Shift: di luar shift';
+  const kaki: string[] = [];
+  if (b.note.trim()) kaki.push(`Catatan: ${b.note.trim()}`);
+  const footer = footerStruk();
+  if (footer) kaki.push(footer);
+  return {
+    judul: getToko() || 'RAVA POS',
+    subjudul: 'BUKTI PEMBAYARAN HUTANG',
+    meta: [
+      `Pelanggan: ${r.customer.name}`,
+      ...(r.customer.phone ? [`Telp: ${r.customer.phone}`] : []),
+      `Tanggal: ${tglLokal(b.created_at)}`,
+      `Kasir: ${kasir}`,
+      shift,
+    ],
+    items: [],
+    baris: [
+      { kiri: 'Jumlah dibayar', kanan: rp(b.amount) },
+      { kiri: 'Sisa sebelum', kanan: rp(sebelum) },
+      { kiri: 'Sisa setelah', kanan: sesudah > 0 ? rp(sesudah) : 'LUNAS', tebal: true },
+    ],
+    kaki,
+  };
+}
+
+/** Dokumen A4 bukti pembayaran. Gaya mengikuti dokumen A4 lain (kop toko +
+ *  logo kanan-atas + footer server); ringkas berupa tabel garis-bawah saja,
+ *  bukan kotak. */
+function htmlBuktiPembayaranA4(r: Rincian, b: Baris, toko: Toko, tglCetak: string): string {
+  const sebelum = sisaSebelumBaris(b);
+  const sesudah = Math.max(0, b.sisa);
+  const lunas = sesudah <= 0;
+  const kasir = (b.cashier ?? '').trim() || '—';
+  const shift = b.shift_id ? `#${b.shift_id}` : 'di luar shift';
+  const footer = footerDokumenA4(toko);
+  return `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Bukti pembayaran — ${escA4(r.customer.name)}</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
+  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .alamat { margin-top: 4px; max-width: 60%; }
+  .baris-kop { display: flex; margin-top: 2px; }
+  .baris-kop .lbl { width: 72px; }
+  ${CSS_LOGO_A4}
+  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
+  .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
+  .meta .kanan .baris { display: flex; }
+  .meta .kanan .lbl { width: 82px; }
+  .hero { border-top: 1px solid #444; border-bottom: 1px solid #444; padding: 12px 4px;
+          display: flex; justify-content: space-between; align-items: baseline; }
+  .hero .lbl { font-weight: 700; font-size: 12px; }
+  .hero .nominal { font-size: 22px; font-weight: 700; }
+  table.ringkas { width: 58%; margin-left: auto; margin-top: 14px; border-collapse: collapse; }
+  table.ringkas td { padding: 5px 9px; border-bottom: 1px solid #999; }
+  table.ringkas td:first-child { font-weight: 700; }
+  table.ringkas td.r { text-align: right; white-space: nowrap; }
+  table.ringkas tr:nth-child(even) td { background: #f3f3f3; }
+  table.ringkas tr:last-child td { border-bottom: 1px solid #444; font-weight: 700; }
+  .status { display: inline-block; margin-top: 14px; padding: 2px 8px; border: 1px solid #444;
+            font-weight: 700; font-size: 10px; }
+  .catatan { margin-top: 14px; padding-top: 8px; border-top: 1px dashed #bbb; }
+  .catatan .lbl { font-weight: 700; }
+  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+</style>
+</head>
+<body>
+  <div class="kop">
+    <div>
+      <div class="judul">BUKTI PEMBAYARAN HUTANG</div>
+      <div class="nama-toko">${escA4(toko.store_name || 'RAVA POS')}</div>
+      ${toko.store_address ? `<div class="alamat">${escA4(toko.store_address)}</div>` : ''}
+      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${escA4(toko.store_phone)}</span></div>` : ''}
+      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${escA4(toko.store_email)}</span></div>` : ''}
+    </div>
+    ${logoA4Html()}
+  </div>
+  <hr>
+  <div class="meta">
+    <div>
+      <div class="ttl">Pelanggan</div>
+      <div>${escA4(r.customer.name)}</div>
+      ${r.customer.phone ? `<div>${escA4(r.customer.phone)}</div>` : ''}
+    </div>
+    <div class="kanan">
+      <div class="baris"><span class="lbl">No. bukti:</span><span>#${b.id}</span></div>
+      <div class="baris"><span class="lbl">Tanggal:</span><span>${escA4(tglLokal(b.created_at))}</span></div>
+      <div class="baris"><span class="lbl">Kasir:</span><span>${escA4(kasir)}</span></div>
+      <div class="baris"><span class="lbl">Shift:</span><span>${escA4(shift)}</span></div>
+      <div class="baris"><span class="lbl">Dicetak:</span><span>${escA4(tglCetak)}</span></div>
+    </div>
+  </div>
+  <div class="hero">
+    <span class="lbl">Jumlah dibayar</span>
+    <span class="nominal">${rp(b.amount)}</span>
+  </div>
+  <table class="ringkas">
+    <tbody>
+      <tr><td>Sisa sebelum</td><td class="r">${rp(sebelum)}</td></tr>
+      <tr><td>${lunas ? 'Sisa setelah (lunas)' : 'Sisa setelah'}</td><td class="r">${rp(sesudah)}</td></tr>
+    </tbody>
+  </table>
+  <div class="status">${lunas ? 'LUNAS' : 'BELUM LUNAS'}</div>
+  ${b.note.trim() ? `<div class="catatan"><span class="lbl">Catatan:</span> ${escA4(b.note.trim())}</div>` : ''}
+  ${footer ? `<div class="foot">${escA4(footer)} &middot; ${escA4(tglCetak)}</div>` : ''}
+  <script>
+    // Cetak otomatis saat dokumen siap (pola invoice.ts); tab tidak ditutup
+    // supaya kasir bisa mencetak ulang.
+    window.addEventListener('load', function () { window.print(); });
+  </script>
+</body>
+</html>`;
+}
+
+/** Tawarkan cetak bukti SETELAH pembayaran tersimpan. Tidak pernah melempar:
+ *  kegagalan muat/cetak hanya toast, karena uang sudah tercatat. */
+async function tawarkanBuktiPembayaran(awal: Baris, customerId: number, nama: string): Promise<void> {
+  let r: Rincian;
+  let toko: Toko;
+  try {
+    const [rr, ss] = await Promise.all([
+      apiGet<{ data: Rincian }>(`/api/customer-debts/${customerId}`),
+      apiGet<{ data: Toko }>('/api/settings'),
+    ]);
+    r = rr.data;
+    toko = ss.data;
+    // Nama toko + footer thermal mengikuti server (satu sumber dengan struk POS).
+    syncDariServerSettings(ss.data);
+  } catch (e) {
+    toast(`Pembayaran tersimpan, tetapi bukti tidak bisa dimuat: ${errMsg(e)}`, 'warning');
+    return;
+  }
+  // Ledger segar adalah sumber utama; `awal` (respons POST) tidak membawa
+  // `sisa` komputasi, jadi jaring terakhir memakai saldo ledger saat ini —
+  // pembayaran yang baru dibuat adalah mutasi terakhir pada alur normal.
+  const b = r.rows.find((x) => x.id === awal.id)
+    ?? { ...awal, sisa: Math.max(0, r.sisa) };
+  const sesudah = Math.max(0, b.sisa);
+  const pilihan = await choiceDialog({
+    title: 'Pembayaran hutang tercatat',
+    html: `
+      <div style="text-align:left;font-size:13px;line-height:1.55">
+        <div style="font-weight:600">${esc(nama || r.customer.name)}</div>
+        <div style="display:flex;justify-content:space-between;gap:12px;margin-top:6px">
+          <span>Dibayar</span><b>${rp(b.amount)}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;gap:12px">
+          <span>Sisa setelah</span><b>${sesudah > 0 ? rp(sesudah) : 'LUNAS'}</b>
+        </div>
+        <div style="margin-top:8px;color:#6b7280">
+          ${esc(tglLokal(b.created_at))} &middot; ${b.shift_id ? `Shift #${b.shift_id}` : 'di luar shift'}
+        </div>
+        <div style="margin-top:10px">Cetak bukti pembayaran?</div>
+      </div>`,
+    icon: 'success',
+    choices: [
+      { key: 'thermal', label: 'Thermal' },
+      { key: 'a4', label: 'A4' },
+    ],
+    cancelLabel: 'Batal',
+  });
+  if (!pilihan) return;
+  if (pilihan === 'thermal') {
+    try {
+      await kirimPrint(await strukUntukTercetak(strukBuktiPembayaran(r, b), 'thermal'));
+      toast('Bukti pembayaran dikirim ke printer thermal', 'success');
+    } catch (e) {
+      toast(`Gagal cetak bukti: ${errMsg(e)}`, 'error');
+    }
+    return;
+  }
+  if (pilihan === 'a4') {
+    try {
+      const w = window.open('', '_blank');
+      if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak A4');
+      w.document.open();
+      w.document.write(htmlBuktiPembayaranA4(r, b, toko, waktuCetakLokal()));
+      w.document.close();
+    } catch (e) {
+      toast(`Gagal cetak A4: ${errMsg(e)}`, 'error');
+    }
+  }
+}
+
 /* ---------- MODAL RINCIAN (ledger per pelanggan) ---------- */
 
 async function muatRincian(el: HTMLElement, customerId: number): Promise<void> {
@@ -454,7 +692,9 @@ async function muatRincian(el: HTMLElement, customerId: number): Promise<void> {
               const charge = b.type === 'charge';
               return `
             <tr>
-              <td class="td whitespace-nowrap">${esc(waktu(b.created_at))}</td>
+              <td class="td whitespace-nowrap">${esc(waktu(b.created_at))}
+                <div class="cell-sub">${b.shift_id ? `Shift #${b.shift_id}` : 'di luar shift'} · ${esc((b.cashier ?? '').trim() || '—')}</div>
+              </td>
               <td class="td">${
                 charge
                   ? `<span class="chip !border-red-500/40 !text-red-700 dark:!text-red-400">${icon('plus')}<span>Hutang</span></span>`
@@ -637,16 +877,33 @@ async function catatForm(jenis: 'charge' | 'payment', prefill?: PrefillBayar): P
         }
         const customerId = prefill ? prefill.id : Number((el.querySelector('#h-cust') as HTMLSelectElement).value);
         try {
-          await apiPost('/api/customer-debts', {
+          // Atribusi laci (Paket A, 2026-10-20): shift bisa dibuka/ditutup
+          // sejak halaman dimuat, jadi tanya server tepat sebelum menulis.
+          // Gagal bertanya = NULL (di luar shift), bukan alasan menolak
+          // mencatat uang yang sudah diterima kasir.
+          await loadShift();
+          const resp = await apiPost<{ data: Baris }>('/api/customer-debts', {
             customer_id: customerId,
             type: jenis,
             amount: v,
             note: (el.querySelector('#h-note') as HTMLInputElement).value.trim(),
+            cashier: getCashier(),
+            shift_id: state.shiftId,
           });
           close();
           const nama = prefill ? prefill.name : (pelanggan.find((c) => c.id === customerId)?.name ?? '');
           toast(hutang ? `Hutang ${rp(v)} untuk "${nama}" dicatat` : `Pembayaran ${rp(v)} dari "${nama}" dicatat`, 'success');
           await load();
+          // Bukti hanya untuk PEMBAYARAN (charge = tidak ada uang diterima).
+          // Gagal tawaran/cetak tidak pernah membatalkan mutasi yang sudah
+          // tersimpan — semua kegagalan berhenti sebagai toast.
+          if (!hutang) {
+            try {
+              await tawarkanBuktiPembayaran(resp.data, customerId, nama);
+            } catch (e) {
+              toast(`Pembayaran tersimpan, tetapi bukti gagal disiapkan: ${errMsg(e)}`, 'warning');
+            }
+          }
         } catch (e) {
           // 400 "pembayaran melebihi sisa…" tetap membuka modal — biar kasir
           // membetulkan nominalnya, bukan mulai dari nol.
@@ -726,5 +983,7 @@ export async function mountDebtsPage(el: HTMLElement): Promise<void> {
       void load();
     }),
   );
-  await load();
+  // Daftar + shift terbuka paralel: shift dipakai saat pembayaran dikirim,
+  // bukan untuk render, jadi tidak boleh menahan tampilan tabel.
+  await Promise.all([loadShift(), load()]);
 }

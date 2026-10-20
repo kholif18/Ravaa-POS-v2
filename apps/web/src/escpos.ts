@@ -27,7 +27,7 @@
 // Riwayat, rekap shift). Layout `a4` sengaja tanpa raster.
 
 import {
-  getAgentUrl, getPrintPause, getStrukLayout, KEY_AGENT, type LayoutStruk,
+  getAgentUrl, getDrawerKickBytes, getPrintPause, getStrukLayout, KEY_AGENT, type LayoutStruk,
 } from './ui/print-pref';
 import { logoStrukBytes } from './logo-struk';
 
@@ -325,13 +325,16 @@ export const AGENT_KEY = KEY_AGENT;
  *  2026-10-06: "Buka Laci Kasir OTOMATIS tiap penjualan tunai (kick ESC/POS
  *  lewat kirimPrint(), nol perubahan API/agent)".
  *
- *  Perintah `ESC p m t1 t2` (0x1B 0x70): pin 2 laci dinyalakan 25×10ms lalu
- *  dimatikan 250×10ms — paket standar Epson ESC/POS yang dikenali hampir semua
- *  printer thermal 58mm (Kassen/Xprinter setara). Sengaja KECIL (5 byte) dan
- *  TERPISAH dari struk: kick tidak boleh ikut mati saat saklar "Cetak struk
- *  otomatis" off (laci = bagian transaksi tunai, bukan cetak). */
-export function bukaLaci(): number[] {
-  return [0x1b, 0x70, 0x00, 0x19, 0xfa];
+ *  Bawaan `ESC p m t1 t2` (0x1B 0x70 0x00 0x19 0xFA): pin 2 laci dinyalakan
+ *  25×10ms lalu dimatikan 250×10ms — paket standar Epson ESC/POS yang dikenali
+ *  hampir semua printer thermal 58mm (Kassen/Xprinter setara). Sejak Paket A
+ *  (2026-10-20) byte dapat diganti PER DEVICE lewat kartu "Cetak struk";
+ *  `opsional` hanya untuk test/pemanggil yang ingin memaksa byte tertentu.
+ *  Sengaja KECIL dan TERPISAH dari struk: kick tidak boleh ikut mati saat
+ *  saklar "Cetak struk otomatis" off (laci = bagian transaksi tunai, bukan
+ *  cetak). */
+export function bukaLaci(bytes?: number[]): number[] {
+  return bytes ? [...bytes] : getDrawerKickBytes();
 }
 export function urlAgent(): string {
   return getAgentUrl();

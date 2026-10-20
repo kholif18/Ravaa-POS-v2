@@ -925,7 +925,14 @@ app.get('/api/customer-debts/:customerId', (c) => {
 // Validasi pembayaran > sisa DITOLAK (400) — uang lebih dari utang memang tidak
 // ada; kalau suatu saat mau jadi saldo awal/kredit, keputusannya ke pemilik dulu.
 const simpanMutasiHutang = transaksi(
-  (customerId: number, type: 'charge' | 'payment', amount: number, note: string) => {
+  (
+    customerId: number,
+    type: 'charge' | 'payment',
+    amount: number,
+    note: string,
+    shiftId: number | null,
+    cashier: string,
+  ) => {
     if (type === 'payment') {
       const s = db
         .prepare(
@@ -936,8 +943,11 @@ const simpanMutasiHutang = transaksi(
       if (amount > s.sisa) throw new Error(`pembayaran melebihi sisa hutang (sisa ${s.sisa})`);
     }
     return db
-      .prepare('INSERT INTO customer_debts (customer_id, type, amount, note) VALUES (?, ?, ?, ?) RETURNING *')
-      .get(customerId, type, amount, note);
+      .prepare(
+        `INSERT INTO customer_debts (customer_id, type, amount, note, shift_id, cashier)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(customerId, type, amount, note, shiftId, cashier);
   },
 );
 
@@ -953,10 +963,21 @@ app.post('/api/customer-debts', async (c) => {
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'amount harus angka > 0' }, 400);
     if (!Number.isInteger(amount)) return c.json({ error: 'amount harus bilangan bulat rupiah' }, 400);
     if (note.length > 200) return c.json({ error: `catatan terlalu panjang (maks 200 karakter)` }, 400);
+    // Atribusi laci (Paket A): shift OPSIONAL seperti expenses — absen/NULL =
+    // tercatat di luar shift (tidak menggerakkan laci mana pun). Baris BARU
+    // selalu punya cashier non-kosong, jadi fallback periode waktu di
+    // GET /api/shifts hanya menyentuh baris lama (`cashier = ''`).
+    const shiftErr = cekShiftOpsional(body?.shift_id);
+    if (shiftErr) return c.json({ error: shiftErr }, 400);
+    const rawShift = body?.shift_id;
+    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
+    const cashier = String(body?.cashier ?? '').trim() || 'kasir';
     const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId) as { id: number } | undefined;
     if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
-    const row = simpanMutasiHutang(customerId, type, amount, note) as Record<string, unknown>;
-    catatAudit(c, 'create', 'debt', (row as { id: number }).id, { customer_id: customerId, type, amount, note });
+    const row = simpanMutasiHutang(customerId, type, amount, note, shiftId, cashier) as Record<string, unknown>;
+    catatAudit(c, 'create', 'debt', (row as { id: number }).id, {
+      customer_id: customerId, type, amount, note, shift_id: shiftId, cashier,
+    });
     return c.json({ data: row }, 201);
   } catch (e) {
     // Pesan "melebihi sisa" sengaja menyebut angka dalam rupiah polos dari
@@ -1804,14 +1825,21 @@ app.get('/api/shifts', (c) => {
                   THEN sl.total - sl.cash_in ELSE 0 END),0)
                FROM sales sl WHERE sl.shift_id = s.id) AS hutang_baru,
             -- Piutang TERBAYAR ke laci shift ini (butir 7-8 Z-report "credit
-            -- payments collected"): ledger tak punya shift_id, jadi diikat
-            -- lewat periode (created_at di antara opened_at..closed_at —
-            -- format datetime('now') sama, perbandingan string valid).
+            -- payments collected"): baris BARU membawa shift_id + cashier
+            -- (Paket A 2026-10-20) sehingga atribusinya eksak. Baris LAMA
+            -- (shift_id NULL + cashier '') tetap dibaca lewat periode waktu
+            -- opened_at..closed_at (format datetime('now') sama, perbandingan
+            -- string valid) — sengaja tanpa backfill. Pembayaran baru di luar
+            -- shift punya cashier non-kosong, jadi TIDAK jatuh ke shift lain.
             -- Masuk rumus kasSeharusnya (uang fisik masuk laci).
             (SELECT COALESCE(SUM(d.amount),0) FROM customer_debts d
               WHERE d.type = 'payment'
-                AND datetime(d.created_at) >= datetime(s.opened_at)
-                AND (s.closed_at IS NULL OR datetime(d.created_at) <= datetime(s.closed_at))) AS piutang_bayar,
+                AND (
+                  d.shift_id = s.id
+                  OR (d.shift_id IS NULL AND d.cashier = ''
+                      AND datetime(d.created_at) >= datetime(s.opened_at)
+                      AND (s.closed_at IS NULL OR datetime(d.created_at) <= datetime(s.closed_at)))
+                )) AS piutang_bayar,
             -- Pesanan jasa (butir ROADMAP 1.6.6, 2026-10-19): uang pesanan
             -- yang MASUK ke laci shift ini = Σ dp + pelunasan − refund
             -- (refund = uang KELUAR, dikurangkan lewat nilai negatif).

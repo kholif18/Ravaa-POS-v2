@@ -368,6 +368,7 @@ try {
   const prefAwal = await page.evaluate(() => ({
     agent: localStorage.getItem('ravaa.printagent') || 'http://localhost:9100',
     laci: localStorage.getItem('ravaa.lacikick') !== '0',
+    laciBytes: localStorage.getItem('ravaa.lacibytes'),
   }));
   const agentAwal = await page.locator('#set-agent').inputValue();
   const laciAwal = await page.locator('#set-laci').isChecked();
@@ -395,6 +396,44 @@ try {
   await page.locator('label[for="set-laci"]').click();
   await page.waitForTimeout(350);
 
+  // Perintah kick laci hex (Paket A, 2026-10-20): bawaan Epson dapat diganti
+  // per device. Semua nilai device uji dipulihkan di akhir suite.
+  ok('input perintah kick laci + tombol simpan dirender dengan bawaan Epson',
+    (await page.locator('#set-laci-bytes').count()) === 1
+    && (await page.locator('#set-laci-bytes-simpan').count()) === 1
+    && (await page.locator('#set-laci-bytes').inputValue()) === '1B 70 00 19 FA',
+    `nilai=${await page.locator('#set-laci-bytes').inputValue()}`);
+
+  await page.locator('#set-laci-bytes').fill('ZZ 70');
+  await page.locator('#set-laci-bytes-simpan').click();
+  await page.waitForTimeout(300);
+  const toastsHex = await page.evaluate(() =>
+    [...document.querySelectorAll('#toast-root .toast')].map((t) => t.textContent ?? '').join(' | '));
+  ok('hex tidak valid ditolak: preferensi TIDAK berubah',
+    (await page.evaluate(() => localStorage.getItem('ravaa.lacibytes'))) === prefAwal.laciBytes
+    && /tidak valid/i.test(toastsHex),
+    toastsHex.slice(0, 100));
+
+  await page.locator('#set-laci-bytes').fill('0x1b, 0x70, 0x01, 0x19, 0xfa');
+  await page.locator('#set-laci-bytes-simpan').click();
+  await page.waitForTimeout(300);
+  ok('hex valid disimpan ternormalisasi (huruf besar, spasi)',
+    (await page.evaluate(() => localStorage.getItem('ravaa.lacibytes'))) === '1B 70 01 19 FA'
+    && (await page.locator('#set-laci-bytes').inputValue()) === '1B 70 01 19 FA',
+    String(await page.evaluate(() => localStorage.getItem('ravaa.lacibytes'))));
+
+  await page.locator('#set-laci-bytes').fill('');
+  await page.locator('#set-laci-bytes-simpan').click();
+  await page.waitForTimeout(300);
+  ok('kosong = hapus preferensi & kembali ke perintah Epson bawaan',
+    (await page.evaluate(() => localStorage.getItem('ravaa.lacibytes'))) === null
+    && (await page.locator('#set-laci-bytes').inputValue()) === '1B 70 00 19 FA');
+  // Pulihkan nilai device semula (suite tidak boleh meninggalkan perubahan).
+  await page.evaluate((v) => {
+    if (v === null) localStorage.removeItem('ravaa.lacibytes');
+    else localStorage.setItem('ravaa.lacibytes', v);
+  }, prefAwal.laciBytes);
+
   console.log('=== H. Pintasan Ctrl+K (riset putaran 2) ===');
   ok('hint kbd "Ctrl K" tampil di toolbar pencarian',
     (await page.locator('kbd.kbd').count()) >= 1
@@ -412,7 +451,8 @@ try {
   const ids = ['set-minus', 'set-kadaluarsa', 'set-toko-nama', 'set-toko-telepon',
     'set-toko-alamat', 'set-toko-email', 'set-toko-simpan', 'set-logo-wadah',
     'set-logo-file', 'set-logo-hapus', 'set-dev-toko', 'set-dev-theme',
-    'set-dev-simpan', 'set-pause', 'set-cetak', 'set-layout', 'set-backup'];
+    'set-dev-simpan', 'set-pause', 'set-cetak', 'set-layout', 'set-backup',
+    'set-laci-bytes', 'set-laci-bytes-simpan'];
   ok('semua id kontrak lama tetap ada',
     await page.evaluate((list) => list.every((id) => !!document.getElementById(id)), ids));
   ok('tanpa error console', errs.length === 0, errs.slice(0, 3).join(' | '));

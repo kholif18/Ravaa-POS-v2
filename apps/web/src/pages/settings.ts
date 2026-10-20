@@ -16,9 +16,9 @@ import { confirmDialog } from '../ui/confirm';
 import { icon, type IconName } from '../ui/icons';
 import { getToko } from '../ui/user';
 import {
-  getAgentUrl, getAutoPrint, getDrawerKick, getPrintPause, getStrukLayout,
-  setAgentUrl, setAutoPrint, setDrawerKick, setPrintPause, setStrukLayout,
-  type LayoutStruk,
+  LACI_BAWAAN_HEX, getAgentUrl, getAutoPrint, getDrawerKick, getDrawerKickHex,
+  getPrintPause, getStrukLayout, setAgentUrl, setAutoPrint, setDrawerKick,
+  setDrawerKickBytes, setPrintPause, setStrukLayout, type LayoutStruk,
 } from '../ui/print-pref';
 import {
   syncDariServerSettings, nomorStrukPendek, type OpsiCetak,
@@ -765,6 +765,7 @@ function kartuCetak(): string {
   const layout = getStrukLayout();
   const jeda = getPrintPause();
   const laci = getDrawerKick();
+  const laciBytes = getDrawerKickHex();
   const agent = getAgentUrl();
   const isiSaklar = nyala
     ? `Setiap penjualan selesai, dialog menawarkan <b>[Thermal] [A4] [Tidak]</b> —
@@ -783,7 +784,7 @@ function kartuCetak(): string {
         ditahan; nol kertas terbuang. Invoice A4 lewat browser tetap bisa dicetak.`
     : `Nonaktif — struk, label harga, dan kick laci mengirim ke printer seperti biasa.`;
   return `
-    <div class="card flex flex-col" data-set-card data-cari="cetak printer struk thermal 58mm a4 epson l3110 jeda otomatis layout kertas browser perangkat agent alamat laci drawer kick">
+    <div class="card flex flex-col" data-set-card data-cari="cetak printer struk thermal 58mm a4 epson l3110 jeda otomatis layout kertas browser perangkat agent alamat laci drawer kick hex byte perintah esc pos">
       <div class="flex items-start gap-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 [&>svg]:size-4">${icon('print')}</span>
         <div class="min-w-0 flex-1">
@@ -848,6 +849,24 @@ function kartuCetak(): string {
             </p>
           </div>
           <div class="shrink-0">${switchHtml('set-laci', laci, laci ? 'Aktif' : 'Nonaktif')}</div>
+        </div>
+        <div class="flex flex-wrap items-start justify-between gap-2 py-2.5">
+          <div class="min-w-0 flex-1 basis-52">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Perintah kick laci (hex)</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Byte ESC/POS yang dikirim ke print-agent. Bawaan Epson
+              <code>${LACI_BAWAAN_HEX}</code>; pisahkan dengan spasi atau koma
+              (boleh <code>0x</code>). Kosongkan lalu simpan untuk kembali ke
+              bawaan. Berlaku hanya di device ini.
+            </p>
+          </div>
+          <div class="flex w-full shrink-0 flex-wrap items-center gap-1.5 sm:w-auto">
+            <input id="set-laci-bytes" class="input input-sm min-w-0 flex-1 font-mono sm:w-60 sm:flex-none"
+                   type="text" inputmode="text" autocomplete="off" spellcheck="false"
+                   maxlength="320" value="${esc(laciBytes)}" placeholder="${LACI_BAWAAN_HEX}"
+                   aria-label="Perintah kick laci (hex)" />
+            <button type="button" id="set-laci-bytes-simpan" class="btn btn-outline btn-sm shrink-0">Simpan</button>
+          </div>
         </div>
       </div>
       <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-700/60">
@@ -1352,6 +1371,34 @@ function bind(): void {
     if ((e as KeyboardEvent).key === 'Enter') {
       e.preventDefault();
       simpanAgent();
+    }
+  });
+
+  // Perintah kick laci (Paket A, 2026-10-20): hex divalidasi sebelum disimpan.
+  // Kosong = kembali ke byte Epson bawaan. Tanpa paint — fokus & ketikan
+  // preferensi lain (alamat agent) tetap utuh.
+  const simpanLaciBytes = (): void => {
+    const el = host?.querySelector<HTMLInputElement>('#set-laci-bytes');
+    if (!el) return;
+    const mentah = el.value.trim();
+    if (!setDrawerKickBytes(mentah)) {
+      toast('Perintah kick laci tidak valid — isi byte hex 00–FF, mis. 1B 70 00 19 FA', 'error');
+      el.focus();
+      return;
+    }
+    el.value = getDrawerKickHex();
+    toast(
+      mentah
+        ? `Perintah kick laci device ini: ${el.value}`
+        : `Perintah kick laci kembali ke bawaan Epson: ${LACI_BAWAAN_HEX}`,
+      'success',
+    );
+  };
+  host?.querySelector('#set-laci-bytes-simpan')?.addEventListener('click', simpanLaciBytes);
+  host?.querySelector<HTMLInputElement>('#set-laci-bytes')?.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') {
+      e.preventDefault();
+      simpanLaciBytes();
     }
   });
 

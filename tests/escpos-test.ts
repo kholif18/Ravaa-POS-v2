@@ -8,6 +8,10 @@ import {
   COLS, COLS_A4, ascii, rp, potong, tengah, kanan,
   keBase64, struk, strukA4, strukUntuk, bukaLaci,
 } from '../apps/web/src/escpos.ts';
+import {
+  LACI_BAWAAN, LACI_BAWAAN_HEX, getDrawerKickBytes, getDrawerKickHex, laciBytesHex,
+  parseDrawerKickBytes, setDrawerKickBytes,
+} from '../apps/web/src/ui/print-pref.ts';
 import { packBit, perintahRaster } from '../apps/web/src/logo-struk.ts';
 
 let lolos = 0, gagal = 0;
@@ -228,6 +232,31 @@ console.log('=== E. logo struk thermal (raster GS v 0, butir 1.6.4) ===');
   eq('logo diabaikan di layout A4', strukUntuk(strukJual, 'a4', raster), strukA4(strukJual));
   const s2 = teksDari(b.slice(i + raster.length));
   ok('teks struk tetap utuh setelah raster', s2.includes('TOKO MAJU JAYA') && s2.includes('TOTAL') && s2.includes('Rp15.000'));
+}
+
+console.log('=== F. perintah kick laci per device (Paket A, 2026-10-20) ===');
+{
+  // Parser menerima tiga gaya tulis yang wajar dipakai pemilik di panel
+  // Sistem; hasilnya SELALU array byte, bukan string yang ditempel mentah.
+  eq('parse hex spasi', parseDrawerKickBytes('1B 70 00 19 FA'), [...LACI_BAWAAN]);
+  eq('parse hex 0x + koma', parseDrawerKickBytes('0x1b, 0x70, 0x01, 0x19, 0xfa'),
+    [0x1b, 0x70, 0x01, 0x19, 0xfa]);
+  eq('parse hex rapat', parseDrawerKickBytes('1b700019fa'), [...LACI_BAWAAN]);
+  ok('parse menolak kosong / token rusak',
+    ['', 'ZZ', '0x', '1B 70 0G'].every((x) => parseDrawerKickBytes(x) === null));
+  ok('parse batas 64 byte: 64 sah, 65 ditolak',
+    parseDrawerKickBytes(new Array(64).fill('AA').join(' '))?.length === 64
+    && parseDrawerKickBytes(new Array(65).fill('AA').join(' ')) === null);
+  eq('laciBytesHex ternormalisasi huruf besar', laciBytesHex([0x1b, 0x0a, 0xff]), '1B 0A FF');
+  // Node tidak punya localStorage: getDrawerKickBytes jatuh ke bawaan dan
+  // setDrawerKickBytes tidak boleh melempar (partial save bukan alasan gagal).
+  eq('getDrawerKickBytes default Epson', getDrawerKickBytes(), [...LACI_BAWAAN]);
+  eq('getDrawerKickHex default Epson', getDrawerKickHex(), LACI_BAWAAN_HEX);
+  ok('setDrawerKickBytes: format salah = false, kosong = true',
+    setDrawerKickBytes('ZZ') === false && setDrawerKickBytes('') === true);
+  eq('bukaLaci(bytes) memakai perintah kustom', bukaLaci([0x1b, 0x70, 0x01, 0x19, 0xfa]),
+    [0x1b, 0x70, 0x01, 0x19, 0xfa]);
+  eq('bukaLaci() kembali default Epson', bukaLaci(), [...LACI_BAWAAN]);
 }
 
 console.log(`\n=== ${gagal === 0 ? 'SEMUA LOLOS' : 'ADA GAGAL'} ===  (lolos: ${lolos}, gagal: ${gagal})`);

@@ -526,10 +526,20 @@ CREATE TABLE IF NOT EXISTS customer_debts (
   type        TEXT NOT NULL CHECK (type IN ('charge', 'payment')),
   amount      INTEGER NOT NULL CHECK (amount > 0),
   note        TEXT NOT NULL DEFAULT '',
+  -- Atribusi laci (Paket A, 2026-10-20): pembayaran piutang dicatat pada
+  -- shift yang sedang terbuka saat kasir menerima uang. Baris lama tetap
+  -- `shift_id NULL` + `cashier ''` dan dibaca lewat fallback periode waktu
+  -- di GET /api/shifts (lihat AGENTS §3); baris BARU selalu menyimpan
+  -- cashier non-kosong sehingga pembayaran di luar shift tidak pernah
+  -- jatuh ke laporan shift lain.
+  shift_id    INTEGER REFERENCES shifts(id),
+  cashier     TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_customer_debts_customer
   ON customer_debts(customer_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_customer_debts_shift
+  ON customer_debts(shift_id);
 
 -- Akun & peran (login, 2026-10-11): 2 role, `owner` (semua) dan `kasir`
 -- (POS + Riwayat + Stok + Pelanggan + Hutang + Retur + shift sendiri).
