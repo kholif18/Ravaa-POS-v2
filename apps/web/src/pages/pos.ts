@@ -37,7 +37,9 @@ import {
 import { diskonBorongan, type TingkatBorongan } from '../borongan';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
-import { getAutoPrint, getPrintPause, setAutoPrint, setStrukLayout } from '../ui/print-pref';
+import {
+  getAutoPrint, getDrawerKick, getPrintPause, setAutoPrint, setStrukLayout,
+} from '../ui/print-pref';
 import {
   getOpsiCetak, syncDariServerSettings, metaPelangganStruk, teksJumlahItem,
   footerStruk, nomorStrukPendek,
@@ -360,7 +362,8 @@ async function cetak(bytes: number[]): Promise<void> {
 async function bukaLaciOtomatis(): Promise<void> {
   // Jeda cetak (print-pref.ts): kick laci = kirim fisik juga — senyap saja,
   // JANGAN spam console.warn tiap penjualan selama pemilik belum perintah nyala.
-  if (getPrintPause()) return;
+  // Device tanpa laci bisa mematikan kick lewat kartu Cetak struk (per-device).
+  if (getPrintPause() || !getDrawerKick()) return;
   try {
     await kirimPrint(bukaLaci());
   } catch (e) {

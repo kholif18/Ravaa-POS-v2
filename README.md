@@ -743,6 +743,10 @@ npm run dev:api
       L3110). Kini khusus struk topup/tarik (penjualan A4 = invoice browser).
       Label harga TIDAK lewat jalur ini sejak 2026-10-17 — cetak lembar A4/Folio
       lewat browser print (lihat butir Label harga di atas).
+    Alamat print-agent device ini dapat diubah di **Sistem → Cetak struk**
+    (bawaan `http://localhost:9100`) — perlu bila agent berjalan di PC lain;
+    kick laci otomatis tiap penjualan tunai juga bisa dimatikan per device
+    di kartu yang sama.
   - Struk disusun `struk()`/`strukA4()` di `apps/web/src/escpos.ts` — INIT ->
     **logo toko** (raster `GS v 0`, hanya layout thermal, bila diunggah di
     Sistem — butir 1.6.4, lihat "Pengaturan toko") -> nama toko
@@ -1054,11 +1058,14 @@ npm run dev:api
   judul di atas sudah **dihapus** (revisi 2026-10-20 — judul sudah ada di header
   shell); pencarian client-side (`#set-cari`, Ctrl+K) dan chip ringkas
   (stok minus/kadaluarsa/cetak/backup) tetap tersedia sebagai toolbar ramping.
-  Hanya area konten yang menggulir (bukan dua scrollbar: input saklar `.sr-only`
-  yang absolut dulu lolos dari area gulir). Empat seksi berisi kartu aturan
-  server, kartu identitas/kop toko, kartu perangkat & cetak (preferensi device
-  + opsi dokumen server), dan kartu backup, masing-masing dengan penjelasan
-  sendiri (bukan lagi satu kartu):
+  **Layout mengikuti halaman Laporan** (revisi pemilik 2026-10-20 "cek halaman
+  laporan, buat layout seperti itu"): dua kolom — menu seksi kiri yang
+  **menempel saat halaman digulir**, toolbar pencarian + isi seksi di kanan;
+  seluruh halaman tetap satu scroller (bukan scrollbar dalam), dan scrollbar
+  ganda `<html>` sudah diperbaiki (input saklar `.sr-only` absolut dulu lolos
+  dari area gulir). Empat seksi berisi kartu aturan server, kartu identitas/kop
+  toko, kartu perangkat & cetak (preferensi device + opsi dokumen server), dan
+  kartu backup, masing-masing dengan penjelasan sendiri (bukan lagi satu kartu):
   - **Stok boleh minus** (`settings.allow_negative_stock`): daring = penjualan
     boleh membuat stok menembus nol (stok jadi angka minus dan langsung terlihat
     di filter **Stok minus** halaman Stok); mati = `POST /api/sales` menolak
@@ -1104,13 +1111,18 @@ npm run dev:api
     struk manual sengaja tidak diadopsi.
   - **Cetak struk** (baru — satu-satunya kartu **per device**): saklar
     **Cetak struk otomatis** + pilihan layout struk (**Thermal 58mm** /
-    **Epson L3110 (A4)**, lihat bagan struk di atas). TIDAK lewat API: keduanya
-    disimpan di browser device ini (localStorage `ravaa.cetak` dan
-    `ravaa.struklayout`, lihat `apps/web/src/ui/print-pref.ts`) — karena dua PC
-    bisa menempel pada printer yang berbeda, dan HP fallback mungkin tanpa
-    printer sama sekali. Sejak putaran 11 (2026-10-05) saklar **hanya
-    mengizinkan pengiriman ke printer** — modal resume + pilihan cetak
-    tetap muncul setiap penjualan (lihat "Modal resume" di atas).
+    **Epson L3110 (A4)**, lihat bagan struk di atas). TIDAK lewat API: semuanya
+    disimpan di browser device ini (localStorage `ravaa.cetak`,
+    `ravaa.struklayout`, `ravaa.printagent`, `ravaa.lacikick`, lihat
+    `apps/web/src/ui/print-pref.ts`) — karena dua PC bisa menempel pada printer
+    yang berbeda, dan HP fallback mungkin tanpa printer sama sekali. Sejak
+    putaran 11 (2026-10-05) saklar **hanya mengizinkan pengiriman ke printer** —
+    modal resume + pilihan cetak tetap muncul setiap penjualan (lihat "Modal
+    resume" di atas). Kartu ini juga memuat **alamat print-agent** (`#set-agent`;
+    bawaan `http://localhost:9100`, isi IP PC kasir bila agent berjalan di
+    perangkat lain, kosong = kembali ke bawaan) dan **saklar kick laci saat
+    tunai** (`#set-laci`, bawaan nyala; matikan di device yang printernya tidak
+    tersambung laci — penjualan tunai tetap tercatat, laci dibuka manual).
   - **Backup data** (tidak berubah sejak awal, ditambah **Pulihkan** 2026-10-16):
     tombol **Backup sekarang** + daftar file (Unduh per baris). Sejak
     2026-10-16 tiap baris juga punya tombol merah **Pulihkan** — swal

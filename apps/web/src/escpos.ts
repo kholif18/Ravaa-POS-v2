@@ -26,7 +26,9 @@
 // `strukUntukTercetak()` (dipakai SEMUA jalur cetak thermal: POS, cetak ulang
 // Riwayat, rekap shift). Layout `a4` sengaja tanpa raster.
 
-import { getPrintPause, getStrukLayout, type LayoutStruk } from './ui/print-pref';
+import {
+  getAgentUrl, getPrintPause, getStrukLayout, KEY_AGENT, type LayoutStruk,
+} from './ui/print-pref';
 import { logoStrukBytes } from './logo-struk';
 
 export const COLS = 32;
@@ -314,8 +316,10 @@ export function keBase64(bytes: number[]): string {
 }
 
 /** URL print-agent per device (bisa beda tiap PC kasir). Disimpan di localStorage
- *  karena host web bisa jalan di server sementara agent di PC kasir. */
-export const AGENT_KEY = 'ravaa.printagent';
+ *  karena host web bisa jalan di server sementara agent di PC kasir. Fungsi
+ *  baca/tulis + validasi berada di ui/print-pref.ts (satu sumber dengan kartu
+ *  Sistem); konstanta ini dipertahankan untuk pemanggil lama. */
+export const AGENT_KEY = KEY_AGENT;
 
 /** Buka laci kasir (cash drawer kick) — Tahap 4a, keputusan pemilik
  *  2026-10-06: "Buka Laci Kasir OTOMATIS tiap penjualan tunai (kick ESC/POS
@@ -330,11 +334,7 @@ export function bukaLaci(): number[] {
   return [0x1b, 0x70, 0x00, 0x19, 0xfa];
 }
 export function urlAgent(): string {
-  try {
-    return localStorage.getItem(AGENT_KEY) || 'http://localhost:9100';
-  } catch {
-    return 'http://localhost:9100';
-  }
+  return getAgentUrl();
 }
 
 /** Kirim bytes ke print-agent. Melempar Error dengan pesan yang bisa ditampilkan

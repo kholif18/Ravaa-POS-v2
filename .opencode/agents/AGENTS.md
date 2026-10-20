@@ -931,8 +931,11 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            kick `bukaLaci()` (`ESC p` via `kirimPrint()`,
                            `bukaLaciOtomatis()`) — **TANPA syarat saklar
                            autoPrint**, segera saat server konfirmasi, hanya
-                           tunai (QRIS/transfer tidak), gagal = `console.warn`
-                           (tak membatalkan & tak menambah toast).
+                           tunai (QRIS/transfer tidak), dan **dilewati bila
+                           device mematikan kick laci** (`getDrawerKick()` —
+                           saklar `#set-laci` di Sistem), gagal =
+                           `console.warn` (tak membatalkan & tak menambah
+                           toast).
                            **SEGAR STOK SETELAH JUAL (revisi pemilik
                            2026-10-08 — "stok di bawah nama produk tidak
                            terefresh sehingga seolah-olah stok tidak
@@ -1647,14 +1650,24 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           **kartu judul DIHAPUS (revisi pemilik 2026-10-20:
                           "card tersebut tidak ada fungsinya bisa di hapus,
                           agar 1 scroll seperti pada halaman laporan")** —
-                          judul sudah dibawa header shell; pencarian
-                          client-side `#set-cari` + `<kbd>Ctrl K</kbd> + chip
-                          ringkas `#set-ringkas` kini TOOLBAR ramping STATIS
-                          (bukan `.card`), tetap di luar `#set-body` supaya
-                          repaint tidak membuang fokus. `#set-body` di-render
-                          ulang `paint()` = nav seksi kiri (sticky 220px
-                          `[data-set-nav]`, chip 2 kolom di mobile) + empat
-                          seksi `#set-sec-{transaksi,toko,perangkat,data}`
+                          judul sudah dibawa header shell.
+                          **Tata letak 2026-10-20 putaran 2 (revisi pemilik
+                          "cek halaman laporan, buat layout seperti itu")**:
+                          SATU grid `lg:grid-cols-[220px_1fr]` TANPA
+                          `items-start` — `<aside id="set-nav-host">` mengisi
+                          tinggi baris sehingga kartu menu `lg:sticky
+                          lg:top-0` benar-benar menempel saat digulir (pola
+                          reports.ts; jangan bungkus nav dengan wrapper
+                          ber-height-auto atau sticky-nya mati). Kolom KIRI =
+                          menu seksi (chip 2 kolom di mobile); kolom KANAN =
+                          toolbar pencarian `#set-cari` + `<kbd>Ctrl K</kbd>
+                          + chip ringkas `#set-ringkas` DI ATAS `#set-body`.
+                          Seluruh halaman tetap SATU scroller (`.page`) —
+                          bukan scroller dalam; toolbar & nav STATIS di luar
+                          `#set-body` supaya repaint data tidak membuang
+                          fokus. `paint()` mengisi `#set-nav-host`
+                          (`navPengaturan`) lalu `#set-body` (`renderBody`);
+                          empat seksi `#set-sec-{transaksi,toko,perangkat,data}`
                           berisi kartu `[data-set-card]` ber-`data-cari`.
                           **Scrollbar ganda diperbaiki**: `.page` di
                           `styles.css` kini `position: relative` — input
@@ -1663,9 +1676,10 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           sehingga melampaui area gulir `.page` dan membuat
                           `<html>` ikut bergulir (dua scrollbar). Dengan
                           `.page` positioned, hanya `.page` yang menggulir
-                          (diuji asersi "hanya area konten yang menggulir").
+                          (diuji asersi "hanya area konten yang menggulir" +
+                          "menu seksi kiri menempel").
                           SEMUA id & logika lama dipertahankan (kontrak
-                          `tests/settings-ui-test.mjs` **39 asersi**). Rincian:
+                          `tests/settings-ui-test.mjs` **45 asersi**). Rincian:
                           * **Cari** client-side tanpa API: semua kata wajib
                             cocok di `data-cari`+textContent; filter memakai
                             `style.display` — BUKAN atribut `hidden` (kartu
@@ -1790,9 +1804,15 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                            printer, modal resume+tetap tampil tiap penjualan —
                            + select layout thermal/A4 + **saklar "Jeda semua
                            cetak" `#set-pause`** (2026-10-06: default PAUSED,
-                           lihat getPrintPause), tanpa swal & tanpa API —
-                           printer tiap PC kasir beda, jangan dipindah ke
-                           server), PLUS kartu
+                           lihat getPrintPause) + **alamat print-agent
+                           `#set-agent`/`#set-agent-simpan`** (validasi
+                           http(s), tanpa query/hash; kosong = bawaan
+                           `http://localhost:9100`) + **saklar kick laci
+                           `#set-laci`** (default nyala; matikan di device
+                           yang printernya tidak punya laci — `getDrawerKick()`
+                           dipakai `bukaLaciOtomatis()` POS), tanpa swal &
+                           tanpa API — printer tiap PC kasir beda, jangan
+                           dipindah ke server), PLUS kartu
                            **Backup data** (tombol "Backup sekarang" ->
                            POST /api/backup + daftar file + Unduh per baris dari
                            GET /api/backup; tanpa swal — non-destruktif; daftar
@@ -1914,8 +1934,10 @@ apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                           `ESC p 00 19 FA` (5 byte) dibuka OTOMATIS tiap
                           penjualan TUNAI sukses lewat `bukaLaciOtomatis()`
                           di pos.ts, TANPA syarat saklar autoPrint (laci ≠
-                          cetak); QRIS/transfer tidak kick; gagal = warn
-                          console saja. Jangan gabungkan kick ke stream struk.
+                          cetak); QRIS/transfer tidak kick; device tanpa laci
+                          mematikan lewat `getDrawerKick()` (`#set-laci`);
+                          gagal = warn console saja. Jangan gabungkan kick ke
+                          stream struk.
                           Layout struk: `thermal` 32 kolom (COLS) ekor FEED+CUT —
                           bawaan toko; `a4` 64 kolom (COLS_A4) ekor FEED+Form
                           Feed 0x0C TANPA CUT — untuk Epson L3110 (inkjet tanpa
@@ -1950,8 +1972,9 @@ apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                            opsi server `receipt_show_items`; diuji
                            `tests/escpos-test.ts` (59 asersi).
                            Berisi: struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
-                           dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
-                          default :9100). Dipanggil dari pay()/submitTopup() POS. PENTING: `teks()` tidak
+                           dua kolom, kirimPrint() + urlAgent() ->
+                           getAgentUrl() (`ravaa.printagent`, default :9100).
+                           Dipanggil dari pay()/submitTopup() POS. PENTING: `teks()` tidak
                          menambah baris baru — setiap baris struk HARUS diakhiri
                          LF, kalau tidak seluruh struk menempel jadi satu baris.
                          **Token PLN DOUBLE-HEIGHT (2026-10-08)**: `StrukBaris`
@@ -2175,6 +2198,16 @@ apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                            `thermal`). `a4` = pref struk topup/tarik + pilihan
                            terakhir dialog cetak (A4 penjualan sendiri lewat
                            `invoice.ts`, bukan struk ESC/POS).
+                           **`getAgentUrl/setAgentUrl` (`ravaa.printagent`,
+                           default `http://localhost:9100`)**: alamat
+                           print-agent device ini; slash akhir dinormalisasi,
+                           kosong = kunci dihapus (bawaan). Dipakai
+                           `urlAgent()` (escpos.ts) + kartu Cetak struk
+                           (`#set-agent`/`#set-agent-simpan`).
+                           **`getDrawerKick/setDrawerKick` (`ravaa.lacikick`,
+                           default NYALA)**: `bukaLaciOtomatis()` POS melewati
+                           kick laci saat device mematikannya (printer tanpa
+                           laci); saklar `#set-laci`.
                            **`getPrintPause/setPrintPause` (`ravaa.printpause`,
                            pemilik 2026-10-06 "jangan print dulu sebelum saya
                            perintah — menghabiskan kertas")**: default **PAUSED**
@@ -2263,14 +2296,18 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        pre-existing (bukan regresi kode); `recap-test` sama
                        tapi cleanup-nya ter-catch.
                        **Halaman Pengaturan**: `tests/settings-ui-test.mjs`
-                       (37 asersi) — panel mode (nav seksi + `aria-current`),
+                       (45 asersi) — layout dua kolom ala Laporan (toolbar
+                       kanan, menu kiri sticky, satu scroller `.page`), panel
+                       mode (nav seksi + `aria-current`),
                        cari multi-kata (logo / alamat email / printer / tanpa
                        hasil / Esc), 4 chip ringkas + lompat seksi, status &
                        draft form toko + draft **Dokumen & struk** (tanpa
                        menulis server; kartu dipastikan berada di seksi
                        Perangkat & cetak), pratinjau struk live, tombol Tes
                        cetak (route `**/print` di-mock — jeda aktif = nol
-                       request, jeda mati = payload "TES CETAK"), Ctrl+K.
+                       request, jeda mati = payload "TES CETAK"), preferensi
+                       device print-agent + kick laci (ditulis & dipulihkan),
+                       Ctrl+K.
                        READ-ONLY terhadap settings server; hanya preferensi
                        localStorage device uji yang dipulihkan.
 infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + Caddyfile

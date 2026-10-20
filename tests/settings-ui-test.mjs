@@ -146,16 +146,43 @@ try {
   // dari area gulir .page. Sekarang hanya `.page` yang boleh menggulir.
   const gulir = await page.evaluate(() => {
     const pageEl = document.getElementById('page');
+    const nav = document.querySelector('#set-nav-host .card')?.getBoundingClientRect();
+    const bar = document.querySelector('#set-cari')?.getBoundingClientRect();
     return {
       doc: document.documentElement.scrollHeight,
       vh: window.innerHeight,
       pageH: pageEl?.scrollHeight ?? 0,
       pageClient: pageEl?.clientHeight ?? 0,
+      navX: Math.round(nav?.x ?? 0), navW: Math.round(nav?.width ?? 0),
+      navTop: Math.round(nav?.y ?? 0),
+      barX: Math.round(bar?.x ?? 0), barTop: Math.round(bar?.y ?? 0),
     };
   });
+  // Revisi pemilik 2026-10-20: layout mengikuti halaman Laporan — menu seksi
+  // di kolom kiri (sticky), pencarian + ringkasan status di atas isi kolom
+  // kanan. Bukan toolbar selebar halaman di atas kedua kolom.
+  ok('dua kolom ala halaman Laporan: menu kiri, toolbar + isi di kanan',
+    gulir.barX >= gulir.navX + gulir.navW && gulir.barTop <= gulir.navTop + 2,
+    JSON.stringify(gulir));
   ok('hanya area konten yang menggulir (tanpa scrollbar ganda)',
     gulir.doc <= gulir.vh && gulir.pageH > gulir.pageClient,
     JSON.stringify(gulir));
+
+  // Kartu menu kiri memakai `lg:sticky lg:top-0` di dalam <aside> yang mengisi
+  // tinggi baris grid (pola reports.ts): saat halaman digulir, menu tetap di
+  // posisinya sementara toolbar kanan ikut naik.
+  await page.locator('#page').evaluate((el) => { el.scrollTop = 400; });
+  await page.waitForTimeout(150);
+  const sticky = await page.evaluate(() => {
+    const nav = document.querySelector('#set-nav-host .card')?.getBoundingClientRect();
+    const bar = document.querySelector('#set-cari')?.getBoundingClientRect();
+    return { navTop: Math.round(nav?.y ?? 0), barTop: Math.round(bar?.y ?? 0) };
+  });
+  ok('menu seksi kiri menempel saat halaman digulir',
+    sticky.navTop === gulir.navTop && sticky.barTop < gulir.barTop,
+    `${JSON.stringify(gulir)} -> ${JSON.stringify(sticky)}`);
+  await page.locator('#page').evaluate((el) => { el.scrollTop = 0; });
+  await page.waitForTimeout(150);
 
   console.log('=== D. Form toko: status simpan & draft ===');
   // Panel mode: form toko ada di seksi Identitas toko — tampilkan dulu.
@@ -328,6 +355,45 @@ try {
     if (v === null) localStorage.removeItem('ravaa.printpause');
     else localStorage.setItem('ravaa.printpause', v);
   }, pauseAwal);
+
+  console.log('=== G2. Preferensi perangkat: print-agent & kick laci ===');
+  // Hardware tiap PC kasir bisa beda: agent mungkin tidak jalan di localhost
+  // dan sebagian printer tidak tersambung ke laci. Keduanya preferensi device
+  // (localStorage), bukan settings server — diuji tulis + dipulihkan.
+  ok('alamat print-agent + tombol simpan + saklar kick laci dirender',
+    (await page.locator('#set-agent').count()) === 1
+    && (await page.locator('#set-agent-simpan').count()) === 1
+    && (await page.locator('#set-laci').count()) === 1);
+
+  const prefAwal = await page.evaluate(() => ({
+    agent: localStorage.getItem('ravaa.printagent') || 'http://localhost:9100',
+    laci: localStorage.getItem('ravaa.lacikick') !== '0',
+  }));
+  const agentAwal = await page.locator('#set-agent').inputValue();
+  const laciAwal = await page.locator('#set-laci').isChecked();
+  ok('nilai awal agent & kick laci mengikuti preferensi device',
+    agentAwal === prefAwal.agent.replace(/\/+$/, '') && laciAwal === prefAwal.laci,
+    `agent=${agentAwal} laci=${laciAwal} pref=${JSON.stringify(prefAwal)}`);
+
+  await page.locator('#set-agent').fill('http://192.168.1.10:9100');
+  await page.locator('#set-agent-simpan').click();
+  await page.waitForTimeout(250);
+  const agentTersimpan = await page.evaluate(() => localStorage.getItem('ravaa.printagent'));
+  ok('Simpan alamat print-agent menulis preferensi device',
+    agentTersimpan === 'http://192.168.1.10:9100', String(agentTersimpan));
+  // Pulihkan alamat awal (default = kunci dihapus oleh setAgentUrl).
+  await page.locator('#set-agent').fill(agentAwal);
+  await page.locator('#set-agent-simpan').click();
+  await page.waitForTimeout(250);
+
+  await page.locator('label[for="set-laci"]').click();
+  await page.waitForTimeout(350);
+  const laciTersimpan = await page.evaluate(() => localStorage.getItem('ravaa.lacikick'));
+  ok('saklar kick laci menulis preferensi device',
+    laciTersimpan === (laciAwal ? '0' : '1'), `laci=${laciTersimpan}`);
+  // Pulihkan kondisi awal supaya suite tidak meninggalkan perubahan device.
+  await page.locator('label[for="set-laci"]').click();
+  await page.waitForTimeout(350);
 
   console.log('=== H. Pintasan Ctrl+K (riset putaran 2) ===');
   ok('hint kbd "Ctrl K" tampil di toolbar pencarian',

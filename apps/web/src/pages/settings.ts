@@ -15,7 +15,11 @@ import { apiGet, apiPost, HttpError } from '../api';
 import { confirmDialog } from '../ui/confirm';
 import { icon, type IconName } from '../ui/icons';
 import { getToko } from '../ui/user';
-import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPause, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
+import {
+  getAgentUrl, getAutoPrint, getDrawerKick, getPrintPause, getStrukLayout,
+  setAgentUrl, setAutoPrint, setDrawerKick, setPrintPause, setStrukLayout,
+  type LayoutStruk,
+} from '../ui/print-pref';
 import {
   syncDariServerSettings, nomorStrukPendek, type OpsiCetak,
 } from '../ui/identitas-struk';
@@ -119,26 +123,34 @@ function errMsg(e: unknown): string {
 //
 // Kerangka 2026-10-20 (revisi pemilik: "card tersebut tidak ada fungsinya bisa
 // di hapus, agar 1 scroll seperti pada halaman laporan"): TIDAK ada kartu
-// judul/deskripsi di atas — judul halaman sudah dibawa header shell. Pencarian
-// + ringkasan status tetap ada sebagai toolbar ramping (bukan kartu) supaya
-// fitur tidak hilang; keduanya STATIS di luar `#set-body` agar repaint data
-// tidak membuang fokus/ketikan.
+// judul/deskripsi di atas — judul halaman sudah dibawa header shell.
+//
+// Revisi pemilik 2026-10-20 kedua ("cek halaman laporan, buat layout seperti
+// itu"): menu seksi kiri = `<aside>` yang MENGISI tinggi baris grid (tanpa
+// `items-start`) dengan kartu `lg:sticky lg:top-0`, persis pola reports.ts —
+// jadi kartu menu menempel saat halaman digulir. Toolbar pencarian + ringkasan
+// status duduk di atas isi kolom KANAN (bukan di atas kedua kolom), dan seluruh
+// halaman tetap satu scroller (`.page`). Toolbar & nav sengaja STATIS di luar
+// `#set-body` supaya repaint data tidak membuang fokus ketikan.
 function renderPage(): string {
   return `
-  <div class="space-y-2.5">
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="relative w-full sm:w-80">
-        <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
-        <input id="set-cari" class="input pl-9 pr-9" type="search" enterkeyhint="search"
-               placeholder="Cari pengaturan…"
-               autocomplete="off" aria-label="Cari pengaturan" />
-        <button type="button" id="set-cari-hapus" class="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                title="Bersihkan pencarian" aria-label="Bersihkan pencarian">${icon('close')}</button>
+  <div class="grid gap-3 lg:grid-cols-[220px_1fr]">
+    <aside id="set-nav-host" class="min-w-0" aria-label="Menu pengaturan"></aside>
+    <div class="min-w-0 space-y-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="relative w-full sm:w-80">
+          <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
+          <input id="set-cari" class="input pl-9 pr-9" type="search" enterkeyhint="search"
+                 placeholder="Cari pengaturan…"
+                 autocomplete="off" aria-label="Cari pengaturan" />
+          <button type="button" id="set-cari-hapus" class="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  title="Bersihkan pencarian" aria-label="Bersihkan pencarian">${icon('close')}</button>
+        </div>
+        <kbd class="kbd hidden shrink-0 sm:inline-flex" title="Fokus ke kolom cari">Ctrl K</kbd>
+        <div id="set-ringkas" class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-live="polite"></div>
       </div>
-      <kbd class="kbd hidden shrink-0 sm:inline-flex" title="Fokus ke kolom cari">Ctrl K</kbd>
-      <div id="set-ringkas" class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-live="polite"></div>
+      <div id="set-body"></div>
     </div>
-    <div id="set-body"></div>
   </div>`;
 }
 
@@ -171,9 +183,9 @@ function renderBody(): string {
   // Status = posisi saklar; keterangan = paragraf di atas footer.
   // Kartu dikelompokkan per CAKUPAN lewat kepalaSeksi: "Semua device" (server)
   // vs "Browser ini" — konsep paling penting halaman ini.
+  // Menu seksi TIDAK ikut di sini: `#set-nav-host` dirender terpisah (kolom
+  // kiri) supaya `#set-body` hanya berisi isi seksi + empty-state pencarian.
   return `
-  <div class="grid items-start gap-3 lg:grid-cols-[220px_1fr]">
-    ${navPengaturan()}
     <div id="set-isi" class="min-w-0 space-y-4">
       <section id="set-sec-transaksi" data-set-sec="transaksi" class="scroll-mt-2 space-y-2" aria-label="Aturan transaksi">
         ${kepalaSeksi('transaksi')}
@@ -216,13 +228,13 @@ function renderBody(): string {
           <button type="button" id="set-cari-bersih" class="btn btn-ghost btn-sm">Bersihkan pencarian</button>
         </div>
       </div>
-    </div>
-  </div>`;
+    </div>`;
 }
 
-// Menu seksi kiri (desktop menempel) / chip 2 kolom (mobile). Pola visual
-// sama dengan menu Laporan; tombol = navigasi dalam halaman, bukan hash —
-// hash milik router (#/settings), jadi jangan diganti anchor href.
+// Menu seksi kiri — dirender ke `<aside id="set-nav-host">` yang mengisi tinggi
+// baris grid (pola reports.ts), sehingga kartu `lg:sticky lg:top-0` benar-benar
+// menempel saat halaman digulir / chip 2 kolom (mobile). Tombol = navigasi
+// dalam halaman, bukan hash — hash milik router (#/settings), jangan anchor.
 function navPengaturan(): string {
   const tombol = SEKSI.map((s) => {
     const aktif = state.seksiAktif === s.id;
@@ -231,7 +243,6 @@ function navPengaturan(): string {
     </button>`;
   }).join('');
   return `
-  <aside class="min-w-0" aria-label="Menu pengaturan">
     <div class="card lg:sticky lg:top-0">
       <p class="form-sec hidden lg:block">Menu pengaturan</p>
       <div id="set-nav" class="grid grid-cols-2 gap-1 lg:mt-2 lg:block lg:gap-0">${tombol}</div>
@@ -244,8 +255,7 @@ function navPengaturan(): string {
           <span class="size-2 shrink-0 rounded-full bg-emerald-500" aria-hidden="true"></span>Perangkat — browser ini
         </p>
       </div>
-    </div>
-  </aside>`;
+    </div>`;
 }
 
 const kelasNav = (aktif: boolean): string =>
@@ -381,7 +391,7 @@ function terapkanCari(): void {
       }
     });
     sec.hidden = tampil === 0;
-    const nav = body.querySelector<HTMLElement>(`[data-set-nav="${sec.dataset.setSec}"]`);
+    const nav = host?.querySelector<HTMLElement>(`[data-set-nav="${sec.dataset.setSec}"]`);
     // style.display, BUKAN atribut hidden: tombol nav memakai `flex` (author
     // display) yang mengalahkan UA rule `[hidden]{display:none}` — pelajaran
     // yang sama dengan `.pm-bayarlayer[hidden]` di pos-mobile.css.
@@ -754,6 +764,8 @@ function kartuCetak(): string {
   const nyala = getAutoPrint();
   const layout = getStrukLayout();
   const jeda = getPrintPause();
+  const laci = getDrawerKick();
+  const agent = getAgentUrl();
   const isiSaklar = nyala
     ? `Setiap penjualan selesai, dialog menawarkan <b>[Thermal] [A4] [Tidak]</b> —
         kasir memilih kertas per transaksi. Topup/tarik langsung dicetak sesuai
@@ -771,7 +783,7 @@ function kartuCetak(): string {
         ditahan; nol kertas terbuang. Invoice A4 lewat browser tetap bisa dicetak.`
     : `Nonaktif — struk, label harga, dan kick laci mengirim ke printer seperti biasa.`;
   return `
-    <div class="card flex flex-col" data-set-card data-cari="cetak printer struk thermal 58mm a4 epson l3110 jeda otomatis layout kertas browser perangkat">
+    <div class="card flex flex-col" data-set-card data-cari="cetak printer struk thermal 58mm a4 epson l3110 jeda otomatis layout kertas browser perangkat agent alamat laci drawer kick">
       <div class="flex items-start gap-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 [&>svg]:size-4">${icon('print')}</span>
         <div class="min-w-0 flex-1">
@@ -806,6 +818,36 @@ function kartuCetak(): string {
             <option value="thermal"${layout === 'thermal' ? ' selected' : ''}>Thermal 58mm</option>
             <option value="a4"${layout === 'a4' ? ' selected' : ''}>Epson L3110 (A4)</option>
           </select>
+        </div>
+        <div class="flex flex-wrap items-start justify-between gap-2 py-2.5">
+          <div class="min-w-0 flex-1 basis-52">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Alamat print-agent</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              PC ini mengirim struk ke agent di alamat berikut. Bawaan
+              <code>http://localhost:9100</code>; isi IP PC kasir bila agent
+              berjalan di perangkat lain.
+            </p>
+          </div>
+          <div class="flex w-full shrink-0 flex-wrap items-center gap-1.5 sm:w-auto">
+            <input id="set-agent" class="input input-sm min-w-0 flex-1 sm:w-60 sm:flex-none"
+                   type="url" inputmode="url" autocomplete="off" spellcheck="false"
+                   value="${esc(agent)}" placeholder="http://localhost:9100"
+                   aria-label="Alamat print-agent" />
+            <button type="button" id="set-agent-simpan" class="btn btn-outline btn-sm shrink-0">Simpan</button>
+          </div>
+        </div>
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Kick laci saat tunai</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              ${laci
+                ? `Laci kasir dibuka otomatis setiap penjualan <b>tunai</b> lewat
+                   print-agent. QRIS/transfer tidak memicu kick.`
+                : `Kick laci <b>dimatikan</b> di device ini — penjualan tunai tetap
+                   tercatat, laci dibuka manual. Cocok bila printer tidak terhubung laci.`}
+            </p>
+          </div>
+          <div class="shrink-0">${switchHtml('set-laci', laci, laci ? 'Aktif' : 'Nonaktif')}</div>
         </div>
       </div>
       <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-700/60">
@@ -997,6 +1039,8 @@ function esc(s: unknown): string {
 }
 
 function paint(): void {
+  const navHost = host?.querySelector('#set-nav-host');
+  if (navHost) navHost.innerHTML = navPengaturan();
   const body = host?.querySelector('#set-body');
   if (!body) return;
   body.innerHTML = renderBody();
@@ -1269,6 +1313,56 @@ function bind(): void {
     toast(
       layout === 'a4' ? 'Layout struk: Epson L3110 (A4) — eject tanpa potong' : 'Layout struk: Thermal 58mm',
       'success',
+    );
+    paint();
+  });
+
+  // Alamat print-agent (per-device). Tombol/Enter memvalidasi URL dulu supaya
+  // salah ketik tidak membuat SEMUA cetak gagal tanpa petunjuk. Kosong =
+  // kembali ke bawaan localhost:9100. Tanpa paint: fokus & ketikan lain aman.
+  const simpanAgent = (): void => {
+    const el = host?.querySelector<HTMLInputElement>('#set-agent');
+    if (!el) return;
+    const mentah = el.value.trim();
+    const calon = mentah || 'http://localhost:9100';
+    let u: URL;
+    try {
+      u = new URL(calon);
+    } catch {
+      toast('Alamat print-agent tidak valid — contoh: http://192.168.1.10:9100', 'error');
+      el.focus();
+      return;
+    }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      toast('Alamat print-agent harus diawali http:// atau https://', 'error');
+      el.focus();
+      return;
+    }
+    if (u.search || u.hash) {
+      toast('Alamat print-agent tidak boleh memuat ?query atau #hash', 'error');
+      el.focus();
+      return;
+    }
+    setAgentUrl(calon);
+    el.value = getAgentUrl();
+    toast(`Print-agent device ini: ${getAgentUrl()}`, 'success');
+  };
+  host?.querySelector('#set-agent-simpan')?.addEventListener('click', simpanAgent);
+  host?.querySelector<HTMLInputElement>('#set-agent')?.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') {
+      e.preventDefault();
+      simpanAgent();
+    }
+  });
+
+  host?.querySelector<HTMLInputElement>('#set-laci')?.addEventListener('change', (e) => {
+    const nyala = (e.target as HTMLInputElement).checked;
+    setDrawerKick(nyala);
+    toast(
+      nyala
+        ? 'Kick laci: aktif — penjualan tunai membuka laci lewat print-agent'
+        : 'Kick laci: nonaktif di device ini (penjualan tunai tetap tercatat)',
+      nyala ? 'success' : 'warning',
     );
     paint();
   });

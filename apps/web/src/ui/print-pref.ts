@@ -20,6 +20,10 @@ export type LayoutStruk = 'thermal' | 'a4';
 export const KEY_CETAK = 'ravaa.cetak';
 export const KEY_LAYOUT = 'ravaa.struklayout';
 export const KEY_PAUSE = 'ravaa.printpause';
+export const KEY_AGENT = 'ravaa.printagent';
+export const KEY_LACI = 'ravaa.lacikick';
+
+export const AGENT_BAWAAN = 'http://localhost:9100';
 
 /** JEDA SEMUA CETAK — keputusan pemilik 2026-10-06: *"jangan print dulu sebelum
  *  saya perintah … menghabiskan kertas terus"*. Selama `true`,
@@ -87,5 +91,48 @@ export function setStrukLayout(layout: LayoutStruk): void {
     localStorage.setItem(KEY_LAYOUT, layout);
   } catch {
     /* abaikan */
+  }
+}
+
+/** Alamat print-agent device ini (mis. `http://192.168.1.10:9100` bila agent
+ *  tidak jalan di PC yang membuka web). Dulu hanya bisa diisi lewat devtools;
+ *  sekarang dapat diubah dari kartu "Cetak struk" tanpa menyentuh kode. */
+export function getAgentUrl(): string {
+  try {
+    return (localStorage.getItem(KEY_AGENT) || AGENT_BAWAAN).replace(/\/+$/, '');
+  } catch {
+    return AGENT_BAWAAN;
+  }
+}
+
+/** Simpan alamat agent; string kosong = kembali ke bawaan (localhost:9100).
+ *  Normalisasi slash akhir supaya `fetch(url + '/print')` tidak menjadi `//print`. */
+export function setAgentUrl(url: string): void {
+  try {
+    const bersih = url.trim().replace(/\/+$/, '');
+    if (!bersih || bersih === AGENT_BAWAAN) localStorage.removeItem(KEY_AGENT);
+    else localStorage.setItem(KEY_AGENT, bersih);
+  } catch {
+    /* private mode: pemanggil tetap memakai nilai di layar */
+  }
+}
+
+/** Kick laci otomatis saat penjualan tunai (default NYALA — perilaku lama).
+ *  Matikan di device yang print-agent/printernya tidak terhubung ke laci;
+ *  perintah `ESC p` yang tidak dikenal sebagian printer bisa tercetak sebagai
+ *  karakter aneh. Per-device karena laci menempel ke printer masing-masing. */
+export function getDrawerKick(): boolean {
+  try {
+    return localStorage.getItem(KEY_LACI) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setDrawerKick(nyala: boolean): void {
+  try {
+    localStorage.setItem(KEY_LACI, nyala ? '1' : '0');
+  } catch {
+    /* private mode: pref tetap berlaku sesi ini via memori pemanggil */
   }
 }
