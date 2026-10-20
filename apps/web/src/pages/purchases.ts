@@ -310,7 +310,6 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
       : sisa > 0 ? 'Sisa hutang' : 'Sisa (lunas)';
   const labelStatus = po.status === 'cancel' ? 'DIBATALKAN' : po.status === 'received' ? 'DITERIMA' : 'ORDER';
 
-  const city = cityToko(toko);
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -319,11 +318,15 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
 <style>
   @page { size: A4; margin: 1cm; }
   * { box-sizing: border-box; }
-  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #333; margin: 0; padding: 0; line-height: 1.2; }
+  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #1a1a1a; margin: 0; padding: 0; line-height: 1.4; }
   .container { width: 100%; margin: 0; padding: 0; }
   .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-  .nama-toko { font-size: 13px; font-weight: bold; margin-top: 4px; }
-  .info-title { font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 5px; padding-bottom: 2px; font-size: 11px; }
+  .nama-toko { font-size: 16px; font-weight: 800; margin-top: 4px; letter-spacing: .2px; }
+  .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
+  .baris-kop { display: flex; margin-top: 2px; font-size: 11px; color: #374151; }
+  .baris-kop .lbl { width: 72px; font-weight: 700; }
+  .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; }
+  .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
   th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
   td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
@@ -335,11 +338,6 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
   .total-section { margin-left: auto; width: 250px; }
   .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
   .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
-  .signature { display: flex; justify-content: flex-end; margin-top: 50px; }
-  .signature-box { text-align: right; }
-  .sig-date { font-size: 11px; }
-  .sig-label { font-size: 11px; margin-top: 10px; }
-  .sig-name { font-size: 11px; font-weight: bold; margin-top: 5px; }
   .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
   .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
@@ -355,15 +353,15 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
         ${logoA4Html()}
         <div>
           <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
-          ${toko.store_address ? `<div style="font-size: 11px;">${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_address ? `<div class="alamat-toko">${esc(toko.store_address)}</div>` : ''}
           ${toko.store_phone || toko.store_email
-            ? `<div style="font-size: 11px;">Telp: ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
+            ? `<div class="baris-kop"><span class="lbl">Telp:</span> ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
             : ''}
         </div>
       </div>
       <div style="text-align: right;">
-        <h1 style="margin: 0; color: #333;">NOTA PEMBELIAN</h1>
-        <div style="font-size: 18px; font-weight: bold;">PO-${po.id}</div>
+        <h1 class="title">NOTA PEMBELIAN</h1>
+        <div class="title-no">PO-${po.id}</div>
       </div>
     </div>
 
@@ -386,7 +384,7 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
     ${
       items.length === 0
         ? `<div class="info-box" style="width: 50%; font-style: italic; color: #777;">Tidak ada barang pada nota ini.</div>`
-        : `<table>
+        : `<table class="items">
       <thead>
         <tr>
           <th class="text-center" width="40">#</th>
@@ -411,16 +409,7 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
 
     ${po.note ? `<div style="margin-top: 14px; font-style: italic;">Catatan: ${esc(po.note)}</div>` : ''}
 
-    <div class="signature">
-      <div class="signature-box">
-        <div class="sig-date">${city}, ${tglSingkat(new Date().toISOString())}</div>
-        <div class="sig-label">Kasir / Pemilik</div>
-        <div class="sig-name">(${esc(toko.store_name || 'Ravaa POS')})</div>
-      </div>
-    </div>
-
     <div class="foot">
-      <div class="foot-line">Dicetak melalui Ravaa POS pada ${tglLengkap(new Date().toISOString())}</div>
       ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
     </div>
   </div>
