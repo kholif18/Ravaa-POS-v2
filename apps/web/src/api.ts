@@ -2,7 +2,7 @@
 // ID uuid dibuat di client -> POST ulang aman (server idempotent).
 
 import { toast } from './ui/toast';
-import { tokenAuth } from './ui/auth';
+import { akunTersimpan, tokenAuth } from './ui/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
@@ -46,7 +46,17 @@ export function uuid(): string {
 }
 
 // ---------- outbox: simpan request gagal, coba lagi tiap 5 detik ----------
-type Job = { key: string; path: string; data: unknown; ts: number };
+type Job = {
+  key: string;
+  path: string;
+  data: unknown;
+  ts: number;
+  /** Akun pembuat job (Paket B4). Job TIDAK boleh dikirim oleh akun lain —
+   *  server memaksa cashier dari sesi, jadi flush setelah ganti akun bisa
+   *  salah atribusi. Job lama tanpa userId tetap diproses (kompatibilitas). */
+  userId?: number;
+  cashier?: string;
+};
 const LS_KEY = 'ravaa.outbox.v1';
 
 function load(): Job[] {
@@ -58,7 +68,14 @@ function save(jobs: Job[]) { localStorage.setItem(LS_KEY, JSON.stringify(jobs));
 export function enqueue(path: string, data: Record<string, unknown>): string {
   const jobs = load();
   const id = (data.id as string) ?? uuid();
-  jobs.push({ key: id, path, data: { ...data, id }, ts: Date.now() });
+  const akun = akunTersimpan()?.akun;
+  jobs.push({
+    key: id,
+    path,
+    data: { ...data, id },
+    ts: Date.now(),
+    ...(akun ? { userId: akun.id, cashier: akun.name } : {}),
+  });
   save(jobs);
   updateOutboxBadge();
   return id;
@@ -70,13 +87,28 @@ export async function flushOutbox(onDone?: (key: string) => void): Promise<void>
   const jobs = load();
   if (jobs.length === 0) return;
   if (!navigator.onLine) return;
+  const saya = akunTersimpan()?.akun;
+  // Tanpa sesi jelas jangan menebak pemilik: biarkan antrean utuh.
+  if (!saya) return;
   const rest: Job[] = [];
   for (const j of jobs) {
+    // Job milik akun lain disimpan apa adanya (pemiliknya melanjutkan saat
+    // login lagi). Job lama tanpa tag tetap dikirim — perilaku lama.
+    if (j.userId !== undefined && j.userId !== saya.id) {
+      rest.push(j);
+      continue;
+    }
     try {
       await apiPost(j.path, j.data);
       onDone?.(j.key);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 0;
+      if (status === 401 || status === 403) {
+        // Token mati / izin dicabut: JANGAN buang nota pelanggan. Simpan dan
+        // hentikan putaran ini (retry berikutnya setelah sesi/izin beres).
+        rest.push(j);
+        break;
+      }
       if (status >= 400 && status < 500) {
         // Gagal validasi permanen (stok kurang, item kosong, dsb) — buang,
         // jangan retry tiap 5 detik selamanya hingga spam console + server.

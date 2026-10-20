@@ -36,6 +36,7 @@ import {
 } from '../store';
 import { diskonBorongan, type TingkatBorongan } from '../borongan';
 import { getCashier, getToko } from '../ui/user';
+import { akunTersimpan, punyaIzin } from '../ui/auth';
 import { switchHtml } from '../ui/switch';
 import {
   getAutoPrint, getDrawerKick, getPrintPause, setAutoPrint, setStrukLayout,
@@ -274,6 +275,10 @@ type Hold = {
   id: string;               // uuid — kunci hapus/muat per baris
   waktu: string;            // ISO — jam pembekuan, dirender lokal saat dibuka
   kasir: string;
+  /** Akun pemilik hold (Paket B4). Hold lama tanpa field = hanya terlihat
+   *  oleh pemegang `pos.hold_semua` (default owner) — jangan tampilkan
+   *  keranjang orang lain ke kasir biasa. */
+  userId?: number | null;
   customerId: number | null;
   customerName: string;
   discount: number;         // diskon transaksi (per baris ikut di items)
@@ -282,6 +287,36 @@ type Hold = {
   topups?: TopupLine[];
 };
 let holds: Hold[] = [];
+
+/* ---------- izin POS (Paket B4) ----------
+ * Server tetap penjaga terakhir; helper ini hanya mencegah kasir menabrak
+ * 403 dan menyembunyikan aksi yang tidak diizinkan. Jangan menaruh logika
+ * bisnis di sini — cukup cermin `punyaIzin()` (ui/auth.ts). */
+const bolehDiskon = (): boolean => punyaIzin('pos.diskon');
+const bolehHarga = (): boolean => punyaIzin('pos.harga');
+const bolehManual = (): boolean => punyaIzin('pos.item_manual');
+const bolehTopup = (): boolean => punyaIzin('pos.topup');
+const bolehTarik = (): boolean => punyaIzin('pos.tarik');
+const bolehLayanan = (): boolean => bolehTopup() || bolehTarik();
+const bolehPilihPelanggan = (): boolean => punyaIzin('pelanggan.lihat');
+
+/** Identitas akun aktif (id) — dipakai menandai & menyaring hold. */
+function idAkunAktif(): number | null {
+  return akunTersimpan()?.akun.id ?? null;
+}
+
+/** Hold yang boleh dilihat akun ini. Aturan:
+ *  - pemegang `pos.hold_semua` (default owner) melihat semua, termasuk hold
+ *    lama tanpa `userId`;
+ *  - kasir biasa hanya melihat hold miliknya sendiri (userId sama).
+ *  Data di IndexedDB TIDAK dihapus — hold orang lain tetap tersimpan untuk
+ *  pemiliknya / owner. */
+function holdsTerlihat(): Hold[] {
+  if (punyaIzin('pos.hold_semua')) return holds;
+  const uid = idAkunAktif();
+  if (uid === null) return [];
+  return holds.filter((h) => h.userId === uid);
+}
 
 /* ---------- cetak struk ---------- */
 
@@ -653,6 +688,10 @@ const isTarik = (t: Pick<TopupLine, 'jenis'>): boolean => TARIK_JENIS.some((j) =
  *  muatKeranjang/muatHold — jangan pernah kirim `provider` ngawur). */
 const isJenisLayanan = (jenis: string): boolean =>
   TOPUP_JENIS.some((j) => j.key === jenis) || TARIK_JENIS.some((j) => j.key === jenis);
+/** Jenis layanan ini boleh dipakai akun aktif? Topup & tarik punya izin
+ *  terpisah (`pos.topup` / `pos.tarik`) — divalidasi juga di server. */
+const bolehJenisLayanan = (jenis: TopupJenis): boolean =>
+  TARIK_JENIS.some((j) => j.key === jenis) ? bolehTarik() : bolehTopup();
 /** Total TAGIHAN baris TOPUP (uang masuk) — nominal + admin per baris
  *  (aturan domain §1: `total = nominal + admin`). Ikut TOTAL TAGIHAN
  *  (bukan omzet — lihat `pay()` yang mengirimnya ke /api/topups terpisah). */
@@ -878,6 +917,10 @@ const jumlahBaris = (l: Pick<CartLine, 'price' | 'qty'>) => Math.round(l.price *
  *  interaksi keduanya otomatis ikut aturan itu.
  *  Selalu dijepit ke jumlah baris: server menolak `discount > amount` (400). */
 function hitungPrefill(l: Pick<CartLine, 'prefill' | 'price' | 'qty' | 'borongan'>): number {
+  // Tanpa izin diskon, prefill & borongan TIDAK boleh menghasilkan diskon:
+  // server menolak diskon > 0 (403) dan barang tidak boleh tampil lebih murah
+  // dari yang akan ditagih. `setDisc` juga menolak input manual.
+  if (!bolehDiskon()) return 0;
   let hasil = 0;
   if (l.prefill) {
     const perUnit =
@@ -1041,6 +1084,11 @@ function setQty(key: string, qty: number): void {
 /** Setel diskon satu baris dari input kolom Diskon. Angka dijepit ke jumlah
  *  baris supaya server tidak menolak dengan 400 "diskon baris melebihi". */
 function setDisc(key: string, nilai: number): void {
+  if (!bolehDiskon()) {
+    toast('Akun ini tidak punya izin diskon', 'error');
+    paintCart();
+    return;
+  }
   const line = cart.find((l) => l.key === key);
   if (!line) return;
   const bersih = Number.isFinite(nilai) ? Math.max(0, Math.round(nilai)) : 0;
@@ -1059,6 +1107,11 @@ function setDisc(key: string, nilai: number): void {
  *  memakai harga itu, kuantitas DIGABUNG (aturan scan yang sama — "harga sama
  *  = qty tambah, beda = baris baru", keputusan pemilik 2026-10-06). */
 function setHarga(key: string, nilai: number): void {
+  if (!bolehHarga()) {
+    toast('Akun ini tidak punya izin mengubah harga', 'error');
+    paintCart();
+    return;
+  }
   const line = cart.find((l) => l.key === key);
   if (!line || !line.dyn || line.product_id === null) return;
   const bersih = Number.isFinite(nilai) ? Math.max(0, Math.round(nilai)) : 0;
@@ -1140,7 +1193,7 @@ function gantiSatuan(key: string, unitSlug: string): void {
  *  lalu menambah diskon baris akan menghasilkan total negatif — server jelas
  *  menolaknya ("diskon melebihi subtotal") tepat di momen pembayaran. */
 function clampDiskonTransaksi(): void {
-  const maks = Math.max(0, subtotal() - diskonBaris());
+  const maks = bolehDiskon() ? Math.max(0, subtotal() - diskonBaris()) : 0;
   if (discount > maks) discount = maks;
   const inp = host?.querySelector<HTMLInputElement>('#pos-discount');
   if (inp && Number(inp.value || 0) !== discount) inp.value = discount ? String(discount) : '';
@@ -1149,6 +1202,27 @@ function clampDiskonTransaksi(): void {
 /* ---------- gate shift ---------- */
 
 function shiftGateHtml(): string {
+  // Tanpa izin shift.buka, form buka shift hanya akan ditolak server (403).
+  // Tampilkan instruksi supaya kasir tidak mengetik modal awal sia-sia.
+  if (!punyaIzin('shift.buka')) {
+    return `
+  <div class="mx-auto max-w-md space-y-4 py-5">
+    <div class="card">
+      <div class="flex items-start gap-3">
+        <span class="inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+          ${icon('alert')}
+        </span>
+        <div class="min-w-0">
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Shift belum dibuka</h2>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Akun <span class="font-semibold text-gray-700 dark:text-gray-200">${esc(getCashier())}</span>
+            tidak punya izin membuka shift. Minta owner membuka shift untuk akun ini, lalu muat ulang halaman.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  }
   return `
   <div class="mx-auto max-w-md space-y-4 py-5">
     <div class="card">
@@ -1232,6 +1306,10 @@ function bindShiftGate(): void {
  *  kolom agregat. Setelah sukses: reload `shift` (null -> gate "Buka shift
  *  dulu" tampil lagi; keranjang TETAP di memori + localStorage). */
 async function tutupShiftDariPos(): Promise<void> {
+  if (!punyaIzin('shift.tutup')) {
+    toast('Akun ini tidak punya izin menutup shift', 'error');
+    return;
+  }
   if (!shift || busy) return;
   // Klik ganda / modal sudah terbuka = jangan menumpuk dialog kedua.
   if (document.querySelector('.modal-overlay:not(.is-closing)')) return;
@@ -1486,10 +1564,10 @@ function infoBarHtml(): string {
                pos.css, pola tombol hijau .pos-paypas). POSISI tetap di kolom
                kiri: sekelompok dengan Waktu/Kasir/Shift (konteks sesi) dan
                jauh dari alur uang di sidebar kanan. -->
-          <button type="button" id="pos-shift-tutup" class="btn pos-tutup"
+          ${punyaIzin('shift.tutup') ? `<button type="button" id="pos-shift-tutup" class="btn pos-tutup"
             title="Tutup shift kasir (hitung laci dulu)" aria-label="Tutup shift">
             ${icon('logout')}<span>Tutup shift</span>
-          </button>
+          </button>` : ''}
         </div>
         <!-- Kolom tengah = blok Pelanggan + tombol cari F9. -->
         <div class="pos-cell min-w-0">
@@ -1499,7 +1577,7 @@ function infoBarHtml(): string {
                openCariPelanggan() — pola sama dengan F3 produk (input multi-
                kata, ↑↓ sorot, Enter pilih), buat pelanggan yang daftarnya
                sudah panjang (master kontak + hutang). -->
-          <div class="w-full">
+          ${bolehPilihPelanggan() ? `<div class="w-full">
             <!-- Chip tier grosir (2026-10-11): tampil bila pelanggan terpilih
                  tier-nya grosir — penanda harga grosir aktif di keranjang.
                  Di-toggle paintTier() (tanpa repaint) tiap ganti pelanggan. -->
@@ -1516,7 +1594,10 @@ function infoBarHtml(): string {
               <select id="pos-customer" class="input input-sm min-w-0 flex-1">${pilih}</select>
               <button type="button" id="pos-cust-cari" class="btn btn-ghost !min-h-[34px] !px-2.5 !bg-white/10 !border-transparent !text-white hover:!bg-white/25" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}<span class="text-sm font-semibold tracking-wide">F9</span></button>
             </div>
-          </div>
+          </div>` : `<div class="w-full">
+            <span class="label !text-white/75">Pelanggan</span>
+            <div class="text-sm text-white/80">Pelanggan Umum <span class="text-white/60">· tanpa akses daftar pelanggan</span></div>
+          </div>`}
         </div>
         <!-- Kolom total = track 1/3 (sama rata, lihat komentar grid di atas).
              justify-between tetap menempelkan label+n item ke KIRI kolom dan
@@ -1650,6 +1731,10 @@ function cartKiriHtml(): string {
  *  Kondisi tombol: Bayar/Bayar pas = bisaBayar() (keranjang terisi). */
 function sidebarBayarHtml(): string {
   const bayarMati = !bisaBayar() || busy;
+  const tampilHold = holdsTerlihat();
+  const bisaRiwayat = punyaIzin('riwayat.lihat');
+  const bisaProduk = punyaIzin('produk.kelola');
+  const bisaStok = punyaIzin('stok.lihat');
   return `
       <div class="card pos-side">
         <!-- 1. Aksi cepat (permintaan pemilik 2026-10-04) — kini di POSISI
@@ -1669,43 +1754,37 @@ function sidebarBayarHtml(): string {
           <span class="label">Aksi cepat</span>
           <div class="pos-side-grid">
             <button type="button" id="pos-hold" class="btn btn-ghost pos-qa" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${keranjangTerisi() && !busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span>${kbd('F7')}</button>
-            <button type="button" id="pos-hold-open" class="btn btn-ghost pos-qa" title="Buka daftar transaksi tertahan (pintasan F8)"${holds.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${holds.length}</span>)</span>${kbd('F8')}</button>
-            <button type="button" id="pos-qa-manual" class="btn btn-ghost pos-qa">${icon('pencil')}<span>Item manual</span></button>
+            <button type="button" id="pos-hold-open" class="btn btn-ghost pos-qa" title="Buka daftar transaksi tertahan (pintasan F8)"${tampilHold.length ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${tampilHold.length}</span>)</span>${kbd('F8')}</button>
+            ${bolehManual() ? `<button type="button" id="pos-qa-manual" class="btn btn-ghost pos-qa">${icon('pencil')}<span>Item manual</span></button>` : ''}
             <!-- Tambah LAYANAN ke keranjang (Opsi B hybrid, 2026-10-07;
                  direvisi 2026-10-08: topup DAN tarik tunai): baris layanan +
                  produk dibayar SEKALI, catatan terpisah di /api/topups
                  (nominal = mutasi modal, BUKAN omzet — AGENTS §1; nominal
                  tarik = uang keluar). -->
-            <button type="button" id="pos-qa-topup" class="btn btn-ghost pos-qa" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>Topup/Tarik</span></button>
-            <button type="button" id="pos-qa-disc" class="btn btn-ghost pos-qa">Diskon${kbd('F6')}</button>
-            <a href="#/history" class="btn btn-ghost pos-qa" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
-            <button type="button" id="pos-reprint" class="btn btn-ghost pos-qa" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
+            ${bolehLayanan() ? `<button type="button" id="pos-qa-topup" class="btn btn-ghost pos-qa" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>${bolehTopup() && bolehTarik() ? 'Topup/Tarik' : bolehTopup() ? 'Topup' : 'Tarik'}</span></button>` : ''}
+            ${bolehDiskon() ? `<button type="button" id="pos-qa-disc" class="btn btn-ghost pos-qa">Diskon${kbd('F6')}</button>` : ''}
+            ${bisaRiwayat ? `<a href="#/history" class="btn btn-ghost pos-qa" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>` : ''}
+            ${bisaRiwayat ? `<button type="button" id="pos-reprint" class="btn btn-ghost pos-qa" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>` : ''}
           </div>
         </div>
-        <div class="pos-side-sep" role="separator"></div>
+        ${bisaProduk || bisaStok ? `<div class="pos-side-sep" role="separator"></div>
         <!-- 2. Menu cepat (permintaan pemilik 2026-10-06: "tambahkan tombol
              cepat ke produk dan stok juga") — anchor hash biasa
              (shell.ts parseRoute). -->
         <div>
           <span class="label">Menu cepat</span>
           <div class="pos-side-grid">
-            <a href="#/products" class="btn btn-ghost pos-qa" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>
-            <a href="#/stock" class="btn btn-ghost pos-qa" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>
+            ${bisaProduk ? `<a href="#/products" class="btn btn-ghost pos-qa" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>` : ''}
+            ${bisaStok ? `<a href="#/stock" class="btn btn-ghost pos-qa" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>` : ''}
           </div>
-        </div>
+        </div>` : ''}
         <div class="pos-side-sep" role="separator"></div>
-        <!-- 3. Diskon item — DIPINDAH dari paling atas ke sini (permintaan
-             pemilik 2026-10-06, lihat catatan Aksi cepat di atas): persis
-             DI ATAS input diskon transaksi. Tetap tersembunyi bila 0. Dua
-             baris lama sudah DIHAPUS: "Grand total" (2026-10-04 — duplikat
-             TOTAL BELANJA di info bar) dan "Subtotal" (putaran 7 — satu
-             angka satu tempat). -->
-        <div class="space-y-1">
+        ${bolehDiskon() ? `<div class="space-y-1">
           <div class="flex items-baseline justify-between" id="pos-disc-item-row" ${diskonBaris() ? '' : 'hidden'}>
             <span class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Diskon item</span>
             <span id="pos-disc-item" class="text-sm font-semibold text-red-600 dark:text-red-400">-${rp(diskonBaris())}</span>
           </div>
-        </div>
+        </div>` : ''}
         <!-- 4. Diskon transaksi (alokasi F6). kelas space-y-1.5 = jarak baris
              label ke input di bawahnya — dulu keduanya menempel langsung
              (permintaan pemilik 2026-10-04 "F6 rapikan, karena nempel dengan
@@ -1713,10 +1792,10 @@ function sidebarBayarHtml(): string {
              (permintaan pemilik putaran 7: "ghapus saja, di atasnya sudah ada
              label F6 ternyata di tombol diskon") — pintasan tetap tercantum di
              tombol **Diskon F6** di grid Aksi cepat. -->
-        <div class="space-y-1.5">
+        ${bolehDiskon() ? `<div class="space-y-1.5">
           <label class="label" for="pos-discount">Diskon transaksi (Rp)</label>
           <input id="pos-discount" class="input input-sm" type="number" inputmode="numeric" min="0" step="500" value="${discount || ''}" placeholder="0" />
-        </div>
+        </div>` : ''}
         <!-- 4. Tombol Bayar = BUKA FORM BAYAR (modal), permintaan pemilik
              2026-10-04: metode bayar + uang diterima + chip nominal +
              kembalian pindah ke modal (ala payment screen Aronium F10),
@@ -1786,6 +1865,9 @@ function segarJudulBayar(): void {
  *  hutang dengan catatan harus terpilih customer".
  *  "" (string kosong) = boleh; selain itu = pesan penolakan untuk toast. */
 function cekHutangDiperbolehkan(): string {
+  if (!punyaIzin('hutang.catat')) {
+    return 'Akun ini tidak punya izin mencatat hutang — uang diterima harus menutup total';
+  }
   if (customerId === null) {
     return 'Hutang butuh pelanggan — pilih dulu di baris "Pelanggan" (info bar), transaksi tanpa kontak tidak bisa dicatat hutang';
   }
@@ -2469,7 +2551,7 @@ function cartRows(): string {
         <div class="cell-sub">${l.product_id === null ? 'item manual' : l.track_stock ? '' : 'jasa'}${expBarisKeranjang(l.product_id)}</div>
         ${unitUi ? `<div class="mt-0.5 flex items-center gap-1">${unitUi}</div>` : ''}
       </td>
-      <td class="td td-num">${l.dyn
+      <td class="td td-num">${l.dyn && bolehHarga()
         ? `<input class="input input-sm !w-24 !px-2 text-right" data-act="price" data-key="${l.key}" type="number"
              inputmode="numeric" min="0" step="500" value="${l.price}"
              aria-label="Harga ${esc(l.name)}" title="Harga jual (Rp) — boleh diubah (produk harga khusus)" />`
@@ -2481,11 +2563,11 @@ function cartRows(): string {
           <button type="button" class="row-btn" data-act="inc" data-key="${l.key}" title="Tambah" aria-label="Tambah qty">${icon('plus')}</button>
         </div>
       </td>
-      <td class="td td-num">
-        <input class="input input-sm !w-24 !px-2 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
+      <td class="td td-num">${bolehDiskon()
+        ? `<input class="input input-sm !w-24 !px-2 text-right" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric"
           min="0" step="100" value="${l.discount || ''}" placeholder="0"
-          aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}${borTeks}"${borAktif ? ' data-borongan="1"' : ''} />
-      </td>
+          aria-label="Diskon baris ${esc(l.name)}" title="Diskon baris (Rp) — maksimum ${rp(gross)}${borTeks}"${borAktif ? ' data-borongan="1"' : ''} />`
+        : (l.discount > 0 ? `<span class="text-red-600 dark:text-red-400">-${rp(l.discount)}</span>` : '<span class="text-gray-400">—</span>')}</td>
       <td class="td td-num">
         ${l.discount > 0 ? `<div class="text-sm text-gray-400 line-through tabular-nums">${rp(gross)}</div>` : ''}
         <div class="font-semibold text-gray-900 tabular-nums dark:text-white">${rp(net)}</div>
@@ -2499,7 +2581,7 @@ function cartRows(): string {
   // bukan dari kolom tabel.
   const rowsTopup = cartTopup.map(topupRowHtml).join('');
   if (!rowsProduk && !rowsTopup) {
-    return `<tr><td colspan="8"><div class="empty">Scan barcode atau ketik nama produk, lalu tekan Enter — atau tombol Topup/Tarik untuk layanan pulsa, e-wallet, atau tarik tunai.</div></td></tr>`;
+    return `<tr><td colspan="8"><div class="empty">Scan barcode atau ketik nama produk, lalu tekan Enter${bolehLayanan() ? ' — atau tombol Topup/Tarik untuk layanan pulsa, e-wallet, atau tarik tunai.' : '.'}</div></td></tr>`;
   }
   return rowsProduk + rowsTopup;
 }
@@ -2518,7 +2600,17 @@ function isLayanan(p: Product): boolean {
 /** Buka dialog layanan dari produk katalog (jenis disarankan dari nama/SKU —
  *  produk "tarik ..." membuka dialog dengan jenis tarik terpilih). */
 function bukaModeLayanan(p: Product): void {
-  openDialogTopupKeranjang(/tarik/i.test(p.name) || /tarik/i.test(p.sku) ? 'tarik-ewallet' : 'e-wallet');
+  if (!bolehLayanan()) {
+    toast('Akun ini tidak punya izin topup/tarik tunai', 'error');
+    return;
+  }
+  const mauTarik = /tarik/i.test(p.name) || /tarik/i.test(p.sku);
+  const jenis: TopupJenis = mauTarik && bolehTarik()
+    ? 'tarik-ewallet'
+    : !mauTarik && bolehTopup()
+      ? 'e-wallet'
+      : (bolehTopup() ? 'e-wallet' : 'tarik-ewallet');
+  openDialogTopupKeranjang(jenis);
   toast(`${p.name} — pilih jenis & isi nominal di dialog`, 'info');
 }
 
@@ -2541,8 +2633,23 @@ function pmCtx(): PosMobileCtx {
     categories,
     cart,
     cartTopup,
-    holdCount: holds.length,
+    holdCount: holdsTerlihat().length,
     diskon: discount,
+    bolehDiskon: bolehDiskon(),
+    bolehHarga: bolehHarga(),
+    bolehManual: bolehManual(),
+    bolehTopup: bolehTopup(),
+    bolehTarik: bolehTarik(),
+    bolehLayanan: bolehLayanan(),
+    bolehPelanggan: bolehPilihPelanggan(),
+    bisaRiwayat: punyaIzin('riwayat.lihat'),
+    bisaProduk: punyaIzin('produk.kelola'),
+    bisaStok: punyaIzin('stok.lihat'),
+    // Halaman Sistem = izin CORE (hanya role owner, tidak bisa dicentang).
+    // `punyaIzin('pengaturan.ubah')` selalu false karena core tidak ada di
+    // daftar izin operasional — cek role langsung, jangan izin fiktif.
+    bisaSistem: akunTersimpan()?.akun.role === 'owner',
+    bisaTutupShift: punyaIzin('shift.tutup'),
     autoPrint,
     bisaCetakUlang: !!bacaNotaTerakhir(),
     busy,
@@ -2754,8 +2861,8 @@ function paintCart(): void {
   const holdBtn = host!.querySelector<HTMLButtonElement>('#pos-hold');
   if (holdBtn) holdBtn.disabled = !keranjangTerisi() || busy;
   const holdOpen = host!.querySelector<HTMLButtonElement>('#pos-hold-open');
-  if (holdOpen) holdOpen.disabled = holds.length === 0;
-  set('#pos-hold-count', String(holds.length));
+  if (holdOpen) holdOpen.disabled = holdsTerlihat().length === 0;
+  set('#pos-hold-count', String(holdsTerlihat().length));
   // Bubble jumlah baris di tab "Keranjang" navbar bawah (UI mobile, 2026-10-17)
   // — ikut menyegar tiap keranjang berubah; elemen tidak ada di desktop =
   // no-op. Isi = jumlah BARIS (produk/manual + layanan), pola yang sama
@@ -2876,7 +2983,7 @@ function muatKeranjang(): boolean {
   // dihitung per baris via pelangganGrosir(), jadi tanpa ini baris grosir
   // pulih sebagai ecer (bug: pack 30000 → 36000). Validasi id terhadap master
   // tetap di mountPosPage setelahnya (lihat komentar kepala fungsi).
-  customerId = s.customerId ?? null;
+  customerId = bolehPilihPelanggan() ? (s.customerId ?? null) : null;
   const byId = new Map(products.map((p) => [p.id, p]));
   const items: CartLine[] = [];
   let dibuang = 0;
@@ -2889,6 +2996,14 @@ function muatKeranjang(): boolean {
       }
       l.dyn = !!p.price_dynamic;
       if (p.price_dynamic) {
+        if (!bolehHarga()) {
+          // Harga dinamis hanya boleh diubah dengan `pos.harga`. Tanpa izin,
+          // baris dipulihkan pada harga master yang akan ditagih server.
+          const r = resolusiSatuan(p, l.unit, pelangganGrosir());
+          l.price = r.price;
+          l.factor = r.factor;
+          l.unit = r.unit;
+        }
         // Re-key baris lama (format pre-2026-10-06 tanpa harga di key) ke
         // `<id>:<unit>:<harga>` — idempoten untuk format baru. Kalau ternyata
         // baris key itu sudah ada (keranjang tersimpan oleh versi berbeda),
@@ -2927,7 +3042,9 @@ function muatKeranjang(): boolean {
       }
     } else l.dyn = false;
     l.note = (l.note ?? '').slice(0, 200);
-    l.discount = Math.min(Math.max(0, Math.round(l.discount || 0)), jumlahBaris(l));
+    l.discount = bolehDiskon()
+      ? Math.min(Math.max(0, Math.round(l.discount || 0)), jumlahBaris(l))
+      : 0;
     items.push(l);
   }
   cart = items;
@@ -2941,7 +3058,10 @@ function muatKeranjang(): boolean {
     if (!(nominal > 0)) continue;
     // Jenis tak dikenal (snapshot korup / dari versi lain) dibuang — jangan
     // pernah mengirim `provider` ngawur ke POST /api/topups saat bayar.
+    // Izin layanan (pos.topup/pos.tarik) ikut disaring: akun tanpa izin tarik
+    // tidak boleh mewarisi baris tarik dari snapshot akun lain.
     if (!isJenisLayanan(t.jenis)) continue;
+    if (!bolehJenisLayanan(t.jenis)) continue;
     const admin = Math.max(0, Math.round(Number(t.admin) || 0));
     const m = /^topup:(\d+)$/.exec(t.key ?? '');
     if (m) topupSeq = Math.max(topupSeq, Number(m[1]));
@@ -2956,7 +3076,7 @@ function muatKeranjang(): boolean {
       admin,
     });
   }
-  discount = Math.max(0, Math.round(s.discount || 0));
+  discount = bolehDiskon() ? Math.max(0, Math.round(s.discount || 0)) : 0;
   // customerId sudah diset di awal fungsi (sebelum loop restore tier) — tidak
   // diulang di sini supaya satu sumber.
   for (const l of cart) {
@@ -3014,6 +3134,7 @@ async function tahanKeranjang(): Promise<void> {
     id: uuid(),
     waktu: new Date().toISOString(),
     kasir: getCashier(),
+    userId: idAkunAktif(),
     customerId,
     customerName: customers.find((c) => c.id === customerId)?.name ?? 'Pelanggan Umum',
     discount,
@@ -3054,6 +3175,15 @@ async function muatHold(h: Hold): Promise<void> {
     if (l.product_id === null) { l.dyn = false; continue; }
     const p = byIdHold.get(l.product_id);
     l.dyn = !!p?.price_dynamic;
+    if (l.dyn && !bolehHarga() && p) {
+      // Tanpa `pos.harga`, harga produk dinamis dikembalikan ke master —
+      // server memang menagih harga master; mempertahankan harga lama membuat
+      // total di layar berbohong.
+      const r = resolusiSatuan(p, l.unit, pelangganGrosir());
+      l.price = r.price;
+      l.factor = r.factor;
+      l.unit = r.unit;
+    }
     if (l.dyn) l.key = `${l.product_id}:${l.unit}:${l.price}`;
   }
   // Harga borongan (2026-10-19): snapshot diambil dari master TERKINI dan
@@ -3069,7 +3199,7 @@ async function muatHold(h: Hold): Promise<void> {
   // dikenal + nominal > 0; admin dijepit) supaya hold korup tidak meledak
   // di layar bayar. Key `topup:<n>` didorong seq-nya di bawah.
   cartTopup = (h.topups ?? [])
-    .filter((t) => isJenisLayanan(t.jenis) && Math.round(Number(t.nominal)) > 0)
+    .filter((t) => isJenisLayanan(t.jenis) && bolehJenisLayanan(t.jenis) && Math.round(Number(t.nominal)) > 0)
     .map((t) => ({
       ...t,
       admin: Math.max(0, Math.round(Number(t.admin) || 0)),
@@ -3077,11 +3207,19 @@ async function muatHold(h: Hold): Promise<void> {
       token: String(t.token ?? ''),
     }));
   discount = h.discount;
+  // Sanitasi izin: diskon (baris + transaksi) hanya milik `pos.diskon`;
+  // tanpa itu server menolak nota — nolkan di sini, jangan biarkan kasir
+  // menekan Bayar dan menabrak 403.
+  if (!bolehDiskon()) {
+    discount = 0;
+    for (const l of cart) l.discount = 0;
+  }
   // Pelanggan hold divalidasi terhadap master terkini — id lama yang sudah
   // tidak ada jatuh ke Pelanggan Umum, bukan ke select kosong.
-  customerId = customers.some((c) => c.id === h.customerId)
+  customerId = bolehPilihPelanggan() && customers.some((c) => c.id === h.customerId)
     ? h.customerId
     : customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
+  if (!bolehPilihPelanggan()) customerId = null;
   const sel = host?.querySelector<HTMLSelectElement>('#pos-customer');
   if (sel) sel.value = customerId === null ? '' : String(customerId);
   paintTier(); // hold bisa milik tier berbeda — chip ikut
@@ -3134,6 +3272,12 @@ async function hapusHold(h: Hold, api: ModalHandle, tampil: () => void): Promise
     api.close();
     return;
   }
+  // Hold milik akun lain TIDAK dihitung "masih ada" bagi kasir biasa —
+  // owner/hold_semua tetap melihat semuanya.
+  if (!holdsTerlihat().length) {
+    api.close();
+    return;
+  }
   tampil();
 }
 
@@ -3160,11 +3304,12 @@ async function hapusHold(h: Hold, api: ModalHandle, tampil: () => void): Promise
  *  Modal memakai openModal `wider` (max-w-5xl ≈ 900px modal-lg v1) dengan
  *  OK disembunyikan — cukup satu tombol "Tutup". */
 function bukaTertahan(): void {
-  if (!holds.length) {
+  const awal = holdsTerlihat();
+  if (!awal.length) {
     toast('Belum ada transaksi tertahan', 'info');
     return;
   }
-  let terpilih = holds[0].id; // antrian terbaru (unshift) = yang dibuka pertama
+  let terpilih = awal[0].id; // antrian terbaru (unshift) = yang dibuka pertama
 
   const stempel = (h: Hold): string =>
     new Date(h.waktu).toLocaleString('id-ID', {
@@ -3288,19 +3433,20 @@ function bukaTertahan(): void {
   /** Render ulang KEDUA kolom + judul. Pemindahan pemilihan dilakukan di
    *  sini: id yang sudah tidak ada (habis dihapus) jatuh ke antrian pertama. */
   const tampil = (api: ModalHandle): void => {
-    if (!holds.some((x) => x.id === terpilih)) terpilih = holds[0]?.id ?? '';
+    const daftar = holdsTerlihat();
+    if (!daftar.some((x) => x.id === terpilih)) terpilih = daftar[0]?.id ?? '';
     const ul = api.el.querySelector<HTMLElement>('#hold-list');
-    if (ul) ul.innerHTML = holds.map((h) => baris(h, h.id === terpilih)).join('');
+    if (ul) ul.innerHTML = daftar.map((h) => baris(h, h.id === terpilih)).join('');
     const pv = api.el.querySelector<HTMLElement>('#hold-preview');
-    if (pv) pv.innerHTML = preview(holds.find((x) => x.id === terpilih) ?? null);
+    if (pv) pv.innerHTML = preview(daftar.find((x) => x.id === terpilih) ?? null);
     const antrian = api.el.querySelector('#hold-antrian-count');
-    if (antrian) antrian.textContent = String(holds.length);
+    if (antrian) antrian.textContent = String(daftar.length);
     const judul = api.el.querySelector('.modal-header h3');
-    if (judul) judul.textContent = `Transaksi tertahan (${holds.length})`;
+    if (judul) judul.textContent = `Transaksi tertahan (${daftar.length})`;
   };
 
   openModal({
-    title: `Transaksi tertahan (${holds.length})`,
+    title: `Transaksi tertahan (${awal.length})`,
     wider: true, // max-w-5xl — mendekati modal-lg 900px v1; 30/70 butuh ruang detail
     body: `
       <!-- .modal-split v1 (proporsi flex 3/7) → grid 3fr/7fr; pemisah =
@@ -3310,11 +3456,11 @@ function bukaTertahan(): void {
       <div class="grid grid-cols-1 sm:grid-cols-[3fr_7fr] pos-scope">
         <div class="flex h-[60vh] min-h-0 flex-col border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-700">
           <!-- split-header ala v1: bar label uppercase kecil di atas daftar -->
-          <div class="shrink-0 border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-700/40 dark:text-gray-400">Daftar antrian (<span id="hold-antrian-count">${holds.length}</span>)</div>
-          <ul id="hold-list" class="min-h-0 flex-1 overflow-y-auto pb-1">${holds.map((h) => baris(h, h.id === terpilih)).join('')}</ul>
+          <div class="shrink-0 border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-bold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-700/40 dark:text-gray-400">Daftar antrian (<span id="hold-antrian-count">${awal.length}</span>)</div>
+          <ul id="hold-list" class="min-h-0 flex-1 overflow-y-auto pb-1">${awal.map((h) => baris(h, h.id === terpilih)).join('')}</ul>
         </div>
         <div class="h-[60vh] min-h-0">
-          <div id="hold-preview" class="h-full overflow-y-auto">${preview(holds[0] ?? null)}</div>
+          <div id="hold-preview" class="h-full overflow-y-auto">${preview(awal[0] ?? null)}</div>
         </div>
       </div>`,
     cancelLabel: 'Tutup',
@@ -3623,6 +3769,10 @@ function barisCust(c: Cust, i: number, aktif: boolean): string {
  *  Enter/klik baris/tombol OK = pilih. Memilih menyetel `customerId` +
  *  nilai `#pos-customer` lalu fokus balik ke kolom scan. */
 function openCariPelanggan(): void {
+  if (!bolehPilihPelanggan()) {
+    toast('Akun ini tidak punya akses daftar pelanggan', 'error');
+    return;
+  }
   let daftar: Cust[] = [];
   let idx = 0;
   let inp: HTMLInputElement | null = null;
@@ -3770,6 +3920,10 @@ function moveActive(step: number): void {
 }
 
 function openManualItem(): void {
+  if (!bolehManual()) {
+    toast('Akun ini tidak punya izin item manual', 'error');
+    return;
+  }
   const m = openModal({
     title: 'Item manual (jasa / cetak)',
     body: `<div class="space-y-3 pos-scope">
@@ -3840,8 +3994,18 @@ function openManualItem(): void {
  *  bernama "tarik ..."). Tombol dialog ~1.5x (permintaan pemilik 2026-10-08
  *  "tombol-tombol pada modal bisa di besarkan setengahnya lagi"). */
 function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
+  if (!bolehLayanan()) {
+    toast('Akun ini tidak punya izin topup/tarik tunai', 'error');
+    return;
+  }
+  const bisaTopup = bolehTopup();
+  const bisaTarik = bolehTarik();
+  const sah = (j: TopupJenis) => bolehJenisLayanan(j);
+  if (!sah(jenisAwal)) {
+    jenisAwal = (bisaTopup ? TOPUP_JENIS[0].key : TARIK_JENIS[0].key) as TopupJenis;
+  }
   openModal({
-    title: 'Tambah topup / tarik tunai',
+    title: bisaTopup && bisaTarik ? 'Tambah topup / tarik tunai' : bisaTopup ? 'Tambah topup' : 'Tarik tunai (uang keluar)',
     okLabel: 'Tambah',
     // REDESAIN 2026-10-09 (keputusan pemilik: modal topup = prioritas 1 dari
     // screenshot kondisi lama — "ok sesuai sekali dengan rekomendasimu"):
@@ -3854,18 +4018,18 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
     // e2e-topup-keranjang & e2e-struk menempel padanya (`#ptk-nomor-wrap`
     // tetap toggle class `hidden`, tile aktif tetap dapat `!border-primary`).
     body: `<div class="ptk pos-scope">
-      <div>
+      ${bisaTopup ? `<div>
         <div class="ptk-group-title">Jenis topup</div>
         <div class="ptk-tiles ptk-tiles-topup" id="ptk-jenis">
           ${TOPUP_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
         </div>
-      </div>
-      <div>
+      </div>` : ''}
+      ${bisaTarik ? `<div>
         <div class="ptk-group-title">Tarik tunai (uang keluar)</div>
         <div class="ptk-tiles ptk-tiles-tarik" id="ptk-jenis-tarik">
           ${TARIK_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
         </div>
-      </div>
+      </div>` : ''}
       <div class="ptk-div"></div>
       <div id="ptk-nomor-wrap" class="hidden ptk-field">
         <label class="label" for="ptk-nomor" id="ptk-nomor-label">Nomor HP tujuan</label>
@@ -3910,12 +4074,10 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         b?.classList.add('!min-h-[40px]', '!px-4', 'text-sm');
       }
       api.ok.innerHTML = `${icon('check')}<span>Tambah</span>`;
-      let jenis: TopupJenis = TOPUP_JENIS.some((j) => j.key === jenisAwal) || TARIK_JENIS.some((j) => j.key === jenisAwal)
-        ? jenisAwal
-        : 'e-wallet';
+      let jenis: TopupJenis = sah(jenisAwal) ? jenisAwal : (bisaTopup ? TOPUP_JENIS[0].key : TARIK_JENIS[0].key) as TopupJenis;
       let adminTouched = false;
-      const wrapJenis = api.el.querySelector<HTMLElement>('#ptk-jenis')!;
-      const wrapTarik = api.el.querySelector<HTMLElement>('#ptk-jenis-tarik')!;
+      const wrapJenis = api.el.querySelector<HTMLElement>('#ptk-jenis');
+      const wrapTarik = api.el.querySelector<HTMLElement>('#ptk-jenis-tarik');
       const wrapNomor = api.el.querySelector<HTMLElement>('#ptk-nomor-wrap')!;
       const labelNomor = api.el.querySelector<HTMLElement>('#ptk-nomor-label')!;
       const inpNomor = api.el.querySelector<HTMLInputElement>('#ptk-nomor')!;
@@ -3944,7 +4106,7 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
       const tampilJenis = () => {
         const j = aktif();
         for (const wrap of [wrapJenis, wrapTarik]) {
-          wrap.querySelectorAll<HTMLElement>('[data-ptk-jenis]').forEach((b) => {
+          wrap?.querySelectorAll<HTMLElement>('[data-ptk-jenis]').forEach((b) => {
             const on = b.dataset.ptkJenis === jenis;
             // Tile aktif: border+teks+latar primer muda (bg ditambah 2026-10-09
             // saat redesain tile berikon — `!border-primary` DIPERTAHANKAN,
@@ -3971,8 +4133,8 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         jenis = b.dataset.ptkJenis as TopupJenis;
         tampilJenis();
       };
-      wrapJenis.addEventListener('click', pilihJenis);
-      wrapTarik.addEventListener('click', pilihJenis);
+      wrapJenis?.addEventListener('click', pilihJenis);
+      wrapTarik?.addEventListener('click', pilihJenis);
       // Saran admin mengikuti tier form topup; berhenti menimpa begitu kasir
       // mengedit kolomnya sendiri (pola saran-admin form layanan).
       inpNominal.addEventListener('input', () => {
@@ -4163,6 +4325,27 @@ async function segarkanStokPos(): Promise<void> {
 async function pay(opts?: { hutang?: boolean }): Promise<void> {
   if (!shift || busy) return;
   if (!keranjangTerisi()) return;
+  // Sanitasi izin terakhir sebelum menyentuh uang (jaring pengaman kalau
+  // state lama lolos restore): baris layanan tanpa izin / item manual tanpa
+  // izin tidak boleh membuat topup terkirim lalu nota ditolak 403 (uang
+  // setengah jalan). Diskon tanpa izin dinolkan — server pasti menolak.
+  if (cartTopup.some((t) => !bolehJenisLayanan(t.jenis))) {
+    toast('Ada baris layanan yang tidak diizinkan akun ini — hapus dulu barisnya', 'error');
+    paintCart();
+    return;
+  }
+  if (!bolehManual() && cart.some((l) => l.product_id === null)) {
+    toast('Ada item manual di keranjang, tetapi akun ini tidak punya izinnya — hapus dulu barisnya', 'error');
+    paintCart();
+    return;
+  }
+  if (!bolehDiskon() && (discount > 0 || cart.some((l) => l.discount > 0))) {
+    discount = 0;
+    for (const l of cart) l.discount = 0;
+    simpanKeranjang();
+    paintCart();
+    toast('Diskon dibersihkan — akun ini tidak punya izin diskon', 'warning');
+  }
   // BARRIER TUNAI (keluhan pemilik 2026-10-03): uang diterima WAJIB diisi
   // dan tidak kurang dari total — meniru payment screen Aronium yang tak bisa
   // konfirmasi sebelum Paid amount masuk.
@@ -4663,6 +4846,10 @@ function bindSidebar(): void {
     openDialogTopupKeranjang();
   });
   host!.querySelector('#pos-qa-disc')?.addEventListener('click', () => {
+    if (!bolehDiskon()) {
+      toast('Akun ini tidak punya izin diskon', 'error');
+      return;
+    }
     host!.querySelector<HTMLInputElement>('#pos-discount')?.focus();
   });
   // Cetak ulang nota terakhir (Tahap 2) — dialog jalur Riwayat, tanpa
@@ -4763,6 +4950,7 @@ function bindPintasan(): void {
         // ada di tombol "Diskon F6" grid Aksi cepat, permintaan pemilik
         // putaran 7 2026-10-04).
         if (!shift) return;
+        if (!bolehDiskon()) return;
         const d = host?.querySelector<HTMLInputElement>('#pos-discount');
         if (d) {
           d.focus();
@@ -5170,6 +5358,12 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
       // Master pelanggan untuk info bar (revisi 2026-10-04). Gagal/ offline =
       // daftar kosong -> select hanya placeholder, payload tanpa customer_id
       // (client lama) tetap sah. Bawaan = "Pelanggan Umum".
+      // Tanpa `pelanggan.lihat` jangan memanggil endpoint (server 403):
+      // POS tetap bisa menjual tanpa kontak.
+      if (!bolehPilihPelanggan()) {
+        customers = [];
+        return;
+      }
       try {
         const r = await apiGet<{ data: Cust[] }>('/api/customers');
         customers = r.data;
@@ -5213,7 +5407,11 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
   // Pelanggan terpilih wajib ada di master terkini: id lama (kontak dihapus
   // sejak mount terakhir / kv lama) jatuh ke Pelanggan Umum — pola muatHold.
   // null saat customers kosong dibiarkan (payload tanpa customer_id sah).
-  if (!customers.some((c) => c.id === customerId)) {
+  // Tanpa izin daftar pelanggan, kontak apa pun dibuang (selectnya memang
+  // tidak dirender).
+  if (!bolehPilihPelanggan()) {
+    customerId = null;
+  } else if (!customers.some((c) => c.id === customerId)) {
     customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
   }
   if (cart.length) simpanKeranjang(); // sinkronkan localStorage dengan state tervalidasi di atas

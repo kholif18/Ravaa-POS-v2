@@ -73,7 +73,7 @@ export function renderLoginPage(el: HTMLElement): void {
     try {
       const { akun, wajib } = await masuk(u, p);
       toast(`Selamat datang, ${akun.name}`, 'success');
-      location.hash = wajib ? '#/ubah-sandi' : ruteBawaan(akun.role);
+      location.hash = wajib ? '#/ubah-sandi' : ruteBawaan(akun);
     } catch (e2) {
       err.textContent = e2 instanceof Error ? e2.message : 'gagal masuk';
       err.classList.remove('hidden');

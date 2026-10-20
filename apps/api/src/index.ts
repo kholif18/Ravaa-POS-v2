@@ -55,16 +55,145 @@ app.onError((err, c) => {
 // gagal peran = 403. Endpoint yang butuh peranasebutkan eksplisit di bawah
 // lewat `hanyaOwner`; yang tidak disebut = kedua peran boleh (kecuali
 // login/logout/me yang punya aturan sendiri).
-type Pengguna = { id: number; username: string; name: string; role: 'owner' | 'kasir' };
+type Pengguna = {
+  id: number;
+  username: string;
+  name: string;
+  role: 'owner' | 'kasir';
+  /** JSON array izin operasional (Paket B4). NULL = default role. */
+  permissions?: string | null;
+};
 type Sesi = Pengguna & { must_change: number };
 
 const UMUR_SESI_HARI = 30;
+
+// ---------- izin operasional (Paket B4, 2026-10-20) ----------
+// Izin CORE sengaja TIDAK masuk kolom users.permissions: empat rute ini tetap
+// dijaga `hanyaOwner` (role, bukan izin) supaya kasir yang diberi banyak izin
+// operasional tidak pernah bisa mengelola akun/backup/audit/mengubah aturan
+// global. Sisanya = izin operasional yang dapat disetel owner per akun.
+const IZIN_CORE = ['pengguna.kelola', 'pengaturan.ubah', 'backup.kelola', 'audit.lihat'] as const;
+const IZIN_OPERASIONAL = [
+  // POS
+  'pos.jual', 'pos.diskon', 'pos.harga', 'pos.item_manual', 'pos.topup', 'pos.tarik', 'pos.hold_semua',
+  // Riwayat & retur
+  'riwayat.lihat', 'riwayat.semua', 'retur.lihat', 'retur.buat', 'retur.batal',
+  // Pelanggan & hutang
+  'pelanggan.lihat', 'pelanggan.ubah', 'pelanggan.hapus',
+  'hutang.lihat', 'hutang.catat', 'hutang.bayar', 'hutang.hapus',
+  // Pesanan jasa
+  'pesanan.lihat', 'pesanan.buat', 'pesanan.bayar', 'pesanan.batal',
+  // Stok & shift
+  'stok.lihat', 'stok.restock', 'stok.opname',
+  'shift.lihat', 'shift.buka', 'shift.tutup', 'shift.kelola',
+  // Manajemen
+  'produk.kelola', 'supplier.kelola', 'pembelian.kelola', 'laporan.lihat',
+  'pengeluaran.kelola', 'kasmasuk.kelola',
+] as const;
+type IzinOperasional = (typeof IZIN_OPERASIONAL)[number];
+const SET_IZIN = new Set<string>(IZIN_OPERASIONAL);
+const SET_CORE = new Set<string>(IZIN_CORE);
+
+// Default kasir "Standar" = perilaku sebelum B4: POS penuh, riwayat/retur,
+// pelanggan/hutang, pesanan, stok (lihat/restock/opname), shift sendiri.
+// Manajemen (produk/supplier/pembelian/laporan/pengeluaran/kas masuk) dan
+// `shift.kelola`/`pos.hold_semua` TIDAK diberikan (dulu memang khusus owner).
+const IZIN_KASIR_STANDAR: readonly IzinOperasional[] = IZIN_OPERASIONAL.filter(
+  (i) =>
+    i !== 'pos.hold_semua' &&
+    i !== 'shift.kelola' &&
+    i !== 'produk.kelola' &&
+    i !== 'supplier.kelola' &&
+    i !== 'pembelian.kelola' &&
+    i !== 'laporan.lihat' &&
+    i !== 'pengeluaran.kelola' &&
+    i !== 'kasmasuk.kelola',
+);
+const SET_STANDAR = new Set<string>(IZIN_KASIR_STANDAR);
+
+function bacaIzinTersimpan(raw: unknown): Set<string> | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  try {
+    const arr = JSON.parse(String(raw));
+    if (!Array.isArray(arr)) return new Set<string>();
+    // Nilai asing/core diabaikan saat membaca (data lama/lebih baru tidak
+    // boleh membuat kasir mendapat akses core lewat kolom ini).
+    return new Set(arr.map(String).filter((x) => SET_IZIN.has(x)));
+  } catch {
+    // Kolom rusak = fail closed. Jangan diam-diam memberi default penuh.
+    console.error('[izin] permissions tidak bisa dibaca — dianggap tanpa izin');
+    return new Set<string>();
+  }
+}
+
+/** Izin efektif sesi. Owner selalu punya SEMUA izin operasional; core tetap
+ *  dijaga `hanyaOwner` dan tidak pernah dibaca dari kolom permissions. */
+function izinEfektif(u: { role: string; permissions?: string | null }): Set<string> {
+  if (u.role === 'owner') return new Set<string>(IZIN_OPERASIONAL);
+  const terbaca = bacaIzinTersimpan(u.permissions);
+  if (terbaca === null) return new Set<string>(SET_STANDAR);
+  return terbaca;
+}
+function bolehIzin(u: { role: string; permissions?: string | null }, izin: IzinOperasional): boolean {
+  return u.role === 'owner' || izinEfektif(u).has(izin);
+}
+
+/** Validasi payload izin dari form owner. `undefined` = tidak dikirim (update
+ *  mempertahankan nilai lama); null/'' = kembali default role; array = custom. */
+function validasiKirimanIzin(raw: unknown): { ok: true; json: string | null } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, json: null };
+  if (raw === null || raw === '') return { ok: true, json: null };
+  if (!Array.isArray(raw)) return { ok: false, error: 'permissions harus array izin operasional' };
+  const bersih: string[] = [];
+  for (const x of raw) {
+    const k = String(x ?? '').trim();
+    if (!k) continue;
+    if (SET_CORE.has(k)) {
+      return { ok: false, error: `izin core hanya milik owner: ${k}` };
+    }
+    if (!SET_IZIN.has(k)) return { ok: false, error: `izin tidak dikenal: ${k}` };
+    if (!bersih.includes(k)) bersih.push(k);
+  }
+  return { ok: true, json: JSON.stringify(bersih) };
+}
+
+/** Profil akun yang aman dikirim ke client (tanpa hash sandi/PIN). */
+function profilAkun(u: {
+  id: number; username: string; name: string; role: string;
+  avatar?: string | null; email?: string; permissions?: string | null;
+  pin_updated_at?: string | null;
+}) {
+  return {
+    id: u.id,
+    username: u.username,
+    name: u.name,
+    role: u.role,
+    avatar: u.avatar ?? null,
+    email: u.email ?? '',
+    permissions: [...izinEfektif(u)],
+    permissions_custom: u.permissions !== null && u.permissions !== undefined,
+    pin_set: Boolean(u.pin_updated_at),
+    pin_updated_at: u.pin_updated_at ?? null,
+  };
+}
+
+const wajibIzin = (izin: IzinOperasional): MiddlewareHandler => async (c, next) => {
+  const u = c.get('user') as Pengguna | undefined;
+  if (!u || !bolehIzin(u, izin)) {
+    return c.json({ error: `izin ${izin} tidak diberikan untuk akun ini — hubungi owner` }, 403);
+  }
+  await next();
+};
+
+/** Error otorisasi dari dalam transaksi (insertSale) — rute membalas 403,
+ *  bukan 400 seperti validasi payload biasa. */
+class IzinError extends Error {}
 
 function sesiDariToken(auth: string | undefined): Sesi | null {
   const m = /^Bearer ([0-9a-f]{64})$/.exec(String(auth ?? '').trim());
   if (!m) return null;
   const row = db.prepare(
-    `SELECT u.id, u.username, u.name, u.role, u.must_change
+    `SELECT u.id, u.username, u.name, u.role, u.must_change, u.permissions
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token = ? AND s.expires_at > datetime('now') AND u.is_active = 1`,
   ).get(m[1]) as Sesi | undefined;
@@ -146,6 +275,96 @@ function catatAudit(
 }
 
 
+// ---------- PIN cepat & kunci layar (Paket B5, 2026-10-20) ----------
+// PIN 6 digit HANYA untuk membuka kunci layar perangkat dan berpindah akun
+// dari sesi yang sudah aktif. BUKAN pengganti sandi/login publik: token API
+// tetap milik sesi yang sedang login (kunci layar = lapisan UI, bukan
+// pencabutan token). Hash memakai scrypt yang sama dengan sandi.
+const PIN_PANJANG = 6;
+const PIN_MAKS_GAGAL_SEBELUM_KUNCI = 5;
+
+function tokenDariHeader(auth: string | undefined): string | null {
+  const m = /^Bearer ([0-9a-f]{64})$/.exec(String(auth ?? '').trim());
+  return m ? m[1] : null;
+}
+
+type BarisPin = {
+  id: number; username: string; name: string; role: string; is_active: number;
+  must_change: number; avatar: string | null; email: string;
+  permissions: string | null; pin_hash: string | null; pin_failed: number;
+  pin_locked_until: string | null; pin_updated_at: string | null;
+};
+
+function detikSampai(until: string | null): number {
+  if (!until) return 0;
+  const t = Date.parse(`${String(until).replace(' ', 'T')}Z`);
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, Math.ceil((t - Date.now()) / 1000));
+}
+
+function kartuPin(row: BarisPin) {
+  return {
+    id: row.id,
+    username: row.username,
+    name: row.name,
+    role: row.role,
+    avatar: row.avatar,
+    email: row.email,
+    permissions: row.permissions,
+    pin_updated_at: row.pin_updated_at,
+  };
+}
+
+function gagalPin(userId: number, gagalLama: number): { status: number; error: string; retry_after: number } {
+  const gagal = gagalLama + 1;
+  // Ambang berjenjang (kontrak §3): 5 gagal = 60 dtk, 10 = 300 dtk,
+  // 15+ = 900 dtk. Hitungan TIDAK di-reset saat kunci habis — hanya
+  // verifikasi berhasil / reset PIN owner yang mengosongkannya.
+  const detik = gagal >= 15 ? 900 : gagal >= 10 ? 300 : gagal >= 5 ? 60 : 0;
+  if (detik > 0) {
+    db.prepare(
+      `UPDATE users SET pin_failed = ?, pin_locked_until = datetime('now', ?) WHERE id = ?`,
+    ).run(gagal, `+${detik} seconds`, userId);
+    return {
+      status: 429,
+      error: `terlalu banyak percobaan PIN — coba lagi dalam ${detik} detik`,
+      retry_after: detik,
+    };
+  }
+  db.prepare('UPDATE users SET pin_failed = ? WHERE id = ?').run(gagal, userId);
+  return { status: 401, error: 'PIN salah', retry_after: 0 };
+}
+
+/** Verifikasi PIN satu akun. Efek samping: menaikkan penalti saat salah dan
+ *  mengosongkan penalti saat benar. Mengembalikan baris user segar saat ok. */
+function verifikasiPin(userId: number, pin: string):
+  | { ok: true; row: BarisPin }
+  | { ok: false; status: number; error: string; retry_after?: number } {
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as BarisPin | undefined;
+  if (!row) return { ok: false, status: 404, error: 'pengguna tidak ada' };
+  if (!row.is_active) return { ok: false, status: 403, error: 'akun ini dinonaktifkan — hubungi owner' };
+  if (!row.pin_hash) return { ok: false, status: 400, error: 'PIN belum diatur untuk akun ini' };
+  const sisa = detikSampai(row.pin_locked_until);
+  if (sisa > 0) {
+    return {
+      ok: false,
+      status: 429,
+      error: `terlalu banyak percobaan PIN — coba lagi dalam ${sisa} detik`,
+      retry_after: sisa,
+    };
+  }
+  if (!new RegExp(`^\\d{${PIN_PANJANG}}$`).test(String(pin ?? '')) || !verifyPassword(String(pin), row.pin_hash)) {
+    return { ok: false, ...gagalPin(userId, Number(row.pin_failed) || 0) };
+  }
+  db.prepare(
+    `UPDATE users SET pin_failed = 0, pin_locked_until = NULL WHERE id = ?`,
+  ).run(userId);
+  return {
+    ok: true,
+    row: { ...row, pin_failed: 0, pin_locked_until: null },
+  };
+}
+
 // ---------- sesi & pengguna (login 2026-10-11) ----------
 const BOLEH_SANDI_MIN = 4;
 
@@ -158,7 +377,11 @@ app.post('/api/login', async (c) => {
     const password = String(body?.password ?? '');
     if (!username || !password) return c.json({ error: 'username dan password wajib diisi' }, 400);
     const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as
-      | { id: number; username: string; name: string; role: string; password_hash: string; is_active: number; must_change: number }
+      | {
+          id: number; username: string; name: string; role: string; password_hash: string;
+          is_active: number; must_change: number; avatar: string | null; email: string;
+          permissions: string | null; pin_updated_at: string | null;
+        }
       | undefined;
     if (!u || !verifyPassword(password, u.password_hash)) {
       catatAudit(c, 'login-gagal', 'session', '', { username });
@@ -175,7 +398,7 @@ app.post('/api/login', async (c) => {
     return c.json({
       data: {
         token,
-        user: { id: u.id, username: u.username, name: u.name, role: u.role },
+        user: profilAkun(u),
         must_change: u.must_change === 1,
       },
     });
@@ -196,29 +419,185 @@ app.get('/api/me', (c) => {
   const u = c.get('user') as Sesi;
   // Baca ulang baris user: avatar/email bisa berubah di tengah sesi (edit
   // profil) — jangan pakai snapshot middleware yang hanya memuat 4 kolom.
-  const segar = db.prepare('SELECT id, username, name, role, avatar, email FROM users WHERE id = ?').get(u.id) as
-    | { id: number; username: string; name: string; role: string; avatar: string | null; email: string }
+  const segar = db.prepare(
+    'SELECT id, username, name, role, avatar, email, permissions, pin_updated_at FROM users WHERE id = ?',
+  ).get(u.id) as
+    | { id: number; username: string; name: string; role: string; avatar: string | null; email: string; permissions: string | null; pin_updated_at: string | null }
     | undefined;
-  const user = segar ?? { id: u.id, username: u.username, name: u.name, role: u.role, avatar: null, email: '' };
+  const user = segar ?? {
+    id: u.id, username: u.username, name: u.name, role: u.role,
+    avatar: null, email: '', permissions: u.permissions ?? null, pin_updated_at: null,
+  };
   return c.json({
     data: {
-      user,
+      user: profilAkun(user),
       must_change: u.must_change === 1,
     },
   });
 });
 
 function barisUserBersih(r: unknown) {
-  const u = r as { id: number; username: string; name: string; role: string; is_active: number; must_change: number; created_at: string; avatar?: string | null; email?: string };
-  return { id: u.id, username: u.username, name: u.name, role: u.role, is_active: u.is_active, must_change: u.must_change, created_at: u.created_at, avatar: u.avatar ?? null, email: u.email ?? '' };
+  const u = r as {
+    id: number; username: string; name: string; role: string; is_active: number;
+    must_change: number; created_at: string; avatar?: string | null; email?: string;
+    permissions?: string | null; pin_updated_at?: string | null;
+  };
+  return {
+    ...profilAkun(u),
+    is_active: u.is_active,
+    must_change: u.must_change,
+    created_at: u.created_at,
+  };
 }
 
-// Daftar akun (owner saja) — TANPA hash sandi, jangan pernah dikirim.
+// Daftar akun (owner saja) — TANPA hash sandi/PIN, jangan pernah dikirim.
 app.get('/api/users', hanyaOwner, (c) => {
   const rows = db.prepare(
-    'SELECT id, username, name, role, is_active, must_change, created_at FROM users ORDER BY id',
+    `SELECT id, username, name, role, is_active, must_change, created_at, avatar, email,
+            permissions, pin_updated_at
+       FROM users ORDER BY id`,
   ).all();
   return c.json({ data: (rows as unknown[]).map(barisUserBersih) });
+});
+
+// Daftar ringkas untuk layar kunci / pilih akun cepat. Semua akun aktif boleh
+// dibaca sesi mana pun (hanya id/nama/peran + status punya PIN; bukan rahasia),
+// karena layar kunci memang harus menampilkan pilihan akun tanpa memanggil
+// endpoint owner-only.
+app.get('/api/users/ringkas', (c) => {
+  const rows = db.prepare(
+    `SELECT id, username, name, role, avatar, pin_updated_at, is_active
+       FROM users WHERE is_active = 1 ORDER BY name COLLATE NOCASE, id`,
+  ).all() as { id: number; username: string; name: string; role: string; avatar: string | null; pin_updated_at: string | null; is_active: number }[];
+  return c.json({
+    data: rows.map((r) => ({
+      id: r.id,
+      username: r.username,
+      name: r.name,
+      role: r.role,
+      avatar: r.avatar,
+      pin_set: Boolean(r.pin_updated_at),
+    })),
+  });
+});
+
+// Atur / ganti PIN sendiri. Bila sudah punya PIN, `old_pin` wajib dan ikut
+// kena rate-limit yang sama — tanpa itu siapa pun yang memegang sesi terbuka
+// bisa mengganti PIN korban tanpa tahu PIN lama.
+app.post('/api/users/pin', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const u = c.get('user') as Sesi;
+    const pin = String(body?.pin ?? '').trim();
+    if (!new RegExp(`^\\d{${PIN_PANJANG}}$`).test(pin)) {
+      return c.json({ error: `PIN harus ${PIN_PANJANG} digit angka` }, 400);
+    }
+    const lama = db.prepare('SELECT pin_hash FROM users WHERE id = ?').get(u.id) as
+      { pin_hash: string | null } | undefined;
+    if (!lama) return c.json({ error: 'pengguna tidak ada' }, 404);
+    if (lama.pin_hash) {
+      const oldPin = String(body?.old_pin ?? '').trim();
+      if (!oldPin) return c.json({ error: 'PIN lama wajib diisi untuk mengganti PIN' }, 400);
+      const v = verifikasiPin(u.id, oldPin);
+      if (!v.ok) {
+        return c.json({ error: v.error, ...(v.retry_after ? { retry_after: v.retry_after } : {}) }, v.status as 400);
+      }
+    }
+    const row = db.prepare(
+      `UPDATE users SET pin_hash = ?, pin_failed = 0, pin_locked_until = NULL,
+         pin_updated_at = datetime('now') WHERE id = ? RETURNING pin_updated_at`,
+    ).get(hashPassword(pin), u.id) as { pin_updated_at: string };
+    catatAudit(c, 'update', 'user', u.id, { pin: true, aksi: 'set-pin' });
+    return c.json({ data: { pin_set: true, pin_updated_at: row.pin_updated_at } });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal menyimpan PIN' }, 400);
+  }
+});
+
+// Verifikasi PIN sesi berjalan (membuka kunci layar). Online didahulukan;
+// klien boleh jatuh ke verifier lokal HANYA saat jaringan error (bukan 401).
+app.post('/api/users/pin/verify', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const u = c.get('user') as Sesi;
+    const pin = String(body?.pin ?? '').trim();
+    const v = verifikasiPin(u.id, pin);
+    if (!v.ok) {
+      catatAudit(c, 'login-gagal', 'session', u.id, { pin: true, alasan: v.error });
+      return c.json(
+        { error: v.error, ...(v.retry_after ? { retry_after: v.retry_after } : {}) },
+        v.status as 400,
+      );
+    }
+    return c.json({ data: { ok: true, pin_updated_at: v.row.pin_updated_at } });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal verifikasi PIN' }, 400);
+  }
+});
+
+// Pindah akun cepat dari sesi aktif. Token lama DICABUT, token baru diterbitkan
+// untuk target — supaya device yang berpindah tidak meninggalkan sesi akun
+// sebelumnya tetap hidup. Target `owner` hanya boleh dipilih dari sesi owner.
+app.post('/api/users/pin/switch', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const saya = c.get('user') as Sesi;
+    const targetId = Number(body?.user_id);
+    if (!Number.isInteger(targetId)) return c.json({ error: 'user_id harus integer' }, 400);
+    const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as BarisPin | undefined;
+    if (!target) return c.json({ error: 'pengguna tidak ada' }, 404);
+    if (!target.is_active) return c.json({ error: 'akun ini dinonaktifkan — hubungi owner' }, 403);
+    if (target.role === 'owner' && saya.role !== 'owner') {
+      return c.json({ error: 'akun owner hanya bisa dipilih dari sesi owner' }, 403);
+    }
+    const v = verifikasiPin(targetId, String(body?.pin ?? '').trim());
+    if (!v.ok) {
+      catatAudit(c, 'login-gagal', 'session', targetId, { pin: true, switch: true, alasan: v.error });
+      return c.json(
+        { error: v.error, ...(v.retry_after ? { retry_after: v.retry_after } : {}) },
+        v.status as 400,
+      );
+    }
+    const token = randomBytes(32).toString('hex');
+    const lama = tokenDariHeader(c.req.header('Authorization'));
+    transaksi(() => {
+      if (lama) db.prepare('DELETE FROM sessions WHERE token = ?').run(lama);
+      db.prepare(
+        `INSERT INTO sessions (token, user_id, expires_at)
+         VALUES (?, ?, datetime('now', ?))`,
+      ).run(token, targetId, `+${UMUR_SESI_HARI} days`);
+    })();
+    catatAudit(c, 'login', 'session', targetId, { switch: true }, {
+      id: target.id, username: target.username, role: target.role,
+    });
+    return c.json({
+      data: {
+        token,
+        user: profilAkun(v.row),
+        must_change: target.must_change === 1,
+      },
+    });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal pindah akun' }, 400);
+  }
+});
+
+// Reset / hapus PIN akun (owner). Semua sesi target diputus: PIN adalah kunci
+// cepat yang bisa dipakai dari device lain, jadi reset harus memaksa sandi
+// ulang di semua device. Owner yang mereset PIN sendiri akan ikut keluar.
+app.delete('/api/users/:id/pin', hanyaOwner, (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  const ada = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id) as
+    { id: number; username: string } | undefined;
+  if (!ada) return c.json({ error: 'pengguna tidak ada' }, 404);
+  db.prepare(
+    `UPDATE users SET pin_hash = NULL, pin_failed = 0, pin_locked_until = NULL,
+       pin_updated_at = NULL WHERE id = ?`,
+  ).run(id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+  catatAudit(c, 'update', 'user', id, { pin: false, aksi: 'reset-pin', sesi_diputus: true });
+  return c.json({ data: { id, pin_set: false, sesi_diputus: true } });
 });
 
 // Tambah / ubah akun (owner saja). Tanpa id = baru (password wajib, min 4,
@@ -232,6 +611,10 @@ app.post('/api/users', hanyaOwner, async (c) => {
     const saya = c.get('user') as Pengguna;
     const id = body?.id === undefined || body?.id === null || body?.id === '' ? null : Number(body.id);
     if (id !== null && !Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+    // `permissions` (B4): undefined = jangan ubah (update) / default role
+    // (insert); null/'' = kembali ke default role; array = izin custom.
+    const izinKirim = validasiKirimanIzin(body?.permissions);
+    if (!izinKirim.ok) return c.json({ error: izinKirim.error }, 400);
     if (id === null) {
       const username = String(body?.username ?? '').trim();
       const name = String(body?.name ?? '').trim() || username;
@@ -247,15 +630,20 @@ app.post('/api/users', hanyaOwner, async (c) => {
         return c.json({ error: 'username sudah dipakai' }, 409);
       }
       const row = db.prepare(
-        `INSERT INTO users (username, name, password_hash, role, must_change)
-         VALUES (?, ?, ?, ?, 1) RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email`,
-      ).get(username, name, hashPassword(password), role);
+        `INSERT INTO users (username, name, password_hash, role, must_change, permissions)
+         VALUES (?, ?, ?, ?, 1, ?)
+         RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email,
+                   permissions, pin_updated_at`,
+      ).get(username, name, hashPassword(password), role, izinKirim.json);
       const bersih = barisUserBersih(row);
-      catatAudit(c, 'create', 'user', bersih.id, { username: bersih.username, role: bersih.role });
+      catatAudit(c, 'create', 'user', bersih.id, {
+        username: bersih.username, role: bersih.role,
+        permissions_custom: bersih.permissions_custom,
+      });
       return c.json({ data: bersih }, 201);
     }
     const ada = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as
-      | { id: number; username: string; role: string; is_active: number }
+      | { id: number; username: string; name: string; role: string; is_active: number; pin_hash: string | null }
       | undefined;
     if (!ada) return c.json({ error: 'pengguna tidak ada' }, 404);
     const name = body?.name === undefined ? undefined : String(body.name).trim();
@@ -281,6 +669,17 @@ app.post('/api/users', hanyaOwner, async (c) => {
       ).get(id) as { n: number }).n;
       if (lain === 0) return c.json({ error: 'owner aktif terakhir tidak bisa diturunkan/dinonaktifkan' }, 400);
     }
+    // Nama tampilan = identitas shift. Mengganti nama saat shift masih terbuka
+    // membuat shift itu tidak lagi bisa ditutup oleh pemiliknya (dan kasir bisa
+    // "kehilangan" laci). Tutup shift dulu, baru ganti nama.
+    if (name !== undefined && name !== ada.name) {
+      const buka = db.prepare(
+        "SELECT COUNT(*) AS n FROM shifts WHERE cashier = ? AND status = 'open'",
+      ).get(ada.name) as { n: number };
+      if (buka.n > 0) {
+        return c.json({ error: 'nama tidak bisa diubah saat akun ini masih punya shift terbuka — tutup shift dulu' }, 400);
+      }
+    }
     const row = db.prepare(
       `UPDATE users SET
          name = COALESCE(?, name),
@@ -288,17 +687,33 @@ app.post('/api/users', hanyaOwner, async (c) => {
          is_active = COALESCE(?, is_active),
          password_hash = COALESCE(?, password_hash),
          email = COALESCE(?, email),
-         must_change = CASE WHEN ? IS NOT NULL THEN 1 ELSE must_change END
-       WHERE id = ? RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email`,
+         permissions = CASE WHEN ? = 1 THEN ? ELSE permissions END,
+         must_change = CASE WHEN ? IS NOT NULL THEN 1 ELSE must_change END,
+         pin_hash = CASE WHEN ? IS NOT NULL THEN NULL ELSE pin_hash END,
+         pin_failed = CASE WHEN ? IS NOT NULL THEN 0 ELSE pin_failed END,
+         pin_locked_until = CASE WHEN ? IS NOT NULL THEN NULL ELSE pin_locked_until END,
+         pin_updated_at = CASE WHEN ? IS NOT NULL THEN NULL ELSE pin_updated_at END
+       WHERE id = ?
+       RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email,
+                 permissions, pin_updated_at`,
     ).get(
       name ?? null, role ?? null, aktif === undefined ? null : aktif ? 1 : 0,
       password === undefined ? null : hashPassword(password),
       body?.email === undefined || body?.email === null ? null : String(body.email).trim(),
+      body?.permissions === undefined ? 0 : 1, izinKirim.json,
+      password === undefined ? null : 1,
+      password === undefined ? null : 1,
+      password === undefined ? null : 1,
+      password === undefined ? null : 1,
       password === undefined ? null : 1, id,
     );
     const bersih = barisUserBersih(row);
+    // Password baru lewat owner = PIN lama dicabut + semua sesi target diputus
+    // (user harus masuk ulang dengan sandi baru, bukan PIN lama).
+    if (password !== undefined) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
     catatAudit(c, 'update', 'user', bersih.id, {
       role: bersih.role, aktif: bersih.is_active, sandi_diubah: password !== undefined,
+      permissions_custom: bersih.permissions_custom,
     });
     return c.json({ data: bersih }, 200);
   } catch (e) {
@@ -316,9 +731,12 @@ app.post('/api/users/:id/password', hanyaOwner, async (c) => {
     if (password.length < BOLEH_SANDI_MIN) return c.json({ error: `sandi minimal ${BOLEH_SANDI_MIN} karakter` }, 400);
     const ada = db.prepare('SELECT id FROM users WHERE id = ?').get(id) as { id: number } | undefined;
     if (!ada) return c.json({ error: 'pengguna tidak ada' }, 404);
-    db.prepare('UPDATE users SET password_hash = ?, must_change = 1 WHERE id = ?').run(hashPassword(password), id);
+    db.prepare(
+      `UPDATE users SET password_hash = ?, must_change = 1, pin_hash = NULL,
+         pin_failed = 0, pin_locked_until = NULL, pin_updated_at = NULL WHERE id = ?`,
+    ).run(hashPassword(password), id);
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id); // paksa masuk ulang di semua device
-    catatAudit(c, 'update', 'user', id, { reset_sandi: true, sesi_diputus: true });
+    catatAudit(c, 'update', 'user', id, { reset_sandi: true, pin_dicabut: true, sesi_diputus: true });
     return c.json({ data: { id, reset: true } });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal reset sandi' }, 400);
@@ -385,6 +803,15 @@ app.post('/api/users/profile', async (c) => {
     const name = String(body?.name ?? '').trim();
     if (!name) return c.json({ error: 'nama tidak boleh kosong' }, 400);
     if (name.length > 32) return c.json({ error: 'nama maksimal 32 karakter' }, 400);
+    const lama = db.prepare('SELECT name FROM users WHERE id = ?').get(u.id) as { name: string } | undefined;
+    if (lama && name !== lama.name) {
+      const buka = db.prepare(
+        "SELECT COUNT(*) AS n FROM shifts WHERE cashier = ? AND status = 'open'",
+      ).get(lama.name) as { n: number };
+      if (buka.n > 0) {
+        return c.json({ error: 'nama tidak bisa diubah saat masih ada shift terbuka — tutup shift dulu' }, 400);
+      }
+    }
     // Email OPSIONAL: kosong = hapus; isi = divalidasi format sederhana.
     const emailRaw = body?.email === undefined || body?.email === null ? undefined : String(body.email).trim();
     let email: string | undefined;
@@ -395,7 +822,9 @@ app.post('/api/users/profile', async (c) => {
       } else email = emailRaw;
     }
     const row = db.prepare(
-      `UPDATE users SET name = ?, email = COALESCE(?, email) WHERE id = ? RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email`,
+      `UPDATE users SET name = ?, email = COALESCE(?, email) WHERE id = ?
+       RETURNING id, username, name, role, is_active, must_change, created_at, avatar, email,
+                 permissions, pin_updated_at`,
     ).get(name, email ?? null, u.id);
     return c.json({ data: barisUserBersih(row) }, 200);
   } catch (e) {
@@ -414,8 +843,11 @@ app.post('/api/users/password', async (c) => {
     if (baru.length < BOLEH_SANDI_MIN) return c.json({ error: `sandi minimal ${BOLEH_SANDI_MIN} karakter` }, 400);
     const cur = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(u.id) as { password_hash: string };
     if (!verifyPassword(lama, cur.password_hash)) return c.json({ error: 'sandi lama salah' }, 401);
-    db.prepare('UPDATE users SET password_hash = ?, must_change = 0 WHERE id = ?').run(hashPassword(baru), u.id);
-    catatAudit(c, 'update', 'user', u.id, { ganti_sandi_sendiri: true });
+    db.prepare(
+      `UPDATE users SET password_hash = ?, must_change = 0, pin_hash = NULL,
+         pin_failed = 0, pin_locked_until = NULL, pin_updated_at = NULL WHERE id = ?`,
+    ).run(hashPassword(baru), u.id);
+    catatAudit(c, 'update', 'user', u.id, { ganti_sandi_sendiri: true, pin_dicabut: true });
     return c.json({ data: { ok: true } });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal ganti sandi' }, 400);
@@ -570,7 +1002,7 @@ app.delete('/api/units/:slug', hanyaOwner, (c) => {
 // `SUM(charge) - SUM(payment)` saat dibaca, supaya hapus 1 baris mutasi tidak
 // meninggalkan angka basi. Baca juga AGENTS.md §3 (kontrak endpoint ini).
 
-app.get('/api/customers', (c) => {
+app.get('/api/customers', wajibIzin('pelanggan.lihat'), (c) => {
   const q = (c.req.query('q') ?? '').trim();
   // Filter multi-kata (pola search produk): SEMUA kata harus cocok di
   // name/phone/note — tidak harus di field atau urutan yang sama.
@@ -620,7 +1052,7 @@ function nomorUrut(tabel: 'customers' | 'suppliers', kolom: 'code', pref: 'CUS-'
   return `${pref}${String(urut).padStart(6, '0')}`;
 }
 
-app.post('/api/customers', async (c) => {
+app.post('/api/customers', wajibIzin('pelanggan.ubah'), async (c) => {
   try {
     const body = await c.req.json();
     const name = String(body?.name ?? '').trim();
@@ -670,7 +1102,7 @@ app.post('/api/customers', async (c) => {
 
 // Hapus pelanggan — DITOLAK bila masih punya catatan hutang (riwayat harus
 // utuh, pola yang sama dengan hapus produk yang pernah terjual).
-app.delete('/api/customers/:id', (c) => {
+app.delete('/api/customers/:id', wajibIzin('pelanggan.hapus'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(id) as { id: number } | undefined;
@@ -703,7 +1135,7 @@ app.delete('/api/customers/:id', (c) => {
 // Dipakai Tahap 3 Pembelian sebagai pilihan pemasok. Hapus = langsung (belum
 // ada tabel yang mereferensinya; Tahap 3 wajib menambah guard 400 seperti
 // hapus pelanggan berhutang / produk yang pernah terjual).
-app.get('/api/suppliers', hanyaOwner, (c) => {
+app.get('/api/suppliers', wajibIzin('supplier.kelola'), (c) => {
   const q = (c.req.query('q') ?? '').trim();
   const kata = q.split(/\s+/).filter(Boolean);
   const conds = kata.map(() => "(lower(s.name) LIKE ? OR s.phone LIKE ? OR lower(s.note) LIKE ?)");
@@ -724,7 +1156,7 @@ app.get('/api/suppliers', hanyaOwner, (c) => {
   return c.json({ data: rows, total });
 });
 
-app.post('/api/suppliers', hanyaOwner, async (c) => {
+app.post('/api/suppliers', wajibIzin('supplier.kelola'), async (c) => {
   try {
     const body = await c.req.json();
     const name = String(body?.name ?? '').trim();
@@ -762,7 +1194,7 @@ app.post('/api/suppliers', hanyaOwner, async (c) => {
   }
 });
 
-app.delete('/api/suppliers/:id', hanyaOwner, (c) => {
+app.delete('/api/suppliers/:id', wajibIzin('supplier.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const ada = db.prepare('SELECT id FROM suppliers WHERE id = ?').get(id) as { id: number } | undefined;
@@ -834,7 +1266,7 @@ function hitungUmurHutang(): Map<number, number> {
   return hasil;
 }
 
-app.get('/api/customer-debts', (c) => {
+app.get('/api/customer-debts', wajibIzin('hutang.lihat'), (c) => {
   const status = c.req.query('status') ?? 'open';
   if (!['open', 'semua'].includes(status)) {
     return c.json({ error: `status harus open|semua (dapat: ${status})` }, 400);
@@ -898,7 +1330,7 @@ app.get('/api/customer-debts', (c) => {
 // Rincian ledger satu pelanggan: baris mutasi + saldo berjalan per baris.
 // Urutan tampil terbaru di atas (DESC); saldo berjalan dihitung dari yang
 // terlama dulu, lalu dibalik — supaya "sisa setelah baris ini" masuk akal.
-app.get('/api/customer-debts/:customerId', (c) => {
+app.get('/api/customer-debts/:customerId', wajibIzin('hutang.lihat'), (c) => {
   const customerId = Number(c.req.param('customerId'));
   if (!Number.isInteger(customerId)) return c.json({ error: 'customer_id harus integer' }, 400);
   const cust = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId) as
@@ -960,6 +1392,11 @@ app.post('/api/customer-debts', async (c) => {
     const note = String(body?.note ?? '').trim();
     if (!Number.isInteger(customerId)) return c.json({ error: 'customer_id harus integer' }, 400);
     if (type !== 'charge' && type !== 'payment') return c.json({ error: 'type harus charge|payment' }, 400);
+    const u = c.get('user') as Pengguna;
+    const izinAksi: IzinOperasional = type === 'charge' ? 'hutang.catat' : 'hutang.bayar';
+    if (!bolehIzin(u, izinAksi)) {
+      return c.json({ error: `izin ${izinAksi} tidak diberikan untuk akun ini — hubungi owner` }, 403);
+    }
     if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'amount harus angka > 0' }, 400);
     if (!Number.isInteger(amount)) return c.json({ error: 'amount harus bilangan bulat rupiah' }, 400);
     if (note.length > 200) return c.json({ error: `catatan terlalu panjang (maks 200 karakter)` }, 400);
@@ -967,11 +1404,10 @@ app.post('/api/customer-debts', async (c) => {
     // tercatat di luar shift (tidak menggerakkan laci mana pun). Baris BARU
     // selalu punya cashier non-kosong, jadi fallback periode waktu di
     // GET /api/shifts hanya menyentuh baris lama (`cashier = ''`).
-    const shiftErr = cekShiftOpsional(body?.shift_id);
-    if (shiftErr) return c.json({ error: shiftErr }, 400);
-    const rawShift = body?.shift_id;
-    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
-    const cashier = String(body?.cashier ?? '').trim() || 'kasir';
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
+    const shiftId = sh.shift_id;
+    const cashier = sh.cashier;
     const ada = db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId) as { id: number } | undefined;
     if (!ada) return c.json({ error: 'pelanggan tidak ada' }, 404);
     const row = simpanMutasiHutang(customerId, type, amount, note, shiftId, cashier) as Record<string, unknown>;
@@ -992,7 +1428,7 @@ app.post('/api/customer-debts', async (c) => {
 // Hapus satu baris mutasi (salah ketik). Tidak butuh pengecekan sisa:
 // menghapus 'payment' memperbesar sisa, menghapus 'charge' memperkecil — dua-duanya
 // memang diinginkan saat membetulkan kesalahan input.
-app.delete('/api/customer-debts/:id', (c) => {
+app.delete('/api/customer-debts/:id', wajibIzin('hutang.hapus'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const ada = db.prepare('SELECT id FROM customer_debts WHERE id = ?').get(id) as { id: number } | undefined;
@@ -1012,6 +1448,9 @@ app.get('/api/products', (c) => {
   const category = c.req.query('category');
   const q = (c.req.query('q') ?? '').trim();
   const status = c.req.query('status') ?? 'aktif';
+  if (status !== 'aktif' && !bolehIzin(c.get('user') as Pengguna, 'produk.kelola')) {
+    return c.json({ error: 'izin produk.kelola tidak diberikan untuk akun ini — hubungi owner' }, 403);
+  }
   if (!['aktif', 'nonaktif', 'semua'].includes(status)) {
     return c.json({ error: `status tidak dikenal: ${status} (pakai aktif|nonaktif|semua)` }, 400);
   }
@@ -1096,7 +1535,7 @@ app.get('/api/products', (c) => {
 // supaya delta sync (?since=) membawanya ke kasir untuk dibuang dari cache.
 // Baris sengaja TIDAK dihapus dari DB agar sale_items/stock_moves tetap valid
 // secara referensial walau produknya sudah tidak bisa dijual lagi.
-app.delete('/api/products/:id', hanyaOwner, (c) => {
+app.delete('/api/products/:id', wajibIzin('produk.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'id tidak valid' }, 400);
   const p = db.prepare('SELECT id, sku, name, deleted_at FROM products WHERE id=?').get(id) as
@@ -1384,7 +1823,7 @@ const upsertProduct = transaksi((
   return db.prepare('SELECT * FROM products WHERE sku = ?').get(sku);
 });
 
-app.post('/api/products', hanyaOwner, async (c) => {
+app.post('/api/products', wajibIzin('produk.kelola'), async (c) => {
   try {
     const body = await c.req.json();
     // sku tidak wajib: kosong berarti server yang menurunkan dari nama (unik).
@@ -1427,7 +1866,7 @@ function buangFileFoto(nama: string): void {
   try { fs.rmSync(path.join(imgDir(), aman), { force: true }); } catch { /* file mungkin tak ada */ }
 }
 
-app.post('/api/products/:id/image', hanyaOwner, async (c) => {
+app.post('/api/products/:id/image', wajibIzin('produk.kelola'), async (c) => {
   try {
     const id = Number(c.req.param('id'));
     if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'id tidak valid' }, 400);
@@ -1514,7 +1953,7 @@ app.get('/api/products/:id/image', (c) => {
 // `dry_run:true` = hitung hasil tanpa menyimpan: seluruh baris dijalankan dalam
 // satu transaksi yang sengaja DIBATALKAN di akhir (rollback lempar error), jadi
 // validasinya tetap kode yang sama persis seperti import sungguhan.
-app.post('/api/products/import', hanyaOwner, async (c) => {
+app.post('/api/products/import', wajibIzin('produk.kelola'), async (c) => {
   try {
     const body = await c.req.json();
     const rows = Array.isArray(body?.rows) ? body.rows : null;
@@ -1586,7 +2025,7 @@ app.post('/api/products/import', hanyaOwner, async (c) => {
 // tidak dikirim rata-rata modal harus tetap seperti semula (bukan dianggap 0,
 // yang akan membuat HPP jadi nol dan laba palsu). Bila diisi wajib angka >= 0;
 // input kosong/huruf ditolak, bukan dianggap 0.
-app.post('/api/restock', async (c) => {
+app.post('/api/restock', wajibIzin('stok.restock'), async (c) => {
   const body = await c.req.json();
   const qty = Number(body?.qty ?? 0);
   if (!body?.product_id || !(qty > 0)) return c.json({ error: 'product_id dan qty>0 wajib' }, 400);
@@ -1618,7 +2057,7 @@ app.post('/api/restock', async (c) => {
     // unit_cost = harga batch bila dikirim; kalau tidak, rata-rata yang berlaku.
     db.prepare(`INSERT INTO stock_moves (product_id, qty, reason, unit_cost, cashier) VALUES (?, ?, 'restock', ?, ?)`)
       .run(body.product_id, qty, adaHarga ? Math.round(harga) : p.avg_cost,
-        body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir');
+        cashierEfektif(c, body?.cashier));
   });
   tx();
   catatAudit(c, 'restock', 'stock', Number(body.product_id), {
@@ -1634,7 +2073,7 @@ app.post('/api/restock', async (c) => {
 // riwayat mutasi tetap bermakna: + = kelebihan ditemukan, - = kekurangan.
 // reason 'opname' memang sudah ada di skema sejak awal (schema.sql) — tidak ada
 // kolom/tabel baru, jadi tidak perlu re-create database.
-app.post('/api/stock-opname', async (c) => {
+app.post('/api/stock-opname', wajibIzin('stok.opname'), async (c) => {
   const body = await c.req.json();
   const raw = body?.qty_fisik;
   const fisik = Number(raw);
@@ -1660,7 +2099,7 @@ app.post('/api/stock-opname', async (c) => {
     // punya harga beli (dibiarkan pada rata-rata lama), stok berkurang = nilai
     // ikut turun lewat `stock`. unit_cost tetap dicatat sebagai harga buku.
     db.prepare(`INSERT INTO stock_moves (product_id, qty, reason, unit_cost, cashier) VALUES (?, ?, 'opname', ?, ?)`)
-      .run(body.product_id, selisih, p.avg_cost, body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir');
+      .run(body.product_id, selisih, p.avg_cost, cashierEfektif(c, body?.cashier));
   });
   tx();
   catatAudit(c, 'opname', 'stock', Number(body.product_id), { sebelum: p.stock, sesudah: fisik, selisih });
@@ -1672,7 +2111,7 @@ app.post('/api/stock-opname', async (c) => {
 // endpoint ini hanya MEMBUKANYannya ke halaman Stok. Read-only: tidak menyentuh
 // products.version, jadi tidak ikut delta sync (dan memang tidak perlu — riwayat
 // bukan master yang di-cache client; diambil saat dialog dibuka).
-app.get('/api/stock-moves', (c) => {
+app.get('/api/stock-moves', wajibIzin('stok.lihat'), (c) => {
   const pid = Number(c.req.query('product_id'));
   if (!Number.isInteger(pid) || pid <= 0) {
     return c.json({ error: 'product_id wajib (riwayat selalu milik satu produk)' }, 400);
@@ -1704,8 +2143,11 @@ app.get('/api/stock-moves', (c) => {
 // ---------- shift ----------
 // Satu shift terbuka per kasir (2 kasir boleh bersamaan, tiap device pakai nama kasir beda).
 // Tanpa ?cashier= -> kembalikan shift terbuka terbaru (kompatibilitas).
-app.get('/api/shifts/open', (c) => {
-  const cashier = c.req.query('cashier');
+app.get('/api/shifts/open', wajibIzin('shift.lihat'), (c) => {
+  const u = c.get('user') as Pengguna;
+  // Tanpa shift.kelola kasir HANYA bisa melihat shiftnya sendiri — query
+  // ?cashier= milik kasir lain diabaikan, bukan membocorkan laci orang.
+  const cashier = bolehIzin(u, 'shift.kelola') ? c.req.query('cashier') : u.name;
   const row = cashier
     ? db.prepare(`SELECT * FROM shifts WHERE status='open' AND cashier=? LIMIT 1`).get(cashier)
     : db.prepare(`SELECT * FROM shifts WHERE status='open' ORDER BY id DESC LIMIT 1`).get();
@@ -1737,12 +2179,14 @@ const nilaiMetodeShift = (m: string) =>
          AND NOT EXISTS (SELECT 1 FROM sale_payments sp2 WHERE sp2.sale_id = sl.id)
     ) x)`;
 
-app.get('/api/shifts', (c) => {
+app.get('/api/shifts', wajibIzin('shift.lihat'), (c) => {
   const status = c.req.query('status') ?? 'semua';
   if (!['semua', 'open', 'closed'].includes(status)) {
     return c.json({ error: 'status harus open|closed|semua' }, 400);
   }
-  const cashier = c.req.query('cashier');
+  const u = c.get('user') as Pengguna;
+  // shift.kelola = boleh melihat semua kasir; selain itu paksa nama sendiri.
+  const cashier = bolehIzin(u, 'shift.kelola') ? c.req.query('cashier') : u.name;
   const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
   const where: string[] = [];
@@ -1859,9 +2303,11 @@ app.get('/api/shifts', (c) => {
   return c.json({ data, total });
 });
 
-app.post('/api/shifts/open', async (c) => {
+app.post('/api/shifts/open', wajibIzin('shift.buka'), async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const cashier = body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir';
+  // Kasir wajib membuka shift atas nama akunnya sendiri; owner bebas memakai
+  // nama kasir lain (kompatibilitas operasional & test).
+  const cashier = cashierEfektif(c, body?.cashier);
   try {
     const info = db.prepare(
       `INSERT INTO shifts (modal_awal, cashier, status) VALUES (?, ?, 'open') RETURNING *`,
@@ -1872,19 +2318,19 @@ app.post('/api/shifts/open', async (c) => {
   }
 });
 
-app.post('/api/shifts/:id/close', async (c) => {
+app.post('/api/shifts/:id/close', wajibIzin('shift.tutup'), async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const id = Number(c.req.param('id'));
-  // Kasir hanya boleh menutup shift ATAS NAMA sendiri (banding display name
-  // akun vs kolom cashier) — owner bebas. Tanpa ini kasir bisa menutup
-  // laci kasir lain dari device-nya.
+  // Tanpa shift.kelola, kasir hanya boleh menutup shift ATAS NAMA sendiri
+  // (banding display name akun vs kolom cashier). `shift.kelola` = wewenang
+  // menutup shift kasir lain (owner default punya).
   const u = c.get('user') as Pengguna;
-  if (u.role !== 'owner') {
+  if (!bolehIzin(u, 'shift.kelola')) {
     const milik = db.prepare('SELECT cashier FROM shifts WHERE id = ?').get(id) as
       { cashier: string } | undefined;
     if (!milik) return c.json({ error: 'shift tidak ditemukan / sudah tutup' }, 404);
     if (milik.cashier !== u.name) {
-      return c.json({ error: 'ini shift kasir lain — hanya owner yang boleh menutupnya' }, 403);
+      return c.json({ error: 'ini shift kasir lain — butuh izin shift.kelola' }, 403);
     }
   }
   const info = db.prepare(
@@ -1918,6 +2364,15 @@ const insertSale = transaksi((sale: {
    *  mengurangi kembalian). Absen = nota satu metode (perilaku lama: kolom
    *  `pay_method` + `cash_in`). Lihat blok validasi di bawah. */
   payments?: { method?: string; amount?: number }[];
+  /** Izin POS akun (B4). Semua opsional supaya pemanggil internal (take
+   *  pesanan) bisa menegaskan izin penuh; route penjualan selalu mengisinya. */
+  bolehHarga?: boolean;
+  bolehDiskon?: boolean;
+  bolehManual?: boolean;
+  bolehHutang?: boolean;
+  /** `true` untuk kasir: uang tunai kurang WAJIB punya pelanggan valid +
+   *  izin hutang.catat. Owner `false` = perilaku lama (bebas, test lama). */
+  wajibLunas?: boolean;
 }) => {
   const dup = db.prepare('SELECT * FROM sales WHERE id = ?').get(sale.id);
   if (dup) return { row: dup, duplicate: true };
@@ -1997,14 +2452,27 @@ const insertSale = transaksi((sale: {
           .get(pid, unitJual) as { factor: number; price: number | null } | undefined;
         if (!ru) throw new Error(`satuan tidak dijual untuk ${p.name}: ${unitJual}`);
         factor = ru.factor;
+        const hargaMasterUnit = Math.round(ru.price ?? Math.round(p.price * factor));
         if (p.price_dynamic) {
-          if (!(price >= 0)) throw new Error(`harga dinamis wajib diisi untuk ${p.name}`);
+          if (!(price >= 0)) {
+            // Tanpa izin ubah harga, master price dipakai — bukan error:
+            // klien restricted memang tidak mengirim harga (field mati).
+            if (sale.bolehHarga) throw new Error(`harga dinamis wajib diisi untuk ${p.name}`);
+            price = hargaMasterUnit;
+          } else if (!sale.bolehHarga && Math.round(price) !== hargaMasterUnit) {
+            throw new IzinError(`izin pos.harga tidak diberikan — harga ${p.name} tidak boleh diubah`);
+          }
         } else {
           // price di baris satuan = harga grosir eksplisit; NULL = ikut rumus.
           price = ru.price ?? Math.round(p.price * factor);
         }
       } else if (p.price_dynamic) {
-        if (!(price >= 0)) throw new Error(`harga dinamis wajib diisi untuk ${p.name}`);
+        if (!(price >= 0)) {
+          if (sale.bolehHarga) throw new Error(`harga dinamis wajib diisi untuk ${p.name}`);
+          price = p.price;
+        } else if (!sale.bolehHarga && Math.round(price) !== p.price) {
+          throw new IzinError(`izin pos.harga tidak diberikan — harga ${p.name} tidak boleh diubah`);
+        }
       } else {
         price = p.price; // harga dikunci dari master, client tidak boleh mengubah
       }
@@ -2031,7 +2499,11 @@ const insertSale = transaksi((sale: {
           .run(pid, -keluar, sale.id, sale.cashier);
       }
     } else {
-      // item manual (misal jasa dadakan): nama + harga wajib
+      // item manual (misal jasa dadakan): nama + harga wajib. Izin B4
+      // `pos.item_manual` ditegakkan server, bukan hanya disembunyikan di UI.
+      if (!sale.bolehManual) {
+        throw new IzinError('izin pos.item_manual tidak diberikan — item manual tidak bisa ditambahkan');
+      }
       if (!name || !(price >= 0)) throw new Error('item manual wajib ada name + price');
       unitJual = '';
     }
@@ -2045,6 +2517,9 @@ const insertSale = transaksi((sale: {
       throw new Error(`diskon baris tidak valid untuk ${name} (harus angka >= 0)`);
     }
     const discBaris = Math.round(discMentah);
+    if (discBaris > 0 && !sale.bolehDiskon) {
+      throw new IzinError('izin pos.diskon tidak diberikan — diskon baris tidak boleh diisi');
+    }
     if (discBaris > amount) {
       throw new Error(`diskon baris melebihi jumlah baris: ${name} (${discBaris} > ${amount})`);
     }
@@ -2067,6 +2542,9 @@ const insertSale = transaksi((sale: {
   }
   // Nilai BERSIH = kotor - diskon baris - diskon transaksi. `subtotal` yang
   // disimpan ke sales tetap kotor, supaya subtotal - total = seluruh diskon.
+  if (sale.discount > 0 && !sale.bolehDiskon) {
+    throw new IzinError('izin pos.diskon tidak diberikan — diskon transaksi tidak boleh diisi');
+  }
   const total = subtotal - totalDiscBaris - Math.max(0, sale.discount);
   if (total < 0) throw new Error('diskon melebihi subtotal');
 
@@ -2129,6 +2607,17 @@ const insertSale = transaksi((sale: {
     payMethod = pecahan.length > 1 ? 'campuran' : (pecahan[0]?.method ?? payMethod);
   } else {
     change = Math.max(0, cashIn - total);
+    // Kasir (B4): uang TUNAI kurang = hutang, wajib pelanggan valid + izin
+    // hutang.catat. Owner tidak diperketat (perilaku lama dipertahankan untuk
+    // operasional & test lama). Split payment sudah diwajibkan menutup total.
+    if (sale.wajibLunas && payMethod === 'tunai' && cashIn < total) {
+      if (!customerId || customerName === 'Pelanggan Umum') {
+        throw new Error('uang diterima kurang dari total — pilih pelanggan untuk mencatat hutang');
+      }
+      if (!sale.bolehHutang) {
+        throw new IzinError('izin hutang.catat tidak diberikan — uang kurang tidak bisa dicatat sebagai hutang');
+      }
+    }
     // Nota satu metode — termasuk HUTANG: atribusi PENUH ke metodenya
     // (perilaku lama; agregat tunai/qris/transfer & byMethod tidak berubah,
     // porsi belum dibayar tampil terpisah sebagai sisa_hutang/hutang_baru).
@@ -2172,12 +2661,17 @@ const insertSale = transaksi((sale: {
   return { row, duplicate: false as const, lines };
 });
 
-app.post('/api/sales', async (c) => {
+app.post('/api/sales', wajibIzin('pos.jual'), async (c) => {
   try {
     const body = await c.req.json();
     if (!Array.isArray(body?.items) || body.items.length === 0) {
       return c.json({ error: 'items kosong' }, 400);
     }
+    const u = c.get('user') as Pengguna;
+    // Kasir hanya boleh menulis ke shift miliknya; owner bebas. `cashier`
+    // kasir dipaksa nama akun — body tidak bisa mengaku kasir lain.
+    const sh = aturShift(c, body.shift_id, body.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     // Divalidasi di sini, bukan di dalam transaksi: `Number('abc')` = NaN, dan
     // NaN lolos cek `total < 0` — penjualan akan tersimpan dengan total NaN.
     const discTransaksi = Number(body.discount ?? 0);
@@ -2186,11 +2680,11 @@ app.post('/api/sales', async (c) => {
     }
     const { row, duplicate, lines } = insertSale({
       id: body.id ?? randomUUID(),
-      shift_id: body.shift_id ?? null,
+      shift_id: sh.shift_id,
       pay_method: body.pay_method ?? 'tunai',
       discount: discTransaksi,
       cash_in: Number(body.cash_in ?? 0),
-      cashier: body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir',
+      cashier: sh.cashier,
       // OPSIONAL: client lama / outbox yang belum ter-update boleh tidak
       // mengirim — transaksi tanpa kontak tetap sah (customer_id NULL).
       customer_id: body.customer_id ?? null,
@@ -2200,11 +2694,21 @@ app.post('/api/sales', async (c) => {
       // Split payment (1.6.5) — opsional; absen = perilaku lama. Dikirim apa
       // adanya, validasi bentuk di insertSale (di dalam transaction).
       payments: body.payments,
+      // Izin POS granular (B4) — ditegakkan di dalam transaksi supaya harga
+      // non-dinamis tetap dikunci server, bukan hanya oleh UI.
+      bolehHarga: bolehIzin(u, 'pos.harga'),
+      bolehDiskon: bolehIzin(u, 'pos.diskon'),
+      bolehManual: bolehIzin(u, 'pos.item_manual'),
+      bolehHutang: bolehIzin(u, 'hutang.catat'),
+      wajibLunas: u.role !== 'owner',
     });
     const items = lines ?? db.prepare('SELECT * FROM sale_items WHERE sale_id=?').all((row as { id: string }).id);
     return c.json({ data: { sale: row, items, duplicate: duplicate ?? true } }, duplicate ? 200 : 201);
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan penjualan' }, 400);
+    return c.json(
+      { error: e instanceof Error ? e.message : 'gagal simpan penjualan' },
+      e instanceof IzinError ? 403 : 400,
+    );
   }
 });
 
@@ -2232,11 +2736,18 @@ function bacaHari(query: (k: string) => string | undefined): Hari {
   return { ok: true, hari, limit, offset };
 }
 
-app.get('/api/sales', (c) => {
+app.get('/api/sales', wajibIzin('riwayat.lihat'), (c) => {
   const h = bacaHari((k) => c.req.query(k));
   if (!h.ok) return c.json({ error: h.error }, 400);
-  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sales WHERE date(created_at)=date(?)`)
-    .get(h.hari) as { n: number }).n;
+  // `riwayat.semua` = boleh melihat nota semua kasir. Tanpa izin itu (mis.
+  // kasir ketat) daftar dibatasi ke nota atas nama akun sendiri. Filter
+  // diterapkan di SQL, bukan setelah paginasi — `total` ikut benar.
+  const u = c.get('user') as Pengguna;
+  const semua = bolehIzin(u, 'riwayat.semua');
+  const cond = semua ? '' : ' AND s.cashier = ?';
+  const filter = semua ? [] : [u.name];
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sales s WHERE date(s.created_at)=date(?)${cond}`)
+    .get(h.hari, ...filter) as { n: number }).n;
   // `n_items` dihitung per baris lewat subquery: daftar riwayat hanya perlu
   // TAHU jumlah item ("3 item") — isi barisnya diambil saat dibuka lewat
   // GET /api/sales/:id, jadi satu hari ratusan nota tidak ditarik sekaligus.
@@ -2275,14 +2786,14 @@ app.get('/api/sales', (c) => {
                SELECT sp.method AS m FROM sale_payments sp
                 WHERE sp.sale_id = s.id ORDER BY sp.id) x) AS pay_methods
        FROM sales s
-      WHERE date(s.created_at)=date(?)
+      WHERE date(s.created_at)=date(?)${cond}
       ORDER BY s.created_at DESC, s.rowid DESC
       LIMIT ? OFFSET ?`,
-  ).all(h.hari, h.limit, h.offset);
+  ).all(h.hari, ...filter, h.limit, h.offset);
   return c.json({ data, total });
 });
 
-app.get('/api/sales/:id', (c) => {
+app.get('/api/sales/:id', wajibIzin('riwayat.lihat'), (c) => {
   // `sisa_hutang` = penanda "nota ini berhutang" — CASE yang SAMA dengan
   // GET /api/sales (putaran 13) + fallback penanda pesanan (1.6.6); `n_retur`/
   // `retur_total` = penanda retur (2026-10-18) — subquery yang SAMA pula;
@@ -2308,8 +2819,14 @@ app.get('/api/sales/:id', (c) => {
             (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.sale_id = sales.id) AS retur_total
        FROM sales LEFT JOIN customers c ON c.id = sales.customer_id
       WHERE sales.id=?`,
-  ).get(c.req.param('id'));
+  ).get(c.req.param('id')) as { cashier?: string } | undefined;
   if (!sale) return c.json({ error: 'tidak ditemukan' }, 404);
+  // `riwayat.semua` = boleh membuka nota kasir lain (cetak ulang/invoice).
+  // Kasir tanpa izin tetap bisa membuka nota miliknya sendiri.
+  const u = c.get('user') as Pengguna;
+  if (!bolehIzin(u, 'riwayat.semua') && sale.cashier !== u.name) {
+    return c.json({ error: 'nota ini milik kasir lain — butuh izin riwayat.semua' }, 403);
+  }
   // base_unit (LEFT JOIN products) ditambahkan 2026-10-01 untuk CETAK ULANG
   // struk dari halaman Riwayat: struk asli hanya mencetak `unit` bila satuan
   // jualnya BUKAN satuan dasar, dan sale_items hanya menyimpan satuan jual —
@@ -2384,7 +2901,7 @@ const SQL_ORDER_UANG = `
             FROM order_payments op WHERE op.order_id = o.id)) END AS sisa,
   (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS n_items`;
 
-app.get('/api/orders', (c) => {
+app.get('/api/orders', wajibIzin('pesanan.lihat'), (c) => {
   const status = c.req.query('status') ?? 'semua';
   if (!['semua', 'dikerjakan', 'selesai', 'diambil', 'batal'].includes(status)) {
     return c.json({ error: 'status harus dikerjakan|selesai|diambil|batal|semua' }, 400);
@@ -2428,7 +2945,7 @@ app.get('/api/orders', (c) => {
   return c.json({ data, total, ringkas });
 });
 
-app.get('/api/orders/:id', (c) => {
+app.get('/api/orders/:id', wajibIzin('pesanan.lihat'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const order = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
@@ -2441,7 +2958,7 @@ app.get('/api/orders/:id', (c) => {
 // Buat pesanan baru (status 'dikerjakan'). Pelanggan WAJIB (keputusan
 // pemilik: pesanan butuh identitas pengambil); item = teks bebas, harga
 // diketik kasir (TIDAK ada resolusi produk/harga master di jalur ini).
-app.post('/api/orders', async (c) => {
+app.post('/api/orders', wajibIzin('pesanan.buat'), async (c) => {
   try {
     const body = await c.req.json();
     const customerId = Number(body?.customer_id);
@@ -2472,7 +2989,7 @@ app.post('/api/orders', async (c) => {
       items.push({ name: nama, qty, price: Math.round(price), amount: Math.round(qty * Math.round(price)), note: catatan });
     }
     const total = items.reduce((a, b) => a + b.amount, 0);
-    const cashier = body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir';
+    const cashier = cashierEfektif(c, body?.cashier);
     const row = transaksi(() => {
       const orderNo = nomorOrder();
       const o = db.prepare(
@@ -2494,22 +3011,47 @@ app.post('/api/orders', async (c) => {
   }
 });
 
-/** Validasi shift OPSIONAL (pola expenses/kas masuk): dikirim = harus ada
- *  (400 "shift tidak dikenal"); absen = dicatat tanpa ikut laci shift mana
- *  pun. Mengembalikan pesan error atau null. */
-function cekShiftOpsional(shiftId: unknown): string | null {
-  if (shiftId === undefined || shiftId === null || shiftId === '') return null;
-  const sid = Number(shiftId);
-  if (!Number.isInteger(sid)) return 'shift_id harus integer';
-  const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(sid);
-  return ada ? null : 'shift tidak dikenal';
+/** Identitas kasir efektif (Paket B4): owner bebas memakai nama kasir apa pun
+ *  (kompatibilitas operasional/test), kasir SELALU terikat `users.name` milik
+ *  akunnya — tidak bisa mengaku kasir lain lewat body. */
+function cashierEfektif(c: Context, raw: unknown): string {
+  const u = c.get('user') as Pengguna;
+  if (u.role === 'owner') {
+    return String(raw ?? '').trim() || u.name || process.env.CASHIER_DEFAULT || 'kasir';
+  }
+  return u.name || 'kasir';
+}
+
+type HasilShift =
+  | { ok: true; shift_id: number | null; cashier: string }
+  | { ok: false; status: 400 | 403; error: string };
+
+/** Validasi shift OPSIONAL + identitas kasir dalam SATU tempat (pola
+ *  expenses/kas masuk): absen/NULL = dicatat di luar shift; dikirim = harus
+ *  ada dan (untuk kasir) HARUS milik akun itu. Owner bebas memilih shift/nama
+ *  kasir; kasir tidak pernah bisa menulis ke laci kasir lain. */
+function aturShift(c: Context, rawShift: unknown, rawCashier: unknown): HasilShift {
+  const u = c.get('user') as Pengguna;
+  const cashier = cashierEfektif(c, rawCashier);
+  if (rawShift === undefined || rawShift === null || rawShift === '') {
+    return { ok: true, shift_id: null, cashier };
+  }
+  const sid = Number(rawShift);
+  if (!Number.isInteger(sid)) return { ok: false, status: 400, error: 'shift_id harus integer' };
+  const s = db.prepare('SELECT id, cashier FROM shifts WHERE id = ?').get(sid) as
+    { id: number; cashier: string } | undefined;
+  if (!s) return { ok: false, status: 400, error: 'shift tidak dikenal' };
+  if (u.role !== 'owner' && s.cashier !== u.name) {
+    return { ok: false, status: 403, error: 'shift ini milik kasir lain — tidak bisa dipakai akun ini' };
+  }
+  return { ok: true, shift_id: sid, cashier };
 }
 
 const METODE_ORDER = ['tunai', 'qris', 'transfer'];
 
 /** Catat DP (uang muka) — status masih dikerjakan/selesai. Tidak boleh
  *  melebihi sisa (uang lebih tidak ada; pelunasan penuh lewat `take`). */
-app.post('/api/orders/:id/payments', async (c) => {
+app.post('/api/orders/:id/payments', wajibIzin('pesanan.bayar'), async (c) => {
   try {
     const body = await c.req.json();
     const id = Number(c.req.param('id'));
@@ -2530,12 +3072,12 @@ app.post('/api/orders/:id/payments', async (c) => {
     if (amount > o.sisa) {
       return c.json({ error: `melebihi sisa pesanan (sisa ${o.sisa})` }, 400);
     }
-    const sErr = cekShiftOpsional(body?.shift_id);
-    if (sErr) return c.json({ error: sErr }, 400);
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     const row = db.prepare(
       `INSERT INTO order_payments (order_id, kind, method, amount, shift_id, cashier, note)
        VALUES (?, 'dp', ?, ?, ?, ?, ?) RETURNING *`,
-    ).get(id, method, amount, body?.shift_id ?? null, body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir',
+    ).get(id, method, amount, sh.shift_id, sh.cashier,
       String(body?.note ?? '').slice(0, 200));
     catatAudit(c, 'update', 'order', id, { kind: 'dp', method, amount });
     const segar = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
@@ -2547,7 +3089,7 @@ app.post('/api/orders/:id/payments', async (c) => {
 
 /** Pindah status antar-dikerjakan/selesai (bolak-balik untuk koreksi).
  *  'diambil' hanya lewat POST /:id/take; 'batal' hanya lewat /:id/cancel. */
-app.post('/api/orders/:id/status', async (c) => {
+app.post('/api/orders/:id/status', wajibIzin('pesanan.buat'), async (c) => {
   try {
     const body = await c.req.json();
     const id = Number(c.req.param('id'));
@@ -2579,9 +3121,10 @@ app.post('/api/orders/:id/status', async (c) => {
  *  Atribusi nota (sale_payments): pembayaran pesanan diagregat per metode,
  *  sisa hutang menempel ke metode penyerahan (pola nota hutang POS:
  *  diatribusi penuh) — Σ baris = total nota, invarian split 1.6.5 dijaga. */
-app.post('/api/orders/:id/take', async (c) => {
+app.post('/api/orders/:id/take', wajibIzin('pesanan.bayar'), async (c) => {
   try {
     const body = await c.req.json();
+    const u = c.get('user') as Pengguna;
     const id = Number(c.req.param('id'));
     if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
     const o = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id) as
@@ -2599,14 +3142,19 @@ app.post('/api/orders/:id/take', async (c) => {
     if (!Number.isInteger(diterima) || diterima < 0) {
       return c.json({ error: 'uang diterima harus rupiah bulat >= 0' }, 400);
     }
-    const sErr = cekShiftOpsional(body?.shift_id);
-    if (sErr) return c.json({ error: sErr }, 400);
-    const cashier = body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir';
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
+    const cashier = sh.cashier;
     const hasil = transaksi(() => {
       const sisa = o.sisa;
       const bayar = Math.min(diterima, sisa);       // yang benar-benar menutup tagihan
       const kembalian = diterima - bayar;           // uang lebih -> dikembalikan
       const hutang = sisa - bayar;                  // sisa -> ledger Hutang
+      // Membuat hutang baru butuh izin hutang.catat — `pesanan.bayar` saja
+      // tidak boleh menciptakan piutang diam-diam.
+      if (hutang > 0 && !bolehIzin(u, 'hutang.catat')) {
+        throw new IzinError('izin hutang.catat tidak diberikan — pesanan dengan sisa hutang tidak bisa diserahkan');
+      }
       const items = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id')
         .all(id) as { name: string; qty: number; price: number; note: string }[];
       const dpRows = db.prepare(
@@ -2625,7 +3173,7 @@ app.post('/api/orders/:id/take', async (c) => {
       // cast ke bentuk minimal yang dipakai di sini (id + invoice_no).
       const { row: sale } = insertSale({
         id: saleId,
-        shift_id: body?.shift_id ?? null,
+        shift_id: sh.shift_id,
         pay_method: method,
         discount: 0,
         cash_in: o.total, // diabaikan saat payments[] dikirim — nota dianggap terbayar penuh
@@ -2634,19 +3182,30 @@ app.post('/api/orders/:id/take', async (c) => {
         note: o.note,     // catatan pesanan ikut jadi catatan transaksi nota
         items: items.map((it) => ({ name: it.name, qty: it.qty, price: it.price, note: it.note })),
         ...(payments.length > 0 ? { payments } : {}),
+        // Take = jalur internal tervalidasi (item teks bebas sudah diketik
+        // saat pesanan dibuat) — semua izin POS penuh, bukan izin akun.
+        bolehHarga: true,
+        bolehDiskon: true,
+        bolehManual: true,
+        bolehHutang: true,
+        wajibLunas: false,
       }) as { row: { id: string; invoice_no: string } };
       if (bayar > 0) {
         db.prepare(
           `INSERT INTO order_payments (order_id, kind, method, amount, shift_id, cashier, note)
            VALUES (?, 'pelunasan', ?, ?, ?, ?, ?)`,
-        ).run(id, method, bayar, body?.shift_id ?? null, cashier, `Pelunasan ${o.order_no}`);
+        ).run(id, method, bayar, sh.shift_id, cashier, `Pelunasan ${o.order_no}`);
       }
       if (hutang > 0) {
         // Ledger Hutang (keputusan pemilik #3): charge dengan nomor nota +
-        // nomor pesanan supaya kasir menemukannya di halaman Hutang.
+        // nomor pesanan supaya kasir menemukannya di halaman Hutang. Ikut
+        // diatribusikan ke shift serah (Paket A) — pembayaran nanti punya
+        // atribusi laci eksak.
         db.prepare(
-          `INSERT INTO customer_debts (customer_id, type, amount, note) VALUES (?, 'charge', ?, ?)`,
-        ).run(o.customer_id, hutang, `Nota ${sale.invoice_no} — sisa pesanan ${o.order_no}`);
+          `INSERT INTO customer_debts (customer_id, type, amount, note, shift_id, cashier)
+           VALUES (?, 'charge', ?, ?, ?, ?)`,
+        ).run(o.customer_id, hutang, `Nota ${sale.invoice_no} — sisa pesanan ${o.order_no}`,
+          sh.shift_id, cashier);
       }
       db.prepare(
         `UPDATE orders SET status='diambil', taken_at=datetime('now'), updated_at=datetime('now'),
@@ -2661,7 +3220,10 @@ app.post('/api/orders/:id/take', async (c) => {
     const segar = db.prepare(`SELECT o.*, ${SQL_ORDER_UANG} FROM orders o WHERE o.id = ?`).get(id);
     return c.json({ data: { order: segar, sale: hasil.sale, kembalian: hasil.kembalian, hutang: hasil.hutang } });
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : 'gagal serahkan pesanan' }, 400);
+    return c.json(
+      { error: e instanceof Error ? e.message : 'gagal serahkan pesanan' },
+      e instanceof IzinError ? 403 : 400,
+    );
   }
 });
 
@@ -2669,7 +3231,7 @@ app.post('/api/orders/:id/take', async (c) => {
  *  DIKEMBALIKAN lewat baris order_payments kind='refund' (uang keluar —
  *  mengurangi agregat laci shift penerima refund). Pesanan yang sudah
  *  diambil TIDAK bisa dibatalkan: koreksi barang lewat Retur. */
-app.post('/api/orders/:id/cancel', async (c) => {
+app.post('/api/orders/:id/cancel', wajibIzin('pesanan.batal'), async (c) => {
   try {
     const body = await c.req.json();
     const id = Number(c.req.param('id'));
@@ -2687,8 +3249,8 @@ app.post('/api/orders/:id/cancel', async (c) => {
     if (!METODE_ORDER.includes(method)) {
       return c.json({ error: `metode pembayaran tidak dikenal: ${method || '(kosong)'}` }, 400);
     }
-    const sErr = cekShiftOpsional(body?.shift_id);
-    if (sErr) return c.json({ error: sErr }, 400);
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     const refund = transaksi(() => {
       const net = (db.prepare(
         `SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount ELSE amount END),0) AS d
@@ -2698,7 +3260,7 @@ app.post('/api/orders/:id/cancel', async (c) => {
         db.prepare(
           `INSERT INTO order_payments (order_id, kind, method, amount, shift_id, cashier, note)
            VALUES (?, 'refund', ?, ?, ?, ?, ?)`,
-        ).run(id, method, net, body?.shift_id ?? null, body?.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir',
+        ).run(id, method, net, sh.shift_id, sh.cashier,
           'Refund pembatalan pesanan');
       }
       db.prepare(
@@ -2720,6 +3282,15 @@ app.post('/api/topups', async (c) => {
     const body = await c.req.json();
     const kind = body?.kind;
     if (!['topup', 'tarik'].includes(kind)) return c.json({ error: 'kind harus topup|tarik' }, 400);
+    const u = c.get('user') as Pengguna;
+    // Izin bergantung jenis: topup (uang masuk) vs tarik tunai (uang keluar)
+    // dipisah supaya kasir bisa diberi salah satu saja.
+    const izinKind: IzinOperasional = kind === 'tarik' ? 'pos.tarik' : 'pos.topup';
+    if (!bolehIzin(u, izinKind)) {
+      return c.json({ error: `izin ${izinKind} tidak diberikan untuk akun ini — hubungi owner` }, 403);
+    }
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     const nominal = Number(body?.nominal ?? 0);
     const admin = Number(body?.admin ?? 0);
     if (!(nominal > 0)) return c.json({ error: 'nominal harus > 0' }, 400);
@@ -2738,14 +3309,20 @@ app.post('/api/topups', async (c) => {
     // tarik mandiri. TANPA validasi FK — baris topup ditulis lebih dulu.
     const saleId = body?.sale_id != null && body.sale_id !== '' ? String(body.sale_id) : null;
     const id = body.id ?? randomUUID();
-    const dup = db.prepare('SELECT * FROM topup_txns WHERE id=?').get(id);
-    if (dup) return c.json({ data: dup, duplicate: true });
+    const dup = db.prepare('SELECT * FROM topup_txns WHERE id=?').get(id) as
+      { cashier: string } | undefined;
+    if (dup) {
+      if (dup.cashier !== sh.cashier && !bolehIzin(u, 'riwayat.semua')) {
+        return c.json({ error: 'transaksi ini milik kasir lain' }, 403);
+      }
+      return c.json({ data: dup, duplicate: true });
+    }
     const total = nominal + admin; // yang dibayar pelanggan
     const row = db.prepare(
       `INSERT INTO topup_txns (id, shift_id, kind, provider, nomor, token, nominal, admin, total, pay_method, cashier, sale_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    ).get(id, body.shift_id ?? null, kind, String(body.provider).toUpperCase(), nomor, token,
-      nominal, admin, total, body.pay_method ?? 'tunai', body.cashier ?? process.env.CASHIER_DEFAULT ?? 'kasir', saleId);
+    ).get(id, sh.shift_id, kind, String(body.provider).toUpperCase(), nomor, token,
+      nominal, admin, total, body.pay_method ?? 'tunai', sh.cashier, saleId);
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan topup' }, 400);
@@ -2755,17 +3332,21 @@ app.post('/api/topups', async (c) => {
 // Riwayat topup/tarik — aturan hari & halaman yang sama dengan GET /api/sales
 // di atas (lihat bacaHari), supaya keduanya digabung jadi satu linimasa tanpa
 // tanggal yang saling bertengkar.
-app.get('/api/topups', (c) => {
+app.get('/api/topups', wajibIzin('riwayat.lihat'), (c) => {
   const h = bacaHari((k) => c.req.query(k));
   if (!h.ok) return c.json({ error: h.error }, 400);
-  const total = (db.prepare(`SELECT COUNT(*) AS n FROM topup_txns WHERE date(created_at)=date(?)`)
-    .get(h.hari) as { n: number }).n;
+  const u = c.get('user') as Pengguna;
+  const semua = bolehIzin(u, 'riwayat.semua');
+  const cond = semua ? '' : ' AND cashier = ?';
+  const filter = semua ? [] : [u.name];
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM topup_txns WHERE date(created_at)=date(?)${cond}`)
+    .get(h.hari, ...filter) as { n: number }).n;
   const data = db.prepare(
     `SELECT * FROM topup_txns
-      WHERE date(created_at)=date(?)
+      WHERE date(created_at)=date(?)${cond}
       ORDER BY created_at DESC, rowid DESC
       LIMIT ? OFFSET ?`,
-  ).all(h.hari, h.limit, h.offset);
+  ).all(h.hari, ...filter, h.limit, h.offset);
   return c.json({ data, total });
 });
 
@@ -2785,7 +3366,7 @@ app.get('/api/topups/suggest-admin', (c) => {
 // tetap tercatat + masuk laporan harian, hanya tidak mengurangi laci shift
 // mana pun. Daftar memakai helper bacaHari (filter tanggal + limit/offset
 // round-trip, pola GET /api/sales).
-app.get('/api/expenses', hanyaOwner, (c) => {
+app.get('/api/expenses', wajibIzin('pengeluaran.kelola'), (c) => {
   const h = bacaHari((k) => c.req.query(k));
   if (!h.ok) return c.json({ error: h.error }, 400);
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM expenses WHERE date(created_at)=date(?)`)
@@ -2798,7 +3379,7 @@ app.get('/api/expenses', hanyaOwner, (c) => {
   return c.json({ data, total, jumlah: jumlahHari });
 });
 
-app.post('/api/expenses', hanyaOwner, async (c) => {
+app.post('/api/expenses', wajibIzin('pengeluaran.kelola'), async (c) => {
   try {
     const body = await c.req.json();
     const kategori = String(body?.kategori ?? '').trim();
@@ -2807,20 +3388,16 @@ app.post('/api/expenses', hanyaOwner, async (c) => {
     if (!kategori) return c.json({ error: 'kategori pengeluaran wajib diisi' }, 400);
     if (!Number.isInteger(jumlah) || jumlah <= 0) return c.json({ error: 'jumlah harus rupiah bulat > 0' }, 400);
     if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
-    // shift_id opsional; bila dikirim harus shift yang benar-benar ada.
-    const rawShift = body?.shift_id;
-    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
-    if (shiftId !== null) {
-      if (!Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
-      const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(shiftId) as { id: number } | undefined;
-      if (!ada) return c.json({ error: 'shift tidak dikenal' }, 400);
-    }
+    // shift_id opsional; bila dikirim harus shift yang benar-benar ada dan
+    // (untuk kasir) milik akun itu — aturShift satu pintu.
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     const row = db
       .prepare(
         `INSERT INTO expenses (kategori, jumlah, note, cashier, shift_id)
          VALUES (?, ?, ?, ?, ?) RETURNING *`,
       )
-      .get(kategori, jumlah, note, String(body?.cashier ?? '').trim() || 'kasir', shiftId);
+      .get(kategori, jumlah, note, sh.cashier, sh.shift_id);
     catatAudit(c, 'create', 'expense', (row as { id: number }).id, { kategori, jumlah });
     return c.json({ data: row }, 201);
   } catch (e) {
@@ -2831,7 +3408,7 @@ app.post('/api/expenses', hanyaOwner, async (c) => {
 // Hapus catatan salah ketik (pola DELETE /api/customer-debts/:id — sengaja
 // tanpa cek saldo: menghapus pengeluaran memperbesar kas, itu memang maksud
 // koreksi).
-app.delete('/api/expenses/:id', hanyaOwner, (c) => {
+app.delete('/api/expenses/:id', wajibIzin('pengeluaran.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const ada = db.prepare('SELECT id FROM expenses WHERE id = ?').get(id) as { id: number } | undefined;
@@ -2850,7 +3427,7 @@ app.delete('/api/expenses/:id', hanyaOwner, (c) => {
 // (`kas_masuk`). `shift_id` OPSIONAL (pola expenses): NULL = di luar shift —
 // tetap tercatat + masuk laporan harian, hanya tidak menambah laci shift
 // mana pun.
-app.get('/api/kas-masuk', hanyaOwner, (c) => {
+app.get('/api/kas-masuk', wajibIzin('kasmasuk.kelola'), (c) => {
   const h = bacaHari((k) => c.req.query(k));
   if (!h.ok) return c.json({ error: h.error }, 400);
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM kas_masuk WHERE date(created_at)=date(?)`)
@@ -2863,7 +3440,7 @@ app.get('/api/kas-masuk', hanyaOwner, (c) => {
   return c.json({ data, total, jumlah: jumlahHari });
 });
 
-app.post('/api/kas-masuk', hanyaOwner, async (c) => {
+app.post('/api/kas-masuk', wajibIzin('kasmasuk.kelola'), async (c) => {
   try {
     const body = await c.req.json();
     const kategori = String(body?.kategori ?? '').trim();
@@ -2872,20 +3449,16 @@ app.post('/api/kas-masuk', hanyaOwner, async (c) => {
     if (!kategori) return c.json({ error: 'kategori kas masuk wajib diisi' }, 400);
     if (!Number.isInteger(jumlah) || jumlah <= 0) return c.json({ error: 'jumlah harus rupiah bulat > 0' }, 400);
     if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
-    // shift_id opsional; bila dikirim harus shift yang benar-benar ada.
-    const rawShift = body?.shift_id;
-    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
-    if (shiftId !== null) {
-      if (!Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
-      const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(shiftId) as { id: number } | undefined;
-      if (!ada) return c.json({ error: 'shift tidak dikenal' }, 400);
-    }
+    // shift_id opsional; bila dikirim harus shift yang benar-benar ada dan
+    // (untuk kasir) milik akun itu.
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     const row = db
       .prepare(
         `INSERT INTO kas_masuk (kategori, jumlah, note, cashier, shift_id)
          VALUES (?, ?, ?, ?, ?) RETURNING *`,
       )
-      .get(kategori, jumlah, note, String(body?.cashier ?? '').trim() || 'kasir', shiftId);
+      .get(kategori, jumlah, note, sh.cashier, sh.shift_id);
     catatAudit(c, 'create', 'kas_masuk', (row as { id: number }).id, { kategori, jumlah });
     return c.json({ data: row }, 201);
   } catch (e) {
@@ -2895,7 +3468,7 @@ app.post('/api/kas-masuk', hanyaOwner, async (c) => {
 
 // Hapus catatan salah ketik (pola DELETE /api/expenses/:id — sengaja tanpa
 // cek saldo: menghapus kas masuk mengurangi kas, itu memang maksud koreksi).
-app.delete('/api/kas-masuk/:id', hanyaOwner, (c) => {
+app.delete('/api/kas-masuk/:id', wajibIzin('kasmasuk.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const ada = db.prepare('SELECT id FROM kas_masuk WHERE id = ?').get(id) as { id: number } | undefined;
@@ -3004,25 +3577,35 @@ const simpanRetur = transaksi(
   },
 );
 
-app.post('/api/returns', async (c) => {
+app.post('/api/returns', wajibIzin('retur.buat'), async (c) => {
   try {
     const body = await c.req.json();
+    const u = c.get('user') as Pengguna;
     const rawItems = body?.items;
     if (!Array.isArray(rawItems) || !rawItems.length) return c.json({ error: 'items wajib array non-kosong' }, 400);
     if (rawItems.length > 200) return c.json({ error: 'maks 200 baris per retur' }, 400);
     const note = String(body?.note ?? '').trim();
     if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
-    const rawShift = body?.shift_id;
-    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
-    if (shiftId !== null && !Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     const rawSale = body?.sale_id;
     const saleId = rawSale === undefined || rawSale === null || rawSale === '' ? null : String(rawSale);
+    // Retur dari nota kasir lain = butuh riwayat.semua; `retur.buat` saja
+    // tidak boleh mengoreksi nota yang tidak pernah dilihat akun itu.
+    if (saleId && !bolehIzin(u, 'riwayat.semua')) {
+      const nota = db.prepare('SELECT cashier FROM sales WHERE id = ?').get(saleId) as
+        { cashier: string } | undefined;
+      if (!nota) return c.json({ error: 'nota asal tidak dikenal' }, 404);
+      if (nota.cashier !== u.name) {
+        return c.json({ error: 'nota ini milik kasir lain — butuh izin riwayat.semua' }, 403);
+      }
+    }
     const row = simpanRetur({
       sale_id: saleId,
       items: rawItems as ReturItemIn[],
       note,
-      cashier: String(body?.cashier ?? '').trim() || 'kasir',
-      shift_id: shiftId,
+      cashier: sh.cashier,
+      shift_id: sh.shift_id,
     });
     const items = db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all((row as { id: number }).id);
     return c.json({ data: { retur: row, items } }, 201);
@@ -3038,30 +3621,39 @@ app.post('/api/returns', async (c) => {
 // Daftar retur per hari (halaman #/returns) — filter tanggal + limit/offset
 // via helper bacaHari (pola GET /api/sales); `jumlah` = total uang kembali
 // hari itu untuk kartu halaman. Urutan terbaru di atas.
-app.get('/api/returns', (c) => {
+app.get('/api/returns', wajibIzin('retur.lihat'), (c) => {
   const h = bacaHari((k) => c.req.query(k));
   if (!h.ok) return c.json({ error: h.error }, 400);
-  const total = (db.prepare(`SELECT COUNT(*) AS n FROM returns WHERE date(created_at)=date(?)`)
-    .get(h.hari) as { n: number }).n;
+  const u = c.get('user') as Pengguna;
+  const semua = bolehIzin(u, 'riwayat.semua');
+  const cond = semua ? '' : ' AND r.cashier = ?';
+  const filter = semua ? [] : [u.name];
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM returns r WHERE date(r.created_at)=date(?)${cond}`)
+    .get(h.hari, ...filter) as { n: number }).n;
   const data = db.prepare(
     `SELECT r.*, s.invoice_no AS invoice_no,
             (SELECT COUNT(*) FROM return_items ri WHERE ri.return_id = r.id) AS n_items
        FROM returns r LEFT JOIN sales s ON s.id = r.sale_id
-      WHERE date(r.created_at)=date(?) ORDER BY r.created_at DESC, r.id DESC LIMIT ? OFFSET ?`,
-  ).all(h.hari, h.limit, h.offset);
-  const jumlah = (db.prepare(`SELECT COALESCE(SUM(total),0) AS t FROM returns WHERE date(created_at)=date(?)`)
-    .get(h.hari) as { t: number }).t;
+      WHERE date(r.created_at)=date(?)${cond}
+      ORDER BY r.created_at DESC, r.id DESC LIMIT ? OFFSET ?`,
+  ).all(h.hari, ...filter, h.limit, h.offset);
+  const jumlah = (db.prepare(`SELECT COALESCE(SUM(r.total),0) AS t FROM returns r WHERE date(r.created_at)=date(?)${cond}`)
+    .get(h.hari, ...filter) as { t: number }).t;
   return c.json({ data, total, jumlah });
 });
 
 // Isi lengkap satu retur (baris + nota asal bila ada).
-app.get('/api/returns/:id', (c) => {
+app.get('/api/returns/:id', wajibIzin('retur.lihat'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const retur = db.prepare(
     `SELECT r.*, s.invoice_no AS invoice_no FROM returns r LEFT JOIN sales s ON s.id = r.sale_id WHERE r.id = ?`,
-  ).get(id);
+  ).get(id) as { cashier: string } | undefined;
   if (!retur) return c.json({ error: 'retur tidak ada' }, 404);
+  const u = c.get('user') as Pengguna;
+  if (!bolehIzin(u, 'riwayat.semua') && retur.cashier !== u.name) {
+    return c.json({ error: 'retur ini milik kasir lain — butuh izin riwayat.semua' }, 403);
+  }
   const items = db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all(id);
   return c.json({ data: { retur, items } });
 });
@@ -3070,13 +3662,17 @@ app.get('/api/returns/:id', (c) => {
 // reason='retur', qty negatif + note penanda) lalu baris dihapus — dalam satu
 // transaction. Stok yang tidak cukup (barang sudah terjual lagi) = 400,
 // bukan diam-diam minus: tanpa guard ini pembatalan mengarang stok dari nol.
-app.delete('/api/returns/:id', (c) => {
+app.delete('/api/returns/:id', wajibIzin('retur.batal'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   try {
     db.transaction(() => {
       const r = db.prepare('SELECT * FROM returns WHERE id = ?').get(id) as { id: number; cashier: string } | undefined;
       if (!r) throw new Error('retur tidak ada');
+      const u = c.get('user') as Pengguna;
+      if (!bolehIzin(u, 'riwayat.semua') && r.cashier !== u.name) {
+        throw new IzinError('retur ini milik kasir lain — butuh izin riwayat.semua');
+      }
       const items = db.prepare('SELECT * FROM return_items WHERE return_id = ?').all(id) as { product_id: number | null; qty: number; name: string }[];
       for (const it of items) {
         if (it.product_id === null) continue;
@@ -3104,7 +3700,10 @@ app.delete('/api/returns/:id', (c) => {
     return c.json({ data: { id, deleted: true } });
   } catch (e) {
     const pesan = e instanceof Error ? e.message : 'gagal batalkan retur';
-    return c.json({ error: pesan }, /tidak ada/.test(pesan) ? 404 : 400);
+    return c.json(
+      { error: pesan },
+      e instanceof IzinError ? 403 : /tidak ada/.test(pesan) ? 404 : 400,
+    );
   }
 });
 
@@ -3135,7 +3734,7 @@ function cekProdukKulakan(pid: number, i: number): { id: number; name: string } 
 }
 
 // Buat PO (status order): validasi item + hitung total, TANPA sentuhan stok.
-app.post('/api/purchases', hanyaOwner, async (c) => {
+app.post('/api/purchases', wajibIzin('pembelian.kelola'), async (c) => {
   try {
     const body = await c.req.json();
     const rawItems = body?.items;
@@ -3170,7 +3769,7 @@ app.post('/api/purchases', hanyaOwner, async (c) => {
       const row = db.prepare(
         `INSERT INTO purchases (supplier_id, supplier_name, status, total, terbayar, cashier, note)
          VALUES (?, ?, 'order', ?, 0, ?, ?) RETURNING *`,
-      ).get(supplierId, supplierName, total, String(body?.cashier ?? '').trim() || 'kasir', note);
+      ).get(supplierId, supplierName, total, cashierEfektif(c, body?.cashier), note);
       const ins = db.prepare(
         `INSERT INTO purchase_items (purchase_id, product_id, name, qty, harga_beli, amount)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -3190,30 +3789,27 @@ app.post('/api/purchases', hanyaOwner, async (c) => {
 // PERSIS dengan restock: avg tertimbang + version++ + stock_moves 'beli') +
 // terbayar bawaan = total (tunai penuh; kirim `dibayar` lebih kecil bila
 // hutang — sisa = total − terbayar).
-app.post('/api/purchases/:id/receive', hanyaOwner, async (c) => {
+app.post('/api/purchases/:id/receive', wajibIzin('pembelian.kelola'), async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   try {
     const body = await c.req.json().catch(() => ({}));
-    const rawShift = body?.shift_id;
-    const shiftId = rawShift === undefined || rawShift === null || rawShift === '' ? null : Number(rawShift);
-    if (shiftId !== null && !Number.isInteger(shiftId)) return c.json({ error: 'shift_id harus integer' }, 400);
+    // Kas keluar PO menempel ke laci shift penerimaan; kasir hanya boleh
+    // memakai shiftnya sendiri, owner bebas (satu-satunya validasi shift).
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
     const rawBayar = body?.dibayar;
     const out = db.transaction(() => {
       const po = ambilPo(id);
       if (!po) throw new Error('pembelian tidak ada');
       if (po.status !== 'order') throw new Error(`hanya PO order yang bisa diterima (status: ${po.status})`);
-      if (shiftId !== null) {
-        const ada = db.prepare('SELECT id FROM shifts WHERE id = ?').get(shiftId) as { id: number } | undefined;
-        if (!ada) throw new Error('shift tidak dikenal');
-      }
       const dibayar = rawBayar === undefined || rawBayar === null || rawBayar === '' ? po.total : Number(rawBayar);
       if (!Number.isInteger(dibayar) || dibayar < 0 || dibayar > po.total) {
         throw new Error(`dibayar harus bulat 0..${po.total}`);
       }
       const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id) as
         { product_id: number; qty: number; harga_beli: number }[];
-      const cashier = String(body?.cashier ?? '').trim() || 'kasir';
+      const cashier = sh.cashier;
       items.forEach((it, i) => {
         cekProdukKulakan(it.product_id, i);
         const p = db.prepare('SELECT stock, avg_cost FROM products WHERE id = ?').get(it.product_id) as
@@ -3230,7 +3826,7 @@ app.post('/api/purchases/:id/receive', hanyaOwner, async (c) => {
       return db.prepare(
         `UPDATE purchases SET status = 'received', shift_id = ?, terbayar = ?,
            received_at = datetime('now'), cashier = ? WHERE id = ? RETURNING *`,
-      ).get(shiftId, dibayar, cashier, id);
+      ).get(sh.shift_id, dibayar, cashier, id);
     })();
     return c.json({ data: out });
   } catch (e) {
@@ -3241,7 +3837,7 @@ app.post('/api/purchases/:id/receive', hanyaOwner, async (c) => {
 
 // Bayar sisa hutang supplier (cicil): terbayar += amount, maks = total.
 // Kas keluar susulan diatribusikan ke shift_id PO ini (satu PO satu laci).
-app.post('/api/purchases/:id/pay', hanyaOwner, async (c) => {
+app.post('/api/purchases/:id/pay', wajibIzin('pembelian.kelola'), async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   try {
@@ -3264,7 +3860,7 @@ app.post('/api/purchases/:id/pay', hanyaOwner, async (c) => {
 
 // Batalkan PO (hanya status order — yang received sudah masuk stok; koreksi
 // stok lewat opname, koreksi kas lewat pengeluaran).
-app.post('/api/purchases/:id/cancel', hanyaOwner, (c) => {
+app.post('/api/purchases/:id/cancel', wajibIzin('pembelian.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const po = ambilPo(id);
@@ -3281,7 +3877,7 @@ app.post('/api/purchases/:id/cancel', hanyaOwner, (c) => {
 // AGING (2026-10-16): `umur_hari` = lama nota DITERIMA-tapi-belum-lunas
 // menunggu (dari `received_at`; julianday SQLite = UTC). `lewat30` = jumlah
 // hutang PO >= 30 hari di SELURUH baris cocok filter (chip header).
-app.get('/api/purchases', hanyaOwner, (c) => {
+app.get('/api/purchases', wajibIzin('pembelian.kelola'), (c) => {
   const status = c.req.query('status') ?? 'semua';
   if (!['semua', 'order', 'received', 'cancel', 'hutang'].includes(status)) {
     return c.json({ error: 'status harus order|received|cancel|hutang|semua' }, 400);
@@ -3318,7 +3914,7 @@ app.get('/api/purchases', hanyaOwner, (c) => {
 });
 
 // Isi lengkap satu nota pembelian.
-app.get('/api/purchases/:id', hanyaOwner, (c) => {
+app.get('/api/purchases/:id', wajibIzin('pembelian.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
   const purchase = db.prepare(`SELECT *, total - terbayar AS sisa FROM purchases WHERE id = ?`).get(id);
@@ -3960,7 +4556,7 @@ function bacaRentang(query: (k: string) => string | undefined):
   return { ok: true, dari, sampai };
 }
 
-app.get('/api/reports/daily', hanyaOwner, (c) => {
+app.get('/api/reports/daily', wajibIzin('laporan.lihat'), (c) => {
   const date = c.req.query('date') ?? new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   return c.json({ data: { date, ...laporanRentang(date, date) } });
 });
@@ -3968,7 +4564,7 @@ app.get('/api/reports/daily', hanyaOwner, (c) => {
 /** Rekap rentang tanggal (menu laporan ala Aronium, 2026-10-11): bentuk
  *  SAMA dengan daily, jendela `from..to` inklusif. `lowStock` snapshot kini
  *  (bukan per tanggal — stok adalah keadaan sekarang). */
-app.get('/api/reports/summary', hanyaOwner, (c) => {
+app.get('/api/reports/summary', wajibIzin('laporan.lihat'), (c) => {
   const r = bacaRentang((k) => c.req.query(k));
   if (!r.ok) return c.json({ error: r.error }, 400);
   return c.json({ data: { from: r.dari, to: r.sampai, ...laporanRentang(r.dari, r.sampai) } });
@@ -3976,7 +4572,7 @@ app.get('/api/reports/summary', hanyaOwner, (c) => {
 
 /** Penjualan per kasir dalam rentang (menu Kasir): n + omzet + diskon
  *  (transaksi + per baris, rumus konsisten dengan sales.diskon). */
-app.get('/api/reports/cashiers', hanyaOwner, (c) => {
+app.get('/api/reports/cashiers', wajibIzin('laporan.lihat'), (c) => {
   const r = bacaRentang((k) => c.req.query(k));
   if (!r.ok) return c.json({ error: r.error }, 400);
   const dl = `date(s.created_at) BETWEEN date(?) AND date(?)`;
@@ -4002,7 +4598,7 @@ app.get('/api/reports/cashiers', hanyaOwner, (c) => {
  *  persis dengan topItems kartu Harian (Σ(amount − diskon baris) − HPP baris;
  *  diskon transaksi tidak dialokasikan ke baris) — jangan dihitung ulang di
  *  klien. `q` multi-kata pola customers; limit 50/200. */
-app.get('/api/reports/products', hanyaOwner, (c) => {
+app.get('/api/reports/products', wajibIzin('laporan.lihat'), (c) => {
   const r = bacaRentang((k) => c.req.query(k));
   if (!r.ok) return c.json({ error: r.error }, 400);
   const q = (c.req.query('q') ?? '').trim();
@@ -4034,7 +4630,7 @@ app.get('/api/reports/products', hanyaOwner, (c) => {
  *  salah. `days` selalu memuat SELURUH hari berisi penjualan di rentang (dasar
  *  angka kartu total); `trx` sengaja dibatasi 200 nota terbaru (layar, bukan
  *  arsip — arsipnya menu Riwayat) dan `total.n` memberi tahu bila terpotong. */
-app.get('/api/reports/profit', hanyaOwner, (c) => {
+app.get('/api/reports/profit', wajibIzin('laporan.lihat'), (c) => {
   const r = bacaRentang((k) => c.req.query(k));
   if (!r.ok) return c.json({ error: r.error }, 400);
   const dasar = `

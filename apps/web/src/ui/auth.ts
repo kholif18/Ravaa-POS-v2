@@ -4,6 +4,7 @@
 // tokenAuth() dari sini untuk header Authorization — arah sebaliknya akan
 // circular). Jadi request di sini memakai fetch mentah + BASE yang sama.
 import { setCashier } from './user';
+import { punyaIzinAkun } from './izin';
 
 export type Peran = 'owner' | 'kasir';
 export interface Akun {
@@ -15,6 +16,13 @@ export interface Akun {
   avatar?: string | null;
   /** Email opsional profil. */
   email?: string;
+  /** Izin operasional efektif (Paket B4). Owner = semua; kasir bisa custom. */
+  permissions?: string[];
+  /** true = kolom permissions diisi custom (bukan preset default role). */
+  permissions_custom?: boolean;
+  /** PIN cepat sudah diatur (Paket B5). */
+  pin_set?: boolean;
+  pin_updated_at?: string | null;
 }
 
 const Kunci_TOKEN = 'ravaa.token';
@@ -146,7 +154,41 @@ export async function profilSaya(): Promise<{ akun: Akun; wajib: boolean } | nul
   }
 }
 
-/** Rute bawaan per peran (dipakai setelah login & saat guard mengalihkan). */
-export function ruteBawaan(peran: Peran): string {
-  return peran === 'kasir' ? '#/pos' : '#/dashboard';
+/** Izin akun yang sedang login (cache lokal, sync — aman dipanggil di render). */
+export function punyaIzin(kode: string): boolean {
+  return punyaIzinAkun(akunTersimpan()?.akun, kode);
+}
+
+/** Simpan sesi hasil quick switch (lock.ts): token + profil baru.
+ *  Dipakai HANYA setelah server mengonfirmasi PIN target. */
+export function simpanSesiBaru(token: string, akun: Akun, wajib: boolean): void {
+  simpan(token, akun, wajib);
+  meCache = { akun, wajib };
+}
+
+/** Rute bawaan per akun (dipakai setelah login & saat guard mengalihkan).
+ *  Kasir dengan izin terbatas tidak boleh dilempar ke POS yang tak boleh
+ *  dibukanya — cari halaman pertama yang memang diizinkan. */
+export function ruteBawaan(akun: Akun | Peran): string {
+  const a: { role: Peran; permissions?: string[] | null } =
+    typeof akun === 'string' ? { role: akun } : akun;
+  if (a.role === 'owner') return '#/dashboard';
+  const urutan: { izin: string; rute: string }[] = [
+    { izin: 'pos.jual', rute: '#/pos' },
+    { izin: 'laporan.lihat', rute: '#/dashboard' },
+    { izin: 'riwayat.lihat', rute: '#/history' },
+    { izin: 'retur.lihat', rute: '#/returns' },
+    { izin: 'pesanan.lihat', rute: '#/orders' },
+    { izin: 'pelanggan.lihat', rute: '#/customers' },
+    { izin: 'hutang.lihat', rute: '#/debts' },
+    { izin: 'stok.lihat', rute: '#/stock' },
+    { izin: 'shift.lihat', rute: '#/shifts' },
+    { izin: 'pembelian.kelola', rute: '#/purchases' },
+    { izin: 'produk.kelola', rute: '#/products' },
+    { izin: 'supplier.kelola', rute: '#/suppliers' },
+    { izin: 'pengeluaran.kelola', rute: '#/expenses' },
+    { izin: 'kasmasuk.kelola', rute: '#/kas-masuk' },
+  ];
+  const cocok = urutan.find((x) => punyaIzinAkun(a, x.izin));
+  return cocok?.rute ?? '#/profil';
 }

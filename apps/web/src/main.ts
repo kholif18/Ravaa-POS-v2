@@ -38,6 +38,7 @@ import { getCashier } from './ui/user';
 import { profilSaya, ruteBawaan } from './ui/auth';
 import { toast } from './ui/toast';
 import { resetAksiBaru } from './ui/aksi-baru';
+import { mulaiKunciLayar } from './ui/lock';
 
 const app = document.getElementById('app');
 if (!app) throw new Error('#app tidak ditemukan');
@@ -77,7 +78,8 @@ async function render(): Promise<void> {
   }
   if (route === 'profil') {
     // Profil: edit nama sendiri + pref perangkat — di dalam shell (semua peran).
-    app!.innerHTML = renderShell(route, cashier(), saya.akun.role);
+    mulaiKunciLayar(saya.akun);
+    app!.innerHTML = renderShell(route, cashier(), saya.akun);
     bindShell();
     updateOutboxBadge();
     renderProfilPage(document.getElementById('page')!);
@@ -87,20 +89,24 @@ async function render(): Promise<void> {
     renderBare('Ganti sandi', renderUbahSandiPage);
     return;
   }
-  if (!bolehBuka(route, saya.akun.role)) {
-    // Kasir nyasar ke halaman owner (ketik hash manual): kembalikan ke
-    // bawaan perannya SEKALI (hash berubah -> render ulang yang sah).
-    toast('Halaman ini khusus owner', 'warning');
-    location.hash = ruteBawaan(saya.akun.role);
+  if (!bolehBuka(route, saya.akun)) {
+    // Kasir nyasar ke halaman yang izinnya tidak dimiliki (ketik hash manual):
+    // kembalikan ke halaman pertama yang memang diizinkan SEKALI (hash berubah
+    // -> render ulang yang sah). Server tetap menolak endpoint-nya.
+    toast('Halaman ini tidak tersedia untuk akun ini', 'warning');
+    location.hash = ruteBawaan(saya.akun);
     return;
   }
+  // Layar kunci (B5) dipasang sesudah profil segar: status PIN + timer idle
+  // mengikuti akun yang sedang aktif, bukan cache halaman sebelumnya.
+  mulaiKunciLayar(saya.akun);
   // labels (2026-10-17) = layar penuh tanpa sidebar (shell sendiri, pola POS):
   // pratinjau lembar A4/Folio butuh lebar; masuknya lewat toolbar Produk.
   app!.innerHTML =
     route === 'labels'
       ? renderLabelShell()
       : isAdminRoute(route)
-        ? renderShell(route, cashier(), saya.akun.role)
+        ? renderShell(route, cashier(), saya.akun)
         : renderPosShell();
   bindShell();
   updateOutboxBadge();

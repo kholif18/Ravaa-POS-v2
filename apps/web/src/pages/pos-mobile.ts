@@ -55,6 +55,28 @@ export interface PosMobileCtx {
   holdCount: number;
   /** Diskon TRANSAKSI (Rp) — nilai awal input `#pos-discount` (pola sidebar desktop). */
   diskon: number;
+  /** Izin akun (Paket B4) — cermin `punyaIzin()` pos.ts. Server tetap
+   *  penjaga terakhir; modul ini hanya menyembunyikan aksi yang tidak
+   *  diizinkan (jangan tambah logika bisnis di sini). */
+  bolehDiskon: boolean;
+  /** Produk `price_dynamic` boleh diubah harganya (kolom Harga). */
+  bolehHarga: boolean;
+  /** Item manual (tanpa product_id) boleh ditambahkan. */
+  bolehManual: boolean;
+  bolehTopup: boolean;
+  bolehTarik: boolean;
+  /** `bolehTopup || bolehTarik` — tombol layanan dirender. */
+  bolehLayanan: boolean;
+  /** `pelanggan.lihat` — blok Pelanggan di header dirender. */
+  bolehPelanggan: boolean;
+  /** Pintasan menu cepat — hanya dirender bila izin halamannya ada. */
+  bisaRiwayat: boolean;
+  bisaProduk: boolean;
+  bisaStok: boolean;
+  /** Halaman Sistem (#/settings) khusus role owner (izin core, bukan operasional). */
+  bisaSistem: boolean;
+  /** `shift.tutup` — tombol "Tutup shift" di tab Lainnya. */
+  bisaTutupShift: boolean;
   autoPrint: boolean;
   /** false = tombol Cetak ulang mati (device belum punya nota sukses). */
   bisaCetakUlang: boolean;
@@ -201,10 +223,12 @@ function kartuBarisHtml(ctx: PosMobileCtx, l: CartLine, i: number): string {
         <input class="input pm-qtyinp" data-act="qty" data-key="${l.key}" type="number" inputmode="numeric" min="0" value="${l.qty}" aria-label="Qty ${ctx.esc(l.name)}" />
         <button type="button" class="pm-stepbtn" data-act="inc" data-key="${l.key}" title="Tambah qty" aria-label="Tambah qty">${icon('plus')}</button>
       </div>
-      ${l.dyn
+      ${l.dyn && ctx.bolehHarga
         ? `<input class="input pm-inp" data-act="price" data-key="${l.key}" type="number" inputmode="numeric" min="0" step="500" value="${l.price}" aria-label="Harga ${ctx.esc(l.name)}" title="Harga jual boleh diubah (produk harga khusus)" />`
         : `<span class="pm-harga">${ctx.rp(l.price)}</span>`}
-      <input class="input pm-inp pm-inp-disc" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric" min="0" step="100" value="${l.discount || ''}" placeholder="Diskon" aria-label="Diskon baris ${ctx.esc(l.name)}" title="Diskon baris (Rp) — maksimum ${ctx.rp(gross)}" />
+      ${ctx.bolehDiskon
+        ? `<input class="input pm-inp pm-inp-disc" data-act="disc" data-key="${l.key}" type="number" inputmode="numeric" min="0" step="100" value="${l.discount || ''}" placeholder="Diskon" aria-label="Diskon baris ${ctx.esc(l.name)}" title="Diskon baris (Rp) — maksimum ${ctx.rp(gross)}" />`
+        : (l.discount > 0 ? `<span class="pm-badge pm-badge-tarik" title="Diskon baris">-${ctx.rp(l.discount)}</span>` : `<span class="pm-harga" title="Akun ini tidak punya izin diskon">—</span>`)}
       <span class="pm-net">${l.discount > 0 ? `<s class="pm-strike">${ctx.rp(gross)}</s> ` : ''}${ctx.rp(net)}</span>
     </div>
     ${l.useNote ? `<input class="input pm-note" type="text" maxlength="200" data-act="note" data-key="${l.key}" value="${ctx.esc(l.note)}" placeholder="Catatan (mis. ukuran 1 x 3 meter)" aria-label="Catatan ${ctx.esc(l.name)}" />` : ''}
@@ -259,8 +283,11 @@ function katalogListHtml(ctx: PosMobileCtx): string {
     return `<div class="empty pm-empty">${icon('search')}${
       ctx.products.length
         ? '<p class="font-semibold">Produk tidak ditemukan</p><p>Ubah kata saring atau pilih kategori lain.</p>'
-        : // Cache kosong (device belum sync) — jalan pintas ke Manage.
-          '<p class="font-semibold">Cache produk kosong</p><p><a class="underline" href="#/products">Buka halaman Produk</a> untuk sinkronisasi dulu.</p>'
+        : // Cache kosong (device belum sync) — jalan pintas ke Manage bila
+          // akun ini memang punya izin halaman Produk.
+          (ctx.bisaProduk
+            ? '<p class="font-semibold">Cache produk kosong</p><p><a class="underline" href="#/products">Buka halaman Produk</a> untuk sinkronisasi dulu.</p>'
+            : '<p class="font-semibold">Cache produk kosong</p><p>Minta owner menyinkronkan master produk di perangkat ini.</p>')
     }</div>`;
   }
   return daftar.map((p) => kartuProdukHtml(ctx, p)).join('');
@@ -289,36 +316,42 @@ function kartuProdukHtml(ctx: PosMobileCtx, p: Product): string {
 
 function aksiPanelHtml(ctx: PosMobileCtx): string {
   const diskonItem = ctx.diskonBaris();
+  const labelLayanan = ctx.bolehTopup && ctx.bolehTarik
+    ? 'Topup/Tarik'
+    : ctx.bolehTopup
+      ? 'Topup'
+      : 'Tarik';
+  const adaMenu = ctx.bisaRiwayat || ctx.bisaProduk || ctx.bisaStok || ctx.bisaSistem;
   return `
   <div class="card pm-sec">
     <span class="label">Aksi cepat</span>
     <div class="pos-side-grid">
       <button type="button" id="pos-hold" class="btn btn-ghost pos-qa" title="Bekukan keranjang, lanjutkan nanti lewat Pending (pintasan F7)"${ctx.keranjangTerisi() && !ctx.busy ? '' : ' disabled'}>${icon('pause')}<span>Tahan</span></button>
       <button type="button" id="pos-hold-open" class="btn btn-ghost pos-qa" title="Buka daftar transaksi tertahan (pintasan F8)"${ctx.holdCount ? '' : ' disabled'}>${icon('clock')}<span>Pending (<span id="pos-hold-count">${ctx.holdCount}</span>)</span></button>
-      <button type="button" id="pos-qa-manual" class="btn btn-ghost pos-qa">${icon('pencil')}<span>Item manual</span></button>
-      <button type="button" id="pos-qa-topup" class="btn btn-ghost pos-qa" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>Topup/Tarik</span></button>
-      <button type="button" id="pos-qa-disc" class="btn btn-ghost pos-qa">${icon('filter')}<span>Diskon</span></button>
-      <button type="button" id="pos-reprint" class="btn btn-ghost pos-qa" title="Cetak ulang nota terakhir dari device ini" ${ctx.bisaCetakUlang ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>
+      ${ctx.bolehManual ? `<button type="button" id="pos-qa-manual" class="btn btn-ghost pos-qa">${icon('pencil')}<span>Item manual</span></button>` : ''}
+      ${ctx.bolehLayanan ? `<button type="button" id="pos-qa-topup" class="btn btn-ghost pos-qa" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>${labelLayanan}</span></button>` : ''}
+      ${ctx.bolehDiskon ? `<button type="button" id="pos-qa-disc" class="btn btn-ghost pos-qa">${icon('filter')}<span>Diskon</span></button>` : ''}
+      ${ctx.bisaRiwayat ? `<button type="button" id="pos-reprint" class="btn btn-ghost pos-qa" title="Cetak ulang nota terakhir dari device ini" ${ctx.bisaCetakUlang ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>` : ''}
     </div>
   </div>
 
-  <div class="card pm-sec">
-    <span class="label">Diskon &amp; menu</span>
-    <div class="space-y-1.5">
+  ${ctx.bolehDiskon || adaMenu ? `<div class="card pm-sec">
+    <span class="label">${ctx.bolehDiskon ? 'Diskon &amp; menu' : 'Menu'}</span>
+    ${ctx.bolehDiskon ? `<div class="space-y-1.5">
       <label class="label !mb-0" for="pos-discount">Diskon transaksi (Rp)</label>
       <input id="pos-discount" class="input" type="number" inputmode="numeric" min="0" step="500" value="${ctx.diskon || ''}" placeholder="0" />
       <div class="flex items-baseline justify-between" id="pos-disc-item-row" ${diskonItem ? '' : 'hidden'}>
         <span class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Diskon item</span>
         <span id="pos-disc-item" class="text-sm font-semibold text-red-600 dark:text-red-400">-${ctx.rp(diskonItem)}</span>
       </div>
-    </div>
-    <div class="pos-side-grid mt-2">
-      <a href="#/history" class="btn btn-ghost pos-qa" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>
-      <a href="#/products" class="btn btn-ghost pos-qa" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>
-      <a href="#/stock" class="btn btn-ghost pos-qa" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>
-      <a href="#/settings" class="btn btn-ghost pos-qa" title="Pengaturan struk &amp; sistem">${icon('settings')}<span>Sistem</span></a>
-    </div>
-  </div>
+    </div>` : ''}
+    ${adaMenu ? `<div class="pos-side-grid mt-2">
+      ${ctx.bisaRiwayat ? `<a href="#/history" class="btn btn-ghost pos-qa" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>` : ''}
+      ${ctx.bisaProduk ? `<a href="#/products" class="btn btn-ghost pos-qa" title="Buka halaman Produk">${icon('products')}<span>Produk</span></a>` : ''}
+      ${ctx.bisaStok ? `<a href="#/stock" class="btn btn-ghost pos-qa" title="Buka halaman Stok">${icon('stock')}<span>Stok</span></a>` : ''}
+      ${ctx.bisaSistem ? `<a href="#/settings" class="btn btn-ghost pos-qa" title="Pengaturan struk &amp; sistem">${icon('settings')}<span>Sistem</span></a>` : ''}
+    </div>` : ''}
+  </div>` : ''}
 
   <div class="card pm-sec">
     <span class="label">Shift</span>
@@ -326,7 +359,7 @@ function aksiPanelHtml(ctx: PosMobileCtx): string {
       <span class="pm-shiftrow">${icon('clock')}<span id="pos-jam">—</span></span>
       <span class="pm-shiftrow">${icon('users')}<span>${ctx.esc(ctx.kasir)} · Shift #${ctx.shiftId ?? '—'}</span></span>
     </div>
-    <button type="button" id="pos-shift-tutup" class="btn pm-tutup" title="Tutup shift kasir ini">${icon('logout')}<span>Tutup shift</span></button>
+    ${ctx.bisaTutupShift ? `<button type="button" id="pos-shift-tutup" class="btn pm-tutup" title="Tutup shift kasir ini">${icon('logout')}<span>Tutup shift</span></button>` : ''}
   </div>
 
   <div class="card pm-sec">
@@ -479,11 +512,11 @@ export function pmShellHtml(ctx: PosMobileCtx): string {
         <button type="button" id="pos-scan-kamera" class="btn btn-ghost pm-iconbtn" title="Pindai barcode dengan kamera" aria-label="Pindai barcode dengan kamera">${icon('camera')}</button>
         <button type="button" id="pos-qty" class="btn btn-ghost pm-qtychip${ctx.qtyNext > 1 ? ' !border-primary !text-primary' : ''}" title="Qty untuk item BERIKUTNYA, dipakai sekali lalu kembali ke 1">Qty ${ctx.qtyNext}</button>
       </div>
-      <div class="pm-headrow">
+      ${ctx.bolehPelanggan ? `<div class="pm-headrow">
         <span id="pos-tier" class="chip pm-tierchip${ctx.grosir ? '' : ' hidden'}">${icon('users')}<span>Grosir</span></span>
         <select id="pos-customer" class="input pm-custsel min-w-0 flex-1" aria-label="Pelanggan">${ctx.customerOptions}</select>
         <button type="button" id="pos-cust-cari" class="btn btn-ghost pm-iconbtn" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}</button>
-      </div>
+      </div>` : ''}
       <div id="pos-notif" class="pm-notif">${ctx.notifHtml}</div>
     </header>
 

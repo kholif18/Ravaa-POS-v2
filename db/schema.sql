@@ -562,6 +562,17 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL DEFAULT '',
   is_active     INTEGER NOT NULL DEFAULT 1,
   must_change   INTEGER NOT NULL DEFAULT 0,
+  -- Izin operasional per akun (Paket B, 2026-10-20): JSON array kunci izin
+  -- (lihat IZIN_OPERASIONAL di apps/api/src/index.ts). NULL = default role;
+  -- [] = valid (tidak punya izin operasional). Izin core owner TIDAK masuk
+  -- kolom ini — selalu dijaga hanyaOwner.
+  permissions   TEXT,
+  -- PIN 6 digit untuk kunci layar/quick switch (Paket B5). Hash scrypt
+  -- format salt:hash (hashPassword) — plaintext/PIN TIDAK PERNAH dikirim.
+  pin_hash      TEXT,
+  pin_failed    INTEGER NOT NULL DEFAULT 0,
+  pin_locked_until TEXT,
+  pin_updated_at TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS sessions (

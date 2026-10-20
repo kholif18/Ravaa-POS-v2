@@ -6,7 +6,7 @@
 // ID #gs-form/#gs-lama/#gs-baru/#gs-ulang/#gs-err/#gs-ok tidak berubah.
 import { apiPost, HttpError } from '../api';
 import { toast } from '../ui/toast';
-import { akunTersimpan, ruteBawaan, type Peran } from '../ui/auth';
+import { akunTersimpan, ruteBawaan, type Akun } from '../ui/auth';
 import { icon } from '../ui/icons';
 import { authLayarHtml } from '../ui/auth-screen';
 
@@ -19,7 +19,7 @@ export function renderUbahSandiPage(el: HTMLElement): void {
   const tersimpan = akunTersimpan();
   const nama = tersimpan?.akun.name ?? tersimpan?.akun.username ?? '';
   const wajib = tersimpan?.wajib ?? true;
-  const peran: Peran = tersimpan?.akun.role ?? 'kasir';
+  const akun: Akun = tersimpan?.akun ?? { id: 0, username: '', name: '', role: 'kasir' };
   el.innerHTML = authLayarHtml(`
     <div class="flex items-center gap-3">
       <span class="login-logo size-11">${icon('shieldCheck')}</span>
@@ -84,7 +84,7 @@ export function renderUbahSandiPage(el: HTMLElement): void {
         /* abaikan */
       }
       toast('Sandi baru tersimpan', 'success');
-      location.hash = ruteBawaan(peran);
+      location.hash = ruteBawaan(akun);
     } catch (e2) {
       gagal(errMsg(e2), lama);
     } finally {

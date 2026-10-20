@@ -26,6 +26,10 @@ import {
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { hariIni, waktu } from '../ui/waktu';
+import { akunTersimpan } from '../ui/auth';
+import {
+  AUTO_LOCK_PILIHAN, getAutoLockMenit, setAutoLockMenit, verifierTersedia,
+} from '../ui/lock';
 import { LEBAR_LOGO, resetLogoStrukCache } from '../logo-struk';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 
@@ -464,14 +468,21 @@ function kartuSaklar(opt: {
 function kartuPerangkat(): string {
   const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   const storeName = state.toko?.store_name || '';
+  const akun = akunTersimpan()?.akun;
+  const auto = getAutoLockMenit();
+  const opsiAuto = AUTO_LOCK_PILIHAN.map(
+    (o) => `<option value="${o.menit}"${o.menit === auto ? ' selected' : ''}>${o.label}</option>`,
+  ).join('');
+  const pinSet = akun?.pin_set === true;
+  const offline = pinSet && akun ? verifierTersedia(akun.id) : false;
   return `
-    <div class="card flex flex-col" data-set-card data-cari="tampilan perangkat tema terang gelap browser lokal">
+    <div class="card flex flex-col" data-set-card data-cari="tampilan perangkat tema terang gelap browser lokal kunci otomatis autolock pin keamanan layar">
       <div class="flex items-start gap-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('smartphone')}</span>
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Tampilan perangkat ini</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Tema warna perangkat ini. Nama toko di <b>kepala struk thermal</b> mengikuti
+            Tema warna dan kunci layar perangkat ini. Nama toko di <b>kepala struk thermal</b> mengikuti
             <b>Identitas toko</b> (halaman ini) dan berlaku untuk semua device.
           </p>
         </div>
@@ -490,6 +501,20 @@ function kartuPerangkat(): string {
             <option value="light" ${theme === 'light' ? 'selected' : ''}>Terang</option>
             <option value="dark" ${theme === 'dark' ? 'selected' : ''}>Gelap</option>
           </select>
+        </div>
+        <div class="field-sm sm:col-span-2">
+          <label class="label" for="set-autolock">Kunci layar otomatis</label>
+          <select id="set-autolock" class="input input-sm">${opsiAuto}</select>
+          <span class="mt-1 block text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+            ${
+              pinSet
+                ? offline
+                  ? 'PIN aktif dan kunci offline siap di perangkat ini.'
+                  : 'PIN aktif, tetapi perangkat ini belum punya kunci offline — buka kunci sekali saat online.'
+                : 'Atur PIN 6 digit di halaman Profil dulu. Tanpa PIN, kunci otomatis tidak berjalan.'
+            }
+            Pilihan ini hanya tersimpan di browser ini.
+          </span>
         </div>
       </div>
       <div class="mt-3 flex justify-end">
@@ -1307,6 +1332,14 @@ function bind(): void {
     try { localStorage.setItem('ravaa.theme', t); } catch { /* abaikan */ }
     document.dispatchEvent(new CustomEvent('ravaa:theme'));
     toast('Tampilan perangkat disimpan', 'success');
+  });
+  host?.querySelector<HTMLSelectElement>('#set-autolock')?.addEventListener('change', (e) => {
+    const menit = Number((e.currentTarget as HTMLSelectElement).value);
+    setAutoLockMenit(menit);
+    toast(
+      menit > 0 ? `Kunci layar otomatis: ${menit} menit tanpa aktivitas` : 'Kunci layar otomatis dimatikan',
+      'info',
+    );
   });
   host?.querySelector<HTMLInputElement>('#set-pause')?.addEventListener('change', (e) => {
     const nyala = (e.target as HTMLInputElement).checked;
