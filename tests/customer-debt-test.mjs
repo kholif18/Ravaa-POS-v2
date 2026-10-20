@@ -203,20 +203,20 @@ const [popA4] = await Promise.all([
 await popA4.waitForLoadState('domcontentloaded');
 const a4 = await popA4.evaluate(() => {
   const css = document.querySelector('style')?.textContent ?? '';
-  const rk = document.querySelector('table.ringkas');
+  const rk = document.querySelector('.total-section');
   return {
     ringkas: !!rk,
-    baris: rk ? rk.querySelectorAll('tbody tr').length : 0,
+    baris: rk ? rk.querySelectorAll('.total-row').length : 0,
     kotak: document.body.innerHTML.includes('kotak'),
-    garis: /table\.ringkas td \{[^}]*border-bottom/.test(css),
-    stripeLedger: css.includes('table.ledger tbody tr:nth-child(even)'),
-    stripeRingkas: css.includes('table.ringkas tr:nth-child(even)'),
+    garis: /td \{[^}]*border-bottom/.test(css),
+    stripeLedger: css.includes('tbody tr:nth-child(even)'),
+    stripeRingkas: css.includes('tbody tr:nth-child(even)'),
     isi: rk ? rk.innerText.replace(/\s+/g, ' ') : '',
   };
 });
 chk('ringkas A4 = tabel 3 baris (Total dihutang/dibayar/sisa) TANPA box',
   a4.ringkas && a4.baris === 3 && !a4.kotak
-    && a4.isi.includes('Total dihutang') && a4.isi.includes('Rp50.000'),
+    && a4.isi.includes('Total dihutang') && a4.isi.includes('Rp 50.000'),
   a4.isi);
 chk('striping ledger + ringkas aktif, ringkas pakai garis bawah-saja',
   a4.stripeLedger && a4.stripeRingkas && a4.garis, JSON.stringify(a4));

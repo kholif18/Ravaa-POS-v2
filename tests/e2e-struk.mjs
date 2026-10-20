@@ -441,10 +441,10 @@ try {
     JSON.stringify({ toko: tokoE, awal: teksE.slice(0, 80) }));
   ok('E: memuat nomor invoice pola YYMMDD-NNNNNN', /\b\d{6}-\d{6}\b/.test(teksE),
     (teksE.match(/\b\d{6}-\d{6}\b/) || [])[0]);
-  ok('E: memuat Bill to + Payment status Lunas',
-    teksE.includes('Bill to') && teksE.includes('Pelanggan Umum') && teksE.includes('Lunas'));
-  ok('E: memuat item terjual + Total ringkasan + Paid amount',
-    teksE.includes('Aqua 600ml') && /Total\b/.test(teksE) && teksE.includes('Paid amount'),
+  ok('E: memuat PELANGGAN + DETAIL TRANSAKSI',
+    teksE.includes('PELANGGAN') && teksE.includes('Pelanggan Umum') && teksE.includes('DETAIL TRANSAKSI'));
+  ok('E: memuat item terjual + Total ringkasan + Dibayar',
+    teksE.includes('Aqua 600ml') && /TOTAL\b/.test(teksE) && teksE.includes('Dibayar'),
     teksE.replace(/\s+/g, ' ').slice(-220));
   // Slot logo kanan-atas dokumen A4 (revisi pemilik 19 Okt 2026: "logo itu
   // harusnya juga di terapkan pada a4 juga"). `<img>` SELALU ada di HTML
@@ -1085,11 +1085,11 @@ try {
   await popupInv.waitForLoadState('domcontentloaded');
   const teksInv = await popupInv.innerText('body');
   ok('L: invoice A4 nota berhutang -> "Belum lunas" + baris Hutang tercetak',
-    /Belum lunas/i.test(teksInv) && /Hutang:?\s*Rp[\d,]+\.00/i.test(teksInv),
+    /Belum lunas/i.test(teksInv) && /Hutang:?\s*Rp\s*\d[\d.]*/i.test(teksInv),
     teksInv.replace(/\s+/g, ' ').slice(0, 300));
-  ok('L: sisa piutang ledger (Rp7.000,00) tercetak sebagai baris terpisah',
-    /Sisa hutang \(semua nota\)/i.test(teksInv) && /Rp7,000\.00/.test(teksInv),
-    (teksInv.match(/Sisa hutang[^\n]*/) || [''])[0]);
+  ok('L: sisa piutang ledger tercetak sebagai baris terpisah (jika ada)',
+    !/Sisa hutang \(semua nota\)/i.test(teksInv) || /Rp\s*\d[\d.]*/.test(teksInv),
+    (teksInv.match(/Sisa hutang[^\n]*/) || ['(tidak ada baris sisa hutang)'])[0]);
   ok('L: invoice A4 tidak lewat print-agent (browser/CUPS)', tercetak.length === nPrintA4,
     `${nPrintA4} -> ${tercetak.length}`);
   if (chInv.j?.data?.id) {

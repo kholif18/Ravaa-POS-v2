@@ -64,89 +64,138 @@ export const CSS_LOGO_A4 = `.logo { position: relative; width: 84px; height: 84p
 
 export function htmlLaporan(d: DokLaporan, toko: Toko): string {
   const cls = (k: { kanan?: boolean; tengah?: boolean }) => (k.kanan ? ' class="r"' : k.tengah ? ' class="c"' : '');
-  // Sel angka (ribuan + desimal Aronium) rata kanan otomatis: pemanggil
-  // mengirim string polos, jadi deteksi digit saja — tanpa menebak kolom.
   const sel = (v: string, kanan: boolean) =>
     `<td${kanan || /[\d.,]/.test(v.replace(/[^0-9.,]/g, '')) && /[0-9]/.test(v) ? ' class="r"' : ''}>${esc(v)}</td>`;
+  const tglCetak = tglLengkap(new Date().toISOString());
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
 <meta charset="utf-8">
 <title>${esc(d.judul)} — ${esc(d.periode)}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  @page { size: A4; margin: 1cm; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45; }
-  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
-  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
-  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
-  .alamat { margin-top: 4px; max-width: 60%; }
-  .baris-kop { display: flex; margin-top: 2px; }
-  .baris-kop .lbl { width: 72px; }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #333; margin: 0; padding: 0; line-height: 1.2; }
+  .container { width: 100%; margin: 0; padding: 0; }
+  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+  .logo { font-size: 24px; font-weight: bold; }
+  .info-title { font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 5px; padding-bottom: 2px; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
+  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
+  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #fafafa; }
+  .text-right { text-align: right; }
+  .text-center { text-align: center; }
+  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .total-section { margin-left: auto; width: 250px; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
+  .signature { display: flex; justify-content: flex-end; margin-top: 50px; }
+  .signature-box { text-align: right; }
+  .sig-date { font-size: 11px; }
+  .sig-label { font-size: 11px; margin-top: 10px; }
+  .sig-name { font-size: 11px; font-weight: bold; margin-top: 5px; }
+  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
-  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
-  .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
-  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
-  .rincian .baris { display: flex; }
-  .rincian .baris .lbl { width: 118px; }
-  table.items { width: 100%; border-collapse: collapse; }
-  table.items th { font-size: 10px; padding: 5px 6px; border-top: 1px solid #444;
-                   border-bottom: 1px solid #444; text-align: left; }
-  table.items th.r, table.items td.r { text-align: right; }
-  table.items th.c, table.items td.c { text-align: center; }
-  table.items td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
-  .seksi { font-size: 12px; font-weight: 700; margin: 18px 0 6px; }
-  .ringkas { width: 55%; margin-left: auto; margin-top: 14px; }
-  .kotak { display: flex; justify-content: space-between; border: 1px solid #444; padding: 5px 9px; margin-bottom: 7px; }
-  .kotak .lbl { font-weight: 700; }
-  .catat { margin-top: 10px; font-size: 10px; color: #555; }
-  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 </style>
 </head>
 <body>
-  <div class="kop">
-    <div>
-      <div class="judul">${esc(d.judul)}</div>
-      <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
-      ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
-      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
-      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
+  <div class="container">
+    <div class="header">
+      <div style="display: flex; gap: 15px; align-items: flex-start;">
+        ${logoA4Html()}
+        <div>
+          <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
+          ${toko.store_address ? `<div style="font-size: 11px;">${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_phone || toko.store_email
+            ? `<div style="font-size: 11px;">Telp: ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
+            : ''}
+        </div>
+      </div>
+      <div style="text-align: right;">
+        <h1 style="margin: 0; color: #333;">${esc(d.judul)}</h1>
+        <div style="font-size: 18px; font-weight: bold;">${esc(d.periode)}</div>
+      </div>
     </div>
-    ${logoA4Html()}
+
+    <div class="meta">
+      <div class="info-box" style="width: 48%;">
+        <div class="info-title">PERIODE</div>
+        <div style="font-size: 14px; font-weight: bold;">${esc(d.periode)}</div>
+      </div>
+      <div class="info-box" style="width: 48%; text-align: right;">
+        <div class="info-title">DETAIL</div>
+        ${d.meta.map(([k, v]) => `<div>${esc(k)}: <strong>${esc(v)}</strong></div>`).join('')}
+      </div>
+    </div>
+
+    <table class="items">
+      <thead>
+        <tr>
+          ${d.kolom.map((k) => `<th${cls(k)}>${esc(k.label)}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${d.baris.map((r) => `<tr>${r.map((v, i) => sel(v, !!d.kolom[i]?.kanan)).join('')}</tr>`).join('')}
+      </tbody>
+    </table>
+
+    ${(d.bagian ?? [])
+      .map(
+        (b) => `
+      <div style="margin-top: 20px;">
+        <div class="info-title" style="font-size: 12px; margin-bottom: 6px;">${esc(b.judul)}</div>
+        <table class="items">
+          <thead>
+            <tr>
+              ${b.kolom.map((k) => `<th${cls(k)}>${esc(k.label)}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${b.baris.map((r) => `<tr>${r.map((v, i) => sel(v, !!b.kolom[i]?.kanan)).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+        ${b.catatan ? `<div style="margin-top: 8px; font-size: 10px; color: #555; font-style: italic;">${esc(b.catatan)}</div>` : ''}
+      </div>`,
+      )
+      .join('')}
+
+    ${d.ringkas.length ? `
+    <div style="display: flex; justify-content: space-between;">
+      <div style="width: 50%;"></div>
+      <div class="total-section">
+        ${d.ringkas.map(([k, v]) => `<div class="total-row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${d.catatan ? `<div style="margin-top: 20px; font-size: 10px; color: #555; font-style: italic;">${esc(d.catatan)}</div>` : ''}
+
+    <div class="signature">
+      <div class="signature-box">
+        <div class="sig-date">${cityToko(toko)}, ${tglSingkat(new Date().toISOString())}</div>
+        <div class="sig-label">Kasir / Pemilik</div>
+        <div class="sig-name">(${esc(toko.store_name || 'Ravaa POS')})</div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada ${tglCetak}</div>
+      ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
+    </div>
   </div>
-  <hr>
-  <div class="meta">
-    <div>
-      <div class="ttl">Periode</div>
-      <div>${esc(d.periode)}</div>
-    </div>
-    <div class="rincian">
-      ${d.meta.map(([k, v]) => `<div class="baris"><span class="lbl">${esc(k)}:</span><span>${esc(v)}</span></div>`).join('')}
-    </div>
-  </div>
-  <table class="items">
-    <thead><tr>${d.kolom.map((k) => `<th${cls(k)}>${esc(k.label)}</th>`).join('')}</tr></thead>
-    <tbody>${d.baris.map((r) => `<tr>${r.map((v, i) => sel(v, !!d.kolom[i]?.kanan)).join('')}</tr>`).join('')}</tbody>
-  </table>
-  ${(d.bagian ?? [])
-    .map(
-      (b) => `
-  <div class="seksi">${esc(b.judul)}</div>
-  <table class="items">
-    <thead><tr>${b.kolom.map((k) => `<th${cls(k)}>${esc(k.label)}</th>`).join('')}</tr></thead>
-    <tbody>${b.baris.map((r) => `<tr>${r.map((v, i) => sel(v, !!b.kolom[i]?.kanan)).join('')}</tr>`).join('')}</tbody>
-  </table>
-  ${b.catatan ? `<div class="catat">${esc(b.catatan)}</div>` : ''}`,
-    )
-    .join('')}
-  ${d.ringkas.length ? `<div class="ringkas">${d.ringkas.map(([k, v]) => `<div class="kotak"><span class="lbl">${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>` : ''}
-  ${d.catatan ? `<div class="catat">${esc(d.catatan)}</div>` : ''}
-  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))}</div>` : ''}
   <script>
     window.addEventListener('load', function () { window.print(); });
   </script>
 </body>
 </html>`;
+}
+
+export function cityToko(toko: Toko): string {
+  return toko.store_address ? String(toko.store_address).split(',')[0].trim() : 'Nganjuk';
 }
 
 /** Buka tab dokumen laporan dan cetak (window.print() — simpan sebagai PDF
@@ -163,7 +212,7 @@ export async function cetakLaporan(dok: DokLaporan): Promise<void> {
 
 /** Baris sale_items dari GET /api/sales/:id (kolom yang relevan utk invoice). */
 export interface ItemNota {
-  name: string; qty: number; price: number; amount: number;
+  name: string; sku: string; qty: number; price: number; amount: number;
   discount: number; unit: string; base_unit: string | null; note: string;
 }
 /** sales row dari GET /api/sales/:id (SELECT * — memuat invoice_no). */
@@ -177,11 +226,18 @@ export interface SaleNota {
   /** id pelanggan (server, `s.*`) — kunci ambil sisa piutang ledger;
    *  null = baris lama tanpa kontak -> tanpa baris sisa hutang. */
   customer_id?: number | null;
+  /** Kontak LIVE pelanggan (sejak 2026-10-20, LEFT JOIN customers) untuk
+   *  cetak detail pelanggan di invoice A4. Null bila tanpa pelanggan atau
+   *  pelanggan sudah dihapus. */
+  customer_phone?: string | null;
+  customer_address?: string | null;
+  /** Catatan transaksi tingkat nota (sales.note, sejak 2026-10-10). */
+  note?: string | null;
   /** Penanda nota berhutang (computed server, `sisa_hutang` putaran 13) —
    *  kas sisa nota INI (tunai + kurang + pelanggan valid). 0 = lunas. */
   sisa_hutang?: number;
 }
-interface Toko {
+export interface Toko {
   store_name: string; store_address: string;
   store_phone: string; store_email: string;
   /** Opsi dokumen server (GET /api/settings, 2026-10-20). Opsional supaya
@@ -240,27 +296,59 @@ const LABEL_METODE: Record<string, string> = {
  * (`GET /api/sales/:id` -> `payments`): >1 baris = rincian Payment method
  * ditulis per metode (tunai = uang diserahkan, non-tunai = porsi). Absen /
  * ≤1 baris = keluaran invoice PERSIS seperti sebelum fitur. */
+/** Angka gaya Indonesia: `Rp 20.000` (titik ribuan, tanpa desimal). */
+export function rpIdr(n: number): string {
+  return `Rp ${n.toLocaleString('id-ID', { maximumFractionDigits: 0 })}`;
+}
+
+/** Tanggal gaya Indonesia `d F Y H:i` (Contoh: 10 Juli 2026 21:48). */
+export function tglId(createdAt: string): string {
+  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(createdAt) || createdAt.includes('T')
+    ? createdAt
+    : `${createdAt.replace(' ', 'T')}Z`;
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const bulan = ['Januari','Februari','Maret','April','Mei','Juni',
+    'Juli','Agustus','September','Oktober','November','Desember'];
+  return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Cetak tanggal `d F Y` untuk tanda tangan. */
+export function tglSingkat(iso: string): string {
+  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) || iso.includes('T')
+    ? iso
+    : `${iso.replace(' ', 'T')}Z`;
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const bulan = ['Januari','Februari','Maret','April','Mei','Juni',
+    'Juli','Agustus','September','Oktober','November','Desember'];
+  return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** Cetak tanggal lengkap `d F Y H:i:s` untuk footer. */
+export function tglLengkap(iso: string): string {
+  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) || iso.includes('T')
+    ? iso
+    : `${iso.replace(' ', 'T')}Z`;
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const bulan = ['Januari','Februari','Maret','April','Mei','Juni',
+    'Juli','Agustus','September','Oktober','November','Desember'];
+  return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piutang = 0, payments: { method: string; amount: number }[] = []): string {
   // Diskon agregat = diskon transaksi + seluruh diskon per baris (persis rumus
-  // laporan: sales.diskon). Dipakai untuk baris "Discount (...%)" ala Aronium.
+  // laporan: sales.diskon).
   const discItem = items.reduce((a, i) => a + (i.discount || 0), 0);
   const discTotal = Math.max(0, sale.discount) + discItem;
-  const pct = sale.subtotal > 0 && discTotal > 0 ? Math.round((discTotal / sale.subtotal) * 100) : 0;
-  // Split payment (1.6.5): >1 baris `payments` = nota dibayar dua metode —
-  // rincian menampilkan baris PER metode (tunai = uang diserahkan = porsi +
-  // kembalian, non-tunai = porsi; pola struk). Satu metode / data lama =
-  // jalur lama PERSIS (satu baris `metode: total`).
+  // Split payment (1.6.5): >1 baris `payments` = nota dibayar dua metode.
   const split = payments.length > 1 ? payments : [];
   const labelM = (m: string) => (m === 'tunai' ? 'TUNAI' : (LABEL_METODE[m] ?? m.toUpperCase()));
-  const metode = split.length
-    ? split.map((p) => labelM(p.method)).join(' + ')
-    : LABEL_METODE[sale.pay_method] ?? sale.pay_method.toUpperCase();
-  // Lunas di muka = tunai cukup / QRIS / transfer. Uang kurang (putaran 12 POS:
-  // uang kurang/0 otomatis jadi hutang) membuat nota INI belum lunas ->
-  // Payment status "Belum lunas" + baris Hutang di rincian pembayaran.
   const sisaNota = sale.sisa_hutang ?? 0;
   const paid = split.length ? sale.total - sisaNota : sale.pay_method === 'tunai' ? sale.cash_in : sale.total;
   const tampilKembalian = split.length ? split.some((p) => p.method === 'tunai') : sale.pay_method === 'tunai';
+  const city = toko.store_address ? String(toko.store_address).split(',')[0].trim() : 'Nganjuk';
 
   const barisItem = items.map((it, i) => {
     const qtyTampil = it.unit && it.base_unit && it.unit !== it.base_unit
@@ -268,15 +356,21 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
       : `${it.qty}`;
     const utama = `<tr>
       <td class="c">${i + 1}</td>
-      <td>${esc(it.name)}</td>
-      <td class="r">${esc(qtyTampil)}</td>
-      <td class="r">${num(it.price)}</td>
-      <td class="r">${num(it.amount)}</td>
+      <td><strong>${esc(it.name)}</strong></td>
+      <td class="font-mono">${esc(it.sku ?? '')}</td>
+      <td class="text-center">${Number(it.qty)}</td>
+      <td class="text-right">Rp ${Number(it.price).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</td>
+      <td class="text-right">Rp ${Number(it.discount || 0).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</td>
+      <td class="text-right">Rp ${Number(it.amount).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</td>
     </tr>`;
     // Catatan per baris (sale_items.note) — pola print_a4.blade.php RPOS:
     // baris mungil italic di bawah itemnya, colspan penuh.
     const catatan = it.note?.trim()
-      ? `<tr class="nota"><td colspan="5">* ${esc(it.note.trim())}</td></tr>`
+      ? `<tr>
+          <td colspan="7" style="font-size: 10px; color: #666; padding: 0 5px 5px 55px; border: none;">
+            <em>* ${esc(it.note.trim())}</em>
+          </td>
+        </tr>`
       : '';
     return utama + catatan;
   }).join('');
@@ -287,107 +381,119 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
 <meta charset="utf-8">
 <title>Invoice ${esc(sale.invoice_no ?? sale.id.slice(0, 8))}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  @page { size: A4; margin: 1cm; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45; }
-  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
-  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
-  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
-  .alamat { margin-top: 4px; max-width: 60%; }
-  .baris-kop { display: flex; margin-top: 2px; }
-  .baris-kop .lbl { width: 72px; }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #333; margin: 0; padding: 0; line-height: 1.2; }
+  .container { width: 100%; margin: 0; padding: 0; }
+  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+  .logo { font-size: 24px; font-weight: bold; }
+  .info { margin-bottom: 20px; display: flex; justify-content: space-between; }
+  .info-box { width: 48%; }
+  .info-title { font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 5px; padding-bottom: 2px; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
+  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
+  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #fafafa; }
+  .text-right { text-align: right; }
+  .text-center { text-align: center; }
+  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .total-section { margin-left: auto; width: 250px; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
+  .signature { display: flex; justify-content: flex-end; margin-top: 50px; }
+  .signature-box { text-align: right; }
+  .sig-date { font-size: 11px; }
+  .sig-label { font-size: 11px; margin-top: 10px; }
+  .sig-name { font-size: 11px; font-weight: bold; margin-top: 5px; }
+  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
-  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
-  .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
-  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
-  .rincian .baris { display: flex; }
-  .rincian .baris .lbl { width: 118px; }
-  table.items { width: 100%; border-collapse: collapse; }
-  table.items th { font-size: 10px; text-transform: none; padding: 5px 6px; border-top: 1px solid #444;
-                   border-bottom: 1px solid #444; text-align: left; }
-  table.items th.r, table.items td.r { text-align: right; }
-  table.items th.c, table.items td.c { text-align: center; }
-  table.items td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
-  table.items td.c { color: #444; }
-  tr.nota td { border: none; padding: 0 6px 5px 34px; font-size: 10px; font-style: italic; color: #555; }
-  .ringkas { width: 55%; margin-left: auto; margin-top: 14px; }
-  .kotak { display: flex; justify-content: space-between; border: 1px solid #444; padding: 5px 9px; margin-bottom: 7px; }
-  .kotak .lbl { font-weight: 700; }
-  .putus { border-top: 1px dashed #999; margin: 4px 0 11px; }
-  .bayar { margin-top: 6px; }
-  .bayar .ttl { font-weight: 700; margin-bottom: 3px; }
-  .bayar .baris { display: flex; justify-content: space-between; width: 100%; padding: 1px 0; }
-  .bayar .baris .lbl { font-weight: 700; }
-  .bayar .baris.hutang, .bayar .baris.hutang .lbl { color: #b91c1c; font-weight: 700; }
-  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 </style>
 </head>
 <body>
-  <div class="kop">
-    <div>
-      <div class="judul">${esc(judulInvoiceA4(toko))}</div>
-      <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
-      ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
-      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
-      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
+  <div class="container">
+    <div class="header">
+      <div style="display: flex; gap: 15px; align-items: flex-start;">
+        ${logoA4Html()}
+        <div>
+          <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
+          ${toko.store_address ? `<div style="font-size: 11px;">${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_phone || toko.store_email
+            ? `<div style="font-size: 11px;">Telp: ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
+            : ''}
+        </div>
+      </div>
+      <div style="text-align: right;">
+        <h1 style="margin: 0; color: #333;">INVOICE</h1>
+        <div style="font-size: 18px; font-weight: bold;">#${esc(sale.invoice_no ?? '—')}</div>
+      </div>
     </div>
-    ${logoA4Html()}
+
+    <div class="info">
+      <div class="info-box">
+        <div class="info-title">PELANGGAN</div>
+        <div style="font-size: 14px; font-weight: bold;">${esc((sale.customer_name ?? '').trim() || 'Walk-In Customer')}</div>
+        <div>${esc(sale.customer_phone ?? '-')}</div>
+        <div>${esc(sale.customer_address ?? '-')}</div>
+      </div>
+      <div class="info-box" style="text-align: right;">
+        <div class="info-title">DETAIL TRANSAKSI</div>
+        <div>Tanggal: <strong>${tglId(sale.created_at)}</strong></div>
+        <div>Metode Bayar: <strong>${labelM(sale.pay_method)}</strong></div>
+        <div>Kasir: <strong>${esc(sale.cashier)}</strong></div>
+      </div>
+    </div>
+
+    <table class="items">
+      <thead>
+        <tr>
+          <th class="text-center" width="40">NO</th>
+          <th>NAMA PRODUK</th>
+          <th>SKU</th>
+          <th class="text-center" width="60">QTY</th>
+          <th class="text-right" width="100">HARGA</th>
+          <th class="text-right" width="100">DISC</th>
+          <th class="text-right" width="120">SUBTOTAL</th>
+        </tr>
+      </thead>
+      <tbody>${barisItem}</tbody>
+    </table>
+
+    <div style="display: flex; justify-content: space-between;">
+      <div class="info-box" style="width: 50%;">
+        <div class="info-title">CATATAN</div>
+        <p style="font-style: italic;">${esc(sale.note ?? '-')}</p>
+      </div>
+      <div class="total-section">
+        <div class="total-row"><span>Subtotal</span><span>Rp ${Number(sale.subtotal).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
+        ${discTotal > 0 ? `<div class="total-row"><span>Diskon</span><span>-Rp ${Number(discTotal).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>` : ''}
+        <div class="total-row grand-total"><span>TOTAL</span><span>Rp ${Number(sale.total).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
+        <div class="total-row" style="margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;"><span>Dibayar</span><span>Rp ${Number(paid).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
+        <div class="total-row"><span>Kembali</span><span>Rp ${Number(sale.change).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
+        <div class="total-row"><span>Status pembayaran</span><span>${sisaNota > 0 ? 'Belum lunas' : 'Lunas'}</span></div>
+        ${sisaNota > 0 ? `<div class="total-row"><span>Hutang</span><span>Rp ${Number(sisaNota).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>` : ''}
+      </div>
+    </div>
+
+    <div class="signature">
+      <div class="signature-box">
+        <div class="sig-date">${city}, ${tglSingkat(new Date().toISOString())}</div>
+        <div class="sig-label">Kasir</div>
+        <div class="sig-name">(${esc(sale.cashier)})</div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada ${tglLengkap(new Date().toISOString())}</div>
+      ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
+      <div class="foot-line">Barang yang sudah dibeli tidak dapat ditukar</div>
+      <div class="foot-line">Simpan struk ini sebagai bukti pembelian</div>
+    </div>
   </div>
-  <hr>
-  <div class="meta">
-    <div>
-      <div class="ttl">Bill to</div>
-      <div>${esc((sale.customer_name ?? '').trim() || 'Pelanggan Umum')}</div>
-    </div>
-    <div class="rincian">
-      <div class="baris"><span class="lbl">Invoice No.:</span><span>${esc(sale.invoice_no ?? '—')}</span></div>
-      <div class="baris"><span class="lbl">Date:</span><span>${tglAronium(sale.created_at)}</span></div>
-      <div class="baris"><span class="lbl">Payment status:</span><span>${sisaNota > 0 ? 'Belum lunas' : 'Lunas'}</span></div>
-      <div class="baris"><span class="lbl">Kasir:</span><span>${esc(sale.cashier)}</span></div>
-    </div>
-  </div>
-  <table class="items">
-    <thead>
-      <tr>
-        <th class="c" style="width:34px">#</th>
-        <th>Item</th>
-        <th class="r" style="width:90px">Quantity</th>
-        <th class="r" style="width:110px">Unit price</th>
-        <th class="r" style="width:120px">Total</th>
-      </tr>
-    </thead>
-    <tbody>${barisItem}</tbody>
-  </table>
-  <div class="ringkas">
-    ${discTotal > 0 ? `<div class="kotak"><span class="lbl">Discount${pct > 0 ? ` (${pct}%)` : ''}</span><span>-${rpNum(discTotal)}</span></div>` : ''}
-    <div class="putus"></div>
-    <div class="kotak"><span class="lbl">Total</span><span>${rpNum(sale.total)}</span></div>
-    <div class="bayar">
-      <div class="ttl">Payment method:</div>
-      ${split.length
-        ? split
-            .map(
-              (p) =>
-                `<div class="baris"><span class="lbl">${labelM(p.method)}:</span><span>${rpNum(p.method === 'tunai' ? p.amount + sale.change : p.amount)}</span></div>`,
-            )
-            .join('\n      ')
-        : `<div class="baris"><span class="lbl">${metode}:</span><span>${rpNum(sale.total)}</span></div>`}
-      <div class="baris"><span class="lbl">Paid amount:</span><span>${rpNum(paid)}</span></div>
-      ${sisaNota > 0
-        ? `<div class="baris hutang"><span class="lbl">Hutang:</span><span>${rpNum(sisaNota)}</span></div>`
-        : ''}
-      ${tampilKembalian ? `<div class="baris"><span class="lbl">Change:</span><span>${rpNum(sale.change)}</span></div>` : ''}
-    </div>
-    ${piutang > 0 && piutang !== sisaNota
-      ? `<div class="kotak"><span class="lbl">Sisa hutang (semua nota)</span><span>${rpNum(piutang)}</span></div>`
-      : ''}
-  </div>
-  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))}</div>` : ''}
   <script>
-    // Cetak otomatis begitu dokumen siap (pola RPOS print_a4.blade.php).
-    // Print STALL/Failure TIDAK PERNAH membatalkan apa pun — kasir bisa klik
-    // print lagi dari tab ini. Tab sengaja TIDAK ditutup otomatis (setelah
-    // dialog print ditutup, kasir masih bisa mencetak ulang lalu menutup tab).
     window.addEventListener('load', function () { window.print(); });
   </script>
 </body>
@@ -428,97 +534,129 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
     - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
   const d = fisik !== null ? fisik - kasHarus : null;
   const nota = s.inv_awal && s.inv_akhir ? `${s.inv_awal} – ${s.inv_akhir}` : 'Tanpa penjualan';
-  const R = (label: string, nilai: number, kuat = false) =>
-    `<tr><td>${label}</td><td class="r"${kuat ? ' style="font-weight:700"' : ''}>${rpNum(nilai)}</td></tr>`;
-  // Baris bernilai teks siap-pakai (tanda minus di depan, mis. pengurang).
-  const S = (label: string, nilaiTeks: string) =>
-    `<tr><td>${label}</td><td class="r">${nilaiTeks}</td></tr>`;
+  const rpIdr = (n: number) => `Rp ${n.toLocaleString('id-ID', { maximumFractionDigits: 0 })}`;
+  const tglCetak = tglLengkap(new Date().toISOString());
+  const city = cityToko(toko);
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<title>Rekap Shift #${s.id}</title>
+<title>Rekap Shift #\${s.id}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  @page { size: A4; margin: 1cm; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45; }
-  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
-  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
-  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
-  .alamat { margin-top: 4px; max-width: 60%; }
-  .baris-kop { display: flex; margin-top: 2px; }
-  .baris-kop .lbl { width: 72px; }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #333; margin: 0; padding: 0; line-height: 1.2; }
+  .container { width: 100%; margin: 0; padding: 0; }
+  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+  .nama-toko { font-size: 13px; font-weight: bold; margin-top: 4px; }
+  .info-title { font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 5px; padding-bottom: 2px; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
+  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
+  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #fafafa; }
+  .text-right { text-align: right; }
+  .text-center { text-align: center; }
+  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .total-section { margin-left: auto; width: 250px; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
+  .signature { display: flex; justify-content: flex-end; margin-top: 50px; }
+  .signature-box { text-align: right; }
+  .sig-date { font-size: 11px; }
+  .sig-label { font-size: 11px; margin-top: 10px; }
+  .sig-name { font-size: 11px; font-weight: bold; margin-top: 5px; }
+  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
-  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
-  .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
-  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
-  .rincian .baris { display: flex; }
-  .rincian .baris .lbl { width: 118px; }
-  table.items { width: 100%; border-collapse: collapse; }
-  table.items th { font-size: 10px; padding: 5px 6px; border-top: 1px solid #444;
-                   border-bottom: 1px solid #444; text-align: left; }
-  table.items th.r, table.items td.r { text-align: right; }
-  table.items td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
-  .ringkas { width: 55%; margin-left: auto; margin-top: 14px; }
-  .kotak { display: flex; justify-content: space-between; border: 1px solid #444; padding: 5px 9px; margin-bottom: 7px; }
-  .kotak .lbl { font-weight: 700; }
-  .putus { border-top: 1px dashed #999; margin: 4px 0 11px; }
-  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 </style>
 </head>
 <body>
-  <div class="kop">
-    <div>
-      <div class="judul">${fisik !== null ? 'REKAP TUTUP SHIFT' : 'REKAP SEMENTARA (X)'}</div>
-      <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
-      ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
-      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
-      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
+  <div class="container">
+    <div class="header">
+      <div style="display: flex; gap: 15px; align-items: flex-start;">
+        ${logoA4Html()}
+        <div>
+          <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
+          ${toko.store_address ? `<div style="font-size: 11px;">\${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_phone || toko.store_email
+            ? `<div style="font-size: 11px;">Telp: \${esc(toko.store_phone ?? '')}\${(toko.store_phone && toko.store_email) ? ' | ' : ''}\${esc(toko.store_email ?? '')}</div>`
+            : ''}
+        </div>
+      </div>
+      <div style="text-align: right;">
+        <h1 style="margin: 0; color: #333;">REKAP TUTUP SHIFT</h1>
+        <div style="font-size: 18px; font-weight: bold;">#\${s.id}</div>
+      </div>
     </div>
-    ${logoA4Html()}
-  </div>
-  <hr>
-  <div class="meta">
-    <div>
-      <div class="ttl">Shift</div>
-      <div>#${s.id} · ${esc(s.cashier)}</div>
+
+    <div class="meta">
+      <div class="info-box" style="width: 48%;">
+        <div class="info-title">SHIFT</div>
+        <div style="font-size: 14px; font-weight: bold;">#\${s.id} · ${esc(s.cashier)}</div>
+      </div>
+      <div class="info-box" style="width: 48%; text-align: right;">
+        <div class="info-title">DETAIL</div>
+        <div>Buka: <strong>\${tglRekap(s.opened_at)}</strong></div>
+        <div>Tutup: <strong>\${tglRekap(s.closed_at)}</strong></div>
+        <div>Nota: <strong>\${esc(nota)}</strong></div>
+      </div>
     </div>
-    <div class="rincian">
-      <div class="baris"><span class="lbl">Buka:</span><span>${tglRekap(s.opened_at)}</span></div>
-      <div class="baris"><span class="lbl">Tutup:</span><span>${tglRekap(s.closed_at)}</span></div>
-      <div class="baris"><span class="lbl">Nota:</span><span>${esc(nota)}</span></div>
+
+    <table class="items">
+      <thead>
+        <tr>
+          <th>Uraian</th>
+          <th class="text-right" width="150">Nilai</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Modal awal</td><td class="text-right">\${rpIdr(s.modal_awal)}</td></tr>
+        <tr><td>Penjualan (\${s.n_sales} nota)</td><td class="text-right">\${rpIdr(s.omzet)}</td></tr>
+        <tr><td style="padding-left:20px">Tunai</td><td class="text-right">\${rpIdr(s.tunai)}</td></tr>
+        <tr><td style="padding-left:20px">QRIS</td><td class="text-right">\${rpIdr(s.qris)}</td></tr>
+        <tr><td style="padding-left:20px">Transfer</td><td class="text-right">\${rpIdr(s.transfer)}</td></tr>
+        <tr><td>Diskon</td><td class="text-right">\${rpIdr(s.diskon_total ?? 0)}</td></tr>
+        <tr><td>Uang pesanan masuk</td><td class="text-right">\${rpIdr(s.order_masuk_total ?? 0)}</td></tr>
+        <tr><td>Nota pesanan (keluar)</td><td class="text-right">\${orderOmzet > 0 ? '-' + rpIdr(orderOmzet) : rpIdr(0)}</td></tr>
+        <tr><td>Topup nominal</td><td class="text-right">\${rpIdr(s.topup_nominal)}</td></tr>
+        <tr><td>Topup admin</td><td class="text-right">\${rpIdr(s.topup_admin)}</td></tr>
+        <tr><td>Tarik nominal</td><td class="text-right">\${rpIdr(s.tarik_nominal)}</td></tr>
+        <tr><td>Tarik admin</td><td class="text-right">\${rpIdr(s.tarik_admin)}</td></tr>
+        <tr><td>Retur (\${s.n_retur})</td><td class="text-right">\${rpIdr(s.retur_total)}</td></tr>
+        <tr><td>Pengeluaran (\${s.n_expense})</td><td class="text-right">\${rpIdr(s.expense_total)}</td></tr>
+        <tr><td>Kas masuk (\${s.n_kas_masuk})</td><td class="text-right">\${rpIdr(s.kas_masuk_total)}</td></tr>
+        <tr><td>Pembelian (\${s.n_purchase})</td><td class="text-right">\${rpIdr(s.purchase_total)}</td></tr>
+        <tr><td>Hutang terbentuk</td><td class="text-right">\${rpIdr(s.hutang_baru ?? 0)}</td></tr>
+        <tr><td>Piutang terbayar</td><td class="text-right">\${rpIdr(s.piutang_bayar ?? 0)}</td></tr>
+      </tbody>
+    </table>
+
+    <div style="display: flex; justify-content: space-between;">
+      <div style="width: 50%;"></div>
+      <div class="total-section">
+        <div class="total-row"><span>Kas seharusnya</span><span>\${rpIdr(kasHarus)}</span></div>
+        ${fisik !== null ? `<div class="total-row"><span>Modal akhir (fisik)</span><span>\${rpIdr(fisik)}</span></div>` : ''}
+        ${d !== null ? `<div class="total-row grand-total"><span>Selisih</span><span>\${d < 0 ? '-' : ''}\${rpIdr(Math.abs(d))}</span></div>` : ''}
+      </div>
+    </div>
+
+    <div style="margin-top: 20px;"></div>
+    <div class="signature">
+      <div class="signature-box">
+        <div class="sig-date">\${city}, \${tglSingkat(new Date().toISOString())}</div>
+        <div class="sig-label">Kasir</div>
+        <div class="sig-name">(\${esc(s.cashier)})</div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada \${tglCetak}</div>
+      ${footerDokumenA4(toko) ? `<div class="foot-line">\${esc(footerDokumenA4(toko))}</div>` : ''}
     </div>
   </div>
-  <table class="items">
-    <thead><tr><th>Uraian</th><th class="r" style="width:150px">Nilai</th></tr></thead>
-    <tbody>
-      ${R('Modal awal', s.modal_awal)}
-      ${R(`Penjualan (${s.n_sales} nota)`, s.omzet)}
-      ${R('&nbsp;&nbsp;Tunai', s.tunai)}
-      ${R('&nbsp;&nbsp;QRIS', s.qris)}
-      ${R('&nbsp;&nbsp;Transfer', s.transfer)}
-      ${R('Diskon', s.diskon_total ?? 0)}
-      ${R('Uang pesanan masuk', s.order_masuk_total ?? 0)}
-      ${S('Nota pesanan (keluar)', orderOmzet > 0 ? `-${rpNum(orderOmzet)}` : rpNum(0))}
-      ${R('Topup nominal', s.topup_nominal)}
-      ${R('Topup admin', s.topup_admin)}
-      ${R('Tarik nominal', s.tarik_nominal)}
-      ${R('Tarik admin', s.tarik_admin)}
-      ${R(`Retur (${s.n_retur})`, s.retur_total)}
-      ${R(`Pengeluaran (${s.n_expense})`, s.expense_total)}
-      ${R(`Kas masuk (${s.n_kas_masuk})`, s.kas_masuk_total)}
-      ${R(`Pembelian (${s.n_purchase})`, s.purchase_total)}
-      ${R('Hutang terbentuk', s.hutang_baru ?? 0)}
-      ${R('Piutang terbayar', s.piutang_bayar ?? 0)}
-    </tbody>
-  </table>
-  <div class="ringkas">
-    <div class="kotak"><span class="lbl">Kas seharusnya</span><span>${rpNum(kasHarus)}</span></div>
-    ${fisik !== null ? `<div class="kotak"><span class="lbl">Modal akhir (fisik)</span><span>${rpNum(fisik)}</span></div>` : ''}
-    ${d !== null ? `<div class="kotak"><span class="lbl">Selisih</span><span>${d < 0 ? '-' : ''}${rpNum(Math.abs(d))}</span></div>` : ''}
-  </div>
-  <div class="putus"></div>
-  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))}</div>` : ''}
   <script>
     window.addEventListener('load', function () { window.print(); });
   </script>

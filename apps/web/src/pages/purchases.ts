@@ -45,7 +45,7 @@ import { tglPendek } from '../ui/waktu';
 import { rp } from '../escpos';
 // Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026) —
 // helper tinggal di invoice.ts, dipakai juga oleh debts.ts & rekap/laporan.
-import { CSS_LOGO_A4, footerDokumenA4, logoA4Html } from '../invoice';
+import { CSS_LOGO_A4, footerDokumenA4, logoA4Html, rpIdr, tglSingkat, tglLengkap, cityToko } from '../invoice';
 
 type Po = {
   id: number; created_at: string;
@@ -294,11 +294,11 @@ function tglLokal(iso: string): string {
 function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string {
   const baris = items
     .map((it, i) => `<tr>
-        <td class="c">${i + 1}</td>
-        <td>${esc(it.name)}</td>
-        <td class="r nowrap">${it.qty}</td>
-        <td class="r nowrap">${rp(it.harga_beli)}</td>
-        <td class="r nowrap">${rp(it.amount)}</td>
+        <td class="text-center">${i + 1}</td>
+        <td><strong>${esc(it.name)}</strong></td>
+        <td class="text-right nowrap">${it.qty}</td>
+        <td class="text-right nowrap">${rpIdr(it.harga_beli)}</td>
+        <td class="text-right nowrap">${rpIdr(it.amount)}</td>
       </tr>`)
     .join('');
 
@@ -310,110 +310,127 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
       : sisa > 0 ? 'Sisa hutang' : 'Sisa (lunas)';
   const labelStatus = po.status === 'cancel' ? 'DIBATALKAN' : po.status === 'received' ? 'DITERIMA' : 'ORDER';
 
+  const city = cityToko(toko);
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
 <meta charset="utf-8">
 <title>Nota pembelian PO-${po.id} — ${esc(po.supplier_name || 'Tanpa supplier')}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm 14mm 14mm; }
+  @page { size: A4; margin: 1cm; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; line-height: 1.45;
-         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .kop { display: flex; justify-content: space-between; align-items: flex-start; }
-  .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
-  .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
-  .alamat { margin-top: 4px; max-width: 60%; }
-  .baris-kop { display: flex; margin-top: 2px; }
-  .baris-kop .lbl { width: 72px; }
-  ${CSS_LOGO_A4}
-  hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
-  .meta { display: flex; justify-content: space-between; margin-bottom: 16px; }
-  .meta .ttl { font-weight: 700; margin-bottom: 4px; }
-  .rincian .baris { display: flex; }
-  .rincian .baris .lbl { width: 96px; }
-  table.ledger { width: 100%; border-collapse: collapse; }
-  table.ledger th { font-size: 10px; padding: 5px 6px; border-top: 1px solid #444;
-                    border-bottom: 1px solid #444; text-align: left; }
-  table.ledger th.r, table.ledger td.r { text-align: right; }
-  table.ledger th.c, table.ledger td.c { text-align: center; }
-  table.ledger td { padding: 5px 6px; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
-  table.ledger tbody tr:nth-child(even) td { background: #f3f3f3; }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #333; margin: 0; padding: 0; line-height: 1.2; }
+  .container { width: 100%; margin: 0; padding: 0; }
+  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+  .nama-toko { font-size: 13px; font-weight: bold; margin-top: 4px; }
+  .info-title { font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 5px; padding-bottom: 2px; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
+  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
+  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #fafafa; }
+  .text-right { text-align: right; }
+  .text-center { text-align: center; }
   .nowrap { white-space: nowrap; }
-  .kosong { padding: 14px 6px; color: #777; border-bottom: 1px solid #e2e2e2; }
-  table.ringkas { width: 55%; margin-left: auto; margin-top: 14px; border-collapse: collapse; }
-  table.ringkas td { padding: 5px 9px; border-bottom: 1px solid #999; }
-  table.ringkas td:first-child { font-weight: 700; }
-  table.ringkas td.r { text-align: right; white-space: nowrap; }
-  table.ringkas tr:nth-child(even) td { background: #f3f3f3; }
-  table.ringkas tr:last-child td { border-bottom: 1px solid #444; font-weight: 700; }
-  .status { display: inline-block; padding: 2px 8px; border: 1px solid #444; font-weight: 700; font-size: 10px; }
-  .catatan { margin-top: 14px; }
-  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .total-section { margin-left: auto; width: 250px; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
+  .signature { display: flex; justify-content: flex-end; margin-top: 50px; }
+  .signature-box { text-align: right; }
+  .sig-date { font-size: 11px; }
+  .sig-label { font-size: 11px; margin-top: 10px; }
+  .sig-name { font-size: 11px; font-weight: bold; margin-top: 5px; }
+  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot-line { margin: 4px 0; }
+  ${CSS_LOGO_A4}
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 </style>
 </head>
 <body>
-  <div class="kop">
-    <div>
-      <div class="judul">NOTA PEMBELIAN</div>
-      <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
-      ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
-      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
-      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${esc(toko.store_email)}</span></div>` : ''}
+  <div class="container">
+    <div class="header">
+      <div style="display: flex; gap: 15px; align-items: flex-start;">
+        ${logoA4Html()}
+        <div>
+          <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
+          ${toko.store_address ? `<div style="font-size: 11px;">${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_phone || toko.store_email
+            ? `<div style="font-size: 11px;">Telp: ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
+            : ''}
+        </div>
+      </div>
+      <div style="text-align: right;">
+        <h1 style="margin: 0; color: #333;">NOTA PEMBELIAN</h1>
+        <div style="font-size: 18px; font-weight: bold;">PO-${po.id}</div>
+      </div>
     </div>
-    ${logoA4Html()}
+
+    <div class="meta">
+      <div class="info-box" style="width: 48%;">
+        <div class="info-title">SUPPLIER</div>
+        <div style="font-size: 14px; font-weight: bold;">${esc(po.supplier_name || 'Tanpa supplier')}</div>
+      </div>
+      <div class="info-box" style="width: 48%; text-align: right;">
+        <div class="info-title">DETAIL</div>
+        <div>Nomor: <strong>PO-${po.id}</strong></div>
+        <div>Tanggal: <strong>${esc(tglLokal(po.created_at))}</strong></div>
+        ${po.received_at ? `<div>Diterima: <strong>${esc(tglLokal(po.received_at))}</strong></div>` : ''}
+        <div>Kasir: <strong>${esc(po.cashier || '—')}</strong></div>
+        ${po.shift_id ? `<div>Shift: <strong>#${po.shift_id}</strong></div>` : ''}
+        <div>Status: <strong>${labelStatus}</strong></div>
+      </div>
+    </div>
+
+    ${
+      items.length === 0
+        ? `<div class="info-box" style="width: 50%; font-style: italic; color: #777;">Tidak ada barang pada nota ini.</div>`
+        : `<table>
+      <thead>
+        <tr>
+          <th class="text-center" width="40">#</th>
+          <th>Barang</th>
+          <th class="text-right" width="64">Qty</th>
+          <th class="text-right" width="120">Harga beli</th>
+          <th class="text-right" width="120">Sub total</th>
+        </tr>
+      </thead>
+      <tbody>${baris}</tbody>
+    </table>`
+    }
+
+    <div style="display: flex; justify-content: space-between;">
+      <div style="width: 50%;"></div>
+      <div class="total-section">
+        <div class="total-row"><span>Total</span><span>${rpIdr(po.total)}</span></div>
+        <div class="total-row"><span>Terbayar</span><span>${rpIdr(po.terbayar)}</span></div>
+        <div class="total-row grand-total"><span>${labelSisa}</span><span>${rpIdr(sisa)}</span></div>
+      </div>
+    </div>
+
+    ${po.note ? `<div style="margin-top: 14px; font-style: italic;">Catatan: ${esc(po.note)}</div>` : ''}
+
+    <div class="signature">
+      <div class="signature-box">
+        <div class="sig-date">${city}, ${tglSingkat(new Date().toISOString())}</div>
+        <div class="sig-label">Kasir / Pemilik</div>
+        <div class="sig-name">(${esc(toko.store_name || 'Ravaa POS')})</div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada ${tglLengkap(new Date().toISOString())}</div>
+      ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
+    </div>
   </div>
-  <hr>
-  <div class="meta">
-    <div>
-      <div class="ttl">Supplier</div>
-      <div>${esc(po.supplier_name || 'Tanpa supplier')}</div>
-    </div>
-    <div class="rincian">
-      <div class="baris"><span class="lbl">Nomor:</span><span>PO-${po.id}</span></div>
-      <div class="baris"><span class="lbl">Tanggal:</span><span>${esc(tglLokal(po.created_at))}</span></div>
-      ${po.received_at ? `<div class="baris"><span class="lbl">Diterima:</span><span>${esc(tglLokal(po.received_at))}</span></div>` : ''}
-      <div class="baris"><span class="lbl">Kasir:</span><span>${esc(po.cashier || '—')}</span></div>
-      ${po.shift_id ? `<div class="baris"><span class="lbl">Shift:</span><span>#${po.shift_id}</span></div>` : ''}
-      <div class="baris"><span class="lbl">Status:</span><span class="status">${labelStatus}</span></div>
-    </div>
-  </div>
-  ${
-    items.length === 0
-      ? `<div class="kosong">Tidak ada barang pada nota ini.</div>`
-      : `<table class="ledger">
-    <thead>
-      <tr>
-        <th class="c" style="width:34px">#</th>
-        <th>Barang</th>
-        <th class="r" style="width:64px">Qty</th>
-        <th class="r" style="width:120px">Harga beli</th>
-        <th class="r" style="width:120px">Sub total</th>
-      </tr>
-    </thead>
-    <tbody>${baris}</tbody>
-  </table>`
-  }
-  <table class="ringkas">
-    <tbody>
-      <tr><td>Total</td><td class="r">${rp(po.total)}</td></tr>
-      <tr><td>Terbayar</td><td class="r">${rp(po.terbayar)}</td></tr>
-      <tr><td>${labelSisa}</td><td class="r">${rp(sisa)}</td></tr>
-    </tbody>
-  </table>
-  ${po.note ? `<div class="catatan">Catatan: ${esc(po.note)}</div>` : ''}
-  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))} &middot; ${esc(tglCetak)}</div>` : ''}
   <script>
-    // Cetak otomatis begitu dokumen siap (pola invoice.ts/debts.ts). Tab sengaja
-    // tidak ditutup supaya bisa print ulang.
     window.addEventListener('load', function () { window.print(); });
   </script>
 </body>
 </html>`;
 }
 
-/** Ambil nota + kop lalu buka tab cetak A4. Lempar Error bila API tak
- *  terjangkau / popup diblokir — pemanggil hanya memberi toast. */
 async function cetakPoA4(id: number): Promise<void> {
   const [det, set] = await Promise.all([
     apiGet<{ data: { purchase: Po; items: PoItem[] } }>(`/api/purchases/${id}`),

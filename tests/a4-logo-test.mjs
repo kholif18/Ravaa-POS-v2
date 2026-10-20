@@ -63,7 +63,7 @@ try {
         pay_method: 'tunai', subtotal: 10000, discount: 0, total: 10000, cash_in: 10000,
         change: 0, cashier: 'uji', customer_name: 'Pelanggan Umum', sisa_hutang: 0,
       },
-      [{ name: 'Barang Uji', qty: 1, price: 10000, amount: 10000, discount: 0, unit: 'pcs', base_unit: 'pcs', note: '' }],
+      [{ name: 'Barang Uji', sku: 'PRD-UJI', qty: 1, price: 10000, amount: 10000, discount: 0, unit: 'pcs', base_unit: 'pcs', note: '' }],
       toko,
     );
     const lap = m.htmlLaporan(

@@ -215,22 +215,22 @@ const [popPo] = await Promise.all([
 await popPo.waitForLoadState('domcontentloaded');
 const a4po = await popPo.evaluate((id) => {
   const css = document.querySelector('style')?.textContent ?? '';
-  const tbl = document.querySelector('table.ledger');
-  const rk = document.querySelector('table.ringkas');
+  const tbl = document.querySelector('table');
+  const rk = document.querySelector('.total-section');
   return {
     judul: document.body.innerHTML.includes('NOTA PEMBELIAN'),
     supplier: document.body.innerHTML.includes('UjiPO Sup Tetap'),
     nomor: document.body.innerHTML.includes(`PO-${id}`),
     barisBarang: tbl ? tbl.querySelectorAll('tbody tr').length : 0,
-    stripe: css.includes('table.ledger tbody tr:nth-child(even)'),
-    ringkas: rk ? [...rk.querySelectorAll('tbody tr')].map((r) => r.innerText.replace(/\s+/g, ' ')) : [],
+    stripe: css.includes('tbody tr:nth-child(even)'),
+    ringkas: rk ? [...rk.querySelectorAll('.total-row')].map((r) => r.innerText.replace(/\s+/g, ' ')) : [],
   };
 }, o1.json.data.purchase.id);
 chk('A4 PO: kop + supplier + nomor + baris barang + striping',
   a4po.judul && a4po.supplier && a4po.nomor && a4po.barisBarang === 1 && a4po.stripe,
   JSON.stringify({ ...a4po, ringkas: undefined }));
 chk('ringkas A4 = Total/Terbayar/Sisa (lunas) Rp2.000',
-  a4po.ringkas.length === 3 && a4po.ringkas[0].includes('Total') && /Rp2\.000/.test(a4po.ringkas[0])
+  a4po.ringkas.length === 3 && a4po.ringkas[0].includes('Total') && /Rp\s*2\.000/.test(a4po.ringkas[0])
     && a4po.ringkas[2].includes('Sisa (lunas)'), JSON.stringify(a4po.ringkas));
 // Slot logo kanan-atas dokumen A4 (revisi pemilik 19 Okt 2026: "logo itu
 // harusnya juga di terapkan pada a4 juga") — img SELALU ada di HTML walau

@@ -2838,7 +2838,7 @@ app.get('/api/sales/:id', wajibIzin('riwayat.lihat'), (c) => {
   // retur" halaman Riwayat: penanda "sudah retur N · sisa M" + clamp max qty.
   // Retur yang dibatalkan (DELETE) hilang dari penjumlahan.
   const items = db.prepare(
-    `SELECT si.*, p.unit AS base_unit,
+    `SELECT si.*, p.unit AS base_unit, p.sku AS sku,
             (SELECT COALESCE(SUM(ri.qty),0) FROM return_items ri WHERE ri.sale_item_id = si.id) AS qty_retur
        FROM sale_items si LEFT JOIN products p ON p.id = si.product_id
       WHERE si.sale_id=?`,
