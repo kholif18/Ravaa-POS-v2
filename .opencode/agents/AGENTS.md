@@ -2161,6 +2161,15 @@ apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
                           harus identik kondisi normal.
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                           produk, panel mode POS, dan kartu Sistem.
+apps/web/src/ui/izin.ts   **Paket B4 (baru 2026-10-20)**: daftar 36 izin
+                          operasional + 4 core owner, label/grup, preset
+                          Standar/Ketat/Semua/Kosong, `punyaIzin()` — satu
+                          sumber kebenaran UI untuk gating tombol/menu.
+apps/web/src/ui/lock.ts   **Paket B5 (baru 2026-10-20)**: layar kunci 6 digit
+                          (keypad), auto-lock idle (default 30 menit, opsi
+                          per device), verifier lokal PBKDF2 WebCrypto
+                          (fallback jaringan error), quick switch, dan tombol
+                          kunci layar / atur PIN / ganti akun di menu akun.
 apps/web/src/ui/aksi-baru.ts  **Pintasan Alt+N "buat baru" (2026-10-18,
                            permintaan pemilik: "tambahkan shortcut setiap
                            halaman yang ada buat baru … menggunakan Alt + N
@@ -3604,6 +3613,30 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   `insertSale`/`simpanRetur` WAJIB hidup sesudah restore tanpa restart
   (bug nyata 2026-10-16 — lihat `transaksi()` di §2).
 
+**Paket B4 — Hak akses kasir granular (2026-10-20)**
+- Tabel `users` ditambah 5 kolom (db/schema.sql, migrasi manual sudah dijalankan di dev):
+  - `permissions TEXT` — JSON array kunci izin operasional. `NULL` = default role (bukan kosong). `[]` = valid, tanpa izin operasional.
+  - `pin_hash TEXT` — hash scrypt PIN 6 digit (format `salt:hash`, `hashPassword()` di `db.ts`). Plaintext PIN **tidak pernah** disimpan/dikirim.
+  - `pin_failed INTEGER DEFAULT 0`, `pin_locked_until TEXT`, `pin_updated_at TEXT` — rate-limit & status PIN.
+- 36 **izin operasional** (`IZIN_OPERASIONAL` di `apps/api/src/index.ts`): POS (`pos.jual/diskon/harga/item_manual/topup/tarik/hold_semua`), Riwayat & retur, Pelanggan & hutang, Pesanan jasa, Stok & shift, Manajemen (`produk/supplier/pembelian/laporan/pengeluaran/kasmasuk`).
+- 4 **izin core** (`IZIN_CORE`): `pengguna.kelola`, `pengaturan.ubah`, `backup.kelola`, `audit.lihat` — **tidak masuk** kolom `permissions`, selalu dijaga `hanyaOwner` (role-based), kasir tidak pernah mendapatkannya.
+- `bolehIzin(u, izin)`: owner selalu TRUE; kasir cek `izinEfektif(u)` = `permissions` jika diisi, else default Standar (`IZIN_KASIR_STANDAR` = 28 izin, semua operasional kecuali `pos.hold_semua`, `shift.kelola`, `produk/supplier/pembelian/laporan/pengeluaran/kasmasuk.kelola`). Baca rusak = fail closed (kosong, jangan default penuh).
+- Middleware `wajibIzin('izin')` -> 403 `izin <izin> tidak diberikan untuk akun ini — hubungi owner`. Diterapkan konsisten: customers/suppliers/hutang/produk/stok/shift/sales/topups/orders/expenses/kas-masuk/retur/purchases/laporan.
+- `POST /api/users` (owner) terima `permissions`: `undefined` = jangan ubah/update mempertahankan; `null`/`''` = default role; array = ganti custom (core & izin tidak dikenal ditolak 400).
+- `GET /api/me`, `GET /api/users`, `POST /api/users/:id` (update) merespon `permissions` (array efektif), `permissions_custom` (boolean), `pin_set` (boolean), `pin_updated_at`.
+- Identitas kasir ditegakkan server: penjualan `cashier = user.name` bila kasir tidak punya `shift.kelola`; kasir tak boleh buka/tutup shift kasir lain; owner bebas.
+
+**Paket B5 — PIN cepat & auto-lock (2026-10-20)**
+- `POST /api/users/pin` — atur/ganti PIN 6 digit sendiri. Bila sudah punya PIN, `old_pin` wajib (rate-limit sama). Sukses -> `pin_updated_at` di-`now`, sesi target **TIDAK** diputus.
+- `POST /api/users/pin/verify` — buka kunci layar. Online didahulukan; fallback verifier lokal PBKDF2 **HANYA** saat error jaringan (status 0), bukan 401. Salah PIN = 400 (dengan `retry_after` bila terkena rate-limit), catat audit `login-gagal`.
+- Rate-limit PIN: kegagalan ke-5 -> kunci 60 detik, ke-10 -> 300 detik, ke-15 -> 900 detik.
+- `POST /api/users/pin/switch` — quick switch dari sesi aktif. Body `{user_id, pin}`. Token lama DICABUT, token baru diterbitkan untuk target. Target `owner` hanya dari sesi owner. Respons `{token, user, must_change}`.
+- `DELETE /api/users/:id/pin` — hanya owner. Hapus `pin_hash` + cabut **semua** sesi target (`DELETE FROM sessions WHERE user_id`). Respons `sesi_diputus: true`.
+- `GET /api/users/ringkas` — daftar akun aktif (id, username, name, role, avatar, `pin_set`), bisa dibaca semua sesi untuk layar kunci / pilih akun cepat.
+- Kunci layar = UI lock, bukan pencabutan token API. Auto-lock default **30 menit** saat PIN aktif; opsi per device `0/5/10/15/30/60` disimpan `ravaa.autolock` (localStorage); verifier lokal `ravaa.pin-verifier.<userId>` dibuang bila `pin_updated_at` berbeda.
+- Ganti sandi sendiri / reset PIN owner -> hapus PIN + `pin_updated_at`, memutus sesi (ui membersihkan sesi & kembali `#/login`).
+- Outbox job baru diberi tag `userId`; flush hanya untuk akun aktif; 401/403 tidak membuang job. Holds baru selalu diberi `userId` pemilik; hold lama tanpa `userId` hanya terlihat pemegang `pos.hold_semua`.
+
 Aturan DB: tulis HANYA lewat prepared statement + transaction di `index.ts`.
 DILARANG: query string concat dari input user, tabel/kolom baru tanpa update `db/schema.sql`.
 
@@ -3634,6 +3667,18 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   di-rename ke pola `PRD00001`..`PRD00018` mengikuti urutan `db/seed.sql`,
   produk buatan user ikut jadi `PRD00019`. Backup:
   `apps/api/data/data.db.bak.sku-prd`.)
+* **Paket B migrasi & aturan (2026-10-20)**: 5 kolom BARU `users`
+  (`permissions`, `pin_hash`, `pin_failed`, `pin_locked_until`, `pin_updated_at`)
+  sudah di-`db/schema.sql` dan migrasi manual di dev selesai
+  (`backup data.db.bak.paket-b`). Install lain yang tidak boleh di-recreate:
+  jalankan `ALTER TABLE users ADD COLUMN ...` untuk masing-masing kolom (data
+  lama utuh, tidak perlu recreate). PIN hash format `salt:hash` (scrypt) —
+  plaintext PIN **tidak pernah** disimpan/dikirim. Rate-limit PIN: 5 gagal ->
+  60 detik, 10 -> 300 detik, 15 -> 900 detik. Empat izin core
+  (`pengguna.kelola`, `pengaturan.ubah`, `backup.kelola`, `audit.lihat`)
+  **tidak boleh** dimasukkan `users.permissions` (validasi menolak 400) — selalu
+  dijaga `hanyaOwner` lewat role. Jangan menambah izin operasional baru tanpa
+  update `IZIN_OPERASIONAL` (index.ts), `ui/izin.ts` (UI), dan §3 ini.
 * DILARANG menambah framework (React/Svelte/Electron) tanpa persetujuan — web vanilla-TS adalah keputusan sadar (ringan, tanpa build rapuh).
 * Tailwind CSS v4 DISETUJUI 2026-09-25 (hanya build-time `@tailwindcss/vite` di `apps/web`,
   tanpa CDN; logika tetap vanilla-TS, tanpa Alpine/jQuery/chart-lib/font-icon).

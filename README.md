@@ -1327,4 +1327,37 @@ npm run dev:api
   varian. Yang sudah tertutup: multi-satuan (lihat entri "Multi satuan"), HPP
   rata-rata (bagian "HPP & laba"), riwayat pembelian (`stock_moves.unit_cost`),
   harga borongan per qty (entri "Harga borongan per qty").
+
+* **Paket B — Hak akses kasir granular + PIN & auto-lock (2026-10-20)**:
+  - **B4 Izin operasional per akun**: tabel `users` punya kolom `permissions`
+    (JSON array, `NULL` = default role). Ada 36 izin operasional dan 4 izin core
+    owner yang **tidak** bisa diberikan ke kasir (`pengguna.kelola`,
+    `pengaturan.ubah`, `backup.kelola`, `audit.lihat`) — selalu dijaga
+    `hanyaOwner`. Default kasir "Standar" = 28 izin (perilaku sebelum B4);
+    preset "Ketat" = `pos.jual` + `pelanggan.lihat` + `shift.lihat/buka/tutup`.
+    Owner bebas atur izin custom per akun lewat halaman `#/users` (editor 36
+    centang + preset Standar/Ketat/Semua/Kosong). Semua pembatasan **ditegakkan
+    server** via middleware `wajibIzin()` (403), bukan hanya menyembunyikan tombol
+    di UI. Mapping route→izin: dashboard/laporan → `laporan.lihat`; produk →
+    `produk.kelola`; stok → `stok.lihat`; supplier → `supplier.kelola`;
+    pembelian → `pembelian.kelola`; riwayat → `riwayat.lihat`; retur →
+    `retur.lihat`; pesanan → `pesanan.lihat`; pelanggan → `pelanggan.lihat`;
+    hutang → `hutang.lihat`; pengeluaran → `pengeluaran.kelola`; kas masuk →
+    `kasmasuk.kelola`; shift → `shift.lihat`; settings/users/audit/satuan
+    owner-only. Aksi POS: diskon → `pos.diskon`, ubah harga dinamis →
+    `pos.harga`, item manual → `pos.item_manual`, topup/tarik → izin masing-masing.
+  - **B5 PIN cepat & kunci layar**: PIN 6 digit (hash scrypt `salt:hash`,
+    plaintext **tidak pernah** disimpan/dikirim), rate-limit 5 gagal → 60 detik,
+    10 → 300 detik, 15 → 900 detik. Endpoint: `POST /api/users/pin` (atur/ganti
+    sendiri, `old_pin` wajib bila sudah ada), `POST /api/users/pin/verify` (buka
+    kunci; online dulu, fallback verifier lokal PBKDF2 hanya saat error jaringan),
+    `POST /api/users/pin/switch` (pindah akun cepat, cabut token lama terbitkan
+    baru), `DELETE /api/users/:id/pin` (owner reset PIN + cabut semua sesi
+    target), `GET /api/users/ringkas` (daftar akun aktif untuk layar kunci).
+    Auto-lock default **30 menit** saat PIN aktif; opsi per device
+    `0/5/10/15/30/60` disimpan `ravaa.autolock`; pengaturan ada di halaman
+    **Profil** (kartu PIN cepat + select auto-lock + tombol kunci layar) dan
+    **Sistem** (select `#set-autolock` di kartu Perangkat). Kunci layar = UI
+    lock, bukan pencabutan token API; outbox job diberi tag `userId`, flush hanya
+    untuk akun aktif.
 * Baca `.opencode/agents/AGENTS.md` sebelum mengubah apa pun.
