@@ -45,7 +45,7 @@ import { tglPendek } from '../ui/waktu';
 import { rp } from '../escpos';
 // Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026) —
 // helper tinggal di invoice.ts, dipakai juga oleh debts.ts & rekap/laporan.
-import { CSS_LOGO_A4, logoA4Html } from '../invoice';
+import { CSS_LOGO_A4, footerDokumenA4, logoA4Html } from '../invoice';
 
 type Po = {
   id: number; created_at: string;
@@ -272,7 +272,10 @@ function bindKembali(el: HTMLElement): void {
 
 /* ---------- DOKUMEN A4 (cetak/ekspor nota PO — butir ROADMAP 1.6.3) ---------- */
 
-type Toko = { store_name: string; store_address: string; store_phone: string; store_email: string };
+type Toko = {
+  store_name: string; store_address: string; store_phone: string; store_email: string;
+  invoice_footer?: string;
+};
 
 /** Tanggal/jam gaya Indonesia, zona waktu KASIR (bukan UTC) — pola
  *  debts.ts/invoice.ts: created_at disimpan UTC (Z), diparse lalu tampil lokal. */
@@ -399,7 +402,7 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
     </tbody>
   </table>
   ${po.note ? `<div class="catatan">Catatan: ${esc(po.note)}</div>` : ''}
-  <div class="foot">Dicetak dari Ravaa POS &middot; ${esc(tglCetak)}</div>
+  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))} &middot; ${esc(tglCetak)}</div>` : ''}
   <script>
     // Cetak otomatis begitu dokumen siap (pola invoice.ts/debts.ts). Tab sengaja
     // tidak ditutup supaya bisa print ulang.

@@ -22,7 +22,7 @@ import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 // Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026).
-import { CSS_LOGO_A4, logoA4Html } from '../invoice';
+import { CSS_LOGO_A4, footerDokumenA4, logoA4Html } from '../invoice';
 
 type Ringkasan = {
   customer_id: number;
@@ -250,7 +250,10 @@ function paint(): void {
    tidak bisa merender HTML — sama alasan dengan invoice A4.
    Gagal cetak/popup diblokir TIDAK PERNAH merusak apa pun: hanya toast. */
 
-type Toko = { store_name: string; store_address: string; store_phone: string; store_email: string };
+type Toko = {
+  store_name: string; store_address: string; store_phone: string; store_email: string;
+  invoice_footer?: string;
+};
 
 function escA4(s: unknown): string {
   return String(s ?? '').replace(/[&<>"']/g, (c) =>
@@ -384,7 +387,7 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
       <tr><td>${lunas ? 'Sisa (lunas)' : 'Sisa hutang'}</td><td class="r">${rp(Math.max(0, r.sisa))}</td></tr>
     </tbody>
   </table>
-  <div class="foot">Dicetak dari Ravaa POS &middot; ${escA4(tglCetak)}</div>
+  ${footerDokumenA4(toko) ? `<div class="foot">${escA4(footerDokumenA4(toko))} &middot; ${escA4(tglCetak)}</div>` : ''}
   <script>
     // Cetak otomatis begitu dokumen siap (pola invoice.ts). Gagal/stall print
     // tidak merusak apa pun — tab sengaja tidak ditutup supaya bisa print ulang.

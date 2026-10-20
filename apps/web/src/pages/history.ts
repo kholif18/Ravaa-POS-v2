@@ -21,7 +21,10 @@ import { icon } from '../ui/icons';
 import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
 import { getCashier, getToko } from '../ui/user';
-import { syncStoreNameFromServer } from '../ui/identitas-struk';
+import {
+  getOpsiCetak, syncDariServerSettings, metaPelangganStruk, teksJumlahItem,
+  footerStruk, nomorStrukPendek,
+} from '../ui/identitas-struk';
 import { openModal } from '../ui/modal';
 import { rp, strukUntukTercetak, kirimPrint, type Struk } from '../escpos';
 import { cetakInvoice } from '../invoice';
@@ -42,6 +45,15 @@ export type SaleRow = {
   /** Pelanggan pada transaksi (SNAPSHOT server, sejak 2026-10-04). '' / absen
    *  = baris lama tanpa kontak -> tampil "Pelanggan Umum". */
   customer_name?: string | null;
+  /** id pelanggan — dipakai cetak ulang untuk opsi "Hutang pelanggan" (total
+   *  ledger). Ada di `SELECT s.*` GET /api/sales; null = tanpa kontak. */
+  customer_id?: number | null;
+  /** Data KONTAK LIVE (hanya GET /api/sales/:id, LEFT JOIN customers sejak
+   *  2026-10-20) — sumber baris alamat/telepon struk sesuai pilihan
+   *  `receipt_customer`. Tidak ada di daftar linimasa. Master pelanggan tidak
+   *  punya email, jadi opsi struk juga tidak menawarkannya. */
+  customer_address?: string | null;
+  customer_phone?: string | null;
   /** Penanda NOTA BERHUTANG (computed server, putaran 13 2026-10-06): kas
    *  sisa = total − uang diterima bila tunai + pelanggan valid (bukan bawaan
    *  "Pelanggan Umum") — kondisi syarat catat-hutang otomatis di POS. Ini
@@ -781,6 +793,10 @@ function waktuStrukRiwayat(createdAt: string): string {
  *  TIDAK membatalkan apa pun — hanya toast, seperti alur POS. */
 export async function cetakUlang(s: SaleRow): Promise<void> {
   try {
+    const opsi = getOpsiCetak();
+    // Detail pelanggan selain NAMA hanya tersedia di GET /api/sales/:id
+    // (LEFT JOIN customers, 2026-10-20) — daftar linimasa cukup untuk nama.
+    const butuhKontak = opsi.receipt_customer.split(',').some((t) => t && t !== 'name');
     // Item dipakai kalau rincian nota ini sudah termuat; kalau belum (klik
     // kilat selesai GET), ambil sendiri — struk tanpa baris item = struk bohong.
     let items = state.det?.key === `sale:${s.id}` ? state.det.items : [];
@@ -789,10 +805,14 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
     // (tanpa fetch tambahan / perubahan struktur struk).
     const perluBayar = s.pay_method === 'campuran';
     let bayar = state.det?.key === `sale:${s.id}` ? state.det.payments : [];
-    if (!items.length || (perluBayar && !bayar.length)) {
-      const j = await apiGet<{ data: { items: ItemRow[]; payments?: PayRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
+    // `nota` = baris yang dipakai menyusun struk; hasil fetch membawa kontak
+    // live + customer_id yang mungkin tidak ada di baris linimasa pemanggil.
+    let nota = s;
+    if (!items.length || (perluBayar && !bayar.length) || butuhKontak) {
+      const j = await apiGet<{ data: { sale?: SaleRow; items: ItemRow[]; payments?: PayRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);
       if (!items.length) items = j.data.items;
       if (perluBayar) bayar = j.data.payments ?? [];
+      if (j.data.sale) nota = j.data.sale;
     }
     // Pilihan gaya Aronium: invoice A4 (window.print) atau struk thermal
     // (print-agent) — pola sama dengan dialog selesai bayar di POS.
@@ -815,20 +835,40 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
       return;
     }
     if (pilihan !== 'thermal') return; // Batal / Esc — tidak mencetak apa pun
-    const discBaris = Math.max(0, s.subtotal - s.discount - s.total); // lihat detailJual
+    const discBaris = Math.max(0, nota.subtotal - nota.discount - nota.total); // lihat detailJual
+    const namaPelanggan = (nota.customer_name ?? '').trim() || 'Pelanggan Umum';
+    // Total hutang pelanggan (opsi "Hutang pelanggan" ala Aronium, 2026-10-20):
+    // ledger terpisah dari nota ini. Gagal muat = struk tetap dicetak tanpa
+    // baris itu (hiasan tidak boleh membatalkan cetak ulang).
+    let totalHutang = 0;
+    if (opsi.receipt_show_debt && nota.customer_id && namaPelanggan !== 'Pelanggan Umum') {
+      try {
+        const d = await apiGet<{ data: { sisa: number } }>(`/api/customer-debts/${nota.customer_id}`);
+        totalHutang = Math.max(0, Number(d.data?.sisa) || 0);
+      } catch {
+        totalHutang = 0;
+      }
+    }
+    const qtyTotal = items.reduce((a, i) => a + (Number(i.qty) || 0), 0);
     const strukUlang: Struk = {
       judul: getToko(),
       meta: [
         // Waktu & No. dipisah baris — digabung melebihi 32 kolom thermal dan
         // kena potong (lihat catatan serupa di struk POS).
-        waktuStrukRiwayat(s.created_at),
-        `No. ${s.invoice_no ?? s.id.slice(0, 8)}`,
-        `Kasir: ${s.cashier}`,
-        `Shift: ${s.shift_id ?? '—'}`,
-        // Snapshot pelanggan dari server (sumber sama dengan struk POS) — baris
-        // lama tanpa kontak tampil "Pelanggan Umum" persis seperti nota aslinya.
-        `Pelanggan: ${(s.customer_name ?? '').trim() || 'Pelanggan Umum'}`,
+        waktuStrukRiwayat(nota.created_at),
+        `No. ${nomorStrukPendek(nota.invoice_no ?? nota.id.slice(0, 8))}`,
+        `Kasir: ${nota.cashier}`,
+        `Shift: ${nota.shift_id ?? '—'}`,
+        // Detail pelanggan mengikuti pilihan halaman Sistem (2026-10-20):
+        // nama = SNAPSHOT nota, alamat/telepon = kontak live (join).
+        // Baris lama tanpa kontak tetap tampil "Pelanggan Umum".
+        ...metaPelangganStruk({
+          name: namaPelanggan,
+          address: nota.customer_address ?? undefined,
+          phone: nota.customer_phone ?? undefined,
+        }),
       ],
+      jumlahItem: teksJumlahItem(items.length, qtyTotal),
       items: items.map((i) => ({
         name: i.name, qty: i.qty, price: i.price,
         // Cetak unit hanya bila bukan satuan dasar — aturan yang sama dengan
@@ -838,10 +878,10 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
         ...(i.note?.trim() ? { note: i.note.trim() } : {}),
       })),
       baris: [
-        { kiri: 'Subtotal', kanan: rp(s.subtotal) },
+        { kiri: 'Subtotal', kanan: rp(nota.subtotal) },
         ...(discBaris > 0 ? [{ kiri: 'Diskon item', kanan: `-${rp(discBaris)}` }] : []),
-        ...(s.discount > 0 ? [{ kiri: 'Diskon', kanan: `-${rp(s.discount)}` }] : []),
-        { kiri: 'TOTAL', kanan: rp(s.total), tebal: true },
+        ...(nota.discount > 0 ? [{ kiri: 'Diskon', kanan: `-${rp(nota.discount)}` }] : []),
+        { kiri: 'TOTAL', kanan: rp(nota.total), tebal: true },
         ...(bayar.length > 1
           ? [
               // Split (1.6.5): baris PER metode — tunai = uang DISERAHKAN
@@ -849,20 +889,26 @@ export async function cetakUlang(s: SaleRow): Promise<void> {
               // porsi atribusi. Kembalian hanya bila ada sisi tunai & > 0.
               ...bayar.map((p) => ({
                 kiri: p.method === 'tunai' ? 'Tunai' : metode(p.method),
-                kanan: rp(p.method === 'tunai' ? p.amount + s.change : p.amount),
+                kanan: rp(p.method === 'tunai' ? p.amount + nota.change : p.amount),
               })),
-              ...(bayar.some((p) => p.method === 'tunai') && s.change > 0
-                ? [{ kiri: 'Kembalian', kanan: rp(s.change) }]
+              ...(bayar.some((p) => p.method === 'tunai') && nota.change > 0
+                ? [{ kiri: 'Kembalian', kanan: rp(nota.change) }]
                 : []),
             ]
-          : s.pay_method === 'tunai' && s.cash_in > 0
+          : nota.pay_method === 'tunai' && (nota.cash_in > 0 || sisaHutang(nota) > 0)
             ? [
-                { kiri: 'Tunai', kanan: rp(s.cash_in) },
-                { kiri: 'Kembalian', kanan: rp(s.change) },
+                { kiri: 'Tunai', kanan: rp(nota.cash_in) },
+                // Sisa yang jadi hutang ikut tercetak (pola struk POS).
+                ...(sisaHutang(nota) > 0 ? [{ kiri: 'Hutang', kanan: rp(sisaHutang(nota)) }] : []),
+                { kiri: 'Kembalian', kanan: rp(nota.change) },
               ]
-            : [{ kiri: metodeBaris(s), kanan: rp(s.total) }]),
+            : [{ kiri: metodeBaris(nota), kanan: rp(nota.total) }]),
+        // Total ledger pelanggan — hanya bila berbeda dari sisa nota ini.
+        ...(totalHutang > 0 && totalHutang !== sisaHutang(nota)
+          ? [{ kiri: 'Total hutang', kanan: rp(totalHutang) }]
+          : []),
       ],
-      kaki: ['Terima kasih sudah berbelanja'],
+      kaki: footerStruk() ? [footerStruk()] : [],
     };
     // Eksplisit 'thermal' — pilihan Thermal di dialog tidak boleh tergantung
     // pref layout per-device (pref 'a4' kini berarti invoice A4, bukan struk).
@@ -912,8 +958,9 @@ export async function mountHistoryPage(el: HTMLElement): Promise<void> {
     </div>`;
   paint();
   try {
-    const r = await apiGet<{ data: { store_name?: string } }>('/api/settings');
-    if (r.data?.store_name) syncStoreNameFromServer(r.data.store_name);
+    // Satu sumber opsi cetak (nama toko + footer/nomor/detail pelanggan).
+    const r = await apiGet<{ data: Parameters<typeof syncDariServerSettings>[0] }>('/api/settings');
+    syncDariServerSettings(r.data);
   } catch {}
   await load();
 }

@@ -28,7 +28,9 @@ import { choiceDialog } from '../ui/confirm';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
-import { syncStoreNameFromServer } from '../ui/identitas-struk';
+import {
+  syncDariServerSettings, teksJumlahItem, footerStruk,
+} from '../ui/identitas-struk';
 import { getCashier, getToko } from '../ui/user';
 import { tglPendek } from '../ui/waktu';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
@@ -1016,13 +1018,22 @@ async function cetakNotaPesanan(o: OrderRow, items: OrderItem[], payments: Order
     }
     const bayar = payments.filter((p) => p.kind !== 'refund');
     const refund = payments.reduce((a, p) => a + (p.kind === 'refund' ? p.amount : 0), 0);
+    const qtyTotal = items.reduce((a, it) => a + (Number(it.qty) || 0), 0);
     const s: Struk = {
       judul: getToko(),
       subjudul: 'NOTA PESANAN',
       meta: [
+        // Nomor pesanan TIDAK dipendekkan oleh opsi "nomor struk pendek":
+        // prefiks ORD-YYMMDD adalah identitas pesanan (bukan nomor nota
+        // penjualan), dan memotongnya menyisakan urutan yang bisa tertukar.
         o.order_no,
         tglLokal(o.created_at),
         `Kasir: ${o.cashier}`,
+        // Nama pelanggan SELALU dicetak di nota pesanan: ini dokumen serah
+        // barang/jasa, bukan struk belanja — nota tanpa nama pemilik pesanan
+        // tidak berguna. Opsi "detail pelanggan" (alamat/telepon) sengaja
+        // hanya berlaku di struk penjualan thermal (POS/Riwayat), karena
+        // halaman ini tidak menyimpan kontak pelanggan.
         `Pelanggan: ${o.customer_name || 'Pelanggan Umum'}`,
         ...(o.status === 'diambil'
           ? ['Status: DIAMBIL']
@@ -1030,6 +1041,7 @@ async function cetakNotaPesanan(o: OrderRow, items: OrderItem[], payments: Order
             ? ['Status: DIBATALKAN']
             : []),
       ],
+      jumlahItem: teksJumlahItem(items.length, qtyTotal),
       items: items.map((it) => ({
         name: it.name, qty: it.qty, price: it.price,
         ...(it.note?.trim() ? { note: it.note.trim() } : {}),
@@ -1043,7 +1055,7 @@ async function cetakNotaPesanan(o: OrderRow, items: OrderItem[], payments: Order
       ],
       kaki: [
         o.status === 'dikerjakan' ? 'Pesanan sedang dikerjakan' : o.status === 'selesai' ? 'Pesanan siap diambil' : 'Simpan nota ini',
-        'Terima kasih',
+        ...(footerStruk() ? [footerStruk()] : []),
       ],
     };
     await kirimPrint(await strukUntukTercetak(s, 'thermal'));
@@ -1082,8 +1094,10 @@ async function loadCustomers(): Promise<void> {
 export async function mountOrdersPage(el: HTMLElement): Promise<void> {
   host = el;
   try {
-    const r = await apiGet<{ data: { store_name?: string } }>('/api/settings');
-    if (r.data?.store_name) syncStoreNameFromServer(r.data.store_name);
+    // Nama toko + opsi struk (footer, jumlah item, detail pelanggan) —
+    // sumber yang sama dengan POS/Riwayat.
+    const r = await apiGet<{ data: Parameters<typeof syncDariServerSettings>[0] }>('/api/settings');
+    syncDariServerSettings(r.data);
   } catch {}
   const sub = subRute();
   // Alt+N = pesanan baru (ui/aksi-baru.ts) — satu pintu dengan tombol toolbar.

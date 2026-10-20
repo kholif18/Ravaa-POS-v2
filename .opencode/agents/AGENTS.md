@@ -992,7 +992,7 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           `tests/e2e-struk.mjs` `pilihCetak()` bergantung
                           padanya; helper `jual()` kini SELALU membaca isi
                           resume + menutup dialog (`pilihan:'Escape'` =
-                           tutup via Esc; e2e-struk 133 asersi). Topup/tarik
+                           tutup via Esc; e2e-struk 144 asersi). Topup/tarik
                            tetap TANPA dialog. Ikon label info bar dipegang CSS
                            `.info-bar svg { size-4 }` di `styles.css` (pola
                            `.chip svg` — `icon()` tidak menulis width/height).
@@ -1155,6 +1155,20 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                           ~1.5x (chip 39px/16px, footer 51px/20px).
                           `e2e-struk.mjs` B-tail + C ditulis ulang ke dialog
                           (141 asersi); suite total **1003 hijau**.
+                          **Opsi dokumen & struk (2026-10-20)**: struk POS
+                          dibangun dari cache server (ui/identitas-struk.ts,
+                          disinkron `syncDariServerSettings` saat mount) —
+                          `metaPelangganStruk` (nama snapshot + alamat/telepon
+                          opsional; default hanya nama), `nomorStrukPendek`
+                          (opsi nomor pendek), `teksJumlahItem` (baris ringkas
+                          sebelum TOTAL), `footerStruk` (kaki struk; juga
+                          dipakai struk layanan-saja topup/tarik) dan
+                          `receipt_show_debt`: `pay()` fetch
+                          `GET /api/customer-debts/:id` SESUDAH charge hutang
+                          terkirim (total ledger memuat nota ini), hanya untuk
+                          pelanggan bernama; bila total = sisa nota ini baris
+                          tidak dicetak dobel. Struk thermal lewat
+                          `strukUntukTercetak` sehingga logo server ikut.
 apps/web/src/pages/pos-mobile.ts  UI POS versi MOBILE (baru 2026-10-17) —
                           satu file render + binding mobile-only, dipanggil
                           dari pos.ts. Kontrak: (a) `PosMobileCtx` dirakit
@@ -1241,8 +1255,8 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           (fallback "Pelanggan Umum") — sama dengan struk
                           asli POS, lalu dialog pilihan
                           **[Thermal] [A4] [Batal]** — A4 = `cetakInvoice()`,
-                          Thermal = `kirimPrint(strukUntuk(...,'thermal'))`
-                          eksplisit seperti POS).
+                          Thermal = `kirimPrint(await
+                          strukUntukTercetak(...,'thermal'))` seperti POS).
                          **Penanda HUTANG (putaran 13, 2026-10-06)**: baris
                          penjualan dengan field computed `sisa_hutang > 0`
                          (lihat GET /api/sales) menampilkan **chip merah
@@ -1288,6 +1302,20 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                          jatuh ke cadangan `orders.hutang_sisa` (lihat §3) —
                          chip Hutang tetap tampil walau uang diterima nota = total
                          (kasus sisa dibayar sebagian saat serah).
+                         **Opsi dokumen & struk di cetak ulang (2026-10-20)**:
+                         `cetakUlang()` mengikuti opsi SERVER
+                         (ui/identitas-struk.ts) — `receipt_short_no`
+                         memotong nomor invoice jadi urutan harian,
+                         `receipt_customer` memilih baris detail pelanggan
+                         (nama dari SNAPSHOT nota, alamat/telepon dari kontak
+                         live `customer_address`/`customer_phone`
+                         GET /api/sales/:id — detail HANYA di-fetch bila token
+                         alamat/telepon aktif), `teksJumlahItem` menambah
+                         baris ringkas, `footerStruk` mengganti/menghapus
+                         kaki, dan `receipt_show_debt` menambah baris
+                         `Total hutang` (ledger pelanggan; bila sama dengan
+                         sisa nota ini tidak dicetak dua kali). Struk thermal
+                         lewat `strukUntukTercetak` sehingga logo server ikut.
                          **Tombol "Buat retur" (Tahap 2, 2026-10-11)** di kartu
                          Pembayaran `detailJual()` (`data-retur-nota`):
                          `dialogReturNota()` prefill item nota + input qty
@@ -1624,7 +1652,7 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           perangkat,data}` berisi kartu `[data-set-card]`
                           ber-`data-cari`. SEMUA id & logika lama
                           dipertahankan (kontrak `tests/settings-ui-test.mjs`
-                          30 asersi). Rincian:
+                          37 asersi). Rincian:
                           * **Cari** client-side tanpa API: semua kata wajib
                             cocok di `data-cari`+textContent; filter memakai
                             `style.display` — BUKAN atribut `hidden` (kartu
@@ -1637,8 +1665,22 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           * **Chip ringkas** `[data-set-chip]` (minus/
                             kadaluarsa/cetak/backup) dari state server +
                             cache backup; klik = `lompatSeksi()` (kosongkan
-                            filter dulu, scrollIntoView + tandai nav);
-                            scroll-spy IntersectionObserver `root:#page`.
+                            filter dulu lalu pindah panel).
+                          * **Panel mode (2026-10-20, permintaan pemilik
+                            "menu settings seperti di halaman Laporan …
+                            klik menu tampilkan seksi itu")**: nav seksi kiri
+                            benar-benar berpindah panel — `state.seksiAktif`
+                            + `style.display` per `[data-set-sec]` (BUKAN
+                            `hidden`: kelas `flex`/`grid` kartu mengalahkan
+                            UA rule) + `paintNavAktif()` (kelas aktif &
+                            `aria-current`). Scroll-spy IntersectionObserver
+                            DIHAPUS (hanya satu seksi tampil, tak ada posisi
+                            gulir untuk dipantau); semua nav memakai
+                            `<button>` (`#set-sec-*` = anchor lama tetap ada
+                            untuk deep-link). Saat mencari, seksi tanpa kartu
+                            cocok ikut disembunyikan dan panel otomatis pindah
+                            ke seksi pertama yang cocok bila seksi aktif tak
+                            punya hasil.
                           * **Form toko = draft** `state.toko` vs snapshot
                             `state.tokoAsli`: `tokoKotor()` / status
                             `#set-toko-status` / tombol simpan mati saat
@@ -1648,14 +1690,46 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           * **Putaran 2 (lanjutan riset)**: kartu **Pratinjau
                             struk** `#set-preview-struk` (`xl:col-span-2`,
                             ala receipt visual editor) — contoh struk thermal
-                            yang live mengikuti ketikan nama toko device +
-                            gambar tersimpan (`paintPratinjauStruk()` repaint
-                            isi kertas saja); dan tombol **`#set-tes-cetak`**
+                            yang live mengikuti DRAFT nama toko + opsi dokumen
+                            yang sedang diedit (footer, detail pelanggan,
+                            jumlah item, nomor pendek; repaint isi kertas saja
+                            lewat `paintPratinjauStruk()`) + gambar tersimpan;
+                            dan tombol **`#set-tes-cetak`**
                             di kartu Cetak struk — kirim `strukContoh()` via
                             `kirimPrint(strukUntukTercetak(...))` (builder
                             ESC/POS yang sama dengan struk asli), hormat
                             `getPrintPause()` (jeda = tolak + toast, nol
                             kertas; `disabled` saat `state.tesJalan`).
+                          * **Dokumen & struk (2026-10-20, riset subset opsi
+                            Aronium)**: kartu `#set-dok-form` DI DALAM seksi
+                            **Perangkat & cetak** (revisi pemilik 2026-10-20:
+                            *"pindahkan ke perangkat & cetak, karena itu
+                            tergolong masuk ke pengaturan dan preview cetak"* —
+                            duduk di grid bersama Cetak struk & Pratinjau,
+                            `xl:col-span-2`; 4 seksi tetap). Chip cakupan
+                            seksi itu menjadi **"Server + perangkat"** karena
+                            kartu dokumen tersimpan di server sedangkan
+                            preferensi printer tetap per browser. Draft
+                            `state.dok` vs `state.dokAsli` (pola form toko:
+                            `dokKotor()` + `#set-dok-status` + tombol simpan
+                            mati saat bersih). Isi: `#set-dok-judul` (judul
+                            invoice A4), `#set-dok-footer-a4` (footer semua
+                            dokumen A4), `#set-dok-footer-struk` (footer struk
+                            thermal), tiga checkbox `#set-dok-cust-name/
+                            -address/-phone` (urutan cetak tetap nama-alamat-
+                            telepon; `receipt_customer` = CSV token, kosong =
+                            tanpa detail), saklar `#set-dok-item` (baris
+                            jumlah item), `#set-dok-nomor` (nomor struk
+                            pendek), `#set-dok-hutang` (total hutang
+                            pelanggan). Toggle saklar mem-paint ulang (teks
+                            Cetak/Mati ikut berubah) tetapi nilai draft
+                            dipertahankan; semua tersimpan SERVER-wide via
+                            POST /api/settings. Tombol Simpan -> `setOpsiCetak`
+                            + `syncDariServerSettings` (cache device ikut).
+                            PPN/pajak, desimal, dan nomor struk manual SENGAJA
+                            tidak diadopsi. Kontrak UI diuji section E
+                            `tests/settings-ui-test.mjs` (READ-ONLY: draft
+                            dibuang reload, tanpa POST).
                           Setelah itu riwayat layout tetap: **Redesign
                           layout 2026-10-16** (permintaan pemilik "lebih user
                           friendly") — empat seksi berkepala `kepalaSeksi()`
@@ -1665,10 +1739,12 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           `kartuSaklar()`: tile ikon + desc + footer "Dibaca
                           server pada setiap penjualan" + switch; baris
                           "Sedang berlaku." dibuang — label switch sendiri
-                          sudah Aktif/Nonaktif), Identitas toko, Perangkat ini
-                          (Tampilan perangkat + Cetak struk `xl:grid-cols-2`;
-                          Cetak struk = 3 baris berlabel: Jeda `#set-pause` /
-                          Cetak otomatis `#set-cetak` / Layout `#set-layout`),
+                          sudah Aktif/Nonaktif), Identitas toko, Perangkat &
+                          cetak (Tampilan perangkat + Dokumen & struk + Cetak
+                          struk + Pratinjau; grid `xl:grid-cols-2`, kartu
+                          dokumen & pratinjau `xl:col-span-2`; Cetak struk = 3
+                          baris berlabel: Jeda `#set-pause` / Cetak otomatis
+                          `#set-cetak` / Layout `#set-layout`),
                           Backup & pemulihan (daftar full-width di bawah
                           header; tombol `w-full sm:w-auto` supaya mobile
                           tidak menghimpit teks). SEMUA id + teks kontrak test
@@ -1680,7 +1756,12 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           2026-10-03: 4 input nama/alamat/Phone/Email ->
                           kunci `store_*` di POST /api/settings, tanpa swal —
                           kop INVOICE A4 tersimpan di server supaya semua
-                          device mencetak kop yang sama; **sejak butir 1.6.4
+                          device mencetak kop yang sama; **sejak 2026-10-20
+                          nama toko juga menjadi sumber `getToko()` struk
+                          thermal semua device** (dulu input per-device —
+                          `#set-dev-toko` lama dipertahankan tersembunyi di
+                          kartu Perangkat supaya kontrak test lama tetap
+                          hidup); **sejak butir 1.6.4
                           2026-10-19 kartu ini juga memuat unggah LOGO STRUK
                           THERMAL** — `#set-logo-file` (label btn berisi
                           input sr-only; `kecilkanLogo()` = resize klien ke
@@ -1846,6 +1927,15 @@ apps/web/src/escpos.ts   ESC/POS: STRUK DUA LAYOUT + POST ke print-agent
                            `kirimRekapThermal()`. Gagal muat logo = struk
                            tetap tercetak tanpa logo (hiasan tidak pernah
                            membatalkan penjualan).
+                           **`Struk.jumlahItem?: string` (2026-10-20)**: baris
+                           ringkas tepat SEBELUM garis sebelum rincian uang
+                           (`Jumlah item: N baris · M qty`), dirender sama di
+                           layout thermal & A4. Field opsional — undefined/'' =
+                           baris tidak dicetak, jadi struk pemanggil lama
+                           tetap identik byte-per-byte. Isinya dibangun
+                           `teksJumlahItem()` (ui/identitas-struk.ts) sesuai
+                           opsi server `receipt_show_items`; diuji
+                           `tests/escpos-test.ts` (59 asersi).
                            Berisi: struk (struk thermal/strukA4/StrukBaris), ascii()/potong/baris
                            dua kolom, kirimPrint() + urlAgent() (`ravaa.printagent`,
                           default :9100). Dipanggil dari pay()/submitTopup() POS. PENTING: `teks()` tidak
@@ -1902,7 +1992,7 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           **Payment status `Lunas`/`Belum lunas`** (putaran 14:
                           `Belum lunas` bila `sale.sisa_hutang > 0`), tabel item
                           + baris `* note`, ringkasan Discount/Total, footer
-                          "Dicetak dari Ravaa POS").
+                          dari opsi server `invoice_footer`).
                           **HUTANG di invoice (putaran 14, 2026-10-06 —
                           "tambahkan hutang jika pelanggan berhutang")**:
                           (a) baris **`Hutang:` merah** di rincian Payment
@@ -1934,6 +2024,17 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           rumus laci sama dengan `kasSeharusnya()`); nota
                           take dibaca `cetakInvoice` jalur biasa (order_no
                           ada di `sale`).
+                          **Judul & footer dokumen (2026-10-20)**: invoice
+                          memakai `judulInvoiceA4(toko)` = `invoice_title`
+                          server (default "INVOICE") dan `footerDokumenA4(toko)`
+                          = `invoice_footer` (default "Dicetak dari Ravaa
+                          POS"); string kosong = baris tidak dicetak. Helper
+                          footer yang SAMA dipakai lima dokumen A4: invoice,
+                          laporan (`htmlLaporan`), rekap shift
+                          (`htmlRekapShift`), nota PO (`htmlPoA4`), rincian
+                          hutang (`htmlHutangA4`) — jangan menulis footer baru
+                          di halaman. Nilainya disimpan SERVER-wide
+                          (`settings` key/value, lihat §3), bukan per device.
                           **Seksi tabel tambahan (butir 1.6.7, 2026-10-19)**:
                           `DokLaporan.bagian?: {judul,kolom,baris,catatan?}[]`
                           = tabel TAMBAHAN setelah tabel utama (judul seksi
@@ -2031,6 +2132,27 @@ apps/web/src/ui/aksi-baru.ts  **Pintasan Alt+N "buat baru" (2026-10-18,
                            `tests/altn-test.mjs` (17 asersi: hint, 9 halaman
                            modal/halaman, guard tidak menumpuk, Esc, halaman
                            tanpa aksi, tanpa pageerror).
+apps/web/src/ui/identitas-struk.ts  **Sumber identitas + opsi cetak dari
+                          SERVER** (2026-10-20): nama toko struk thermal pindah
+                          dari localStorage per-device ke `store_name` server
+                          (`syncStoreNameFromServer`, cache localStorage
+                          `ravaa.store_name` + TTL 30 menit) dan opsi
+                          dokumen/struk di cache `ravaa.opsi-cetak`
+                          (`OpsiCetak`: invoice_title/invoice_footer/
+                          receipt_footer/receipt_customer CSV token
+                          `name,address,phone`/receipt_show_items/
+                          receipt_short_no/receipt_show_debt). API:
+                          `getOpsiCetak`/`setOpsiCetak` (parsial — kunci
+                          undefined TIDAK menimpa cache)/
+                          `syncDariServerSettings` + helper struk:
+                          `nomorStrukPendek` (`261020-000012` -> `000012`;
+                          non-invoice 8 char), `metaPelangganStruk` (nama
+                          selalu, alamat/telepon opsional, bungkus 32 kolom),
+                          `teksJumlahItem` (`Jumlah item: N baris · M qty`,
+                          '' bila opsi mati) dan `footerStruk`. Dipanggil
+                          mount POS/Riwayat/Pesanan + simpan halaman Sistem.
+                          Master pelanggan TIDAK punya email — jangan
+                          menambah token email tanpa migrasi.
 apps/web/src/ui/print-pref.ts  Preferensi cetak PER DEVICE (localStorage):
                            getAutoPrint/setAutoPrint (`ravaa.cetak`, default
                            nyala — matikan lewat panel Sistem -> Cetak struk
@@ -2128,11 +2250,13 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        pre-existing (bukan regresi kode); `recap-test` sama
                        tapi cleanup-nya ter-catch.
                        **Halaman Pengaturan**: `tests/settings-ui-test.mjs`
-                       (30 asersi) — nav seksi + scroll/aria, cari multi-kata
-                       (logo / alamat email / printer / tanpa hasil / Esc),
-                       4 chip ringkas + lompat seksi, status & draft form toko
-                       (tanpa menulis server), pratinjau struk live, tombol
-                       Tes cetak (route `**/print` di-mock — jeda aktif = nol
+                       (37 asersi) — panel mode (nav seksi + `aria-current`),
+                       cari multi-kata (logo / alamat email / printer / tanpa
+                       hasil / Esc), 4 chip ringkas + lompat seksi, status &
+                       draft form toko + draft **Dokumen & struk** (tanpa
+                       menulis server; kartu dipastikan berada di seksi
+                       Perangkat & cetak), pratinjau struk live, tombol Tes
+                       cetak (route `**/print` di-mock — jeda aktif = nol
                        request, jeda mati = payload "TES CETAK"), Ctrl+K.
                        READ-ONLY terhadap settings server; hanya preferensi
                        localStorage device uji yang dipulihkan.
@@ -2718,13 +2842,33 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     filter q/tanggal/limit, 401 tanpa token, kasir 403, login-gagal tercatat,
     dan UI `#/audit` (chip jumlah, cari, modal detail, Esc).
 * `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false,
-  store_name:"",store_address:"",store_phone:"",store_email:"",store_logo:""}}`
-  (selalu ada — dua baris boolean default di-seed `db/seed.sql` lewat `INSERT OR
+  store_name:"",store_address:"",store_phone:"",store_email:"",store_logo:"",
+  invoice_title:"INVOICE",invoice_footer:"Dicetak dari Ravaa POS",
+  receipt_footer:"Terima kasih sudah berbelanja",receipt_customer:"name",
+  receipt_show_items:true,receipt_short_no:false,receipt_show_debt:true}}`
+  (selalu ada — baris boolean default di-seed `db/seed.sql` lewat `INSERT OR
   IGNORE` jadi seed ulang tidak mereset pilihan pemilik; empat kunci `store_*`
-  = **kop INVOICE A4** (nama/alamat/Phone/Email toko) juga `INSERT OR IGNORE`
-  dengan data contoh pemilik)
+  = **kop dokumen A4** (nama/alamat/Phone/Email toko) juga `INSERT OR IGNORE`
+  dengan data contoh pemilik; **sejak 2026-10-20** nama toko juga dipakai
+  struk thermal semua device lewat `getToko()`/`ui/identitas-struk.ts`).
+  - **Opsi dokumen & struk (2026-10-20, subset riset Aronium)** — tujuh kunci
+    `settings` biasa (tanpa migrasi skema; kunci absen = bawaan di atas):
+    `invoice_title` (judul invoice A4), `invoice_footer` (footer SEMUA dokumen
+    A4), `receipt_footer` (kaki struk thermal), `receipt_customer` (CSV token
+    `name,address,phone` — urutan = urutan baris; kosong = tanpa detail
+    pelanggan), `receipt_show_items` (baris `Jumlah item: N baris · M qty`),
+    `receipt_short_no` (nomor struk = urutan harian `000012`) dan
+    `receipt_show_debt` (baris `Total hutang` pelanggan). **Master pelanggan
+    TIDAK punya email** — token email sengaja tidak ada (server menolak
+    `receipt_customer` berisi selain tiga token itu). Default
+    `receipt_show_items`/`receipt_show_debt` = true (fitur baru terlihat;
+    pemilik bisa mematikan), `receipt_short_no` = false, `receipt_customer` =
+    `name`.
 * `POST /api/settings` `{allow_negative_stock?:boolean, tolak_jual_kadaluarsa?:boolean,
-  store_name?:string, store_address?:string, store_phone?:string, store_email?:string}`
+  store_name?:string, store_address?:string, store_phone?:string, store_email?:string,
+  invoice_title?:string, invoice_footer?:string, receipt_footer?:string,
+  receipt_customer?:string, receipt_show_items?:boolean, receipt_short_no?:boolean,
+  receipt_show_debt?:boolean}`
   -> `{data:{...}}` (200)
   - **Update PARSIAL (sejak 2026-10-01)**: kunci yang TIDAK dikirim TIDAK
     diubah — berbeda dengan `POST /api/products` yang mereset kolom tak-dikirim.
@@ -2732,17 +2876,27 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     kunci yang diubah, dan `{tolak_jual_kadaluarsa:true}` tidak boleh mereset
     `allow_negative_stock` milik pemilik diam-diam.
   - 400 bila payload `{}` (minimal satu kunci). Tiap kunci yang dikirim wajib
-    tipe yang benar -> 400 dengan nama kuncinya: dua saklar boolean **sungguhan**
-    (angka 0/1, `"ya"`, `null` ditolak, memaksa client mengirim `true`/`false`);
-    empat `store_*` wajib **teks** (string) — nilai di-trim server.
-    Kunci tidak dikenal (mis. `waduh`) -> 400 `"pengaturan tidak dikenal: <k>"`.
-  - **Pembacaan**: dua boolean hanya di `POST /api/sales` (dari DB SETIAP
-    penjualan, bukan cache): `allow_negative_stock` = boleh stok minus, lihat
-    aturan stok di kontrak penjualan; `tolak_jual_kadaluarsa` = tolak barang
-    lewat `expiry_date`, lihat aturan kadaluarsa di kontrak penjualan. Default
-    `false`. Empat `store_*` dibaca client saat **membuka invoice A4**
+    tipe yang benar -> 400 dengan nama kuncinya: **lima saklar** boolean
+    **sungguhan** (angka 0/1, `"ya"`, `null` ditolak, memaksa client mengirim
+    `true`/`false`); kunci teks (`store_*` + empat kunci dokumen) wajib
+    **teks** (string) — nilai di-trim server. `receipt_customer` divalidasi
+    token: hanya `name|address|phone` (duplikat dibuang, urutan dipertahankan;
+    token asing -> 400 `"receipt_customer tidak dikenal: X (boleh:
+    name,address,phone)"`). Kunci tidak dikenal -> 400
+    `"pengaturan tidak dikenal: <k>"`. **Semua validasi sebelum menulis** dan
+    penulisan + audit dibungkus `transaksi()` — payload sebagian salah tidak
+    meninggalkan setengah perubahan.
+  - **Pembacaan**: dua boolean transaksi hanya di `POST /api/sales` (dari DB
+    SETIAP penjualan, bukan cache): `allow_negative_stock` = boleh stok minus,
+    lihat aturan stok di kontrak penjualan; `tolak_jual_kadaluarsa` = tolak
+    barang lewat `expiry_date`, lihat aturan kadaluarsa di kontrak penjualan.
+    Default `false`. Empat `store_*` dibaca client saat **membuka invoice A4**
     (`cetakInvoice()` di `apps/web/src/invoice.ts`) — satu kop untuk semua
-    device, sengaja di server bukan localStorage.
+    device, sengaja di server bukan localStorage. Tujuh kunci dokumen/struk
+    dibaca `ui/identitas-struk.ts` (cache device, disinkron saat mount
+    POS/Riwayat/Pesanan + simpan halaman Sistem) — `receipt_short_no` HANYA
+    memotong nomor invoice penjualan; nota pesanan tetap `ORD-YYMMDD-NNN`
+    penuh.
   - **Logo struk thermal (butir ROADMAP 1.6.4, 2026-10-19)** — file di `img/`
     sebelah DB (pola foto produk/avatar), tabel settings hanya menyimpan
     NAMANYA di kunci `store_logo`. TANPA migrasi skema (baris `settings`
@@ -3053,6 +3207,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - `sale` juga memuat **`customer_id`** + **`customer_name`** (snapshot, sejak
     2026-10-04) — sumber baris `Pelanggan:` di struk ulang dan "Bill to"
     invoice A4. Baris lama bernama `''` = tampilkan "Pelanggan Umum".
+  - Sejak 2026-10-20 `sale` memuat **`customer_address` + `customer_phone`** —
+    data KONTAK LIVE lewat `LEFT JOIN customers` (additive; `customer_name`
+    tetap snapshot). Dipakai cetak ulang struk thermal untuk opsi
+    `receipt_customer` token address/phone; `NULL` untuk nota tanpa pelanggan
+    atau pelanggan yang sudah dihapus. Master pelanggan TIDAK punya email —
+    jangan menambah alias email di sini tanpa migrasi.
   - Sejak putaran 13 (2026-10-06) `sale` memuat **`sisa_hutang`** — penanda
     "nota ini berhutang", CASE komputasi **SAMA PERSIS** dengan
     `GET /api/sales` (lihat butir `sisa_hutang` di sana untuk rasional &

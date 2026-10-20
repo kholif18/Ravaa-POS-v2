@@ -79,6 +79,16 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('tolak_jual_kadaluarsa', '0'
 -- (bukan localStorage) supaya semua device mencetak kop yang sama. Default
 -- diisi dari contoh pemilik (invoice Aronium "RAVAA CREATIVE"); pemilik
 -- mengubahnya lewat kartu "Pengaturan toko" di halaman #/settings.
+-- Opsi dokumen & struk (riset Aronium 2026-10-20). INSERT OR IGNORE membuat
+-- seed ulang tidak menimpa pilihan pemilik. Default = perilaku lama KECUALI
+-- jumlah item + total hutang pelanggan (dua fitur baru, default menyala).
+INSERT OR IGNORE INTO settings (key, value) VALUES ('invoice_title', 'INVOICE');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('invoice_footer', 'Dicetak dari Ravaa POS');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_footer', 'Terima kasih sudah berbelanja');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_customer', 'name');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_show_items', '1');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_short_no', '0');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_show_debt', '1');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_name', 'RAVAA CREATIVE');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_address', 'Gedong, Ds. Ngluyu Kec. Ngluyu, 64452 NGANJUK');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_phone', '082233377661');

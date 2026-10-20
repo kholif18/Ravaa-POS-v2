@@ -73,6 +73,9 @@ await page.route('**/print', async (route) => {
 });
 
 const API = 'http://localhost:3001';
+// Nama toko struk = Identitas toko di server (sejak 2026-10-20; dulu per-device
+// 'RAVA POS'). Diambil sekali dengan token dari bantuan-uji (fetch dipatch).
+const TOKO = (await (await fetch(API + '/api/settings')).json()).data?.store_name || 'RAVA POS';
 const jpost = async (p, b) => {
   const r = await fetch(API + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
   return { s: r.status, j: await r.json().catch(() => ({})) };
@@ -185,7 +188,7 @@ try {
   ok('diakhiri CUT', s1[s1.length - 3] === 0x1d && s1[s1.length - 2] === 0x56 && s1[s1.length - 1] === 0x00);
   const t1 = teksDari(s1);
   const b1 = barisStruk(s1);
-  ok('membawa nama toko (default aplikasi)', t1.includes('RAVA POS'), b1.slice(0, 2));
+  ok('membawa nama toko (identitas toko)', TOKO !== '' && t1.includes(TOKO), b1.slice(0, 2));
   // Revisi nomor 2026-10-04: `No.` = invoice YYMMDD-NNNNNN (tanggal hari ini
   // UTC + urut harian), bukan lagi 8 digit uuid — dan dipisah baris dari
   // waktu supaya tidak kena potong 32 kolom.

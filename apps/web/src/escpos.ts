@@ -125,6 +125,10 @@ export interface Struk {
    *  Umum") — rata tengah, satu per baris. */
   meta: string[];
   items: StrukItem[];
+  /** Ringkasan sebelum rincian uang (opsi "Cetak jumlah item" — riset
+   *  Aronium 2026-10-20). undefined/'' = baris tidak dicetak, jadi struk
+   *  pemanggil lama tetap identik byte-per-byte. */
+  jumlahItem?: string;
   /** Subtotal / Diskon / TOTAL / Tunai / Kembalian — sudah berpasangan. */
   baris: StrukBaris[];
   kaki?: string[];
@@ -184,6 +188,8 @@ export function struk(s: Struk, logo?: number[] | null): number[] {
       if (it.note?.trim()) out.push(...byteCatatan(it.note, COLS), ...LF);
     }
   }
+  // Opsi struk: jumlah item (baris tersendiri sebelum rincian uang).
+  if (s.jumlahItem?.trim()) baris(tengah(potong(s.jumlahItem, COLS)));
   out.push(...teks(garis()), ...LF);
 
   for (const b of s.baris) {
@@ -253,6 +259,8 @@ export function strukA4(s: Struk): number[] {
       if (it.note?.trim()) out.push(...byteCatatan(it.note, COLS_A4), ...LF);
     }
   }
+  // Opsi struk: jumlah item — aturan sama dengan layout thermal.
+  if (s.jumlahItem?.trim()) baris(tengah(potong(s.jumlahItem, COLS_A4)));
   out.push(...teks(garisA4()), ...LF);
 
   for (const b of s.baris) {

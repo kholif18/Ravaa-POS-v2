@@ -2260,8 +2260,16 @@ app.get('/api/sales/:id', (c) => {
   // `retur_total` = penanda retur (2026-10-18) — subquery yang SAMA pula;
   // lihat komentar di sana. `order_no` = nomor pesanan bila nota ini lahir
   // dari take pesanan (dipakai struk ulang/Riwayat menampilkan asalnya).
+  // `customer_address`/`customer_phone` (2026-10-20) = data KONTAK LIVE lewat
+  // LEFT JOIN, additive: dipakai opsi "Detail pelanggan di struk thermal" saat
+  // cetak ulang dari Riwayat. `customer_name` tetap SNAPSHOT kolom sales (nama
+  // saat nota dibuat) — alamat/telepon boleh berubah, dan nota lama tanpa
+  // pelanggan tetap NULL. Master pelanggan TIDAK punya email (hanya phone +
+  // address), jadi jangan menambah alias email di sini.
   const sale = db.prepare(
-    `SELECT *,
+    `SELECT sales.*,
+            c.address AS customer_address,
+            c.phone AS customer_phone,
             CASE WHEN pay_method='tunai' AND total > cash_in
                   AND customer_id IS NOT NULL
                   AND customer_name <> 'Pelanggan Umum'
@@ -2270,7 +2278,8 @@ app.get('/api/sales/:id', (c) => {
             (SELECT o.order_no FROM orders o WHERE o.sale_id = sales.id) AS order_no,
             (SELECT COUNT(*) FROM returns r WHERE r.sale_id = sales.id) AS n_retur,
             (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.sale_id = sales.id) AS retur_total
-       FROM sales WHERE id=?`,
+       FROM sales LEFT JOIN customers c ON c.id = sales.customer_id
+      WHERE sales.id=?`,
   ).get(c.req.param('id'));
   if (!sale) return c.json({ error: 'tidak ditemukan' }, 404);
   // base_unit (LEFT JOIN products) ditambahkan 2026-10-01 untuk CETAK ULANG
@@ -3297,25 +3306,48 @@ app.get('/api/purchases/:id', hanyaOwner, (c) => {
 // cara pasti membuat dua device memahami aturan yang berbeda.
 const K_STOK_MINUS = 'allow_negative_stock';
 const K_TOLAK_KADALUARSA = 'tolak_jual_kadaluarsa';
+// Opsi dokumen & struk (riset Aronium 2026-10-20): semuanya SERVER-wide supaya
+// semua device mencetak isi yang sama. Teks disimpan sebagai teks biasa,
+// pilihan pelanggan sebagai CSV token `name,address,phone` (master pelanggan
+// memang tidak punya email — jangan tawarkan token yang tak bisa diisi).
+const K_RECEIPT_SHOW_ITEMS = 'receipt_show_items';
+const K_RECEIPT_SHORT_NO = 'receipt_short_no';
+const K_RECEIPT_SHOW_DEBT = 'receipt_show_debt';
+const K_BOOL_SETTING = new Set<string>([
+  K_STOK_MINUS, K_TOLAK_KADALUARSA,
+  K_RECEIPT_SHOW_ITEMS, K_RECEIPT_SHORT_NO, K_RECEIPT_SHOW_DEBT,
+]);
 // Kop INVOICE A4 (cetak gaya Aronium) — teks biasa, bukan boolean. Empat kunci
 // ini disimpan di server supaya semua device mencetak kop yang sama (beda dengan
 // preferensi cetak per-device yang sifatnya hardware). Seed default = contoh
 // pemilik; diubah lewat kartu "Pengaturan toko" di halaman #/settings.
 const K_STORE = ['store_name', 'store_address', 'store_phone', 'store_email'] as const;
-type KStore = (typeof K_STORE)[number];
-const RE_K_STORE = new Set<string>(K_STORE);
+// Teks dokumen tambahan: judul + footer A4, footer struk thermal, dan pilihan
+// detail pelanggan di struk thermal. Semua update PARSIAL (kunci yang tidak
+// dikirim tidak diubah), sama seperti store_*.
+const K_DOKUMEN = ['invoice_title', 'invoice_footer', 'receipt_footer', 'receipt_customer'] as const;
+const RE_K_TEKS = new Set<string>([...K_STORE, ...K_DOKUMEN]);
+const TOKEN_PELANGGAN = new Set(['name', 'address', 'phone']);
 
 function settingBool(key: string, bawaan: boolean): boolean {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row ? row.value === '1' : bawaan;
 }
 
-// `string` (bukan KStore): `store_logo` juga dibaca lewat helper ini tapi
-// SENGAJA bukan bagian K_STORE — nilainya HANYA boleh ditulis endpoint unggah
+// `string`: `store_logo` juga dibaca lewat helper ini tapi SENGAJA bukan
+// bagian K_STORE — nilainya HANYA boleh ditulis endpoint unggah
 // logo, tidak lewat POST /api/settings (nama file di img/ ≠ teks bebas).
 function settingStr(key: string): string {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row?.value ?? '';
+}
+
+/** Beda dengan `settingStr`: baris yang TIDAK ADA memakai bawaan, sedangkan
+ *  baris yang ada walau isinya '' dihormati (mis. pemilik mengosongkan footer
+ *  untuk menyembunyikannya). */
+function settingStrAtau(key: string, bawaan: string): string {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row ? row.value : bawaan;
 }
 
 function semuaSettings() {
@@ -3329,51 +3361,79 @@ function semuaSettings() {
     // Logo toko untuk struk thermal (butir ROADMAP 1.6.4, 2026-10-19): NAMA
     // file di img/ (pola avatar), bukan isi gambar — '' = tanpa logo.
     store_logo: settingStr('store_logo'),
+    // Opsi dokumen & struk (riset Aronium 2026-10-20). Default: judul/footer
+    // serta nama pelanggan seperti perilaku lama; jumlah item dan total hutang
+    // pelanggan MENYALA supaya fitur baru langsung terlihat (pemilik bisa
+    // mematikannya), nomor invoice tetap penuh (short = opt-in).
+    invoice_title: settingStrAtau('invoice_title', 'INVOICE'),
+    invoice_footer: settingStrAtau('invoice_footer', 'Dicetak dari Ravaa POS'),
+    receipt_footer: settingStrAtau('receipt_footer', 'Terima kasih sudah berbelanja'),
+    receipt_customer: settingStrAtau('receipt_customer', 'name'),
+    receipt_show_items: settingBool(K_RECEIPT_SHOW_ITEMS, true),
+    receipt_short_no: settingBool(K_RECEIPT_SHORT_NO, false),
+    receipt_show_debt: settingBool(K_RECEIPT_SHOW_DEBT, true),
   };
 }
 
 app.get('/api/settings', (c) => c.json({ data: semuaSettings() }));
 
 // Update PARSIAL: kunci yang tidak dikirim TIDAK diubah, minimal satu wajib ada.
-// Boolean harus boolean sungguhan (angka 0/1, "ya", null ditolak); kunci store_*
-// harus TEKS (string) — salah tipe = 400 dengan nama kuncinya.
+// Boolean harus boolean sungguhan (angka 0/1, "ya", null ditolak); kunci teks
+// (store_*/dokumen) harus TEKS (string) — salah tipe = 400 dengan nama kuncinya.
+// SEMUA validasi dilakukan sebelum menulis, supaya payload yang sebagian salah
+// tidak meninggalkan setengah perubahan.
 app.post('/api/settings', hanyaOwner, async (c) => {
   try {
     const body = await c.req.json();
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return c.json({ error: 'payload harus object' }, 400);
     }
-    const vMinus = body?.allow_negative_stock;
-    const vKadaluarsa = body?.tolak_jual_kadaluarsa;
-    if (vMinus !== undefined && typeof vMinus !== 'boolean') {
-      return c.json({ error: 'allow_negative_stock harus boolean (true|false)' }, 400);
+    const entries = Object.entries(body ?? {});
+    if (!entries.length) {
+      return c.json({ error: 'tidak ada pengaturan yang dikirim (boleh: allow_negative_stock, tolak_jual_kadaluarsa, store_*, invoice_*, receipt_*)' }, 400);
     }
-    if (vKadaluarsa !== undefined && typeof vKadaluarsa !== 'boolean') {
-      return c.json({ error: 'tolak_jual_kadaluarsa harus boolean (true|false)' }, 400);
-    }
-    // Kunci toko: hanya empat nama yang dikenal, nilainya teks (di-trim).
-    const simpan = db.prepare(
-      `INSERT INTO settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    );
-    let adaKunci = vMinus !== undefined || vKadaluarsa !== undefined;
-    for (const [k, v] of Object.entries(body ?? {})) {
-      if (k === 'allow_negative_stock' || k === 'tolak_jual_kadaluarsa') continue; // sudah divalidasi di atas
-      if (!RE_K_STORE.has(k)) {
+    // Validasi nama kunci dulu — kunci tak dikenal tidak boleh menulis apa pun.
+    for (const [k] of entries) {
+      if (!K_BOOL_SETTING.has(k) && !RE_K_TEKS.has(k)) {
         return c.json({ error: `pengaturan tidak dikenal: ${k}` }, 400);
+      }
+    }
+    const siap = new Map<string, string>();
+    for (const [k, v] of entries) {
+      if (K_BOOL_SETTING.has(k)) {
+        if (typeof v !== 'boolean') {
+          return c.json({ error: `${k} harus boolean (true|false)` }, 400);
+        }
+        siap.set(k, v ? '1' : '0');
+        continue;
       }
       if (typeof v !== 'string') {
         return c.json({ error: `${k} harus teks (string)` }, 400);
       }
-      simpan.run(k, v.trim());
-      adaKunci = true;
+      let nilai = v.trim();
+      if (k === 'receipt_customer') {
+        // CSV token; urutan dipertahankan, duplikat dibuang, token asing ditolak
+        // (klien lama/tangan nakal tidak boleh membuat struk membaca kolom yang
+        // tidak ada).
+        const token = nilai.split(',').map((t) => t.trim()).filter(Boolean);
+        const asing = token.find((t) => !TOKEN_PELANGGAN.has(t));
+        if (asing) {
+          return c.json({ error: `receipt_customer tidak dikenal: ${asing} (boleh: name,address,phone)` }, 400);
+        }
+        nilai = [...new Set(token)].join(',');
+      }
+      siap.set(k, nilai);
     }
-    if (!adaKunci) {
-      return c.json({ error: 'tidak ada pengaturan yang dikirim (boleh: allow_negative_stock, tolak_jual_kadaluarsa, store_*)' }, 400);
-    }
-    if (vMinus !== undefined) simpan.run(K_STOK_MINUS, vMinus ? '1' : '0');
-    if (vKadaluarsa !== undefined) simpan.run(K_TOLAK_KADALUARSA, vKadaluarsa ? '1' : '0');
-    catatAudit(c, 'update', 'setting', Object.keys(body).join('+'), body);
+    const simpan = db.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    );
+    // Satu transaction: semua kunci tersimpan bersama, dan audit ikut rollback
+    // bila ada kegagalan tulis di tengah.
+    transaksi(() => {
+      for (const [k, v] of siap) simpan.run(k, v);
+      catatAudit(c, 'update', 'setting', Object.keys(body).join('+'), body);
+    })();
     return c.json({ data: semuaSettings() });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan pengaturan' }, 400);

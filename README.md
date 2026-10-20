@@ -701,8 +701,9 @@ npm run dev:api
   ([Thermal][A4][Selesai]; A4 layanan-saja = struk 64 kolom, karena
   tidak ada nota sale untuk invoice).
   - **Pilihan A4 = INVOICE A4 gaya Aronium** (baru 2026-10-03): membuka tab
-    baru berisi nota invoice A4 (kop **INVOICE** + nama/alamat/Phone/Email
-    toko + logo toko — unggahan di Sistem, fallback bulatan "R" —, Bill to
+    baru berisi nota invoice A4 (kop berjudul `invoice_title` — bawaan
+    **INVOICE** — + nama/alamat/Phone/Email toko + logo toko (unggahan di
+    Sistem, fallback bulatan "R"), Bill to
     pelanggan terpilih — *Pelanggan Umum* bila
     kosong —, **Invoice No. `YYMMDD-NNNNNN`**
     (tahun+bulan+tanggal, nomor urut harian yang di-assign server), tabel item
@@ -721,6 +722,10 @@ npm run dev:api
     Kop disimpan **di server** (4 kunci `store_*`) lewat kartu **Pengaturan
     toko** di **Sistem → Pengaturan toko** — semua device mencetak kop yang
     sama; nilai awal = contoh pemilik (RAVAA STUDIO) lewat seed.
+    **Judul & footer** dapat diubah di **Sistem → Dokumen & struk**
+    (`invoice_title`/`invoice_footer`; footer kosong = baris tidak dicetak).
+    Footer yang sama dipakai lima dokumen A4: invoice, laporan, rekap shift,
+    nota PO, dan rincian hutang.
     **Logo toko di semua dokumen A4** (2026-10-19): logo yang diunggah di
     Sistem → Pengaturan toko tampil di kanan-atas SEMUA dokumen A4 cetak
     browser — invoice, laporan (`#/reports`), rekap shift (PDF), nota PO,
@@ -743,17 +748,32 @@ npm run dev:api
     Sistem — butir 1.6.4, lihat "Pengaturan toko") -> nama toko
     (bold, rata tengah) -> tanggal/no transaksi/kasir/shift -> garis 32 kolom ->
     item (`qty x nama` + line total; baris yang didiskon memunculkan baris
-    **Diskon item -Rp…** tepat di bawahnya) -> Subtotal/Diskon (total item +
-    diskon transaksi, bila ada)/**TOTAL** (bold)/Tunai/
-    Kembalian -> kaki -> FEED -> CUT (thermal) / Form Feed (A4).
+    **Diskon item -Rp…** tepat di bawahnya) -> **`Jumlah item: N baris · M qty`**
+    (bila opsi menyala) -> Subtotal/Diskon (total item + diskon transaksi, bila
+    ada)/**TOTAL** (bold)/Tunai/Kembalian/Hutang -> kaki -> FEED -> CUT (thermal)
+    / Form Feed (A4).
   - **Setiap baris diakhiri LF**; tanpa LF seluruh struk menempel jadi satu baris
     memanjang (firmware thermal memisah baris dengan LF, bukan FEED). Semua baris
     dijamin <= 32 kolom, dan kolom uang (14) selalu menempel di tepi kanan supaya
     nama barang panjang tidak menelannya.
   - Struk topup/tarik memakai blok yang sama **tanpa** baris item — jadi tidak ada
     `(tanpa item)` dan tidak ada garis ganda.
-  - Nama toko diambil dari **Pengaturan Akun** (`ravaa.toko`, bawaan `RAVA POS`
-    = merk aplikasi, bukan nama toko sungguhan — ganti sekali di situ).
+  - Nama toko diambil dari **Sistem → Pengaturan toko** (`settings.store_name`
+    di server, dicache per device `ravaa.store_name` dengan TTL 30 menit —
+    pindah dari input per-device lama). Semua device mencetak nama yang sama;
+    bawaan `RAVA POS` = merk aplikasi, bukan nama toko sungguhan — isi sekali
+    di situ.
+  - **Opsi dokumen & struk** (2026-10-20, subset riset Aronium) tersimpan
+    SERVER-wide di `settings` dan disinkron ke cache device saat POS/Riwayat/
+    Pesanan dibuka: **judul invoice A4**, **footer semua dokumen A4**, **footer
+    struk thermal**, **detail pelanggan** (nama/alamat/telepon — master
+    pelanggan tidak punya email), **baris jumlah item**, **nomor struk pendek**
+    (hanya urutan harian; nota pesanan tetap `ORD-YYMMDD-NNN`) dan **total
+    hutang pelanggan** di struk. Default jumlah item + total hutang menyala;
+    nomor pendek opt-in. Diatur lewat kartu **Dokumen & struk** di
+    **Sistem → Identitas toko**; penerapannya di struk POS, cetak ulang
+    Riwayat, invoice A4, laporan/rekap/PO/hutang A4, dan nota pesanan (footer +
+    jumlah item saja).
   - Saklar disimpan di `ravaa.cetak` (bawaan **nyala**). **Gagal cetak tidak
     membatalkan penjualan**: uang sudah tercatat, hanya kertasnya belum keluar;
     toast peringatan muncul sekali per sesi agar tidak membanjiri layar kasir.
@@ -909,8 +929,11 @@ npm run dev:api
     non-dasar tercetak lewat `base_unit` dari `GET /api/sales/:id` — subtotal,
     diskon item, diskon transaksi, total, uang diterima/kembali persis seperti
     struk asli) lalu dikirim ke print-agent lewat `kirimPrint()` eksplisit
-    layout thermal. Gagal cetak hanya toast peringatan — riwayat tidak
-    berubah apa pun.
+    layout thermal. Opsi **Dokumen & struk** di Sistem ikut diterapkan: nomor
+    pendek, detail pelanggan (nama snapshot + alamat/telepon live), baris
+    jumlah item, footer, dan total hutang pelanggan; logo server disisipkan
+    lewat `strukUntukTercetak()`. Gagal cetak hanya toast peringatan — riwayat
+    tidak berubah apa pun.
   - **Tanpa pembatalan/refund**: riwayat bersifat catatan, sama seperti riwayat
     mutasi stok. Koreksi lewat stok opname + transaksi baru.
   - Endpoint baru: `GET /api/sales` dan `GET /api/topups`, keduanya berparameter
@@ -1024,9 +1047,15 @@ npm run dev:api
   - Rekap shift memuat **uang pesanan masuk** + nota pesanan (pengurang
     omzet agar tidak dobel), dan piutang baru laporan harian ikut menghitung
     sisa hutang saat serah.
-* **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — dua kartu saklar
-  server, kartu kop toko, kartu preferensi device, masing-masing dengan
-  penjelasan sendiri (bukan lagi satu kartu):
+* **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — **panel mode
+  (2026-10-20, permintaan pemilik "menu settings seperti di halaman Laporan")**:
+  nav seksi kiri (Aturan transaksi, Identitas toko, Perangkat & cetak, Backup &
+  pemulihan) benar-benar berpindah panel, bukan menggulir satu halaman; kartu
+  judul memuat pencarian client-side (`#set-cari`, Ctrl+K) dan chip ringkas
+  (stok minus/kadaluarsa/cetak/backup) yang melompat ke seksinya. Empat seksi
+  berisi kartu aturan server, kartu identitas/kop toko, kartu perangkat &
+  cetak (preferensi device + opsi dokumen server), dan kartu backup, masing-
+  masing dengan penjelasan sendiri (bukan lagi satu kartu):
   - **Stok boleh minus** (`settings.allow_negative_stock`): daring = penjualan
     boleh membuat stok menembus nol (stok jadi angka minus dan langsung terlihat
     di filter **Stok minus** halaman Stok); mati = `POST /api/sales` menolak
@@ -1049,10 +1078,27 @@ npm run dev:api
     semua device; tombol **Simpan toko** tanpa konfirmasi swal (non-destruktif
     seperti Backup), nilai tampil kembali persis seperti hasil trim server.
     Bawaan seed = contoh pemilik (RAVAA STUDIO, alamat Ngluyu Nganjuk).
+    **Sejak 2026-10-20 nama toko di sini juga menjadi sumber nama di struk
+    thermal semua device** (`getToko()`/`ui/identitas-struk.ts`, cache 30
+    menit) — input nama toko per-device lama tidak dipakai lagi.
     Sejak butir 1.6.4 (2026-10-19) kartu ini juga memuat **logo struk
     thermal** — unggah/ganti/hapus dari sini (file di `img/` server, kunci
     `store_logo`; `POST /api/settings/logo` khusus owner, `GET
     /api/settings/logo` publik untuk `<img>` + unduhan klien raster).
+  - **Dokumen & struk** (2026-10-20, subset opsi Aronium; semua SERVER-wide;
+    kartu berada di seksi **Perangkat & cetak** bersama preferensi printer &
+    pratinjau struk — revisi pemilik 2026-10-20, bukan di Identitas toko):
+    judul invoice A4 (`invoice_title`), footer semua dokumen A4
+    (`invoice_footer`), footer struk thermal (`receipt_footer`), detail
+    pelanggan di struk (checkbox nama/alamat/telepon — `receipt_customer` CSV,
+    kosong = tanpa detail; master pelanggan tidak punya email), baris
+    **jumlah item** (`receipt_show_items`, bawaan nyala), **nomor struk
+    pendek** (`receipt_short_no`, bawaan mati — hanya urutan harian, nota
+    pesanan tetap `ORD-YYMMDD-NNN`) dan **total hutang pelanggan** di struk
+    (`receipt_show_debt`, bawaan nyala). Disimpan lewat `POST /api/settings`
+    (validasi tipe + token, penulisan satu transaksi), disinkron ke cache
+    device saat POS/Riwayat/Pesanan dibuka. PPN/pajak, desimal, dan nomor
+    struk manual sengaja tidak diadopsi.
   - **Cetak struk** (baru — satu-satunya kartu **per device**): saklar
     **Cetak struk otomatis** + pilihan layout struk (**Thermal 58mm** /
     **Epson L3110 (A4)**, lihat bagan struk di atas). TIDAK lewat API: keduanya

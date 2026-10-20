@@ -141,7 +141,7 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
     .join('')}
   ${d.ringkas.length ? `<div class="ringkas">${d.ringkas.map(([k, v]) => `<div class="kotak"><span class="lbl">${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>` : ''}
   ${d.catatan ? `<div class="catat">${esc(d.catatan)}</div>` : ''}
-  <div class="foot">Dicetak dari Ravaa POS</div>
+  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))}</div>` : ''}
   <script>
     window.addEventListener('load', function () { window.print(); });
   </script>
@@ -184,6 +184,22 @@ export interface SaleNota {
 interface Toko {
   store_name: string; store_address: string;
   store_phone: string; store_email: string;
+  /** Opsi dokumen server (GET /api/settings, 2026-10-20). Opsional supaya
+   *  pemanggil/test lama yang hanya mengirim empat kolom store_* tetap
+   *  mencetak teks lama. String kosong = footer/judul memang disembunyikan. */
+  invoice_title?: string;
+  invoice_footer?: string;
+}
+
+/** Footer dokumen A4 dari pengaturan server; `undefined` (data lama/test) =
+ *  teks lama, `''` = pemilik mengosongkan footernya. */
+export function footerDokumenA4(toko: { invoice_footer?: string }): string {
+  return toko.invoice_footer ?? 'Dicetak dari Ravaa POS';
+}
+
+/** Judul invoice A4 (default lama INVOICE). */
+export function judulInvoiceA4(toko: { invoice_title?: string }): string {
+  return toko.invoice_title ?? 'INVOICE';
 }
 
 function esc(s: string): string {
@@ -309,7 +325,7 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
 <body>
   <div class="kop">
     <div>
-      <div class="judul">INVOICE</div>
+      <div class="judul">${esc(judulInvoiceA4(toko))}</div>
       <div class="nama-toko">${esc(toko.store_name || 'RAVA POS')}</div>
       ${toko.store_address ? `<div class="alamat">${esc(toko.store_address)}</div>` : ''}
       ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${esc(toko.store_phone)}</span></div>` : ''}
@@ -366,7 +382,7 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
       ? `<div class="kotak"><span class="lbl">Sisa hutang (semua nota)</span><span>${rpNum(piutang)}</span></div>`
       : ''}
   </div>
-  <div class="foot">Dicetak dari Ravaa POS</div>
+  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))}</div>` : ''}
   <script>
     // Cetak otomatis begitu dokumen siap (pola RPOS print_a4.blade.php).
     // Print STALL/Failure TIDAK PERNAH membatalkan apa pun — kasir bisa klik
@@ -502,7 +518,7 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
     ${d !== null ? `<div class="kotak"><span class="lbl">Selisih</span><span>${d < 0 ? '-' : ''}${rpNum(Math.abs(d))}</span></div>` : ''}
   </div>
   <div class="putus"></div>
-  <div class="foot">Dicetak dari Ravaa POS</div>
+  ${footerDokumenA4(toko) ? `<div class="foot">${esc(footerDokumenA4(toko))}</div>` : ''}
   <script>
     window.addEventListener('load', function () { window.print(); });
   </script>

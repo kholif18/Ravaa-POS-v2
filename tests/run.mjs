@@ -48,7 +48,7 @@ function cekPathAbsolut() {
 
 const SUITE = [
   ['importcsv-test.ts', 176],
-  ['escpos-test.ts', 56],
+  ['escpos-test.ts', 59],
   ['labelsheet-test.ts', 80],
   ['borongan-test.ts', 31],
   ['sku-urut-test.mjs', 17],
@@ -75,7 +75,7 @@ const SUITE = [
   ['backup-test.mjs', 27],
   // UI halaman Pengaturan (2026-10-20): nav seksi + cari client-side + chip
   // ringkasan + penanda "belum disimpan". Read-only terhadap /api/settings.
-  ['settings-ui-test.mjs', 30],
+  ['settings-ui-test.mjs', 37],
   ['skema-guard-test.mjs', 11],
   ['customer-debt-test.mjs', 37],
   ['expense-supplier-test.mjs', 34],

@@ -14,9 +14,11 @@
 import { apiGet, apiPost, HttpError } from '../api';
 import { confirmDialog } from '../ui/confirm';
 import { icon, type IconName } from '../ui/icons';
-import { getToko, setToko } from '../ui/user';
+import { getToko } from '../ui/user';
 import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPause, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
-import { syncStoreNameFromServer } from '../ui/identitas-struk';
+import {
+  syncDariServerSettings, nomorStrukPendek, type OpsiCetak,
+} from '../ui/identitas-struk';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { hariIni, waktu } from '../ui/waktu';
@@ -24,7 +26,7 @@ import { LEBAR_LOGO, resetLogoStrukCache } from '../logo-struk';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 
 type Toko = { store_name: string; store_address: string; store_phone: string; store_email: string };
-type Settings = {
+type Settings = OpsiCetak & {
   allow_negative_stock: boolean; tolak_jual_kadaluarsa: boolean;
   store_name: string; store_address: string; store_phone: string; store_email: string;
   /** NAMA file logo di img/ ('' = tanpa logo) — butir ROADMAP 1.6.4. */
@@ -39,7 +41,7 @@ type SeksiId = 'transaksi' | 'toko' | 'perangkat' | 'data';
 const SEKSI: { id: SeksiId; label: string; judul: string; ikon: IconName; cakupan: string }[] = [
   { id: 'transaksi', label: 'Aturan transaksi', judul: 'Aturan transaksi', ikon: 'stock', cakupan: 'Semua device' },
   { id: 'toko', label: 'Identitas toko', judul: 'Identitas toko', ikon: 'receipt', cakupan: 'Semua device' },
-  { id: 'perangkat', label: 'Perangkat & cetak', judul: 'Perangkat ini', ikon: 'smartphone', cakupan: 'Browser ini' },
+  { id: 'perangkat', label: 'Perangkat & cetak', judul: 'Perangkat & cetak', ikon: 'smartphone', cakupan: 'Server + perangkat' },
   { id: 'data', label: 'Backup & pemulihan', judul: 'Backup & pemulihan', ikon: 'shieldCheck', cakupan: 'Server' },
 ];
 
@@ -52,6 +54,35 @@ const KUNCI_TOKO: Record<string, keyof Toko> = {
   'set-toko-email': 'store_email',
 };
 
+/** Draft opsi dokumen & struk (server-wide). Semua disimpan SEKALI lewat
+ *  tombol Simpan supaya perubahan judul/footer/toggle tidak setengah jalan. */
+const dokKosong = (): OpsiCetak => ({
+  invoice_title: 'INVOICE',
+  invoice_footer: 'Dicetak dari Ravaa POS',
+  receipt_footer: 'Terima kasih sudah berbelanja',
+  receipt_customer: 'name',
+  receipt_show_items: true,
+  receipt_short_no: false,
+  receipt_show_debt: true,
+});
+
+const KUNCI_DOK_TEKS: Record<string, 'invoice_title' | 'invoice_footer' | 'receipt_footer'> = {
+  'set-dok-judul': 'invoice_title',
+  'set-dok-footer-a4': 'invoice_footer',
+  'set-dok-footer-struk': 'receipt_footer',
+};
+
+const KUNCI_DOK_BOOL: Record<string, 'receipt_show_items' | 'receipt_short_no' | 'receipt_show_debt'> = {
+  'set-dok-item': 'receipt_show_items',
+  'set-dok-nomor': 'receipt_short_no',
+  'set-dok-hutang': 'receipt_show_debt',
+};
+
+const URUTAN_PELANGGAN = ['name', 'address', 'phone'] as const;
+const LABEL_PELANGGAN: Record<(typeof URUTAN_PELANGGAN)[number], string> = {
+  name: 'Nama', address: 'Alamat', phone: 'Telepon',
+};
+
 const state = {
   loading: true, error: '', minus: false, kadaluarsa: false,
   backups: [] as BarisBackup[], backupErr: '', backupJalan: false,
@@ -60,16 +91,20 @@ const state = {
   /** Nilai terakhir yang tersimpan di server — dasar penanda "belum disimpan". */
   tokoAsli: tokoKosong(),
   tokoJalan: false,
+  /** Draft opsi dokumen & struk (judul/footer/detail pelanggan/toggle). */
+  dok: dokKosong(),
+  /** Nilai terakhir tersimpan — dasar penanda "belum disimpan". */
+  dokAsli: dokKosong(),
+  dokJalan: false,
   /** Tombol "Tes cetak" sedang mengirim (menahan klik ganda). */
   tesJalan: false,
   /** Nama file logo struk thermal ('' = belum ada). */
   logo: '',
-  /** Seksi yang disorot menu kiri; diperbarui scroll-spy/nav. */
+  /** Seksi yang sedang ditampilkan (panel mode — hanya satu yang tampil). */
   seksiAktif: 'transaksi' as SeksiId,
 };
 
 let host: HTMLElement | null = null;
-let ioSeksi: IntersectionObserver | null = null;
 /** Listener dokumen (Ctrl+K) milik kunjungan terakhir — di-abort saat mount
  *  berikutnya supaya berpindah-pindah halaman tidak menumpuk listener. */
 let sinyal: AbortController | null = null;
@@ -94,7 +129,8 @@ function renderPage(): string {
           <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
           <p class="mt-0.5 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
             Aturan <b>server</b> berlaku untuk semua device kasir; preferensi
-            <b>perangkat</b> (tema & cetak) hanya menempel di browser ini.
+            <b>perangkat</b> (tema, printer, jeda cetak) hanya menempel di browser
+            ini. Opsi <b>dokumen & struk</b> tetap tersimpan di server.
             Cari di bawah menyaring tampilan — tidak mengubah data
             (<kbd class="kbd">Ctrl K</kbd> fokus ke kolom cari).
           </p>
@@ -173,6 +209,7 @@ function renderBody(): string {
         <div class="grid items-stretch gap-3 xl:grid-cols-2">
           ${kartuPerangkat()}
           ${kartuCetak()}
+          ${kartuDokumen()}
           ${kartuPratinjau()}
         </div>
       </section>
@@ -311,6 +348,11 @@ function setSeksiAktif(id: SeksiId): void {
   if (state.seksiAktif === id) return;
   state.seksiAktif = id;
   paintNavAktif();
+  // Panel mode (2026-10-20): seksi non-aktif disembunyikan lewat style.display
+  // (bukan atribut hidden — kelas `flex`/`grid` di kartu mengalahkan UA rule).
+  host?.querySelectorAll<HTMLElement>('#set-body [data-set-sec]').forEach((sec) => {
+    sec.style.display = sec.dataset.setSec === id ? '' : 'none';
+  });
 }
 
 function paintNavAktif(): void {
@@ -388,29 +430,9 @@ function bindCari(): void {
   host?.querySelector('#set-cari-hapus')?.addEventListener('click', () => bersihkanCari());
 }
 
-/** Sorot menu sesuai posisi gulir (IntersectionObserver, root = #page yang
- *  memang kontainer scroll-nya). Diputus di awal paint supaya node lama tidak
- *  menahan callback. */
-function pantauSeksi(): void {
-  ioSeksi?.disconnect();
-  ioSeksi = null;
-  if (!host || typeof IntersectionObserver === 'undefined') return;
-  const secs = [...host.querySelectorAll<HTMLElement>('[data-set-sec]')];
-  if (!secs.length) return;
-  ioSeksi = new IntersectionObserver((entries) => {
-    if (!host?.isConnected) {
-      ioSeksi?.disconnect();
-      return;
-    }
-    const tampak = entries
-      .filter((e) => e.isIntersecting)
-      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-    if (!tampak) return;
-    const id = (tampak.target as HTMLElement).dataset.setSec as SeksiId | undefined;
-    if (id) setSeksiAktif(id);
-  }, { root: host, rootMargin: '0px 0px -55% 0px', threshold: 0 });
-  secs.forEach((s) => ioSeksi!.observe(s));
-}
+// (Scroll-spy IntersectionObserver DIHAPUS 2026-10-20: halaman memakai panel
+// mode — hanya seksi aktif yang tampil, jadi tidak ada posisi gulir untuk
+// dipantau. `lompatSeksi`/`setSeksiAktif` yang memegang state seksi.)
 
 // Kartu saklar aturan transaksi: ikon + judul + deskripsi, lalu footer
 // pemisah berisi keterangan singkat (kiri) & saklar (kanan) — pola baris
@@ -456,7 +478,7 @@ function kartuPerangkat(): string {
         <div class="field-sm">
           <label class="label">Nama toko (struk thermal)</label>
           <div class="input input-sm flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-            <span>${storeName || 'RAVA POS'}</span>
+            <span id="set-dev-toko">${esc(storeName || 'RAVA POS')}</span>
             <span class="text-xs text-gray-500 dark:text-gray-400">dari Identitas toko</span>
           </div>
         </div>
@@ -611,6 +633,126 @@ function kartuToko(): string {
     </div>`;
 }
 
+/** Nilai `receipt_customer` dari checkbox (urutan tetap: nama, alamat,
+ *  telepon — urutan itulah yang tercetak di struk). */
+function pilihPelangganDari(d: OpsiCetak): Set<string> {
+  return new Set(d.receipt_customer.split(',').map((t) => t.trim()).filter(Boolean));
+}
+
+function dokKotor(): boolean {
+  return JSON.stringify(state.dok) !== JSON.stringify(state.dokAsli);
+}
+
+/** Perbarui penanda & tombol simpan TANPA repaint — fokus ketikan tetap. */
+function perbaruiStatusDok(): void {
+  const kotor = dokKotor();
+  const status = host?.querySelector<HTMLElement>('#set-dok-status');
+  if (status) {
+    status.textContent = kotor ? 'Perubahan belum disimpan' : 'Semua perubahan tersimpan';
+    status.className = `text-xs ${kotor ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}`;
+  }
+  const btn = host?.querySelector<HTMLButtonElement>('#set-dok-simpan');
+  if (btn) btn.disabled = state.dokJalan || !kotor;
+}
+
+function kartuDokumen(): string {
+  const d = state.dok;
+  const kotor = dokKotor();
+  const dipilih = pilihPelangganDari(d);
+  const centang = URUTAN_PELANGGAN.map((t) => `
+    <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-2.5 py-2 text-sm text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
+      <input type="checkbox" class="size-4 shrink-0 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600"
+             id="set-dok-cust-${t}" data-dok-cust="${t}" ${dipilih.has(t) ? 'checked' : ''} />
+      <span>${LABEL_PELANGGAN[t]}</span>
+    </label>`).join('');
+  const f = (id: string, label: string, nilai: string, lebar?: boolean) => `
+    <div class="field-sm${lebar ? ' sm:col-span-2' : ''}">
+      <label class="label" for="${id}">${label}</label>
+      <input class="input" id="${id}" value="${esc(nilai)}" maxlength="200" autocomplete="off">
+    </div>`;
+  return `
+    <div class="card xl:col-span-2" data-set-card data-cari="dokumen struk invoice judul footer catatan pelanggan alamat telepon nomor pendek jumlah item hutang a4 thermal semua device percetakan">
+      <div class="flex items-start gap-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400 [&>svg]:size-4">${icon('receipt')}</span>
+        <div class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Dokumen &amp; struk</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Judul <b>invoice A4</b> serta footer <b>dokumen A4</b> (invoice, laporan,
+            rekap shift, nota PO, rincian hutang) dan <b>struk thermal</b>. Semua
+            tersimpan di <b>server</b> — device kasir mencetak isi yang sama.
+          </p>
+        </div>
+      </div>
+      <div id="set-dok-form" class="mt-3 grid gap-3 sm:grid-cols-2">
+        ${f('set-dok-judul', 'Judul invoice A4', d.invoice_title)}
+        ${f('set-dok-footer-a4', 'Footer dokumen A4', d.invoice_footer)}
+        ${f('set-dok-footer-struk', 'Footer struk thermal', d.receipt_footer, true)}
+        <div class="field-sm sm:col-span-2">
+          <span class="label">Detail pelanggan di struk thermal</span>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">${centang}</div>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Pilih baris kontak yang dicetak di bawah info transaksi. Kosongkan
+            semua untuk menyembunyikan detail pelanggan.
+          </p>
+        </div>
+        <div class="sm:col-span-2 grid gap-2 rounded-xl border border-gray-100 p-3 dark:border-gray-700/60 sm:grid-cols-3">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Jumlah item</p>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Baris ringkas sebelum rincian uang.</p>
+            </div>
+            ${switchHtml('set-dok-item', d.receipt_show_items, d.receipt_show_items ? 'Cetak' : 'Mati')}
+          </div>
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Nomor pendek</p>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Hanya urutan harian, tanpa awalan tanggal.</p>
+            </div>
+            ${switchHtml('set-dok-nomor', d.receipt_short_no, d.receipt_short_no ? 'Pendek' : 'Penuh')}
+          </div>
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Hutang pelanggan</p>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Sisa hutang nota + total ledger berjalan.</p>
+            </div>
+            ${switchHtml('set-dok-hutang', d.receipt_show_debt, d.receipt_show_debt ? 'Cetak' : 'Mati')}
+          </div>
+        </div>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <span id="set-dok-status" aria-live="polite" class="text-xs ${kotor ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}">
+          ${kotor ? 'Perubahan belum disimpan' : 'Semua perubahan tersimpan'}
+        </span>
+        <button type="button" id="set-dok-simpan" class="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60" ${state.dokJalan || !kotor ? 'disabled' : ''}>
+          ${icon('check')}<span>${state.dokJalan ? 'Menyimpan…' : 'Simpan dokumen'}</span>
+        </button>
+      </div>
+    </div>`;
+}
+
+/** Ambil hanya field dokumen dari respons server (bentuknya Settings penuh). */
+function dokDariSettings(s: Settings | null | undefined): OpsiCetak {
+  const dasar = dokKosong();
+  if (!s) return dasar;
+  // Token pelanggan disaring ke yang dikenal — nilai lama 'email' (sempat
+  // dicoba) tidak boleh membuat POST berikutnya ditolak server.
+  const cust = (s.receipt_customer ?? dasar.receipt_customer)
+    .split(',').map((t) => t.trim())
+    .filter((t) => (URUTAN_PELANGGAN as readonly string[]).includes(t));
+  return {
+    invoice_title: s.invoice_title ?? dasar.invoice_title,
+    invoice_footer: s.invoice_footer ?? dasar.invoice_footer,
+    receipt_footer: s.receipt_footer ?? dasar.receipt_footer,
+    receipt_customer: [...new Set(cust)].join(','),
+    // `?? dasar` (bukan `=== true`) supaya respons yang belum memuat kunci
+    // baru (API lama / cache) memakai perilaku lama: jumlah item & hutang
+    // TETAP dicetak.
+    receipt_show_items: s.receipt_show_items ?? dasar.receipt_show_items,
+    receipt_short_no: s.receipt_short_no ?? dasar.receipt_short_no,
+    receipt_show_debt: s.receipt_show_debt ?? dasar.receipt_show_debt,
+  };
+}
+
 // Kartu "Cetak struk" — preferensi PER DEVICE (localStorage lewat
 // ui/print-pref.ts), BUKAN POST /api/settings: printer tiap PC kasir beda
 // (thermal 58mm vs Epson L3110 vs HP tanpa printer), jadi menyimpannya
@@ -697,6 +839,7 @@ function namaStrukDevice(): string {
 }
 
 function isiPratinjauStruk(): string {
+  const d = state.dok;
   const gambar = state.logo
     ? `<img src="/api/settings/logo?${esc(state.logo)}" alt="" class="mx-auto mb-1.5 max-h-12 max-w-[220px] object-contain" />`
     : '';
@@ -705,19 +848,33 @@ function isiPratinjauStruk(): string {
       <div class="flex justify-between gap-2 ${tebal ? 'font-bold' : ''}">
         <span class="truncate">${esc(kiri)}</span><span class="shrink-0">${esc(kanan)}</span>
       </div>`;
+  const tengah = (teks: string) => `<div class="text-center text-gray-400">${esc(teks)}</div>`;
+  const kontak: Record<string, string> = {
+    name: 'Pelanggan Umum',
+    address: 'Gedong, Nganjuk',
+    phone: '0822 3333 7766',
+  };
+  const labelKontak: Record<string, string> = { name: 'Pelanggan', address: 'Alamat', phone: 'Telp' };
+  const detail = d.receipt_customer.split(',').map((t) => t.trim()).filter(Boolean)
+    .map((t) => tengah(`${labelKontak[t] ?? t}: ${kontak[t] ?? ''}`))
+    .join('');
   return `
       ${gambar}
       <div class="text-center font-bold">${esc(namaStrukDevice())}</div>
       <div class="text-center text-gray-400">Contoh tampilan</div>
+      ${tengah(`No. ${nomorStrukPendek('261020-000012', d.receipt_short_no)}`)}
+      ${detail}
       ${garis}
       ${baris('1 x Contoh barang', rp(10000))}
       ${baris('2 x Contoh kedua', rp(2500))}
+      ${d.receipt_show_items ? tengah('Jumlah item: 2 baris · 3 qty') : ''}
       ${garis}
       ${baris('TOTAL', rp(15000), true)}
       ${baris('Tunai', rp(20000))}
       ${baris('Kembali', rp(5000))}
+      ${d.receipt_show_debt ? baris('Total hutang', rp(5000)) : ''}
       ${garis}
-      <div class="text-center text-gray-400">Terima kasih</div>`;
+      ${d.receipt_footer.trim() ? tengah(d.receipt_footer.trim()) : ''}`;
 }
 
 function kartuPratinjau(): string {
@@ -755,6 +912,7 @@ function paintPratinjauStruk(): void {
 /** Struk contoh tombol "Tes cetak" — dibangun builder yang SAMA dengan struk
  *  penjualan (escpos), jadi yang diuji = jalur cetak sebenarnya. */
 function strukContoh(nama: string): Struk {
+  const d = state.dok;
   return {
     judul: nama.trim() || 'RAVA POS',
     subjudul: 'TES CETAK',
@@ -763,12 +921,16 @@ function strukContoh(nama: string): Struk {
       { name: 'Contoh barang', qty: 1, price: 10000 },
       { name: 'Contoh kedua', qty: 2, price: 2500 },
     ],
+    jumlahItem: d.receipt_show_items ? 'Jumlah item: 2 baris · 3 qty' : undefined,
     baris: [
       { kiri: 'TOTAL', kanan: rp(15000), tebal: true },
       { kiri: 'Tunai', kanan: rp(20000) },
       { kiri: 'Kembali', kanan: rp(5000) },
     ],
-    kaki: ['Printer & kertas siap dipakai.'],
+    kaki: [
+      ...(d.receipt_footer.trim() ? [d.receipt_footer.trim()] : []),
+      'Printer & kertas siap dipakai.',
+    ],
   };
 }
 
@@ -845,8 +1007,6 @@ function esc(s: unknown): string {
 function paint(): void {
   const body = host?.querySelector('#set-body');
   if (!body) return;
-  ioSeksi?.disconnect();
-  ioSeksi = null;
   body.innerHTML = renderBody();
   bind();
   terapkanCari();
@@ -873,6 +1033,36 @@ function bind(): void {
     if (!kunci) return;
     state.toko[kunci] = el.value;
     perbaruiStatusToko();
+  });
+
+  // Draft opsi dokumen & struk. Teks/checkbox pelanggan tidak mem-paint ulang
+  // supaya fokus ketikan selamat; toggle saklar di-paint ulang karena teks
+  // "Cetak/Mati" & "Pendek/Penuh" ikut berubah.
+  const formDok = host?.querySelector<HTMLElement>('#set-dok-form');
+  formDok?.addEventListener('input', (ev) => {
+    const el = ev.target as HTMLInputElement;
+    const kunciTeks = KUNCI_DOK_TEKS[el.id];
+    if (kunciTeks) {
+      state.dok[kunciTeks] = el.value;
+      perbaruiStatusDok();
+      paintPratinjauStruk();
+      return;
+    }
+    if (el.dataset.dokCust) {
+      const dipilih = pilihPelangganDari(state.dok);
+      const token = el.dataset.dokCust;
+      if (el.checked) dipilih.add(token);
+      else dipilih.delete(token);
+      state.dok.receipt_customer = URUTAN_PELANGGAN.filter((t) => dipilih.has(t)).join(',');
+      perbaruiStatusDok();
+      paintPratinjauStruk();
+      return;
+    }
+    const kunciBool = KUNCI_DOK_BOOL[el.id];
+    if (kunciBool) {
+      state.dok[kunciBool] = el.checked;
+      paint();
+    }
   });
 
   // Kedua saklar pola sama: konfirmasi -> POST HANYA kunci yang diubah
@@ -959,13 +1149,33 @@ function bind(): void {
         store_email: r.data.store_email ?? '',
       };
       state.tokoAsli = { ...state.toko };
-      // Sinkron nama toko ke cache struk thermal
-      syncStoreNameFromServer(state.toko.store_name);
+      // Sinkron nama toko + opsi dokumen ke cache jalur cetak.
+      syncDariServerSettings(r.data);
       toast('Pengaturan toko disimpan — kop invoice A4 memakai nilai ini', 'success');
     } catch (e) {
       toast(`Gagal simpan pengaturan toko: ${errMsg(e)}`, 'error');
     } finally {
       state.tokoJalan = false;
+      if (host?.isConnected) paint();
+    }
+  });
+
+  // Simpan opsi dokumen & struk: satu POST untuk semua kunci (update parsial
+  // di server, tapi dari sini sengaja lengkap supaya toggle & teks konsisten).
+  host?.querySelector('#set-dok-simpan')?.addEventListener('click', async () => {
+    if (state.dokJalan) return;
+    state.dokJalan = true;
+    paint();
+    try {
+      const r = await apiPost<{ data: Settings }>('/api/settings', { ...state.dok });
+      state.dok = dokDariSettings(r.data);
+      state.dokAsli = { ...state.dok };
+      syncDariServerSettings(r.data);
+      toast('Pengaturan dokumen & struk disimpan — semua device memakai nilai ini', 'success');
+    } catch (e) {
+      toast(`Gagal simpan pengaturan dokumen: ${errMsg(e)}`, 'error');
+    } finally {
+      state.dokJalan = false;
       if (host?.isConnected) paint();
     }
   });
@@ -1164,9 +1374,11 @@ async function load(): Promise<void> {
     };
     // Snapshot server = pembanding penanda "belum disimpan".
     state.tokoAsli = { ...state.toko };
+    state.dok = dokDariSettings(s.value.data);
+    state.dokAsli = { ...state.dok };
     state.logo = s.value.data?.store_logo ?? '';
-    // Sinkron nama toko untuk struk thermal dari server (Identitas toko)
-    syncStoreNameFromServer(state.toko.store_name);
+    // Sinkron nama toko + opsi dokumen/struk ke cache jalur cetak.
+    syncDariServerSettings(s.value.data);
   } else {
     state.error = errMsg(s.reason);
   }

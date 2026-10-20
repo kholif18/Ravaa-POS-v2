@@ -38,7 +38,10 @@ import { diskonBorongan, type TingkatBorongan } from '../borongan';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
 import { getAutoPrint, getPrintPause, setAutoPrint, setStrukLayout } from '../ui/print-pref';
-import { syncStoreNameFromServer } from '../ui/identitas-struk';
+import {
+  getOpsiCetak, syncDariServerSettings, metaPelangganStruk, teksJumlahItem,
+  footerStruk, nomorStrukPendek,
+} from '../ui/identitas-struk';
 import { kirimPrint, strukUntukTercetak, bukaLaci, type Struk, type StrukBaris } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
@@ -225,7 +228,10 @@ let qtyNext = 1;
 // tanpa kontak (payload tanpa customer_id — client lama/offline tetap sah).
 // `phone`/`note` = bahan cari di layar Cari pelanggan (openCariPelanggan) —
 // filter lokal multi-kata pola sama dengan `?q=` API.
-type Cust = { id: number; code: string; name: string; phone?: string; note?: string; tier?: string };
+type Cust = {
+  id: number; code: string; name: string; phone?: string; note?: string; tier?: string;
+  address?: string;
+};
 let customers: Cust[] = [];
 let customerId: number | null = null;
 /** Pelanggan terpilih tier grosir? Harga grosir (products.price_grosir)
@@ -4282,7 +4288,9 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     // atas sudah memvalidasi pelanggan DAN memblokir hutang saat ada baris
     // topup. Dicatat ke ledger /api/customer-debts SETELAH nota tersimpan.
     const sisaHutang = opts?.hutang && payMethod === 'tunai' && cashIn < tot ? tot - cashIn : 0;
-    const namaHutang = customers.find((c) => c.id === customerId)?.name ?? '';
+    const kontakStruk = customers.find((c) => c.id === customerId);
+    const namaHutang = kontakStruk?.name ?? '';
+    const qtyStruk = cart.reduce((a, l) => a + l.qty, 0);
 
     // Keranjang hanya berisi baris LAYANAN (tanpa produk): POST /api/sales
     // tanpa items ditolak server, jadi cukup catat layanan + struknya —
@@ -4319,9 +4327,12 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
               ]
             : [{ kiri: labelMetode(payMethod), kanan: rp(topupTot) }]),
         ],
-        kaki: adaTarik && !adaTopup
-          ? ['Cek kembali nominal sebelum meninggalkan loket']
-          : ['Simpan struk ini sebagai bukti'],
+        kaki: [
+          ...(footerStruk() ? [footerStruk()] : []),
+          ...(adaTarik && !adaTopup
+            ? ['Cek kembali nominal sebelum meninggalkan loket']
+            : ['Simpan struk ini sebagai bukti']),
+        ],
       };
       tutupBayar();
       void pilihCetakSelesai(null, strukTopOnly, topupTot, kembalian, {
@@ -4415,6 +4426,10 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     // SEBELUM resume & paintCart berikutnya, supaya angka yang tampil sudah
     // sinkron. Lihat segarkanStokPos().
     await segarkanStokPos();
+    // Sisa nota ini dicatat ke ledger SETELAH baris di bawah; total hutang
+    // pelanggan (opsi "Hutang pelanggan" struk, 2026-10-20) karena itu dibaca
+    // SESUDAH charge supaya angka yang tercetak sudah termasuk sisa nota ini.
+    const namaSnapshot = res.data.sale.customer_name || kontakStruk?.name || '';
     let catatanHutang = '';
     if (sisaHutang > 0 && customerId !== null) {
       try {
@@ -4433,6 +4448,18 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         );
       }
     }
+    // Total hutang pelanggan: hanya untuk pelanggan bernama — Pelanggan Umum
+    // tak punya ledger. Gagal muat = struk tetap mencetak sisa nota (hiasan
+    // tak boleh membatalkan penjualan).
+    let totalHutang = 0;
+    if (getOpsiCetak().receipt_show_debt && customerId !== null && namaSnapshot !== 'Pelanggan Umum') {
+      try {
+        const d = await apiGet<{ data: { sisa: number } }>(`/api/customer-debts/${customerId}`);
+        totalHutang = Math.max(0, Number(d.data?.sisa) || 0);
+      } catch {
+        totalHutang = 0;
+      }
+    }
     const strukJual: Struk = {
       judul: getToko(),
       meta: [
@@ -4442,14 +4469,19 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         // TERPISAH: digabung jadi 40 kolom kena `potong(m, COLS)` dan nomornya
         // terpotong di 32. Fallback id hanya untuk baris lama tanpa invoice.
         waktuStruk(),
-        `No. ${res.data.sale.invoice_no ?? res.data.sale.id.slice(0, 8)}`,
+        `No. ${nomorStrukPendek(res.data.sale.invoice_no ?? res.data.sale.id.slice(0, 8))}`,
         `Kasir: ${getCashier()}`,
         `Shift: ${shift.id}`,
-        // Pelanggan dari SNAPSHOT server (customer_name), bukan label select —
-        // struk ulang di Riwayat memakai sumber yang sama. Baris lama tanpa
-        // kontak tampil "Pelanggan Umum" (default toko).
-        `Pelanggan: ${res.data.sale.customer_name || 'Pelanggan Umum'}`,
+        // Detail pelanggan mengikuti pilihan halaman Sistem (2026-10-20):
+        // default hanya nama, alamat/telepon opsional. Nama memakai SNAPSHOT
+        // server (customer_name) — sumber yang sama dengan Riwayat.
+        ...metaPelangganStruk({
+          name: namaSnapshot || 'Pelanggan Umum',
+          address: kontakStruk?.address,
+          phone: kontakStruk?.phone,
+        }),
       ],
+      jumlahItem: teksJumlahItem(cart.length, qtyStruk),
       items: cart.map((l) => ({
         name: l.name, qty: l.qty, price: l.price,
         // Cetak unit hanya bila bukan satuan dasar (lihat StrukItem.unit).
@@ -4493,10 +4525,16 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
                 { kiri: 'Kembalian', kanan: rp(kembalian) },
               ]
             : [{ kiri: labelMetode(payMethod), kanan: rp(tot + topupTot) }]),
+        // Total ledger pelanggan (opsi "Hutang pelanggan", 2026-10-20) —
+        // hanya bila berbeda dari sisa nota ini supaya tidak dobel.
+        ...(totalHutang > 0 && totalHutang !== sisaHutang
+          ? [{ kiri: 'Total hutang', kanan: rp(totalHutang) }]
+          : []),
       ],
-      kaki: adaTarik
-        ? ['Terima kasih sudah berbelanja', 'Nominal tarik sudah diserahkan tunai']
-        : ['Terima kasih sudah berbelanja'],
+      kaki: [
+        ...(footerStruk() ? [footerStruk()] : []),
+        ...(adaTarik ? ['Nominal tarik sudah diserahkan tunai'] : []),
+      ],
     };
     // Form bayar DITUTUP lebih dulu: modal resume (swal) dan fokus kembali ke
     // kolom scan jangan berdiri di atas modal yang isinya sudah tidak berlaku.
@@ -5157,10 +5195,11 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
       }
     })(),
     (async () => {
-      // Sync nama toko untuk struk thermal dari server Identitas toko
+      // Sync nama toko + opsi dokumen/struk dari server (Identitas toko &
+      // halaman Pengaturan). Offline = pakai cache terakhir.
       try {
-        const r = await apiGet<{ data: { store_name?: string } }>('/api/settings');
-        if (r.data?.store_name) syncStoreNameFromServer(r.data.store_name);
+        const r = await apiGet<{ data: Parameters<typeof syncDariServerSettings>[0] }>('/api/settings');
+        syncDariServerSettings(r.data);
       } catch {
         /* offline: pakai cache terakhir */
       }

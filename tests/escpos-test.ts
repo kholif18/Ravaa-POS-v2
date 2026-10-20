@@ -83,6 +83,8 @@ const strukJual = {
     { name: 'Pulpen Hitam', qty: 1, price: 2000 },
     { name: 'Kopi Kapal Api Special Sachet', qty: 5, price: 1500 },
   ],
+  // Opsi server "Cetak jumlah item" (2026-10-20): baris ringkas sebelum TOTAL.
+  jumlahItem: '3 item · 8 Qty',
   baris: [
     { kiri: 'Subtotal', kanan: 'Rp15.500' },
     { kiri: 'Diskon', kanan: '-Rp500' },
@@ -106,6 +108,7 @@ const strukJual = {
   ok('memuat TOTAL', s2.includes('TOTAL'));
   ok('memuat kembalian', s2.includes('Rp5.000'));
   ok('memuat kaki', s2.includes('Terima kasih sudah berbelanja'));
+  ok('memuat jumlah item (opsi struk)', s2.includes('3 item - 8 Qty'));
   ok('ada garis pemisah', s2.includes('-'.repeat(COLS)));
 
   // TOTAL ditebalkan: sebelum "TOTAL" harus ada ESC E 1, sesudahnya ESC E 0
@@ -139,6 +142,7 @@ const strukJual = {
   const garisCount = (s2.match(/-{32}/g) || []).length;
   ok('hanya 2 garis (tanpa blok item)', garisCount === 2, garisCount);
   ok('memuat nominal & admin', s2.includes('Rp50.000') && s2.includes('Rp3.000'));
+  ok('jumlahItem absen -> tanpa baris ringkasan', !s2.includes('Qty'));
   const barisStruk = s2.match(/[\x20-\x7E]+/g) ?? [];
   ok('semua baris <= 32', barisStruk.filter((x) => x.length > COLS && !x.startsWith('----')).length === 0);
 }
@@ -173,6 +177,7 @@ console.log('=== D. struk A4 (Epson L3110) & pilihan layout ===');
     s2.includes('TOKO MAJU JAYA') && s2.includes('Kasir: Budi') && s2.includes('TOTAL') && s2.includes('Rp15.000')
       && s2.includes('Terima kasih sudah berbelanja'));
   ok('A4: item dgn qty tetap ada', s2.includes('2 x Aqua 600ml'));
+  ok('A4: jumlah item ikut (opsi struk)', s2.includes('3 item - 8 Qty'));
   ok('A4: garis pemisah 64 kolom', s2.includes('-'.repeat(COLS_A4)));
   const barisA4 = s2.match(/[\x20-\x7E]+/g) ?? [];
   const lewatA4 = barisA4.filter((x) => x.length > COLS_A4);

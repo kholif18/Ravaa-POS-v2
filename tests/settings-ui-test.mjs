@@ -63,10 +63,17 @@ try {
     return {
       visible: style.display !== 'none',
       aria: btn.getAttribute('aria-current'),
+      display: [...document.querySelectorAll('[data-set-sec]')].map((s) => window.getComputedStyle(s).display),
     };
   });
   ok('klik menu Backup menampilkan seksi Data & menandainya aktif',
     navData.visible && navData.aria === 'true', JSON.stringify(navData));
+  // Panel mode (2026-10-20): hanya seksi aktif yang tampil — bukan semua
+  // seksi bertumpuk lalu disorot scroll-spy seperti desain awal.
+  ok('panel mode: hanya seksi aktif yang ditampilkan',
+    navData.display.filter((d) => d !== 'none').length === 1
+    && navData.display[3] !== 'none',
+    JSON.stringify(navData.display));
 
   console.log('=== B. Pencarian pengaturan (client-side) ===');
   await page.locator('#set-cari').fill('logo');
@@ -130,6 +137,9 @@ try {
     lompat.visible && lompat.aria === 'true', JSON.stringify(lompat));
 
   console.log('=== D. Form toko: status simpan & draft ===');
+  // Panel mode: form toko ada di seksi Identitas toko — tampilkan dulu.
+  await page.locator('[data-set-nav="toko"]').click();
+  await page.waitForTimeout(200);
   const namaAwal = await page.locator('#set-toko-nama').inputValue();
   ok('awalnya bersih: status tersimpan & tombol simpan mati',
     (await page.locator('#set-toko-status').innerText()).includes('tersimpan')
@@ -140,6 +150,9 @@ try {
     (await page.locator('#set-toko-status').innerText()).includes('belum disimpan')
     && !(await page.locator('#set-toko-simpan').isDisabled()));
 
+  // Toggle cetak ada di seksi Perangkat — tampilkan dulu (panel mode).
+  await page.locator('[data-set-nav="perangkat"]').click();
+  await page.waitForTimeout(200);
   const cetakAwal = await page.locator('#set-cetak').isChecked();
   await page.locator('label[for="set-cetak"]').click();
   await page.waitForTimeout(400);
@@ -150,12 +163,97 @@ try {
   ok('preferensi cetak kembali ke kondisi semula',
     (await page.locator('#set-cetak').isChecked()) === cetakAwal);
 
+  await page.locator('[data-set-nav="toko"]').click();
+  await page.waitForTimeout(200);
   await page.locator('#set-toko-nama').fill(namaAwal);
   ok('dikembalikan ke nilai server: status bersih lagi (tanpa menulis)',
     (await page.locator('#set-toko-status').innerText()).includes('tersimpan')
     && (await page.locator('#set-toko-simpan').isDisabled()));
 
+  console.log('=== E. Kartu Dokumen & struk (riset Aronium 2026-10-20) ===');
+  const idDok = ['set-dok-form', 'set-dok-judul', 'set-dok-footer-a4', 'set-dok-footer-struk',
+    'set-dok-cust-name', 'set-dok-cust-address', 'set-dok-cust-phone',
+    'set-dok-item', 'set-dok-nomor', 'set-dok-hutang', 'set-dok-simpan'];
+  ok('kartu dokumen & struk merender semua kontrolnya',
+    (await page.locator('#set-dok-form').count()) === 1
+    && await page.evaluate((list) => list.every((id) => !!document.getElementById(id)), idDok),
+    `form=${await page.locator('#set-dok-form').count()}`);
+
+  // Revisi pemilik 2026-10-20: kartu ini milik pengaturan cetak/pratinjau,
+  // jadi tinggal di seksi Perangkat & cetak (bukan Identitas toko).
+  ok('kartu dokumen berada di seksi Perangkat & cetak, bukan Identitas toko',
+    (await page.locator('#set-sec-perangkat #set-dok-form').count()) === 1
+    && (await page.locator('#set-sec-toko #set-dok-form').count()) === 0);
+
+  const dokAwal = await page.evaluate(() => ({
+    judul: document.querySelector('#set-dok-judul').value,
+    footerA4: document.querySelector('#set-dok-footer-a4').value,
+    footerStruk: document.querySelector('#set-dok-footer-struk').value,
+    nama: document.querySelector('#set-dok-cust-name').checked,
+    alamat: document.querySelector('#set-dok-cust-address').checked,
+    item: document.querySelector('#set-dok-item').checked,
+    nomor: document.querySelector('#set-dok-nomor').checked,
+    hutang: document.querySelector('#set-dok-hutang').checked,
+  }));
+  ok('nilai awal kartu = pengaturan server',
+    dokAwal.judul === (pengaturan.invoice_title ?? 'INVOICE')
+    && dokAwal.footerA4 === (pengaturan.invoice_footer ?? 'Dicetak dari Ravaa POS')
+    && dokAwal.footerStruk === (pengaturan.receipt_footer ?? 'Terima kasih sudah berbelanja')
+    && dokAwal.nama === (pengaturan.receipt_customer ?? 'name').split(',').includes('name')
+    && dokAwal.alamat === (pengaturan.receipt_customer ?? 'name').split(',').includes('address')
+    && dokAwal.item === (pengaturan.receipt_show_items !== false)
+    && dokAwal.nomor === (pengaturan.receipt_short_no === true)
+    && dokAwal.hutang === (pengaturan.receipt_show_debt !== false),
+    JSON.stringify(dokAwal));
+
+  // Draft lokal (TIDAK disimpan — suite tetap read-only): ubah footer, matikan
+  // jumlah item, nyalakan nomor pendek, dan pilih alamat pelanggan.
+  // Panel mode: kartu ada di seksi Perangkat — tampilkan dulu.
+  await page.locator('[data-set-nav="perangkat"]').click();
+  await page.waitForTimeout(200);
+  await page.locator('#set-dok-footer-struk').fill('UJI footer struk');
+  await page.locator('label[for="set-dok-item"]').click();
+  await page.locator('label[for="set-dok-nomor"]').click();
+  await page.locator('#set-dok-cust-address').check();
+  await page.waitForTimeout(200);
+  ok('draft dokumen menyalakan "belum disimpan" & tombol simpan',
+    (await page.locator('#set-dok-status').innerText()).includes('belum disimpan')
+    && !(await page.locator('#set-dok-simpan').isDisabled()));
+
+  // Pratinjau ada di seksi Perangkat; panel mode mengharuskan seksi itu aktif.
+  await page.locator('[data-set-nav="perangkat"]').click();
+  await page.waitForTimeout(200);
+  const teksDok = await page.locator('#set-preview-struk').innerText();
+  ok('pratinjau mengikuti draft: footer, nomor pendek, alamat, tanpa jumlah item',
+    teksDok.includes('UJI footer struk')
+    && teksDok.includes('No. 000012')
+    && teksDok.includes('Alamat:')
+    && !teksDok.includes('Jumlah item'),
+    teksDok.replace(/\n/g, ' / ').slice(0, 120));
+
+  // Reload penuh = buang draft; nilai server kembali (tanpa POST).
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#set-dok-form', { state: 'attached', timeout: 10000 });
+  await page.locator('[data-set-nav="perangkat"]').click();
+  await page.waitForTimeout(200);
+  const dokPulih = await page.evaluate(() => ({
+    footer: document.querySelector('#set-dok-footer-struk').value,
+    item: document.querySelector('#set-dok-item').checked,
+    nomor: document.querySelector('#set-dok-nomor').checked,
+    alamat: document.querySelector('#set-dok-cust-address').checked,
+    status: document.querySelector('#set-dok-status').textContent,
+  }));
+  ok('reload membuang draft & memulihkan nilai server',
+    dokPulih.footer === (pengaturan.receipt_footer ?? 'Terima kasih sudah berbelanja')
+    && dokPulih.item === (pengaturan.receipt_show_items !== false)
+    && dokPulih.nomor === (pengaturan.receipt_short_no === true)
+    && dokPulih.alamat === (pengaturan.receipt_customer ?? 'name').split(',').includes('address')
+    && (dokPulih.status ?? '').includes('tersimpan'),
+    JSON.stringify(dokPulih));
+
   console.log('=== F. Pratinjau struk (riset putaran 2) ===');
+  await page.locator('[data-set-nav="perangkat"]').click();
+  await page.waitForTimeout(200);
   const namaDevice = await page.locator('#set-dev-toko').innerText();
   const teksPreview = await page.locator('#set-preview-struk').innerText();
   ok('pratinjau struk dirender & memuat nama toko dari Identitas toko',
