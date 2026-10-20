@@ -123,8 +123,15 @@
        13/11px (±34px) jadi tetap muat di 44px tanpa memotong. */
     @apply sticky top-0 z-30 flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3 dark:border-gray-700 dark:bg-gray-800 sm:px-4;
   }
+  /* `relative` WAJIB: input `.sr-only` (saklar/toggle) memakai
+     `position:absolute`; tanpa ancestor positioned mereka memakai initial
+     containing block sehingga bisa melampaui area gulir `.page` dan membuat
+     <html> ikut bergulir — nyata di #/settings saat seksi Perangkat aktif
+     (dua scrollbar; laporan pemilik 2026-10-20). Dengan `.page` positioned,
+     elemen absolut tetap di dalam scroller dan halaman hanya punya SATU
+     scrollbar (area ini), pola yang sama dengan halaman Laporan. */
   .page {
-    @apply flex-1 overflow-y-auto p-2.5 sm:p-3;
+    @apply relative flex-1 overflow-y-auto p-2.5 sm:p-3;
   }
   /* Halaman Label harga (#/labels, refactor 2026-10-17): layar penuh tanpa
      sidebar, padding .page dibuang dan gulir pindah ke panel masing-masing

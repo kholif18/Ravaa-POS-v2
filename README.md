@@ -1050,12 +1050,15 @@ npm run dev:api
 * **Pengaturan** (`#/settings`, menu **Sistem** di sidebar) — **panel mode
   (2026-10-20, permintaan pemilik "menu settings seperti di halaman Laporan")**:
   nav seksi kiri (Aturan transaksi, Identitas toko, Perangkat & cetak, Backup &
-  pemulihan) benar-benar berpindah panel, bukan menggulir satu halaman; kartu
-  judul memuat pencarian client-side (`#set-cari`, Ctrl+K) dan chip ringkas
-  (stok minus/kadaluarsa/cetak/backup) yang melompat ke seksinya. Empat seksi
-  berisi kartu aturan server, kartu identitas/kop toko, kartu perangkat &
-  cetak (preferensi device + opsi dokumen server), dan kartu backup, masing-
-  masing dengan penjelasan sendiri (bukan lagi satu kartu):
+  pemulihan) benar-benar berpindah panel, bukan menggulir satu halaman. Kartu
+  judul di atas sudah **dihapus** (revisi 2026-10-20 — judul sudah ada di header
+  shell); pencarian client-side (`#set-cari`, Ctrl+K) dan chip ringkas
+  (stok minus/kadaluarsa/cetak/backup) tetap tersedia sebagai toolbar ramping.
+  Hanya area konten yang menggulir (bukan dua scrollbar: input saklar `.sr-only`
+  yang absolut dulu lolos dari area gulir). Empat seksi berisi kartu aturan
+  server, kartu identitas/kop toko, kartu perangkat & cetak (preferensi device
+  + opsi dokumen server), dan kartu backup, masing-masing dengan penjelasan
+  sendiri (bukan lagi satu kartu):
   - **Stok boleh minus** (`settings.allow_negative_stock`): daring = penjualan
     boleh membuat stok menembus nol (stok jadi angka minus dan langsung terlihat
     di filter **Stok minus** halaman Stok); mati = `POST /api/sales` menolak

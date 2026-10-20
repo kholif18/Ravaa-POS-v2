@@ -1644,15 +1644,28 @@ apps/web/src/pages/settings.ts  Halaman #/settings (menu Sistem): **Desain ulang
                           2026-10-20 (riset Settings POS populer — Loyverse:
                           katalog seksi per topik; Shopify: receipt visual
                           editor + test print; Odoo: seksi berjudul/scope)** —
-                          kartu judul STATIS memuat pencarian client-side
-                          `#set-cari` + chip ringkas `#set-ringkas`; `#set-body`
-                          di-render ulang `paint()` = nav seksi kiri
-                          (sticky 220px `[data-set-nav]`, chip 2 kolom di
-                          mobile) + empat seksi `#set-sec-{transaksi,toko,
-                          perangkat,data}` berisi kartu `[data-set-card]`
-                          ber-`data-cari`. SEMUA id & logika lama
-                          dipertahankan (kontrak `tests/settings-ui-test.mjs`
-                          37 asersi). Rincian:
+                          **kartu judul DIHAPUS (revisi pemilik 2026-10-20:
+                          "card tersebut tidak ada fungsinya bisa di hapus,
+                          agar 1 scroll seperti pada halaman laporan")** —
+                          judul sudah dibawa header shell; pencarian
+                          client-side `#set-cari` + `<kbd>Ctrl K</kbd> + chip
+                          ringkas `#set-ringkas` kini TOOLBAR ramping STATIS
+                          (bukan `.card`), tetap di luar `#set-body` supaya
+                          repaint tidak membuang fokus. `#set-body` di-render
+                          ulang `paint()` = nav seksi kiri (sticky 220px
+                          `[data-set-nav]`, chip 2 kolom di mobile) + empat
+                          seksi `#set-sec-{transaksi,toko,perangkat,data}`
+                          berisi kartu `[data-set-card]` ber-`data-cari`.
+                          **Scrollbar ganda diperbaiki**: `.page` di
+                          `styles.css` kini `position: relative` — input
+                          `.sr-only` (`position:absolute`) di saklar seksi
+                          Perangkat dulu memakai initial containing block
+                          sehingga melampaui area gulir `.page` dan membuat
+                          `<html>` ikut bergulir (dua scrollbar). Dengan
+                          `.page` positioned, hanya `.page` yang menggulir
+                          (diuji asersi "hanya area konten yang menggulir").
+                          SEMUA id & logika lama dipertahankan (kontrak
+                          `tests/settings-ui-test.mjs` **39 asersi**). Rincian:
                           * **Cari** client-side tanpa API: semua kata wajib
                             cocok di `data-cari`+textContent; filter memakai
                             `style.display` — BUKAN atribut `hidden` (kartu

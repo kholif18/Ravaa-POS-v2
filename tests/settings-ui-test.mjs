@@ -53,6 +53,11 @@ try {
   ok('kartu ditandai untuk pencarian (>= 6)',
     (await page.locator('[data-set-card]').count()) >= 6,
     `jumlah=${await page.locator('[data-set-card]').count()}`);
+  // Revisi pemilik 2026-10-20: kartu judul di atas dihapus (judul sudah ada
+  // di header shell) agar halaman tidak terasa "dua scroll"; pencarian tetap
+  // hidup sebagai toolbar ramping.
+  ok('tidak ada kartu judul di atas menu — pencarian ada di toolbar',
+    await page.locator('#set-cari').evaluate((el) => !el.closest('.card')));
 
   await page.locator('[data-set-nav="data"]').click();
   await page.waitForTimeout(300);
@@ -133,8 +138,24 @@ try {
       aria: btn.getAttribute('aria-current'),
     };
   });
-  ok('chip Cetak menampilkan seksi Perangkat & menandai menunya',
+  ok('chip Cetak menampilkan seksi Perangkat & menandainya aktif',
     lompat.visible && lompat.aria === 'true', JSON.stringify(lompat));
+
+  // Seksi Perangkat paling tinggi (banyak saklar); inilah kondisi yang dulu
+  // memunculkan scrollbar KEDUA di <html> karena input sr-only absolut lolos
+  // dari area gulir .page. Sekarang hanya `.page` yang boleh menggulir.
+  const gulir = await page.evaluate(() => {
+    const pageEl = document.getElementById('page');
+    return {
+      doc: document.documentElement.scrollHeight,
+      vh: window.innerHeight,
+      pageH: pageEl?.scrollHeight ?? 0,
+      pageClient: pageEl?.clientHeight ?? 0,
+    };
+  });
+  ok('hanya area konten yang menggulir (tanpa scrollbar ganda)',
+    gulir.doc <= gulir.vh && gulir.pageH > gulir.pageClient,
+    JSON.stringify(gulir));
 
   console.log('=== D. Form toko: status simpan & draft ===');
   // Panel mode: form toko ada di seksi Identitas toko — tampilkan dulu.
@@ -309,7 +330,7 @@ try {
   }, pauseAwal);
 
   console.log('=== H. Pintasan Ctrl+K (riset putaran 2) ===');
-  ok('hint kbd "Ctrl K" tampil di kartu judul',
+  ok('hint kbd "Ctrl K" tampil di toolbar pencarian',
     (await page.locator('kbd.kbd').count()) >= 1
     && (await page.locator('kbd.kbd').first().innerText()).trim() === 'Ctrl K');
 

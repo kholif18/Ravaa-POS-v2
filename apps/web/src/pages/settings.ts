@@ -117,34 +117,26 @@ function errMsg(e: unknown): string {
 // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
 // halaman Stok & Produk.
 //
-// Kerangka 2026-10-20 (riset Settings POS populer): judul + pencarian +
-// ringkasan status di kartu atas; menu seksi + isi dirender `renderBody()`
-// supaya repaint data tidak menghapus fokus kolom cari (elemen ini STATIS).
+// Kerangka 2026-10-20 (revisi pemilik: "card tersebut tidak ada fungsinya bisa
+// di hapus, agar 1 scroll seperti pada halaman laporan"): TIDAK ada kartu
+// judul/deskripsi di atas — judul halaman sudah dibawa header shell. Pencarian
+// + ringkasan status tetap ada sebagai toolbar ramping (bukan kartu) supaya
+// fitur tidak hilang; keduanya STATIS di luar `#set-body` agar repaint data
+// tidak membuang fokus/ketikan.
 function renderPage(): string {
   return `
-  <div class="space-y-3">
-    <div class="card">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Pengaturan</h2>
-          <p class="mt-0.5 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-            Aturan <b>server</b> berlaku untuk semua device kasir; preferensi
-            <b>perangkat</b> (tema, printer, jeda cetak) hanya menempel di browser
-            ini. Opsi <b>dokumen & struk</b> tetap tersimpan di server.
-            Cari di bawah menyaring tampilan — tidak mengubah data
-            (<kbd class="kbd">Ctrl K</kbd> fokus ke kolom cari).
-          </p>
-        </div>
-        <div class="relative w-full sm:w-80">
-          <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
-          <input id="set-cari" class="input pl-9 pr-9" type="search" enterkeyhint="search"
-                 placeholder="Cari pengaturan… (cth: logo, printer, backup)"
-                 autocomplete="off" aria-label="Cari pengaturan" />
-          <button type="button" id="set-cari-hapus" class="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                  title="Bersihkan pencarian" aria-label="Bersihkan pencarian">${icon('close')}</button>
-        </div>
+  <div class="space-y-2.5">
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="relative w-full sm:w-80">
+        <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
+        <input id="set-cari" class="input pl-9 pr-9" type="search" enterkeyhint="search"
+               placeholder="Cari pengaturan…"
+               autocomplete="off" aria-label="Cari pengaturan" />
+        <button type="button" id="set-cari-hapus" class="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                title="Bersihkan pencarian" aria-label="Bersihkan pencarian">${icon('close')}</button>
       </div>
-      <div id="set-ringkas" class="mt-3 flex flex-wrap items-center gap-1.5" aria-live="polite"></div>
+      <kbd class="kbd hidden shrink-0 sm:inline-flex" title="Fokus ke kolom cari">Ctrl K</kbd>
+      <div id="set-ringkas" class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-live="polite"></div>
     </div>
     <div id="set-body"></div>
   </div>`;
@@ -277,7 +269,7 @@ function kepalaSeksi(id: SeksiId): string {
   </div>`;
 }
 
-/* ---------- ringkasan status (chip di kartu atas) ---------- */
+/* ---------- ringkasan status (chip toolbar atas) ---------- */
 
 type WarnaChip = 'ok' | 'warn' | 'bad' | 'netral';
 
@@ -417,7 +409,7 @@ function bersihkanCari(fokus = true): void {
   terapkanCari();
 }
 
-/** Pemasangan sekali per mount: kolom cari ada di kartu header STATIS sehingga
+/** Pemasangan sekali per mount: kolom cari ada di toolbar STATIS sehingga
  *  repaint `#set-body` tidak menghapus fokus ketikan. */
 function bindCari(): void {
   const input = host?.querySelector<HTMLInputElement>('#set-cari');
