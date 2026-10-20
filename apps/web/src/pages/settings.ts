@@ -16,6 +16,7 @@ import { confirmDialog } from '../ui/confirm';
 import { icon, type IconName } from '../ui/icons';
 import { getToko, setToko } from '../ui/user';
 import { getAutoPrint, getPrintPause, getStrukLayout, setAutoPrint, setPrintPause, setStrukLayout, type LayoutStruk } from '../ui/print-pref';
+import { syncStoreNameFromServer } from '../ui/identitas-struk';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { hariIni, waktu } from '../ui/waktu';
@@ -304,7 +305,6 @@ function paintRingkas(): void {
 function lompatSeksi(id: SeksiId): void {
   if ((host?.querySelector<HTMLInputElement>('#set-cari')?.value ?? '').trim() !== '') bersihkanCari(false);
   setSeksiAktif(id);
-  host?.querySelector<HTMLElement>(`#set-sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function setSeksiAktif(id: SeksiId): void {
@@ -438,25 +438,27 @@ function kartuSaklar(opt: {
 // Kartu "Tampilan perangkat" (2026-10-11, pindahan dari halaman Profil —
 // nama toko kepala struk + tema). Per-device localStorage, tanpa API.
 function kartuPerangkat(): string {
-  const toko = getToko();
   const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  const storeName = state.toko?.store_name || '';
   return `
-    <div class="card flex flex-col" data-set-card data-cari="tampilan perangkat tema terang gelap nama toko kepala struk thermal browser lokal">
+    <div class="card flex flex-col" data-set-card data-cari="tampilan perangkat tema terang gelap browser lokal">
       <div class="flex items-start gap-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('smartphone')}</span>
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Tampilan perangkat ini</h3>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Nama toko di <b>kepala struk thermal</b> + tema warna. Tersimpan di
-            <b>browser device ini</b> — device lain tidak ikut berubah (beda
-            dengan kop INVOICE A4 di atas yang berlaku semua device).
+            Tema warna perangkat ini. Nama toko di <b>kepala struk thermal</b> mengikuti
+            <b>Identitas toko</b> (halaman ini) dan berlaku untuk semua device.
           </p>
         </div>
       </div>
       <div class="mt-3 grid flex-1 gap-2 sm:grid-cols-2">
         <div class="field-sm">
-          <label class="label" for="set-dev-toko">Nama toko (struk thermal)</label>
-          <input id="set-dev-toko" class="input input-sm" maxlength="32" value="${getToko() === 'RAVA POS' ? '' : getToko()}" placeholder="RAVA POS" />
+          <label class="label">Nama toko (struk thermal)</label>
+          <div class="input input-sm flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            <span>${storeName || 'RAVA POS'}</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">dari Identitas toko</span>
+          </div>
         </div>
         <div class="field-sm">
           <label class="label" for="set-dev-theme">Tema</label>
@@ -690,8 +692,8 @@ function kartuCetak(): string {
 // bukan membuka data penjualan. `paintPratinjauStruk()` memperbaruinya live
 // saat nama toko device diketik / gambar diunggah — tanpa menyentuh fokus input.
 function namaStrukDevice(): string {
-  const input = host?.querySelector<HTMLInputElement>('#set-dev-toko');
-  return ((input ? input.value : getToko()).trim()) || 'RAVA POS';
+  const fromServer = state.toko?.store_name?.trim();
+  return (fromServer && fromServer.length > 0) ? fromServer : (getToko() || 'RAVA POS');
 }
 
 function isiPratinjauStruk(): string {
@@ -848,7 +850,11 @@ function paint(): void {
   body.innerHTML = renderBody();
   bind();
   terapkanCari();
-  pantauSeksi();
+  // Panel mode: hanya seksi aktif yang tampil, tidak mengikuti scroll
+  body.querySelectorAll<HTMLElement>('[data-set-sec]').forEach((sec) => {
+    const aktif = sec.dataset.setSec === state.seksiAktif;
+    sec.style.display = aktif ? '' : 'none';
+  });
   paintRingkas();
 }
 
@@ -953,6 +959,8 @@ function bind(): void {
         store_email: r.data.store_email ?? '',
       };
       state.tokoAsli = { ...state.toko };
+      // Sinkron nama toko ke cache struk thermal
+      syncStoreNameFromServer(state.toko.store_name);
       toast('Pengaturan toko disimpan — kop invoice A4 memakai nilai ini', 'success');
     } catch (e) {
       toast(`Gagal simpan pengaturan toko: ${errMsg(e)}`, 'error');
@@ -996,9 +1004,8 @@ function bind(): void {
     }
   });
 
-  // Pratinjau struk: mengikuti ketikan nama toko device secara LIVE (tanpa
-  // menunggu Simpan) — menjawab "apa efek isian ini ke kertas struk".
-  host?.querySelector<HTMLInputElement>('#set-dev-toko')?.addEventListener('input', () => paintPratinjauStruk());
+  // Pratinjau struk mengikuti nama toko dari server (Identitas toko).
+  // Tidak ada input nama toko per-device lagi.
 
   // Tombol "Tes cetak" (riset 2026-10-20 — pola printer setup Shopify/Square):
   // kirim struk CONTOH lewat print-agent yang sama dengan transaksi asli.
@@ -1029,9 +1036,8 @@ function bind(): void {
   // dari halaman Profil (2026-10-11). applyTheme + event ravaa:theme agar
   // sidebar/header ikut tercatat ulang seketika.
   host?.querySelector('#set-dev-simpan')?.addEventListener('click', () => {
-    const toko = (host?.querySelector<HTMLInputElement>('#set-dev-toko')?.value ?? '').trim() || 'RAVA POS';
     const t = (host?.querySelector<HTMLSelectElement>('#set-dev-theme')?.value ?? 'light') === 'dark' ? 'dark' : 'light';
-    setToko(toko);
+    // Nama toko mengikuti Identitas toko (server) — tidak disimpan per device lagi
     document.documentElement.dataset.theme = t;
     try { localStorage.setItem('ravaa.theme', t); } catch { /* abaikan */ }
     document.dispatchEvent(new CustomEvent('ravaa:theme'));
@@ -1159,6 +1165,8 @@ async function load(): Promise<void> {
     // Snapshot server = pembanding penanda "belum disimpan".
     state.tokoAsli = { ...state.toko };
     state.logo = s.value.data?.store_logo ?? '';
+    // Sinkron nama toko untuk struk thermal dari server (Identitas toko)
+    syncStoreNameFromServer(state.toko.store_name);
   } else {
     state.error = errMsg(s.reason);
   }

@@ -12,6 +12,7 @@ import { openModal } from './modal';
 import { confirmDialog } from './confirm';
 import { toast } from './toast';
 import { icon } from './icons';
+import { getToko as getStoreFromIdentitas, setToko as setStoreToIdentitas } from './identitas-struk';
 
 const KEY = 'ravaa.cashier';
 
@@ -53,23 +54,27 @@ function esc(s: string): string {
  *  dari device yang memegang printer. */
 const TOKO_KEY = 'ravaa.toko';
 export function getToko(): string {
+  const fromIdentitas = getStoreFromIdentitas();
+  if (fromIdentitas && fromIdentitas !== 'RAVA POS') return fromIdentitas;
   try {
-    return localStorage.getItem(TOKO_KEY)?.trim() || 'RAVA POS';
-  } catch {
-    return 'RAVA POS';
-  }
+    const legacy = localStorage.getItem(TOKO_KEY)?.trim();
+    if (legacy) return legacy;
+  } catch {}
+  return getStoreFromIdentitas();
 }
 export function setToko(name: string): void {
+  setStoreToIdentitas(name);
   try {
-    localStorage.setItem(TOKO_KEY, name);
+    localStorage.setItem(TOKO_KEY, name.trim());
   } catch {
     /* abaikan */
   }
 }
 
-/** Modal pengaturan akun: info akun (read-only) + nama toko + tema + ganti sandi.
- *  Nama kasir mengikuti AKUN dan tidak bisa diubah di sini (mengubahnya akan
- *  memutus kepemilikan shift — nama diganti lewat halaman Pengguna). */
+/** Modal pengaturan akun: info akun (read-only) + tema + ganti sandi.
+ *  Nama toko struk kini mengikuti Identitas toko (server) dan tidak bisa diubah
+ *  di sini. Nama kasir mengikuti AKUN dan tidak bisa diubah di sini.
+ */
 export function openProfileModal(): void {
   const name = getCashier();
   const toko = getToko();
@@ -87,11 +92,11 @@ export function openProfileModal(): void {
         </div>
       </div>
       <div class="field mt-4">
-        <label class="label" for="pf-toko">Nama toko (kepala struk)</label>
-        <input id="pf-toko" class="input" maxlength="32" value="${esc(toko)}" placeholder="cth: Toko Maju Jaya" />
-        <span class="text-xs text-gray-500 dark:text-gray-400">
-          Tercetak paling atas di struk. Tersimpan di perangkat ini.
-        </span>
+        <label class="label">Nama toko (kepala struk)</label>
+        <div class="input flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <span>${esc(toko || 'RAVA POS')}</span>
+          <span class="text-xs text-gray-500 dark:text-gray-400">dari Identitas toko</span>
+        </div>
       </div>
       <div class="field">
         <label class="label" for="pf-theme">Tampilan</label>
@@ -103,17 +108,13 @@ export function openProfileModal(): void {
       <button type="button" id="pf-sandi" class="btn btn-ghost w-full justify-center">Ganti sandi</button>`,
     onMount: ({ el, ok, close }) => {
       const themeEl = el.querySelector('#pf-theme') as HTMLSelectElement;
-      const tokoEl = el.querySelector('#pf-toko') as HTMLInputElement;
-      tokoEl.focus();
-      tokoEl.select();
       el.querySelector('#pf-sandi')?.addEventListener('click', () => {
         close();
         location.hash = '#/ubah-sandi';
       });
 
       ok.addEventListener('click', () => {
-        setToko(tokoEl.value.trim() || 'RAVA POS');
-        // Tema ikut diterapkan seketika supaya langsung terlihat hasilnya.
+        // Nama toko tidak disimpan per-device lagi
         const t = themeEl.value === 'dark' ? 'dark' : 'light';
         document.documentElement.dataset.theme = t;
         try {

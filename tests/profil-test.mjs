@@ -81,7 +81,7 @@ console.log('=== C. Sistem: kartu Tampilan perangkat ===');
 await p.goto('http://localhost:5656/#/settings', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1200);
 chk('kartu Tampilan perangkat ada di Sistem', (await p.textContent('#set-body')).includes('Tampilan perangkat ini'));
-chk('input toko + tema tersedia', await p.locator('#set-dev-toko').count() === 1 && await p.locator('#set-dev-theme').count() === 1);
+chk('nama toko struk tampil statis + tema tersedia', await p.locator('#set-dev-toko').count() === 1 && await p.locator('#set-dev-theme').count() === 1 && await p.locator('#set-dev-toko input').count() === 0);
 
 chk('tidak ada pageerror', err.length === 0, err.join(' ~ '));
 await b.close();

@@ -28,6 +28,7 @@ import { choiceDialog } from '../ui/confirm';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
+import { syncStoreNameFromServer } from '../ui/identitas-struk';
 import { getCashier, getToko } from '../ui/user';
 import { tglPendek } from '../ui/waktu';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
@@ -1080,6 +1081,10 @@ async function loadCustomers(): Promise<void> {
 
 export async function mountOrdersPage(el: HTMLElement): Promise<void> {
   host = el;
+  try {
+    const r = await apiGet<{ data: { store_name?: string } }>('/api/settings');
+    if (r.data?.store_name) syncStoreNameFromServer(r.data.store_name);
+  } catch {}
   const sub = subRute();
   // Alt+N = pesanan baru (ui/aksi-baru.ts) — satu pintu dengan tombol toolbar.
   pasangAksiBaru(() => {

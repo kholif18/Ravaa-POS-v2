@@ -21,6 +21,7 @@ import { icon } from '../ui/icons';
 import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
 import { getCashier, getToko } from '../ui/user';
+import { syncStoreNameFromServer } from '../ui/identitas-struk';
 import { openModal } from '../ui/modal';
 import { rp, strukUntukTercetak, kirimPrint, type Struk } from '../escpos';
 import { cetakInvoice } from '../invoice';
@@ -910,5 +911,9 @@ export async function mountHistoryPage(el: HTMLElement): Promise<void> {
       <div id="h-body"></div>
     </div>`;
   paint();
+  try {
+    const r = await apiGet<{ data: { store_name?: string } }>('/api/settings');
+    if (r.data?.store_name) syncStoreNameFromServer(r.data.store_name);
+  } catch {}
   await load();
 }

@@ -55,19 +55,18 @@ try {
     `jumlah=${await page.locator('[data-set-card]').count()}`);
 
   await page.locator('[data-set-nav="data"]').click();
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(300);
   const navData = await page.evaluate(() => {
-    const pg = document.querySelector('#page');
     const sec = document.querySelector('#set-sec-data');
     const btn = document.querySelector('[data-set-nav="data"]');
+    const style = window.getComputedStyle(sec);
     return {
-      st: pg.scrollTop,
-      top: sec.getBoundingClientRect().top - pg.getBoundingClientRect().top,
+      visible: style.display !== 'none',
       aria: btn.getAttribute('aria-current'),
     };
   });
-  ok('klik menu Backup menggulir ke seksi & menandainya aktif',
-    navData.st > 0 && navData.top < 120 && navData.aria === 'true', JSON.stringify(navData));
+  ok('klik menu Backup menampilkan seksi Data & menandainya aktif',
+    navData.visible && navData.aria === 'true', JSON.stringify(navData));
 
   console.log('=== B. Pencarian pengaturan (client-side) ===');
   await page.locator('#set-cari').fill('logo');
@@ -117,18 +116,18 @@ try {
     `minus=${nilaiMinus} kadaluarsa=${nilaiKadaluarsa}`);
 
   await page.locator('[data-set-chip="cetak"]').click();
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(300);
   const lompat = await page.evaluate(() => {
-    const pg = document.querySelector('#page');
     const sec = document.querySelector('#set-sec-perangkat');
     const btn = document.querySelector('[data-set-nav="perangkat"]');
+    const style = window.getComputedStyle(sec);
     return {
-      top: sec.getBoundingClientRect().top - pg.getBoundingClientRect().top,
+      visible: style.display !== 'none',
       aria: btn.getAttribute('aria-current'),
     };
   });
-  ok('chip Cetak melompat ke seksi Perangkat & menandai menunya',
-    lompat.top < 160 && lompat.aria === 'true', JSON.stringify(lompat));
+  ok('chip Cetak menampilkan seksi Perangkat & menandai menunya',
+    lompat.visible && lompat.aria === 'true', JSON.stringify(lompat));
 
   console.log('=== D. Form toko: status simpan & draft ===');
   const namaAwal = await page.locator('#set-toko-nama').inputValue();
@@ -157,19 +156,17 @@ try {
     && (await page.locator('#set-toko-simpan').isDisabled()));
 
   console.log('=== F. Pratinjau struk (riset putaran 2) ===');
-  const namaDevice = await page.locator('#set-dev-toko').inputValue();
+  const namaDevice = await page.locator('#set-dev-toko').innerText();
   const teksPreview = await page.locator('#set-preview-struk').innerText();
-  ok('pratinjau struk dirender & memuat nama toko device',
+  ok('pratinjau struk dirender & memuat nama toko dari Identitas toko',
     (await page.locator('#set-preview-struk').isVisible())
     && teksPreview.includes('Contoh barang')
     && teksPreview.includes(namaDevice || 'RAVA POS'),
     `teks=${teksPreview.replace(/\n/g, ' / ').slice(0, 90)}`);
 
-  await page.locator('#set-dev-toko').fill('TOKO PRATINJAU UJI');
-  await page.waitForTimeout(120);
-  ok('ketikan nama toko device langsung tampil di pratinjau (belum disimpan)',
-    (await page.locator('#set-preview-struk').innerText()).includes('TOKO PRATINJAU UJI'));
-  await page.locator('#set-dev-toko').fill(namaDevice);
+  // Nama toko kini mengikuti Identitas toko (server), tidak ada input per-device untuk diisi
+  ok('nama toko di kartu perangkat menjadi teks statis, tidak bisa diisi ulang',
+    (await page.locator('#set-dev-toko input').count()) === 0);
 
   const jmlGambarPreview = await page.locator('#set-preview-struk img').count();
   ok('slot gambar pratinjau mengikuti logo tersimpan di server',

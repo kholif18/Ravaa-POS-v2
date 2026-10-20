@@ -38,6 +38,7 @@ import { diskonBorongan, type TingkatBorongan } from '../borongan';
 import { getCashier, getToko } from '../ui/user';
 import { switchHtml } from '../ui/switch';
 import { getAutoPrint, getPrintPause, setAutoPrint, setStrukLayout } from '../ui/print-pref';
+import { syncStoreNameFromServer } from '../ui/identitas-struk';
 import { kirimPrint, strukUntukTercetak, bukaLaci, type Struk, type StrukBaris } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
@@ -5153,6 +5154,15 @@ export async function mountPosPage(el: HTMLElement): Promise<void> {
         categories = r.data.map((c) => ({ name: c.name, slug: c.slug }));
       } catch {
         categories = [];
+      }
+    })(),
+    (async () => {
+      // Sync nama toko untuk struk thermal dari server Identitas toko
+      try {
+        const r = await apiGet<{ data: { store_name?: string } }>('/api/settings');
+        if (r.data?.store_name) syncStoreNameFromServer(r.data.store_name);
+      } catch {
+        /* offline: pakai cache terakhir */
       }
     })(),
   ]);
