@@ -32,6 +32,8 @@ import {
 } from '../ui/lock';
 import { LEBAR_LOGO, resetLogoStrukCache } from '../logo-struk';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
+import { getZonaWaktu, setZonaWaktu, ZONA_WAKTU_PILIHAN, ZONA_WAKTU_BAWAAN, type ZonaWaktu } from '../ui/timezone';
+import { getCurrencyFormat, setCurrencyFormat, CURRENCY_BAWAAN, type FormatCurrency } from '../ui/currency';
 
 type Toko = { store_name: string; store_address: string; store_phone: string; store_email: string };
 type Settings = OpsiCetak & {
@@ -39,6 +41,10 @@ type Settings = OpsiCetak & {
   store_name: string; store_address: string; store_phone: string; store_email: string;
   /** NAMA file logo di img/ ('' = tanpa logo) — butir ROADMAP 1.6.4. */
   store_logo: string;
+  /** Zona waktu tampilan device ini (default Asia/Jakarta). */
+  timezone: string;
+  /** Format currency tampilan device ini (default Rp Indonesia). */
+  currency: string;
 };
 type BarisBackup = { nama: string; ukuran: number; waktu: string };
 type SeksiId = 'transaksi' | 'toko' | 'perangkat' | 'data';
@@ -108,6 +114,10 @@ const state = {
   tesJalan: false,
   /** Nama file logo struk thermal ('' = belum ada). */
   logo: '',
+  /** Zona waktu dan currency — preferensi PER DEVICE (localStorage), bukan server. */
+  zonaWaktu: getZonaWaktu(),
+  currency: getCurrencyFormat(),
+  currencyJalan: false,
   /** Seksi yang sedang ditampilkan (panel mode — hanya satu yang tampil). */
   seksiAktif: 'transaksi' as SeksiId,
 };
@@ -217,6 +227,7 @@ function renderBody(): string {
         <div class="grid items-stretch gap-3 xl:grid-cols-2">
           ${kartuPerangkat()}
           ${kartuCetak()}
+          ${renderKartuFormatTampil()}
           ${kartuDokumen()}
           ${kartuPratinjau()}
         </div>
@@ -904,7 +915,109 @@ function kartuCetak(): string {
         </button>
       </div>
     </div>`;
-}
+  }
+
+  // Kartu "Format & zona waktu" — preferensi PER DEVICE (localStorage), bukan
+  // server. Zona waktu memengaruhi tampilan jam/tanggal di layar dan cetak;
+  // currency memengaruhi format angka uang (Rp, $, €, dst).
+  function renderKartuFormatTampil(): string {
+    const zona = state.zonaWaktu ?? ZONA_WAKTU_BAWAAN;
+    const cur = state.currency ?? CURRENCY_BAWAAN;
+    const opsiZona = ZONA_WAKTU_PILIHAN.map((z) =>
+      `<option value="${z.nilai}"${z.nilai === zona ? ' selected' : ''}>${esc(z.label)}</option>`).join('');
+    const simbol = esc(cur.simbol ?? 'Rp');
+    const kode = esc(cur.kode ?? 'id-ID');
+    const desimal = cur.desimal ?? 0;
+    return `
+    <div class="card flex flex-col" data-set-card data-cari="format zona waktu currency mata uang rupiah tampilan jam tanggal perangkat">
+      <div class="flex items-start gap-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 [&>svg]:size-4">${icon('clock')}</span>
+        <div class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Format & zona waktu</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Zona waktu menentukan tampilan jam & tanggal di layar & cetak device
+            ini. Currency menentukan simbol & pemisah angka uang (default
+            <b>Rp Indonesia</b>). Preferensi <b>device ini</b> — tidak ikut ke
+            kasir lain.
+          </p>
+        </div>
+      </div>
+      <div class="mt-2 flex-1 divide-y divide-gray-100 dark:divide-gray-700/60">
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Zona waktu</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Contoh WIB = Jakarta UTC+7. Mengubah zona waktu tidak mengubah
+              data yang tersimpan di server (semua UTC), hanya tampilan.
+            </p>
+          </div>
+          <div class="shrink-0">
+            <select id="set-timezone" class="input input-sm !w-auto shrink-0 sm:w-64" aria-label="Zona waktu">
+              ${opsiZona}
+            </select>
+          </div>
+        </div>
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Simbol currency</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Simbol yang muncul sebelum angka uang (default <b>Rp</b>).
+            </p>
+          </div>
+          <div class="shrink-0">
+            <input id="set-currency-simbol" class="input input-sm !w-16 shrink-0" type="text" maxlength="3"
+                   value="${simbol}" placeholder="Rp" aria-label="Simbol currency" />
+          </div>
+        </div>
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Kode locale</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              menentukan pemisah ribuan & desimal (contoh <b>id-ID</b> =
+              20.000, <b>en-US</b> = 20,000).
+            </p>
+          </div>
+          <div class="shrink-0">
+            <input id="set-currency-kode" class="input input-sm !w-24 shrink-0" type="text" maxlength="10"
+                   value="${kode}" placeholder="id-ID" aria-label="Kode locale currency" />
+          </div>
+        </div>
+        <div class="flex items-start justify-between gap-3 py-2.5">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Desimal</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Jumlah angka di belakang koma (default <b>0</b> untuk Rupiah).
+            </p>
+          </div>
+          <div class="shrink-0">
+            <input id="set-currency-desimal" class="input input-sm !w-12 shrink-0 text-right" type="number" min="0" max="4"
+                   value="${desimal}" aria-label="Desimal currency" />
+          </div>
+        </div>
+        <div class="flex items-start justify-between gap-3 py-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700/60">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Contoh tampilan</p>
+            <p class="mt-0.5 text-xs font-mono text-gray-700 dark:text-gray-300" id="set-contoh-currency">
+              ${formatRupiahContoh(cur)}
+            </p>
+          </div>
+          <button type="button" id="set-format-simpan" class="btn btn-outline btn-sm shrink-0">Simpan format</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function formatRupiahContoh(cur: FormatCurrency): string {
+    try {
+      const angka = 1250000.5;
+      return angka.toLocaleString(cur.kode || 'id-ID', {
+        minimumFractionDigits: cur.desimal ?? 0,
+        maximumFractionDigits: cur.desimal ?? 0,
+      });
+    } catch {
+      return '1.250.000';
+    }
+  }
 
 // Pratinjau struk (riset 2026-10-20 — pola "receipt visual editor" Shopify POS):
 // contoh struk thermal yang MENGIKUTI nama toko device + gambar tersimpan.
@@ -1317,6 +1430,42 @@ function bind(): void {
       state.tesJalan = false;
       if (host?.isConnected) paint();
     }
+  });
+
+  // Kartu "Format & zona waktu": simpan ke localStorage per-device, tanpa API.
+  host?.querySelector('#set-timezone')?.addEventListener('change', (e) => {
+    const v = (e.target as HTMLSelectElement).value;
+    if (ZONA_WAKTU_PILIHAN.some((z) => z.nilai === v)) {
+      state.zonaWaktu = v as ZonaWaktu;
+      setZonaWaktu(v as ZonaWaktu);
+      state.currencyJalan = true;
+      paint();
+    }
+  });
+  host?.querySelector('#set-currency-simbol')?.addEventListener('input', (e) => {
+    const cur = { ...state.currency };
+    cur.simbol = (e.target as HTMLInputElement).value;
+    state.currency = cur;
+  });
+  host?.querySelector('#set-currency-kode')?.addEventListener('input', (e) => {
+    const cur = { ...state.currency };
+    cur.kode = (e.target as HTMLInputElement).value;
+    state.currency = cur;
+  });
+  host?.querySelector('#set-currency-desimal')?.addEventListener('input', (e) => {
+    const cur = { ...state.currency };
+    cur.desimal = Number((e.target as HTMLInputElement).value) || 0;
+    state.currency = cur;
+    // Update contoh tampilan langsung
+    const contoh = host?.querySelector('#set-contoh-currency');
+    if (contoh) contoh.textContent = formatRupiahContoh(cur);
+  });
+  host?.querySelector('#set-format-simpan')?.addEventListener('click', async () => {
+    const cur = state.currency ?? CURRENCY_BAWAAN;
+    setCurrencyFormat(cur);
+    state.currencyJalan = false;
+    paint();
+    toast('Format currency & zona waktu disimpan — device ini', 'success');
   });
 
   // Kartu "Cetak struk": preferensi per-device, langsung tersimpan tanpa

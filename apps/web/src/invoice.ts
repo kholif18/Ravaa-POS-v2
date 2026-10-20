@@ -9,6 +9,8 @@
 // transaksi (pos.ts) dan tombol Cetak ulang di halaman Riwayat.
 
 import { apiGet } from './api';
+import { formatRupiah } from './ui/currency';
+import { formatTanggal, formatTanggalWaktu } from './ui/timezone';
 
 /** Dokumen laporan generik (menu Laporan ala Aronium, 2026-10-11): satu
  *  builder untuk semua menu — judul + periode + tabel + ringkasan. `baris`
@@ -254,22 +256,19 @@ function esc(s: string): string {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
-/** Angka gaya Aronium: `470,000.00` / `Rp376,000.00` (titik-ribuan, koma desimal). */
+/** Angka gaya Aronium: `470,000.00` / `Rp376,000.00` (titik-ribuan, koma desimal).
+ *  Digunakan untuk perhitungan persen diskon, bukan tampilan uang ke pelanggan. */
 function num(n: number): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+/** Tampilan uang ke pelanggan sesuai preferensi device (default Rp Indonesia). */
 function rpNum(n: number): string {
-  return `Rp${num(n)}`;
+  return formatRupiah(n);
 }
 
-/** Tanggal gaya Aronium `M/D/YYYY` + jam lokal — created_at selalu UTC (Z). */
-function tglAronium(createdAt: string): string {
-  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(createdAt) || createdAt.includes('T')
-    ? createdAt
-    : `${createdAt.replace(' ', 'T')}Z`;
-  const d = new Date(t);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+/** Tanggal gaya Indonesia dengan zona waktu aktif device. */
+function tglId(createdAt: string): string {
+  return formatTanggalWaktu(createdAt);
 }
 
 const LABEL_METODE: Record<string, string> = {
@@ -287,45 +286,20 @@ const LABEL_METODE: Record<string, string> = {
  * (`GET /api/sales/:id` -> `payments`): >1 baris = rincian Payment method
  * ditulis per metode (tunai = uang diserahkan, non-tunai = porsi). Absen /
  * ≤1 baris = keluaran invoice PERSIS seperti sebelum fitur. */
-/** Angka gaya Indonesia: `Rp 20.000` (titik ribuan, tanpa desimal). */
+/** Angka gaya Indonesia: `Rp 20.000` (titik ribuan, tanpa desimal).
+ *  Delegasi ke `formatRupiah` dari ./currency agar hormat preferensi device. */
 export function rpIdr(n: number): string {
-  return `Rp ${n.toLocaleString('id-ID', { maximumFractionDigits: 0 })}`;
-}
-
-/** Tanggal gaya Indonesia `d F Y H:i` (Contoh: 10 Juli 2026 21:48). */
-export function tglId(createdAt: string): string {
-  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(createdAt) || createdAt.includes('T')
-    ? createdAt
-    : `${createdAt.replace(' ', 'T')}Z`;
-  const d = new Date(t);
-  const p = (n: number) => String(n).padStart(2, '0');
-  const bulan = ['Januari','Februari','Maret','April','Mei','Juni',
-    'Juli','Agustus','September','Oktober','November','Desember'];
-  return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return formatRupiah(n);
 }
 
 /** Cetak tanggal `d F Y` untuk tanda tangan. */
 export function tglSingkat(iso: string): string {
-  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) || iso.includes('T')
-    ? iso
-    : `${iso.replace(' ', 'T')}Z`;
-  const d = new Date(t);
-  const p = (n: number) => String(n).padStart(2, '0');
-  const bulan = ['Januari','Februari','Maret','April','Mei','Juni',
-    'Juli','Agustus','September','Oktober','November','Desember'];
-  return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
+  return formatTanggal(iso);
 }
 
-/** Cetak tanggal lengkap `d F Y H:i:s` untuk footer. */
+/** Cetak tanggal lengkap `d F Y H:i:s` dengan zona waktu aktif device. */
 export function tglLengkap(iso: string): string {
-  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) || iso.includes('T')
-    ? iso
-    : `${iso.replace(' ', 'T')}Z`;
-  const d = new Date(t);
-  const p = (n: number) => String(n).padStart(2, '0');
-  const bulan = ['Januari','Februari','Maret','April','Mei','Juni',
-    'Juli','Agustus','September','Oktober','November','Desember'];
-  return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return formatTanggalWaktu(iso);
 }
 
 export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piutang = 0, payments: { method: string; amount: number }[] = []): string {
@@ -349,9 +323,9 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
       <td><strong>${esc(it.name)}</strong></td>
       <td class="font-mono">${esc(it.sku ?? '')}</td>
       <td class="text-center">${Number(it.qty)}</td>
-      <td class="text-right">Rp ${Number(it.price).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</td>
-      <td class="text-right">Rp ${Number(it.discount || 0).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</td>
-      <td class="text-right">Rp ${Number(it.amount).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</td>
+      <td class="text-right">${formatRupiah(Number(it.price))}</td>
+      <td class="text-right">${formatRupiah(Number(it.discount || 0))}</td>
+      <td class="text-right">${formatRupiah(Number(it.amount))}</td>
     </tr>`;
     // Catatan per baris (sale_items.note) — pola print_a4.blade.php RPOS:
     // baris mungil italic di bawah itemnya, colspan penuh.
@@ -443,13 +417,13 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
         <p style="font-style: italic;">${esc(sale.note ?? '-')}</p>
       </div>
       <div class="total-section">
-        <div class="total-row"><span>Subtotal</span><span>Rp ${Number(sale.subtotal).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
-        ${discTotal > 0 ? `<div class="total-row"><span>Diskon</span><span>-Rp ${Number(discTotal).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>` : ''}
-        <div class="total-row grand-total"><span>TOTAL</span><span>Rp ${Number(sale.total).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
-        <div class="total-row" style="margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;"><span>Dibayar</span><span>Rp ${Number(paid).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
-        <div class="total-row"><span>Kembali</span><span>Rp ${Number(sale.change).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>
+        <div class="total-row"><span>Subtotal</span><span>${formatRupiah(Number(sale.subtotal))}</span></div>
+        ${discTotal > 0 ? `<div class="total-row"><span>Diskon</span><span>-Rp ${formatRupiah(Number(discTotal))}</span></div>` : ''}
+        <div class="total-row grand-total"><span>TOTAL</span><span>${formatRupiah(Number(sale.total))}</span></div>
+        <div class="total-row" style="margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;"><span>Dibayar</span><span>${formatRupiah(Number(paid))}</span></div>
+        <div class="total-row"><span>Kembali</span><span>${formatRupiah(Number(sale.change))}</span></div>
         <div class="total-row"><span>Status pembayaran</span><span>${sisaNota > 0 ? 'Belum lunas' : 'Lunas'}</span></div>
-        ${sisaNota > 0 ? `<div class="total-row"><span>Hutang</span><span>Rp ${Number(sisaNota).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span></div>` : ''}
+        ${sisaNota > 0 ? `<div class="total-row"><span>Hutang</span><span>${formatRupiah(Number(sisaNota))}</span></div>` : ''}
       </div>
     </div>
 
@@ -468,13 +442,9 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
  *  `import type` dari shift-tutup agar satu sumber, tanpa runtime cycle). */
 import type { ShiftRow } from './pages/shift-tutup';
 
-/** Tanggal lokal `D/M/YYYY HH:MM` untuk rekap (pola tglAronium di atas). */
+/** Tanggal lokal `D/M/YYYY HH:MM` untuk rekap dengan zona waktu aktif device. */
 function tglRekap(iso: string | null): string {
-  if (!iso) return '—';
-  const t = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) || iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`;
-  const d = new Date(t);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return formatTanggalWaktu(iso);
 }
 
 /** Rekap tutup shift ala Z-report Aronium (2026-10-11) — dokumen A4 mandiri
@@ -498,7 +468,6 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
     - (s.expense_total ?? 0) - (s.retur_total ?? 0) - (s.purchase_total ?? 0);
   const d = fisik !== null ? fisik - kasHarus : null;
   const nota = s.inv_awal && s.inv_akhir ? `${s.inv_awal} – ${s.inv_akhir}` : 'Tanpa penjualan';
-  const rpIdr = (n: number) => `Rp ${n.toLocaleString('id-ID', { maximumFractionDigits: 0 })}`;
   const tglCetak = tglLengkap(new Date().toISOString());
   return `<!DOCTYPE html>
 <html lang="id">

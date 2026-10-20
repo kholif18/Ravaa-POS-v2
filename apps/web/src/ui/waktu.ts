@@ -4,20 +4,31 @@
 // dua halaman yang menampilkan `datetime('now')` tidak boleh mengubah cara
 // menafsirkannya sendiri-sendiri.
 
-/** Waktu dari SQLite `datetime('now')` (UTC) ditampilkan APA ADANYA, tanpa
- *  dikonversi ke zona lokal. Konversi malah menipu: laporan harian juga memakai
- *  `date(created_at)` di sisi server, jadi angka tanggal di riwayat dan di
- *  laporan harus membaca jam yang sama. */
+import { formatTanggalWaktu, formatTanggal, formatJam } from './timezone';
+
+/** Waktu dari SQLite `datetime('now')` (UTC) ditampilkan dengan zona waktu
+ *  aktif device (default Asia/Jakarta). Gunakan `waktuUtc()` bila ingin tampil
+ *  UTC apa adanya tanpa konversi. */
 export function waktu(s: unknown): string {
+  return formatTanggalWaktu(String(s ?? ''));
+}
+
+/** Waktu UTC apa adanya, tanpa konversi zona waktu. Digunakan laporan harian
+ *  dan pemilih hari yang harus sinkron dengan `date(created_at)` di server. */
+export function waktuUtc(s: unknown): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(s ?? ''));
   if (!m) return String(s ?? '—');
   const bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   return `${Number(m[3])} ${bulan[Number(m[2]) - 1]} ${m[1]} · ${m[4]}:${m[5]}`;
 }
 
-/** Jam saja ("14:03") untuk kolom Waktu di linimasa — tanggalnya sudah
- *  terkunci di pemilih hari di atas. String di luar pola tampil apa adanya. */
+/** Jam saja dengan zona waktu aktif device. */
 export function jam(s: unknown): string {
+  return formatJam(String(s ?? ''));
+}
+
+/** Jam saja UTC apa adanya. */
+export function jamUtc(s: unknown): string {
   const m = /[ T](\d{2}):(\d{2})/.exec(String(s ?? ''));
   return m ? `${m[1]}:${m[2]}` : '—';
 }
