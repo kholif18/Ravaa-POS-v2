@@ -327,19 +327,19 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
   .container { width: 100%; margin: 0; padding: 0; }
   .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
   .nama-toko { font-size: 16px; font-weight: 800; margin-top: 4px; letter-spacing: .2px; }
-  .info-title { font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 5px; padding-bottom: 2px; font-size: 11px; }
+  .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
-  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
-  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
-  tbody tr:nth-child(even) { background-color: #fafafa; }
+  th { text-align: left; padding: 6px 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
+  td { padding: 6px 5px; border-bottom: 1px solid #d1d5db; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #f9fafb; }
   .text-right { text-align: right; }
   .text-center { text-align: center; }
   .nowrap { white-space: nowrap; }
-  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .total-section { margin-left: auto; width: 250px; }
-  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: 700; }
   .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
-  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot { margin-top: 30px; text-align: center; color: #4b5563; font-size: 10px; border-top: 1px dashed #d1d5db; padding-top: 10px; }
   .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
   @media print {
@@ -408,6 +408,7 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
     </div>
 
     <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada: ${escA4(tglCetak)}</div>
       ${footerDokumenA4(toko) ? `<div class="foot-line">${escA4(footerDokumenA4(toko))}</div>` : ''}
     </div>
   </div>
@@ -423,9 +424,7 @@ async function cetakHutangA4(customerId: number): Promise<void> {
     apiGet<{ data: Rincian }>(`/api/customer-debts/${customerId}`),
     apiGet<{ data: Toko }>('/api/settings'),
   ]);
-  const tglCetak = new Date().toLocaleString('id-ID', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  const tglCetak = tglLengkap(new Date().toISOString());
   const html = htmlHutangA4(rincian.data, set.data, tglCetak);
   const w = window.open('', '_blank');
   if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak A4');
@@ -447,9 +446,7 @@ function sisaSebelumBaris(b: Baris): number {
 }
 
 function waktuCetakLokal(): string {
-  return new Date().toLocaleString('id-ID', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  return tglLengkap(new Date().toISOString());
 }
 
 function strukBuktiPembayaran(r: Rincian, b: Baris): Struk {
@@ -505,8 +502,8 @@ function htmlBuktiPembayaranA4(r: Rincian, b: Baris, toko: Toko, tglCetak: strin
   .judul { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
   .nama-toko { font-size: 13px; font-weight: 700; margin-top: 4px; }
   .alamat { margin-top: 4px; max-width: 60%; }
-  .baris-kop { display: flex; margin-top: 2px; }
-  .baris-kop .lbl { width: 72px; }
+  .baris-kop { margin-top: 2px; }
+  .baris-kop .lbl { font-weight: 700; }
   ${CSS_LOGO_A4}
   hr { border: 0; border-top: 1px solid #444; margin: 12px 0; }
   .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
@@ -527,7 +524,8 @@ function htmlBuktiPembayaranA4(r: Rincian, b: Baris, toko: Toko, tglCetak: strin
             font-weight: 700; font-size: 10px; }
   .catatan { margin-top: 14px; padding-top: 8px; border-top: 1px dashed #bbb; }
   .catatan .lbl { font-weight: 700; }
-  .foot { margin-top: 34px; font-size: 9px; color: #aaa; }
+  .foot { margin-top: 34px; font-size: 9px; color: #4b5563; border-top: 1px dashed #d1d5db; padding-top: 8px; }
+  .foot-line { margin: 3px 0; }
 </style>
 </head>
 <body>
@@ -536,8 +534,8 @@ function htmlBuktiPembayaranA4(r: Rincian, b: Baris, toko: Toko, tglCetak: strin
       <div class="judul">BUKTI PEMBAYARAN HUTANG</div>
       <div class="nama-toko">${escA4(toko.store_name || 'RAVA POS')}</div>
       ${toko.store_address ? `<div class="alamat">${escA4(toko.store_address)}</div>` : ''}
-      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span><span>${escA4(toko.store_phone)}</span></div>` : ''}
-      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span><span>${escA4(toko.store_email)}</span></div>` : ''}
+      ${toko.store_phone ? `<div class="baris-kop"><span class="lbl">Phone:</span> ${escA4(toko.store_phone)}</div>` : ''}
+      ${toko.store_email ? `<div class="baris-kop"><span class="lbl">Email:</span> ${escA4(toko.store_email)}</div>` : ''}
     </div>
     ${logoA4Html()}
   </div>
@@ -568,7 +566,10 @@ function htmlBuktiPembayaranA4(r: Rincian, b: Baris, toko: Toko, tglCetak: strin
   </table>
   <div class="status">${lunas ? 'LUNAS' : 'BELUM LUNAS'}</div>
   ${b.note.trim() ? `<div class="catatan"><span class="lbl">Catatan:</span> ${escA4(b.note.trim())}</div>` : ''}
-  ${footer ? `<div class="foot">${escA4(footer)} &middot; ${escA4(tglCetak)}</div>` : ''}
+  <div class="foot">
+    <div class="foot-line">Dicetak melalui Ravaa POS pada: ${escA4(tglCetak)}</div>
+    ${footer ? `<div class="foot-line">${escA4(footer)}</div>` : ''}
+  </div>
   <script>
     // Cetak otomatis saat dokumen siap (pola invoice.ts); tab tidak ditutup
     // supaya kasir bisa mencetak ulang.

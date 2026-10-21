@@ -54,7 +54,7 @@ import { toast } from '../ui/toast';
 import { choiceDialog } from '../ui/confirm';
 import { getAutoPrint, getPrintPause } from '../ui/print-pref';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
-import { cetakRekapShift } from '../invoice';
+import { cetakRekapShift, tglLengkap } from '../invoice';
 
 /** Baris `GET /api/shifts` (kontrak lengkap dengan agregat subquery —
  *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran, kas masuk,
@@ -173,7 +173,7 @@ export function bangunStrukRekap(s: ShiftRow, toko: string, fisik: number | null
     ],
     items: [],
     baris,
-    kaki: ['Dicetak dari Ravaa POS'],
+    kaki: [`Dicetak melalui Ravaa POS pada: ${tglLengkap(new Date().toISOString())}`],
   };
 }
 

@@ -396,11 +396,12 @@ try {
   ]);
   if (popup) await popup.waitForTimeout(800);
   const teksA4 = popup ? norm(await popup.evaluate(() => document.body.innerText).catch(() => '')) : '';
-  chk('E6 invoice A4: baris TUNAI + TRANSFER per metode',
-    teksA4.includes('TUNAI') && teksA4.includes('TRANSFER') && teksA4.includes('Payment method'),
-    teksA4.slice(0, 240));
-  chk('E7 invoice A4: Paid amount + Change',
-    teksA4.includes('Paid amount') && teksA4.includes('Change'), teksA4.slice(0, 320));
+  chk('E6 invoice A4: baris TUNAI + TRANSFER per metode (uang diserahkan)',
+    /TUNAI\s*Rp 8\.000/.test(teksA4) && /TRANSFER\s*Rp 3\.000/.test(teksA4),
+    teksA4.slice(0, 320));
+  chk('E7 invoice A4: Dibayar Rp 10.000 + Kembali Rp 1.000',
+    /Dibayar\s*Rp 10\.000/.test(teksA4) && /Kembali\s*Rp 1\.000/.test(teksA4),
+    teksA4.slice(0, 320));
   if (popup) await popup.close().catch(() => {});
 
   console.log('=== M. Mobile: lapisan bayar #pm-bayar ikut split-aware ===');

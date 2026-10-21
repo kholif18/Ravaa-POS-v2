@@ -3990,7 +3990,9 @@ function semuaSettings() {
     // pelanggan MENYALA supaya fitur baru langsung terlihat (pemilik bisa
     // mematikannya), nomor invoice tetap penuh (short = opt-in).
     invoice_title: settingStrAtau('invoice_title', 'INVOICE'),
-    invoice_footer: settingStrAtau('invoice_footer', 'Dicetak dari Ravaa POS'),
+    // Footer dokumen A4: baris "Dicetak melalui Ravaa POS pada: <tanggal>" selalu dicetak klien;
+    // kunci ini hanya teks TAMBAHAN (default kosong sejak 2026-10-21).
+    invoice_footer: settingStrAtau('invoice_footer', ''),
     receipt_footer: settingStrAtau('receipt_footer', 'Terima kasih sudah berbelanja'),
     receipt_customer: settingStrAtau('receipt_customer', 'name'),
     receipt_show_items: settingBool(K_RECEIPT_SHOW_ITEMS, true),

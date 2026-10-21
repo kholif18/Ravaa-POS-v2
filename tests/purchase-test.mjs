@@ -224,6 +224,10 @@ const a4po = await popPo.evaluate((id) => {
     barisBarang: tbl ? tbl.querySelectorAll('tbody tr').length : 0,
     stripe: css.includes('tbody tr:nth-child(even)'),
     ringkas: rk ? [...rk.querySelectorAll('.total-row')].map((r) => r.innerText.replace(/\s+/g, ' ')) : [],
+    // Footer dokumen (2026-10-21): tanggal-cetak DENGAN DETIK selalu ada,
+    // teks legacy "Dicetak dari Ravaa POS" tidak boleh ikut tercetak.
+    kaki: /Dicetak melalui Ravaa POS pada: \d{1,2} [A-Za-z]+ \d{4} \d{2}:\d{2}:\d{2}/.test(document.body.innerText)
+      && !document.body.innerText.includes('Dicetak dari Ravaa POS'),
   };
 }, o1.json.data.purchase.id);
 chk('A4 PO: kop + supplier + nomor + baris barang + striping',
@@ -242,6 +246,8 @@ const logoPo = await popPo.evaluate(() => ({
 }));
 chk('A4 PO: slot logo kanan-atas (/api/settings/logo + fallback "R")',
   logoPo.src.endsWith('/api/settings/logo') && logoPo.fb === 'R', JSON.stringify(logoPo));
+chk('A4 PO: footer "Dicetak melalui Ravaa POS pada: <tgl> <jam:detik>" + teks legacy tidak dicetak',
+  a4po.kaki, JSON.stringify({ kaki: a4po.kaki }));
 await popPo.close().catch(() => {});
 
 await p.click('[data-po-kembali]');

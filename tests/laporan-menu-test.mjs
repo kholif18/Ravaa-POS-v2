@@ -249,7 +249,7 @@ const [pop] = await Promise.all([
 await pop.waitForLoadState('domcontentloaded');
 chk('popup cetak: judul + tabel + kaki', (await pop.title()).includes('STOK')
   && (await pop.content()).includes('Saran order')
-  && (await pop.content()).includes('Dicetak dari Ravaa POS'));
+  && (await pop.content()).includes('Dicetak melalui Ravaa POS pada:'));
 await pop.close().catch(() => {});
 const [dl] = await Promise.all([
   p.waitForEvent('download'),
@@ -283,7 +283,7 @@ const [popKat] = await Promise.all([
 await popKat.waitForLoadState('domcontentloaded');
 chk('popup cetak Kategori: judul + ringkasan total', (await popKat.title()).includes('KATEGORI')
   && (await popKat.content()).includes('Total laba')
-  && (await popKat.content()).includes('Dicetak dari Ravaa POS'));
+  && (await popKat.content()).includes('Dicetak melalui Ravaa POS pada:'));
 await popKat.close().catch(() => {});
 const [dlKat] = await Promise.all([
   p.waitForEvent('download'),

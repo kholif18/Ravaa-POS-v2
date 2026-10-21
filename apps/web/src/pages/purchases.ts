@@ -323,22 +323,22 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
   .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
   .nama-toko { font-size: 16px; font-weight: 800; margin-top: 4px; letter-spacing: .2px; }
   .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
-  .baris-kop { display: flex; margin-top: 2px; font-size: 11px; color: #374151; }
-  .baris-kop .lbl { width: 72px; font-weight: 700; }
+  .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
+  .baris-kop .lbl { font-weight: 700; }
   .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; }
   .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
-  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
-  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
-  tbody tr:nth-child(even) { background-color: #fafafa; }
+  th { text-align: left; padding: 6px 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
+  td { padding: 6px 5px; border-bottom: 1px solid #d1d5db; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #f9fafb; }
   .text-right { text-align: right; }
   .text-center { text-align: center; }
   .nowrap { white-space: nowrap; }
-  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .total-section { margin-left: auto; width: 250px; }
-  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: 700; }
   .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
-  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot { margin-top: 30px; text-align: center; color: #4b5563; font-size: 10px; border-top: 1px dashed #d1d5db; padding-top: 10px; }
   .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
   @media print {
@@ -410,6 +410,7 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
     ${po.note ? `<div style="margin-top: 14px; font-style: italic;">Catatan: ${esc(po.note)}</div>` : ''}
 
     <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada: ${esc(tglCetak)}</div>
       ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
     </div>
   </div>
@@ -425,9 +426,7 @@ async function cetakPoA4(id: number): Promise<void> {
     apiGet<{ data: { purchase: Po; items: PoItem[] } }>(`/api/purchases/${id}`),
     apiGet<{ data: Toko }>('/api/settings'),
   ]);
-  const tglCetak = new Date().toLocaleString('id-ID', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  const tglCetak = tglLengkap(new Date().toISOString());
   const html = htmlPoA4(det.data.purchase, det.data.items, set.data, tglCetak);
   const w = window.open('', '_blank');
   if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak A4');

@@ -31,7 +31,9 @@ export interface OpsiCetak {
 
 export const OPSI_CETAK_BAWAAN: OpsiCetak = {
   invoice_title: 'INVOICE',
-  invoice_footer: 'Dicetak dari Ravaa POS',
+  // Footer A4 = teks TAMBAHAN; baris "Dicetak melalui Ravaa POS pada: <tanggal>" selalu
+  // dicetak builder dokumen (permintaan pemilik 2026-10-21).
+  invoice_footer: '',
   receipt_footer: 'Terima kasih sudah berbelanja',
   receipt_customer: 'name',
   receipt_show_items: true,

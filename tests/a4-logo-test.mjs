@@ -96,7 +96,15 @@ try {
         css: h.includes('width: 84px'),
       };
     };
-    return { inv: satu(inv), lap: satu(lap), rek: satu(rek) };
+    // Footer dokumen (2026-10-21): baris tanggal-cetak DENGAN DETIK selalu
+    // ada; teks legacy "Dicetak dari Ravaa POS" tidak boleh ikut tercetak.
+    const kaki = (h) => ({
+      tanggal: /Dicetak melalui Ravaa POS pada: \d{1,2} [A-Za-z]+ \d{4} \d{2}:\d{2}:\d{2}/.test(h),
+      tanpaLama: !h.includes('Dicetak dari Ravaa POS'),
+      bergaris: h.includes('border-bottom: 1px solid #d1d5db')
+        && h.includes('tbody tr:nth-child(even) { background-color: #f9fafb; }'),
+    });
+    return { inv: satu(inv), lap: satu(lap), rek: satu(rek), kaki: [kaki(inv), kaki(lap), kaki(rek)] };
   }, WEB);
   const full = (x) => x.adaImg && x.absolut && x.fb && x.onerr && x.css;
   ok('builder htmlInvoice: img absolut + fallback "R" + onerror + slot 84px',
@@ -105,6 +113,10 @@ try {
     full(cek.lap), JSON.stringify(cek.lap));
   ok('builder htmlRekapShift: img absolut + fallback "R" + onerror + slot 84px',
     full(cek.rek), JSON.stringify(cek.rek));
+  ok('builder A4: footer "Dicetak melalui Ravaa POS pada: <tgl> <jam:detik>" + teks legacy tidak dicetak',
+    cek.kaki.every((k) => k.tanggal && k.tanpaLama), JSON.stringify(cek.kaki));
+  ok('builder A4: tabel bergaris #d1d5db + zebra #f9fafb (invoice/laporan/rekap)',
+    cek.kaki.every((k) => k.bergaris), JSON.stringify(cek.kaki));
 
   console.log('=== B. Popup laporan NYATA: logo termuat ===');
   const unggah = await page.evaluate(async () => {

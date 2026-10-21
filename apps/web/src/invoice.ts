@@ -10,7 +10,7 @@
 
 import { apiGet } from './api';
 import { formatRupiah } from './ui/currency';
-import { formatTanggal, formatTanggalWaktu } from './ui/timezone';
+import { formatTanggal, formatTanggalWaktu, formatTanggalWaktuDetik } from './ui/timezone';
 
 /** Dokumen laporan generik (menu Laporan ala Aronium, 2026-10-11): satu
  *  builder untuk semua menu — judul + periode + tabel + ringkasan. `baris`
@@ -77,27 +77,31 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
 <style>
   @page { size: A4; margin: 1cm; }
   * { box-sizing: border-box; }
-  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #333; margin: 0; padding: 0; line-height: 1.2; }
+  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #1a1a1a; margin: 0; padding: 0; line-height: 1.4; }
   .container { width: 100%; margin: 0; padding: 0; }
   .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-  .logo { font-size: 24px; font-weight: bold; }
-  .info-title { font-weight: bold; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 5px; padding-bottom: 2px; font-size: 11px; }
+  .nama-toko { font-size: 16px; font-weight: 800; margin-top: 4px; letter-spacing: .2px; }
+  .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
+  .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
+  .baris-kop .lbl { font-weight: 700; }
+  .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; text-transform: uppercase; }
+  .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
+  .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+  .info-box { width: 48%; }
+  .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
-  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
-  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
-  tbody tr:nth-child(even) { background-color: #fafafa; }
+  th { text-align: left; padding: 6px 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
+  td { padding: 6px 5px; border-bottom: 1px solid #d1d5db; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #f9fafb; }
   .text-right { text-align: right; }
   .text-center { text-align: center; }
-  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .r { text-align: right; }
+  .c { text-align: center; }
+  .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .total-section { margin-left: auto; width: 250px; }
-  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: 700; }
   .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
-  .signature { display: flex; justify-content: flex-end; margin-top: 50px; }
-  .signature-box { text-align: right; }
-  .sig-date { font-size: 11px; }
-  .sig-label { font-size: 11px; margin-top: 10px; }
-  .sig-name { font-size: 11px; font-weight: bold; margin-top: 5px; }
-  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot { margin-top: 30px; text-align: center; color: #4b5563; font-size: 10px; border-top: 1px dashed #d1d5db; padding-top: 10px; }
   .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
   @media print {
@@ -112,15 +116,15 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
         ${logoA4Html()}
         <div>
           <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
-          ${toko.store_address ? `<div style="font-size: 11px;">${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_address ? `<div class="alamat-toko">${esc(toko.store_address)}</div>` : ''}
           ${toko.store_phone || toko.store_email
-            ? `<div style="font-size: 11px;">Telp: ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
+            ? `<div class="baris-kop"><span class="lbl">Telp:</span> ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
             : ''}
         </div>
       </div>
       <div style="text-align: right;">
-        <h1 style="margin: 0; color: #333;">${esc(d.judul)}</h1>
-        <div style="font-size: 18px; font-weight: bold;">${esc(d.periode)}</div>
+        <h1 class="title">${esc(d.judul)}</h1>
+        <div class="title-no">${esc(d.periode)}</div>
       </div>
     </div>
 
@@ -177,6 +181,7 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
     ${d.catatan ? `<div style="margin-top: 20px; font-size: 10px; color: #555; font-style: italic;">${esc(d.catatan)}</div>` : ''}
 
     <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada: ${tglCetak}</div>
       ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
     </div>
   </div>
@@ -240,10 +245,15 @@ export interface Toko {
   invoice_footer?: string;
 }
 
-/** Footer dokumen A4 dari pengaturan server; `undefined` (data lama/test) =
- *  teks lama, `''` = pemilik mengosongkan footernya. */
+/** Footer dokumen A4 dari pengaturan server = teks TAMBAHAN (boleh kosong).
+ *  `undefined`/`''` = tanpa footer tambahan. Nilai legacy "Dicetak dari
+ *  Ravaa POS" SENGAJA diabaikan (permintaan pemilik 2026-10-20/21: footer
+ *  dokumen = baris "Dicetak melalui Ravaa POS pada: <tanggal> <jam:detik>" yang selalu
+ *  dicetak builder) — instalasi lama yang belum pernah mengubah footer
+ *  tidak ikut mencetaknya. */
 export function footerDokumenA4(toko: { invoice_footer?: string }): string {
-  return toko.invoice_footer ?? '';
+  const teks = (toko.invoice_footer ?? '').trim();
+  return teks === 'Dicetak dari Ravaa POS' ? '' : teks;
 }
 
 /** Judul invoice A4 (default lama INVOICE). */
@@ -275,6 +285,22 @@ const LABEL_METODE: Record<string, string> = {
   tunai: 'TUNAI', qris: 'QRIS', transfer: 'TRANSFER',
 };
 
+/** Angka gaya Indonesia: `Rp 20.000` (titik ribuan, tanpa desimal).
+ *  Delegasi ke `formatRupiah` dari ./currency agar hormat preferensi device. */
+export function rpIdr(n: number): string {
+  return formatRupiah(n);
+}
+
+/** Cetak tanggal `d F Y` untuk meta dokumen. */
+export function tglSingkat(iso: string): string {
+  return formatTanggal(iso);
+}
+
+/** Cetak tanggal lengkap `d F Y H:i:s` dengan zona waktu aktif device. */
+export function tglLengkap(iso: string): string {
+  return formatTanggalWaktuDetik(iso);
+}
+
 /** Seluruh isi invoice jadi satu string HTML (A4, print-only).
  *
  * `piutang` (opsional, putaran 14 2026-10-06) = sisa ledger HALAMAN HUTANG
@@ -283,25 +309,10 @@ const LABEL_METODE: Record<string, string> = {
  * dari hutang nota ini. Nota berhutang sendiri memakai snapshot
  * `sale.sisa_hutang` (deterministik, ikut walau ledger gagal dimuat).
  * `payments` (opsional, split 1.6.5 2026-10-19) = baris ATRIBUSI per metode
- * (`GET /api/sales/:id` -> `payments`): >1 baris = rincian Payment method
- * ditulis per metode (tunai = uang diserahkan, non-tunai = porsi). Absen /
- * ≤1 baris = keluaran invoice PERSIS seperti sebelum fitur. */
-/** Angka gaya Indonesia: `Rp 20.000` (titik ribuan, tanpa desimal).
- *  Delegasi ke `formatRupiah` dari ./currency agar hormat preferensi device. */
-export function rpIdr(n: number): string {
-  return formatRupiah(n);
-}
-
-/** Cetak tanggal `d F Y` untuk tanda tangan. */
-export function tglSingkat(iso: string): string {
-  return formatTanggal(iso);
-}
-
-/** Cetak tanggal lengkap `d F Y H:i:s` dengan zona waktu aktif device. */
-export function tglLengkap(iso: string): string {
-  return formatTanggalWaktu(iso);
-}
-
+ * (`GET /api/sales/:id` -> `payments`): >1 baris = rincian Pembayaran
+ * ditulis per metode (tunai = uang diserahkan = porsi + kembalian,
+ * non-tunai = porsi). Absen / ≤1 baris = keluaran invoice PERSIS seperti
+ * sebelum fitur. */
 export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piutang = 0, payments: { method: string; amount: number }[] = []): string {
   // Diskon agregat = diskon transaksi + seluruh diskon per baris (persis rumus
   // laporan: sales.diskon).
@@ -313,6 +324,7 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
   const sisaNota = sale.sisa_hutang ?? 0;
   const paid = split.length ? sale.total - sisaNota : sale.pay_method === 'tunai' ? sale.cash_in : sale.total;
   const tampilKembalian = split.length ? split.some((p) => p.method === 'tunai') : sale.pay_method === 'tunai';
+  const tglCetak = tglLengkap(new Date().toISOString());
 
   const barisItem = items.map((it, i) => {
     const qtyTampil = it.unit && it.base_unit && it.unit !== it.base_unit
@@ -322,7 +334,7 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
       <td class="c">${i + 1}</td>
       <td><strong>${esc(it.name)}</strong></td>
       <td class="font-mono">${esc(it.sku ?? '')}</td>
-      <td class="text-center">${Number(it.qty)}</td>
+      <td class="text-center">${qtyTampil}</td>
       <td class="text-right">${formatRupiah(Number(it.price))}</td>
       <td class="text-right">${formatRupiah(Number(it.discount || 0))}</td>
       <td class="text-right">${formatRupiah(Number(it.amount))}</td>
@@ -352,10 +364,28 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
   .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
   .nama-toko { font-size: 16px; font-weight: 800; margin-top: 4px; letter-spacing: .2px; }
   .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
-  .baris-kop { display: flex; margin-top: 2px; font-size: 11px; color: #374151; }
-  .baris-kop .lbl { width: 72px; font-weight: 700; }
+  .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
+  .baris-kop .lbl { font-weight: 700; }
   .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; }
   .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
+  .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+  .info { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+  .info-box { width: 48%; }
+  .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
+  th { text-align: left; padding: 6px 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
+  td { padding: 6px 5px; border-bottom: 1px solid #d1d5db; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #f9fafb; }
+  .text-right { text-align: right; }
+  .text-center { text-align: center; }
+  .r { text-align: right; }
+  .c { text-align: center; }
+  .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .total-section { margin-left: auto; width: 250px; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: 700; }
+  .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
+  .foot { margin-top: 30px; text-align: center; color: #4b5563; font-size: 10px; border-top: 1px dashed #d1d5db; padding-top: 10px; }
+  .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
   @media print {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -369,15 +399,15 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
         ${logoA4Html()}
         <div>
           <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
-          ${toko.store_address ? `<div style="font-size: 11px;">${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_address ? `<div class="alamat-toko">${esc(toko.store_address)}</div>` : ''}
           ${toko.store_phone || toko.store_email
-            ? `<div style="font-size: 11px;">Telp: ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
+            ? `<div class="baris-kop"><span class="lbl">Telp:</span> ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
             : ''}
         </div>
       </div>
       <div style="text-align: right;">
-        <h1 style="margin: 0; color: #333;">INVOICE</h1>
-        <div style="font-size: 18px; font-weight: bold;">#${esc(sale.invoice_no ?? '—')}</div>
+        <h1 class="title">${esc(judulInvoiceA4(toko))}</h1>
+        <div class="title-no">#${esc(sale.invoice_no ?? '—')}</div>
       </div>
     </div>
 
@@ -418,16 +448,18 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
       </div>
       <div class="total-section">
         <div class="total-row"><span>Subtotal</span><span>${formatRupiah(Number(sale.subtotal))}</span></div>
-        ${discTotal > 0 ? `<div class="total-row"><span>Diskon</span><span>-Rp ${formatRupiah(Number(discTotal))}</span></div>` : ''}
+        ${discTotal > 0 ? `<div class="total-row"><span>Diskon</span><span>-${formatRupiah(Number(discTotal))}</span></div>` : ''}
         <div class="total-row grand-total"><span>TOTAL</span><span>${formatRupiah(Number(sale.total))}</span></div>
+        ${split.length ? split.map((p) => `<div class="total-row"><span>${labelM(p.method)}</span><span>${formatRupiah(p.method === 'tunai' ? p.amount + sale.change : p.amount)}</span></div>`).join('') : ''}
         <div class="total-row" style="margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;"><span>Dibayar</span><span>${formatRupiah(Number(paid))}</span></div>
-        <div class="total-row"><span>Kembali</span><span>${formatRupiah(Number(sale.change))}</span></div>
+        ${tampilKembalian ? `<div class="total-row"><span>Kembali</span><span>${formatRupiah(Number(sale.change))}</span></div>` : ''}
         <div class="total-row"><span>Status pembayaran</span><span>${sisaNota > 0 ? 'Belum lunas' : 'Lunas'}</span></div>
         ${sisaNota > 0 ? `<div class="total-row"><span>Hutang</span><span>${formatRupiah(Number(sisaNota))}</span></div>` : ''}
       </div>
     </div>
 
     <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada: ${tglCetak}</div>
       ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
     </div>
   </div>
@@ -473,7 +505,7 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<title>Rekap Shift #\${s.id}</title>
+<title>Rekap Shift #${s.id}</title>
 <style>
   @page { size: A4; margin: 1cm; }
   * { box-sizing: border-box; }
@@ -482,21 +514,26 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
   .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
   .nama-toko { font-size: 16px; font-weight: 800; margin-top: 4px; letter-spacing: .2px; }
   .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
-  .baris-kop { display: flex; margin-top: 2px; font-size: 11px; color: #374151; }
-  .baris-kop .lbl { width: 72px; font-weight: 700; }
+  .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
+  .baris-kop .lbl { font-weight: 700; }
   .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; }
   .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
+  .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+  .info-box { width: 48%; }
+  .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
-  th { text-align: left; padding: 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; }
-  td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: middle; }
-  tbody tr:nth-child(even) { background-color: #fafafa; }
+  th { text-align: left; padding: 6px 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
+  td { padding: 6px 5px; border-bottom: 1px solid #d1d5db; vertical-align: middle; }
+  tbody tr:nth-child(even) { background-color: #f9fafb; }
   .text-right { text-align: right; }
   .text-center { text-align: center; }
-  .font-mono { font-family: 'Courier New', Courier, monospace; }
+  .r { text-align: right; }
+  .c { text-align: center; }
+  .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .total-section { margin-left: auto; width: 250px; }
-  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: bold; }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-weight: 700; }
   .grand-total { font-size: 14px; border-top: 2px solid #333; padding-top: 10px; margin-top: 5px; }
-  .foot { margin-top: 30px; text-align: center; color: #aaa; font-size: 10px; border-top: 1px dashed #ddd; padding-top: 10px; }
+  .foot { margin-top: 30px; text-align: center; color: #4b5563; font-size: 10px; border-top: 1px dashed #d1d5db; padding-top: 10px; }
   .foot-line { margin: 4px 0; }
   ${CSS_LOGO_A4}
   @media print {
@@ -511,28 +548,28 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
         ${logoA4Html()}
         <div>
           <div class="nama-toko">${esc(toko.store_name || 'Ravaa POS')}</div>
-          ${toko.store_address ? `<div style="font-size: 11px;">\${esc(toko.store_address)}</div>` : ''}
+          ${toko.store_address ? `<div class="alamat-toko">${esc(toko.store_address)}</div>` : ''}
           ${toko.store_phone || toko.store_email
-            ? `<div style="font-size: 11px;">Telp: \${esc(toko.store_phone ?? '')}\${(toko.store_phone && toko.store_email) ? ' | ' : ''}\${esc(toko.store_email ?? '')}</div>`
+            ? `<div class="baris-kop"><span class="lbl">Telp:</span> ${esc(toko.store_phone ?? '')}${(toko.store_phone && toko.store_email) ? ' | ' : ''}${esc(toko.store_email ?? '')}</div>`
             : ''}
         </div>
       </div>
       <div style="text-align: right;">
-        <h1 style="margin: 0; color: #333;">REKAP TUTUP SHIFT</h1>
-        <div style="font-size: 18px; font-weight: bold;">#\${s.id}</div>
+        <h1 class="title">REKAP TUTUP SHIFT</h1>
+        <div class="title-no">#${s.id}</div>
       </div>
     </div>
 
     <div class="meta">
       <div class="info-box" style="width: 48%;">
         <div class="info-title">SHIFT</div>
-        <div style="font-size: 14px; font-weight: bold;">#\${s.id} · ${esc(s.cashier)}</div>
+        <div style="font-size: 14px; font-weight: bold;">#${s.id} · ${esc(s.cashier)}</div>
       </div>
       <div class="info-box" style="width: 48%; text-align: right;">
         <div class="info-title">DETAIL</div>
-        <div>Buka: <strong>\${tglRekap(s.opened_at)}</strong></div>
-        <div>Tutup: <strong>\${tglRekap(s.closed_at)}</strong></div>
-        <div>Nota: <strong>\${esc(nota)}</strong></div>
+        <div>Buka: <strong>${tglRekap(s.opened_at)}</strong></div>
+        <div>Tutup: <strong>${tglRekap(s.closed_at)}</strong></div>
+        <div>Nota: <strong>${esc(nota)}</strong></div>
       </div>
     </div>
 
@@ -544,39 +581,40 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
         </tr>
       </thead>
       <tbody>
-        <tr><td>Modal awal</td><td class="text-right">\${rpIdr(s.modal_awal)}</td></tr>
-        <tr><td>Penjualan (\${s.n_sales} nota)</td><td class="text-right">\${rpIdr(s.omzet)}</td></tr>
-        <tr><td style="padding-left:20px">Tunai</td><td class="text-right">\${rpIdr(s.tunai)}</td></tr>
-        <tr><td style="padding-left:20px">QRIS</td><td class="text-right">\${rpIdr(s.qris)}</td></tr>
-        <tr><td style="padding-left:20px">Transfer</td><td class="text-right">\${rpIdr(s.transfer)}</td></tr>
-        <tr><td>Diskon</td><td class="text-right">\${rpIdr(s.diskon_total ?? 0)}</td></tr>
-        <tr><td>Uang pesanan masuk</td><td class="text-right">\${rpIdr(s.order_masuk_total ?? 0)}</td></tr>
-        <tr><td>Nota pesanan (keluar)</td><td class="text-right">\${orderOmzet > 0 ? '-' + rpIdr(orderOmzet) : rpIdr(0)}</td></tr>
-        <tr><td>Topup nominal</td><td class="text-right">\${rpIdr(s.topup_nominal)}</td></tr>
-        <tr><td>Topup admin</td><td class="text-right">\${rpIdr(s.topup_admin)}</td></tr>
-        <tr><td>Tarik nominal</td><td class="text-right">\${rpIdr(s.tarik_nominal)}</td></tr>
-        <tr><td>Tarik admin</td><td class="text-right">\${rpIdr(s.tarik_admin)}</td></tr>
-        <tr><td>Retur (\${s.n_retur})</td><td class="text-right">\${rpIdr(s.retur_total)}</td></tr>
-        <tr><td>Pengeluaran (\${s.n_expense})</td><td class="text-right">\${rpIdr(s.expense_total)}</td></tr>
-        <tr><td>Kas masuk (\${s.n_kas_masuk})</td><td class="text-right">\${rpIdr(s.kas_masuk_total)}</td></tr>
-        <tr><td>Pembelian (\${s.n_purchase})</td><td class="text-right">\${rpIdr(s.purchase_total)}</td></tr>
-        <tr><td>Hutang terbentuk</td><td class="text-right">\${rpIdr(s.hutang_baru ?? 0)}</td></tr>
-        <tr><td>Piutang terbayar</td><td class="text-right">\${rpIdr(s.piutang_bayar ?? 0)}</td></tr>
+        <tr><td>Modal awal</td><td class="text-right">${rpIdr(s.modal_awal)}</td></tr>
+        <tr><td>Penjualan (${s.n_sales} nota)</td><td class="text-right">${rpIdr(s.omzet)}</td></tr>
+        <tr><td style="padding-left:20px">Tunai</td><td class="text-right">${rpIdr(s.tunai)}</td></tr>
+        <tr><td style="padding-left:20px">QRIS</td><td class="text-right">${rpIdr(s.qris)}</td></tr>
+        <tr><td style="padding-left:20px">Transfer</td><td class="text-right">${rpIdr(s.transfer)}</td></tr>
+        <tr><td>Diskon</td><td class="text-right">${rpIdr(s.diskon_total ?? 0)}</td></tr>
+        <tr><td>Uang pesanan masuk</td><td class="text-right">${rpIdr(s.order_masuk_total ?? 0)}</td></tr>
+        <tr><td>Nota pesanan (keluar)</td><td class="text-right">${orderOmzet > 0 ? '-' + rpIdr(orderOmzet) : rpIdr(0)}</td></tr>
+        <tr><td>Topup nominal</td><td class="text-right">${rpIdr(s.topup_nominal)}</td></tr>
+        <tr><td>Topup admin</td><td class="text-right">${rpIdr(s.topup_admin)}</td></tr>
+        <tr><td>Tarik nominal</td><td class="text-right">${rpIdr(s.tarik_nominal)}</td></tr>
+        <tr><td>Tarik admin</td><td class="text-right">${rpIdr(s.tarik_admin)}</td></tr>
+        <tr><td>Retur (${s.n_retur})</td><td class="text-right">${rpIdr(s.retur_total)}</td></tr>
+        <tr><td>Pengeluaran (${s.n_expense})</td><td class="text-right">${rpIdr(s.expense_total)}</td></tr>
+        <tr><td>Kas masuk (${s.n_kas_masuk})</td><td class="text-right">${rpIdr(s.kas_masuk_total)}</td></tr>
+        <tr><td>Pembelian (${s.n_purchase})</td><td class="text-right">${rpIdr(s.purchase_total)}</td></tr>
+        <tr><td>Hutang terbentuk</td><td class="text-right">${rpIdr(s.hutang_baru ?? 0)}</td></tr>
+        <tr><td>Piutang terbayar</td><td class="text-right">${rpIdr(s.piutang_bayar ?? 0)}</td></tr>
       </tbody>
     </table>
 
     <div style="display: flex; justify-content: space-between;">
       <div style="width: 50%;"></div>
       <div class="total-section">
-        <div class="total-row"><span>Kas seharusnya</span><span>\${rpIdr(kasHarus)}</span></div>
-        ${fisik !== null ? `<div class="total-row"><span>Modal akhir (fisik)</span><span>\${rpIdr(fisik)}</span></div>` : ''}
-        ${d !== null ? `<div class="total-row grand-total"><span>Selisih</span><span>\${d < 0 ? '-' : ''}\${rpIdr(Math.abs(d))}</span></div>` : ''}
+        <div class="total-row"><span>Kas seharusnya</span><span>${rpIdr(kasHarus)}</span></div>
+        ${fisik !== null ? `<div class="total-row"><span>Modal akhir (fisik)</span><span>${rpIdr(fisik)}</span></div>` : ''}
+        ${d !== null ? `<div class="total-row grand-total"><span>Selisih</span><span>${d < 0 ? '-' : ''}${rpIdr(Math.abs(d))}</span></div>` : ''}
       </div>
     </div>
 
     <div style="margin-top: 20px;"></div>
 
     <div class="foot">
+      <div class="foot-line">Dicetak melalui Ravaa POS pada: ${tglCetak}</div>
       ${footerDokumenA4(toko) ? `<div class="foot-line">${esc(footerDokumenA4(toko))}</div>` : ''}
     </div>
   </div>

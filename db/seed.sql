@@ -82,8 +82,10 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('tolak_jual_kadaluarsa', '0'
 -- Opsi dokumen & struk (riset Aronium 2026-10-20). INSERT OR IGNORE membuat
 -- seed ulang tidak menimpa pilihan pemilik. Default = perilaku lama KECUALI
 -- jumlah item + total hutang pelanggan (dua fitur baru, default menyala).
+-- invoice_footer kosong: baris "Dicetak melalui Ravaa POS pada: <tanggal>" selalu dicetak
+-- builder dokumen A4 (permintaan pemilik 2026-10-21).
 INSERT OR IGNORE INTO settings (key, value) VALUES ('invoice_title', 'INVOICE');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('invoice_footer', 'Dicetak dari Ravaa POS');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('invoice_footer', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_footer', 'Terima kasih sudah berbelanja');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_customer', 'name');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('receipt_show_items', '1');

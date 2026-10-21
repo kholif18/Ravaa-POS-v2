@@ -248,7 +248,7 @@ const nTabelPop = await pop.locator('table.items').count();
 chk('B9 cetak satu dokumen: tabel valuasi + seksi TIDAK LAKU + kaki',
   (await pop.title()).includes('ANALITIK') && nTabelPop === 2
   && isiPop.includes('TIDAK LAKU DALAM') && isiPop.includes(NAMA[0])
-  && isiPop.includes('Dicetak dari Ravaa POS'),
+  && isiPop.includes('Dicetak melalui Ravaa POS pada:'),
   `tabel=${nTabelPop}`);
 await pop.close().catch(() => {});
 

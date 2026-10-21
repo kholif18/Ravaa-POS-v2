@@ -337,7 +337,7 @@ function metodeBayar(l: Laporan): string {
   const total = l.byMethod.reduce((a, m) => a + m.total, 0);
   const n = l.byMethod.reduce((a, m) => a + m.n, 0);
   return `
-  <div class="card">
+  <div class="card min-w-0">
     <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Rekap per metode bayar</h2>
     ${
       l.byMethod.length
@@ -370,7 +370,7 @@ function topupCard(l: Laporan): string {
   const nominal = l.topup.reduce((a, t) => a + t.nominal, 0);
   const admin = l.topup.reduce((a, t) => a + t.admin, 0);
   return `
-  <div class="card">
+  <div class="card min-w-0">
     <div class="flex items-baseline justify-between gap-2">
       <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Topup & tarik tunai</h2>
       <span class="chip">${icon('wallet')}<span>${n} transaksi</span></span>
@@ -408,11 +408,12 @@ function topupCard(l: Laporan): string {
 
 function produkTerlaris(l: Laporan): string {
   return `
-  <div class="card">
+  <div class="card min-w-0">
     <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Produk terlaris</h2>
     ${
       l.topItems.length
-        ? `<table class="mt-2 w-full text-left text-sm">
+        ? `<div class="mt-2 -mx-1 overflow-x-auto px-1">
+        <table class="w-full text-left text-sm">
         <thead><tr><th class="th">Produk</th><th class="th text-right">Omzet</th><th class="th text-right">HPP</th><th class="th text-right">Laba</th></tr></thead>
         <tbody>
           ${l.topItems
@@ -430,6 +431,7 @@ function produkTerlaris(l: Laporan): string {
             .join('')}
         </tbody>
       </table>
+      </div>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
         10 teratas per (nama, satuan) — "2 pack" dan "3 btl" tidak dicampur.
         Laba dihitung server = omzet − diskon baris − HPP baris (diskon transaksi tidak dialokasikan).
@@ -441,7 +443,7 @@ function produkTerlaris(l: Laporan): string {
 
 function stokMenipis(l: Laporan): string {
   return `
-  <div class="card">
+  <div class="card min-w-0">
     <div class="flex items-baseline justify-between gap-2">
       <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Stok menipis</h2>
       <a href="#/stock" class="chip">${icon('stock')}<span>Buka Stok</span></a>

@@ -735,9 +735,12 @@ npm run dev:api
     toko** di **Sistem → Pengaturan toko** — semua device mencetak kop yang
     sama; nilai awal = contoh pemilik (RAVAA STUDIO) lewat seed.
     **Judul & footer** dapat diubah di **Sistem → Dokumen & struk**
-    (`invoice_title`/`invoice_footer`; footer kosong = baris tidak dicetak).
-    Footer yang sama dipakai lima dokumen A4: invoice, laporan, rekap shift,
-    nota PO, dan rincian hutang.
+    (`invoice_title`/`invoice_footer`). Setiap dokumen A4 SELALU mencetak
+    baris `Dicetak melalui Ravaa POS pada: <tanggal> <jam:detik>` (zona waktu device);
+    `invoice_footer` hanya teks TAMBAHAN di bawahnya (kosong = tidak ada
+    baris tambahan; nilai legacy "Dicetak dari Ravaa POS" diabaikan).
+    Footer yang sama dipakai enam dokumen A4: invoice, laporan, rekap shift,
+    nota PO, rincian hutang, dan bukti pembayaran hutang.
     **Logo toko di semua dokumen A4** (2026-10-19): logo yang diunggah di
     Sistem → Pengaturan toko tampil di kanan-atas SEMUA dokumen A4 cetak
     browser — invoice, laporan (`#/reports`), rekap shift (PDF), nota PO,
@@ -1114,8 +1117,10 @@ npm run dev:api
   - **Dokumen & struk** (2026-10-20, subset opsi Aronium; semua SERVER-wide;
     kartu berada di seksi **Perangkat & cetak** bersama preferensi printer &
     pratinjau struk — revisi pemilik 2026-10-20, bukan di Identitas toko):
-    judul invoice A4 (`invoice_title`), footer semua dokumen A4
-    (`invoice_footer`), footer struk thermal (`receipt_footer`), detail
+    judul invoice A4 (`invoice_title`), teks tambahan footer dokumen A4
+    (`invoice_footer`; baris `Dicetak melalui Ravaa POS pada: <tanggal> <jam:detik>` selalu
+    dicetak, kosong = tanpa teks tambahan), footer struk thermal
+    (`receipt_footer`), detail
     pelanggan di struk (checkbox nama/alamat/telepon — `receipt_customer` CSV,
     kosong = tanpa detail; master pelanggan tidak punya email), baris
     **jumlah item** (`receipt_show_items`, bawaan nyala), **nomor struk

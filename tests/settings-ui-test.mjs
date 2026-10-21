@@ -245,7 +245,7 @@ try {
   }));
   ok('nilai awal kartu = pengaturan server',
     dokAwal.judul === (pengaturan.invoice_title ?? 'INVOICE')
-    && dokAwal.footerA4 === (pengaturan.invoice_footer ?? 'Dicetak dari Ravaa POS')
+    && dokAwal.footerA4 === (pengaturan.invoice_footer ?? '')
     && dokAwal.footerStruk === (pengaturan.receipt_footer ?? 'Terima kasih sudah berbelanja')
     && dokAwal.nama === (pengaturan.receipt_customer ?? 'name').split(',').includes('name')
     && dokAwal.alamat === (pengaturan.receipt_customer ?? 'name').split(',').includes('address')

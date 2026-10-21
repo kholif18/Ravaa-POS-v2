@@ -39,6 +39,12 @@ await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 console.log('=== A. API kas masuk: CRUD + validasi ===');
+// Baris milik pemilik/suite lain TIDAK boleh dihapus atau diasumsikan kosong
+// (AGENTS §5: data uji nama eksak + penjaga). Ambil baseline hari ini dulu,
+// lalu asersi memakai selisih — bukan angka absolut.
+const rpUji = (n) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
+const g0 = await api(`/api/kas-masuk?date=${TODAY}`);
+const dasar = { total: g0.total ?? 0, jumlah: g0.jumlah ?? 0 };
 const e1 = await post('/api/kas-masuk', { kategori: 'UjiKM Modal', jumlah: 45000, note: 'UjiKM nota' });
 chk('POST valid -> 201 + shift null', e1.status === 201 && e1.json.data.shift_id === null, JSON.stringify(e1.json.data));
 chk('kategori kosong -> 400', (await post('/api/kas-masuk', { kategori: '  ', jumlah: 1000 })).status === 400);
@@ -49,7 +55,9 @@ chk('note > 200 -> 400', (await post('/api/kas-masuk', { kategori: 'UjiKM X', ju
 chk('shift_id tak ada -> 400', (await post('/api/kas-masuk', { kategori: 'UjiKM X', jumlah: 1000, shift_id: 999999 })).status === 400);
 chk('shift_id bukan integer -> 400', (await post('/api/kas-masuk', { kategori: 'UjiKM X', jumlah: 1000, shift_id: 'abc' })).status === 400);
 const g1 = await api(`/api/kas-masuk?date=${TODAY}`);
-chk('GET hari ini memuat baris + jumlah', g1.total === 1 && g1.jumlah === 45000 && g1.data[0].kategori === 'UjiKM Modal', JSON.stringify({ total: g1.total, jumlah: g1.jumlah }));
+chk('GET hari ini memuat baris + jumlah', g1.total === dasar.total + 1 && g1.jumlah === dasar.jumlah + 45000
+  && (g1.data ?? []).some((r) => r.kategori === 'UjiKM Modal'),
+  JSON.stringify({ total: g1.total, jumlah: g1.jumlah, dasar }));
 chk('date rusak -> 400', (await p.evaluate(() => fetch('/api/kas-masuk?date=2026-02-31').then((r) => r.status))) === 400);
 chk('DELETE -> hilang', (await p.evaluate((id) => fetch(`/api/kas-masuk/${id}`, { method: 'DELETE' }).then((r) => r.json()), e1.json.data.id)).data?.deleted === true);
 
@@ -89,15 +97,17 @@ await w('#km-nominal', '25000');
 await w('#km-note', 'UjiKM ui');
 await p.click('.modal [data-ok]');
 await p.waitForTimeout(1200);
+const g2 = await api(`/api/kas-masuk?date=${TODAY}`);
 chk('catat via modal -> modal tutup, baris + total hari ikut', (await p.locator('.modal').count()) === 0
   && (await p.textContent('#km-body')).includes('UjiKM UI')
-  && (await p.textContent('#km-jumlah')).includes('37.345'));
+  && (await p.textContent('#km-jumlah')).includes(rpUji(g2.jumlah ?? 0)));
 await p.click('[data-km-del]');
 await p.waitForSelector('.swal2-container', { timeout: 8000 });
 await p.click('.swal2-container .sw-btn-danger');
 await p.waitForTimeout(1200);
+const g3 = await api(`/api/kas-masuk?date=${TODAY}`);
 chk('hapus via konfirmasi -> baris hilang + total turun', !(await p.textContent('#km-body')).includes('UjiKM UI')
-  && (await p.textContent('#km-jumlah')).includes('12.345'));
+  && (await p.textContent('#km-jumlah')).includes(rpUji(g3.jumlah ?? 0)));
 
 console.log('=== E. Dialog tutup shift memuat blok Kas masuk ===');
 await p.goto('http://localhost:5656/#/shifts', { waitUntil: 'networkidle' });
@@ -108,7 +118,10 @@ await p.waitForSelector(`#sh-body tbody tr[data-shift="${kasirId}"]`, { timeout:
 await p.click(`#sh-body tbody tr[data-shift="${kasirId}"] [data-tutup]`);
 await p.waitForTimeout(400);
 const isiDialog = await p.textContent('.modal');
-chk('blok "Kas masuk — menambah laci" + nominal tampil', isiDialog.includes('Kas masuk — menambah laci') && isiDialog.includes('Rp12.345'), isiDialog.slice(0, 120));
+const sh2 = await api('/api/shifts?status=open&limit=200');
+const baris2 = (sh2.data ?? []).find((s) => s.id === kasirId);
+chk('blok "Kas masuk — menambah laci" + nominal tampil', isiDialog.includes('Kas masuk — menambah laci')
+  && isiDialog.includes(rpUji(baris2?.kas_masuk_total ?? 0)), isiDialog.slice(0, 120));
 await p.click('.modal-overlay [data-x]');
 await p.waitForTimeout(300);
 

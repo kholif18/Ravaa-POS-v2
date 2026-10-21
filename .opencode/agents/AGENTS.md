@@ -1241,7 +1241,12 @@ apps/web/src/pages/dashboard.ts  Halaman #/dashboard (rute pembuka #/): kartu
                           semua (title + tooltip hover per batang tidak
                           hilang). Anti-regresi section G `dashboard-test.mjs`
                           (19→23 asersi). Seluruh angka diambil apa adanya
-                          dari API.
+                          dari API. **Kartu grid Harian `min-w-0` + tabel
+                          "Produk terlaris" dibungkus `overflow-x-auto`
+                          (2026-10-21)** — item grid default ber-min-width
+                          min-content sehingga kolom angka yang lebar bisa
+                          memaksa kartu melebihi kolom kanan; tabel tetap
+                          bisa digulir sendiri tanpa menggeser kartu.
 apps/web/src/pages/shifts.ts  Halaman #/shifts (menu Shift Kasir): tabel
                           riwayat dari GET /api/shifts (agregat penjualan/
                           topup per baris), filter status, dialog Buka shift
@@ -1532,14 +1537,17 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           Diterima/Kasir/Shift/Status, tabel barang, ringkas
                           Total/Terbayar/Sisa (label kontekstual "Sisa
                           (lunas)"/"Sisa hutang"/"Sisa (belum diterima)"/
-                          "Dibatalkan"), catatan + striping; **slot logo toko
+                          "Dibatalkan"), catatan + garis tabel `#d1d5db` +
+                          zebra `#f9fafb`, footer `Dicetak melalui Ravaa POS pada:
+                          <tgl> <jam:detik>` + teks opsional
+                          `invoice_footer`; **slot logo toko
                           kanan-atas lewat helper bersama
                           `logoA4Html`/`CSS_LOGO_A4` dari `invoice.ts`**
                           (revisi pemilik 19 Okt 2026: "logo itu harusnya
                           juga di terapkan pada a4 juga"); popup diblokir/
                           gagal = toast. `tests/purchase-test.mjs`
-                          45 asersi (section F uji popup: kop + supplier +
-                          nomor + baris + ringkas + slot logo).
+                          46 asersi (section F uji popup: kop + supplier +
+                          nomor + baris + ringkas + slot logo + footer).
 apps/web/src/labelsheet.ts  **Model cetak label (baru 2026-10-17, refactor
                          halaman Label harga)**: LEMBAR label A4/Folio lewat
                          CETAK BROWSER (`window.print()` + `@page` mm), bukan
@@ -1850,7 +1858,9 @@ apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            print-agent, gagal = toast; **slot logo toko
                            kanan-atas lewat helper bersama
                            `logoA4Html`/`CSS_LOGO_A4` dari `invoice.ts`** —
-                           revisi pemilik 19 Okt 2026). Hutang DICATAT
+                           revisi pemilik 19 Okt 2026; tabel bergaris
+                           `#d1d5db` + zebra, footer `Dicetak melalui Ravaa POS pada:
+                           <tgl> <jam:detik>` + teks opsional). Hutang DICATAT
                            MANUAL di sini — POS tidak punya mode piutang.
                            **Atribusi laci + bukti pembayaran (Paket A,
                            2026-10-20)**: mount & setiap POST memanggil
@@ -2052,7 +2062,8 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           **Payment status `Lunas`/`Belum lunas`** (putaran 14:
                           `Belum lunas` bila `sale.sisa_hutang > 0`), tabel item
                           + baris `* note`, ringkasan Discount/Total, footer
-                          dari opsi server `invoice_footer`).
+                          WAJIB `Dicetak melalui Ravaa POS pada: <tanggal> <jam:detik>` +
+                          teks opsional `invoice_footer`).
                           **HUTANG di invoice (putaran 14, 2026-10-06 —
                           "tambahkan hutang jika pelanggan berhutang")**:
                           (a) baris **`Hutang:` merah** di rincian Payment
@@ -2084,16 +2095,26 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           rumus laci sama dengan `kasSeharusnya()`); nota
                           take dibaca `cetakInvoice` jalur biasa (order_no
                           ada di `sale`).
-                          **Judul & footer dokumen (2026-10-20)**: invoice
-                          memakai `judulInvoiceA4(toko)` = `invoice_title`
-                          server (default "INVOICE") dan `footerDokumenA4(toko)`
-                          = `invoice_footer` (default "Dicetak dari Ravaa
-                          POS"); string kosong = baris tidak dicetak. Helper
-                          footer yang SAMA dipakai lima dokumen A4: invoice,
-                          laporan (`htmlLaporan`), rekap shift
+                          **Judul, tabel & footer dokumen (revisi
+                          2026-10-21)**: invoice memakai `judulInvoiceA4(toko)`
+                          = `invoice_title` server (default "INVOICE");
+                          `footerDokumenA4(toko)` = teks TAMBAHAN
+                          `invoice_footer` (default `''`; nilai legacy
+                          "Dicetak dari Ravaa POS" SENGAJA difilter). SEMUA
+                          builder A4 selalu mencetak baris sistem
+                          **`Dicetak melalui Ravaa POS pada: <tanggal> <jam:detik>`** lewat
+                          `tglLengkap()` -> `formatTanggalWaktuDetik()`
+                          (zona waktu device, contoh "20 Oktober 2026
+                          20:44:56"), lalu footer server bila ada. Tabel
+                          bergaris `#d1d5db` + zebra `#f9fafb`
+                          (`print-color-adjust: exact`), font system-ui;
+                          blok tanda tangan + teks lama TIDAK dicetak.
+                          Helper footer yang SAMA dipakai enam dokumen A4:
+                          invoice, laporan (`htmlLaporan`), rekap shift
                           (`htmlRekapShift`), nota PO (`htmlPoA4`), rincian
-                          hutang (`htmlHutangA4`) — jangan menulis footer baru
-                          di halaman. Nilainya disimpan SERVER-wide
+                          hutang (`htmlHutangA4`), bukti pembayaran hutang
+                          (`htmlBuktiPembayaranA4`) — jangan menulis footer
+                          baru di halaman. Nilainya disimpan SERVER-wide
                           (`settings` key/value, lihat §3), bukan per device.
                           **Seksi tabel tambahan (butir 1.6.7, 2026-10-19)**:
                           `DokLaporan.bagian?: {judul,kolom,baris,catatan?}[]`
@@ -2296,14 +2317,28 @@ apps/web/src/ui/scan-kamera.ts  **Pemindai barcode lewat kamera HP** (butir
                            Diuji `tests/scan-kamera-test.mjs` (16 asersi:
                            stub kamera+detektor; desktop `Qty*Kode`, header
                            mobile, dan konteks tanpa BarcodeDetector).
-apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (tampil UTC apa
-                         adanya), hariIni()/geser()/tglPanjang()/tglPendek()/
+apps/web/src/ui/waktu.ts  Tanggal/jam bersama: waktu()/jam() (zona waktu aktif
+                         device), waktuUtc()/jamUtc() (UTC apa adanya),
+                         hariIni()/geser()/tglPanjang()/tglPendek()/
                          hariPendek() + **awalMinggu()/awalBulan()/akhirBulan()**
                          (2026-10-17 — dasar preset dialog rentang halaman
                          Laporan: minggu ala Indonesia Senin–Minggu) — SATU
                          aturan hari UTC untuk Riwayat, Laporan, dan Dashboard
                          (jangan tulis ulang di halaman baru: aritmetika
                          tanggal harus lewat file ini).
+apps/web/src/ui/timezone.ts  Preferensi zona waktu PER DEVICE (localStorage
+                         `ravaa.timezone`, default `Asia/Jakarta`; opsi
+                         WIB/WITA/WIT/UTC, disetel di Sistem → Format & zona
+                         waktu) + `formatTanggalWaktu`, `formatTanggal`,
+                         `formatJam`, dan **`formatTanggalWaktuDetik`**
+                         (`20 Oktober 2026 20:44:56`, dipakai footer dokumen
+                         cetak). String SQLite `datetime('now')`
+                         (`YYYY-MM-DD HH:MM:SS`, UTC TANPA `Z`) diparse lewat
+                         `parseWaktu()` sebagai UTC — jangan `new Date()`
+                         langsung (dibaca sebagai waktu lokal perangkat,
+                         tampilan meleset sebesar offset). DB tetap UTC — zona
+                         hanya memengaruhi tampilan/cetak, jangan mengubah
+                         data tersimpan.
 apps/print-agent/server.js  HTTP :9100 -> tulis bytes ke PRINTER_PATH|/dev/usb/lp0|file. TANPA deps.
 tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        run.mjs MENOLAK file hilang / crash / 0 asersi / jumlah
@@ -2957,7 +2992,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     dan UI `#/audit` (chip jumlah, cari, modal detail, Esc).
 * `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false,
   store_name:"",store_address:"",store_phone:"",store_email:"",store_logo:"",
-  invoice_title:"INVOICE",invoice_footer:"Dicetak dari Ravaa POS",
+  invoice_title:"INVOICE",invoice_footer:"",
   receipt_footer:"Terima kasih sudah berbelanja",receipt_customer:"name",
   receipt_show_items:true,receipt_short_no:false,receipt_show_debt:true}}`
   (selalu ada — baris boolean default di-seed `db/seed.sql` lewat `INSERT OR
@@ -2967,8 +3002,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   struk thermal semua device lewat `getToko()`/`ui/identitas-struk.ts`).
   - **Opsi dokumen & struk (2026-10-20, subset riset Aronium)** — tujuh kunci
     `settings` biasa (tanpa migrasi skema; kunci absen = bawaan di atas):
-    `invoice_title` (judul invoice A4), `invoice_footer` (footer SEMUA dokumen
-    A4), `receipt_footer` (kaki struk thermal), `receipt_customer` (CSV token
+    `invoice_title` (judul invoice A4), `invoice_footer` (teks TAMBAHAN footer
+    semua dokumen A4 — baris `Dicetak melalui Ravaa POS pada: <tanggal> <jam:detik>` SELALU
+    dicetak builder klien; default `''`, nilai legacy "Dicetak dari Ravaa POS"
+    difilter), `receipt_footer` (kaki struk thermal), `receipt_customer` (CSV token
     `name,address,phone` — urutan = urutan baris; kosong = tanpa detail
     pelanggan), `receipt_show_items` (baris `Jumlah item: N baris · M qty`),
     `receipt_short_no` (nomor struk = urutan harian `000012`) dan
@@ -3186,7 +3223,8 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     fisik/selisih, tanpa menutup); setelah POST close sukses = dialog rekap
     (Z) [Thermal] [PDF] [Selesai]. Thermal = objek `Struk` dari
     `bangunStrukRekap()` via print-agent 32 kolom (guard autoPrint/pause
-    pola `cetak()` POS); PDF = `htmlRekapShift()` + `cetakRekapShift()` di
+    pola `cetak()` POS; kaki `Dicetak melalui Ravaa POS pada: <tgl> <jam:detik>`); PDF =
+    `htmlRekapShift()` + `cetakRekapShift()` di
     `invoice.ts` (window.print browser, pola `cetakInvoice` — kop `store_*`,
     tabel uraian, kotak Kas seharusnya/Modal akhir/Selisih). Gagal cetak
     tak pernah membatalkan tutup shift (toast saja).

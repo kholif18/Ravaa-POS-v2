@@ -212,6 +212,10 @@ const a4 = await popA4.evaluate(() => {
     stripeLedger: css.includes('tbody tr:nth-child(even)'),
     stripeRingkas: css.includes('tbody tr:nth-child(even)'),
     isi: rk ? rk.innerText.replace(/\s+/g, ' ') : '',
+    // Footer dokumen (2026-10-21): tanggal-cetak DENGAN DETIK selalu ada,
+    // teks legacy "Dicetak dari Ravaa POS" tidak boleh ikut tercetak.
+    kaki: /Dicetak melalui Ravaa POS pada: \d{1,2} [A-Za-z]+ \d{4} \d{2}:\d{2}:\d{2}/.test(document.body.innerText)
+      && !document.body.innerText.includes('Dicetak dari Ravaa POS'),
   };
 });
 chk('ringkas A4 = tabel 3 baris (Total dihutang/dibayar/sisa) TANPA box',
@@ -229,6 +233,8 @@ const logoA4 = await popA4.evaluate(() => ({
 }));
 chk('A4 hutang: slot logo kanan-atas (/api/settings/logo + fallback "R")',
   logoA4.src.endsWith('/api/settings/logo') && logoA4.fb === 'R', JSON.stringify(logoA4));
+chk('A4 hutang: footer "Dicetak melalui Ravaa POS pada: <tgl> <jam:detik>" + teks legacy tidak dicetak',
+  a4.kaki, JSON.stringify({ kaki: a4.kaki }));
 await popA4.close().catch(() => {});
 await p.click('.modal [data-x]'); await p.waitForTimeout(300);
 

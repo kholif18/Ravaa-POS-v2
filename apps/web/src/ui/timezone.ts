@@ -38,12 +38,25 @@ export function setZonaWaktu(z: ZonaWaktu): void {
   }
 }
 
+/** Parse waktu dari server. SQLite `datetime('now')` menyimpan UTC TANPA
+ *  penanda zona ("YYYY-MM-DD HH:MM:SS"); `new Date()` membacanya sebagai
+ *  waktu LOKAL perangkat sehingga tampilan selalu meleset sebesar offset.
+ *  Tambahkan "Z" hanya untuk bentuk tanpa zona — string ISO ber-Z/offset
+ *  dibiarkan apa adanya. */
+function parseWaktu(iso: string): Date {
+  const s = iso.trim();
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) {
+    return new Date(`${s.replace(' ', 'T')}Z`);
+  }
+  return new Date(s);
+}
+
 /** Format tanggal-waktu lengkap dengan zona waktu aktif.
  *  Contoh: "20 Oktober 2026 22:17". */
 export function formatTanggalWaktu(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
-    const d = new Date(iso);
+    const d = parseWaktu(String(iso));
     if (Number.isNaN(d.getTime())) return String(iso);
     return d.toLocaleString('id-ID', {
       day: 'numeric',
@@ -58,12 +71,39 @@ export function formatTanggalWaktu(iso: string | null | undefined): string {
   }
 }
 
+/** Format tanggal-waktu lengkap DENGAN DETIK, dipakai baris footer dokumen
+ *  cetak ("Dicetak melalui Ravaa POS pada: 20 Oktober 2026 20:44:56"). Pemisah jam dipaksa
+ *  titik dua supaya identik dengan contoh cetak pemilik. */
+export function formatTanggalWaktuDetik(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    const d = parseWaktu(String(iso));
+    if (Number.isNaN(d.getTime())) return String(iso);
+    const tz = getZonaWaktu();
+    const tanggal = d.toLocaleDateString('id-ID', {
+      day: 'numeric', month: 'long', year: 'numeric', timeZone: tz,
+    });
+    const jam = d.toLocaleTimeString('id-ID', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false, timeZone: tz,
+    }).replace(/\./g, ':');
+    return `${tanggal} ${jam}`;
+  } catch {
+    return String(iso);
+  }
+}
+
 /** Format tanggal saja dengan zona waktu aktif.
  *  Contoh: "20 Oktober 2026". */
 export function formatTanggal(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
-    const d = new Date(`${iso}T00:00:00Z`);
+    const s = String(iso).trim();
+    // Tanggal saja (YYYY-MM-DD) = tanggal kalender, bukan instant — jangan
+    // digeser zona waktu.
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(s)
+      ? new Date(`${s}T00:00:00Z`)
+      : parseWaktu(s);
     if (Number.isNaN(d.getTime())) return String(iso);
     return d.toLocaleDateString('id-ID', {
       day: 'numeric',
@@ -81,15 +121,13 @@ export function formatTanggal(iso: string | null | undefined): string {
 export function formatJam(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
-    const m = /[ T](\d{2}):(\d{2})/.exec(String(iso));
-    if (m) return `${m[1]}:${m[2]}`;
-    const d = new Date(iso);
+    const d = parseWaktu(String(iso));
     if (Number.isNaN(d.getTime())) return String(iso);
     return d.toLocaleTimeString('id-ID', {
       hour: '2-digit',
       minute: '2-digit',
       timeZone: getZonaWaktu(),
-    });
+    }).replace(/\./g, ':');
   } catch {
     return String(iso);
   }
