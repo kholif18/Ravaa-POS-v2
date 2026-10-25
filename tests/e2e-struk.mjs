@@ -3,7 +3,7 @@
 // (/dev/usb/lp0 ada dan user tergabung di grup lp — menulisnya akan membuang
 // kertas nyata). Yang diuji adalah bytes yang benar-benar dikirim browser.
 import { chromium } from 'playwright-core';
-import { pasangToken } from './bantuan-uji.mjs';
+import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 let lolos = 0, gagal = 0;
 const ok = (n, c, info = '') => {
@@ -434,7 +434,7 @@ try {
     jual({ q: 'PRD00013', tunai: 20000 }, 'A4'),
   ]);
   await popup.waitForLoadState('domcontentloaded');
-  const teksE = await popup.innerText('body');
+  const teksE = await tungguDokumenA4(popup);
   const tokoE = (await (await fetch(API + '/api/settings')).json()).data?.store_name || '';
   ok('E: popup invoice terbuka (judul INVOICE + kop nama toko)',
     /INVOICE/.test(teksE) && tokoE !== '' && teksE.includes(tokoE),
@@ -1083,7 +1083,7 @@ try {
     })(),
   ]);
   await popupInv.waitForLoadState('domcontentloaded');
-  const teksInv = await popupInv.innerText('body');
+  const teksInv = await tungguDokumenA4(popupInv);
   ok('L: invoice A4 nota berhutang -> "Belum lunas" + baris Hutang tercetak',
     /Belum lunas/i.test(teksInv) && /Hutang:?\s*Rp\s*\d[\d.]*/i.test(teksInv),
     teksInv.replace(/\s+/g, ' ').slice(0, 300));

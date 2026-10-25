@@ -642,25 +642,61 @@ export async function cetakRekapShift(s: ShiftRow, fisik: number | null): Promis
  *  Melempar Error bila API tidak terjangkau / popup diblokir — pemanggil
  *  (pos.ts / history.ts) hanya memberi toast; penjualan TIDAK dibatalkan. */
 export async function cetakInvoice(saleId: string): Promise<void> {
-  const nota = await apiGet<{ data: { sale: SaleNota; items: ItemNota[]; payments?: { method: string; amount: number }[] } }>(
-    `/api/sales/${encodeURIComponent(saleId)}`,
-  );
+  // Tab dibuka SINKRON di baris pertama, SEBELUM fetch apa pun.
+  // Alasan (flake nyata di run suite penuh 2026-10-25): `window.open` SETELAH
+  // `await` bergantung pada "transient user activation" dari klik kasir. Di
+  // mesin lambat tiga roundtrip (nota + settings + ledger) bisa melewati jendela
+  // aktivasi Chrome, hasilnya `window.open` = null dan kasir melihat toast
+  // "popup diblokir" padahal tidak ada pemblokir. Membuka tab kosong lebih dulu
+  // juga UX lebih jujur: tab langsung muncul ("Menyiapkan invoice…"), isinya
+  // menyusul. Gagal fetch = tab ditutup lagi + Error dilempar (pemanggil toast).
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak invoice A4');
+  try {
+    w.document.write(
+      '<title>Menyiapkan invoice…</title>' +
+        '<body style="font-family:system-ui,sans-serif;padding:24px;color:#475569">Menyiapkan invoice…</body>',
+    );
+  } catch {
+    /* tab sudah ditutup user / dokumen belum siap — isi menyusul di bawah */
+  }
+  let nota: { data: { sale: SaleNota; items: ItemNota[]; payments?: { method: string; amount: number }[] } };
+  try {
+    nota = await apiGet<{ data: { sale: SaleNota; items: ItemNota[]; payments?: { method: string; amount: number }[] } }>(
+      `/api/sales/${encodeURIComponent(saleId)}`,
+    );
+  } catch (e) {
+    try { w.close(); } catch { /* sudah tertutup */ }
+    throw e;
+  }
   // Piutang = pelengkap (putaran 14): sisa ledger halaman Hutang untuk
   // pelanggan nota ini, dicetak sebagai "Sisa hutang (semua nota)" — menutupi
   // hutang NOTA LAIN milik pelanggan yang sama. Gagal dimuat / pelanggan
   // absen -> 0 (barisnya tidak tampil); invoice TETAP tercetak — hutang nota
   // INI sendiri datang dari snapshot `sisa_hutang`, bukan dari ledger ini.
-  const [set, piutang] = await Promise.all([
-    apiGet<{ data: Toko }>('/api/settings'),
-    nota.data.sale.customer_id
-      ? apiGet<{ data: { sisa: number } }>(`/api/customer-debts/${nota.data.sale.customer_id}`)
-          .then((d) => d.data?.sisa ?? 0)
-          .catch(() => 0)
-      : Promise.resolve(0),
-  ]);
+  let set: { data: Toko };
+  let piutang = 0;
+  try {
+    const hasil = await Promise.all([
+      apiGet<{ data: Toko }>('/api/settings'),
+      nota.data.sale.customer_id
+        ? apiGet<{ data: { sisa: number } }>(`/api/customer-debts/${nota.data.sale.customer_id}`)
+            .then((d) => d.data?.sisa ?? 0)
+            .catch(() => 0)
+        : Promise.resolve(0),
+    ]);
+    set = hasil[0];
+    piutang = hasil[1];
+  } catch (e) {
+    try { w.close(); } catch { /* sudah tertutup */ }
+    throw e;
+  }
   const html = htmlInvoice(nota.data.sale, nota.data.items, set.data, piutang, nota.data.payments ?? []);
-  const w = window.open('', '_blank');
-  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak invoice A4');
+  // Kasir menutup tab "Menyiapkan…" di tengah fetch = batal cetak, bukan
+  // kegagalan — jangan lempar Error (pemanggil akan men-toast seolah rusak).
+  if (w.closed) return;
+  // `document.open()` me-reset dokumen placeholder; script `window.print()`
+  // di dalam htmlInvoice dieksekusi lagi saat `close()`.
   w.document.open();
   w.document.write(html);
   w.document.close();

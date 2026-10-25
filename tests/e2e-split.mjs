@@ -21,7 +21,7 @@ import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pasangToken } from './bantuan-uji.mjs';
+import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
@@ -394,8 +394,8 @@ try {
     p.waitForEvent('popup', { timeout: 15000 }).catch(() => null),
     p.click('.swal2-deny'), // A4
   ]);
-  if (popup) await popup.waitForTimeout(800);
-  const teksA4 = popup ? norm(await popup.evaluate(() => document.body.innerText).catch(() => '')) : '';
+  if (popup) await popup.waitForTimeout(300);
+  const teksA4 = popup ? norm(await tungguDokumenA4(popup).catch(() => '')) : '';
   chk('E6 invoice A4: baris TUNAI + TRANSFER per metode (uang diserahkan)',
     /TUNAI\s*Rp 8\.000/.test(teksA4) && /TRANSFER\s*Rp 3\.000/.test(teksA4),
     teksA4.slice(0, 320));

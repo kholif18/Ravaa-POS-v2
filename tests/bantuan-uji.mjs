@@ -97,7 +97,7 @@ export async function pasangToken(page) {
       localStorage.setItem('ravaa.token', tok);
       const _f = window.fetch.bind(window);
       window.fetch = (u, o = {}) => {
-        const h = new Headers(o.headers || {});
+        const h = new Headers(o.headers ?? {});
         h.set('Authorization', `Bearer ${tok}`);
         return _f(u, { ...o, headers: h });
       };
@@ -105,4 +105,22 @@ export async function pasangToken(page) {
       /* private mode: abaikan */
     }
   }, t);
+}
+
+/** Tunggu popup dokumen A4 SIAP diisi, lalu kembalikan teks body-nya.
+ *
+ *  Sejak `cetakInvoice()` membuka tab SINKRON di awal fungsi (menghindari
+ *  aktivasi pengguna kedaluwarsa -> popup diblokir di mesin lambat), popup
+ *  MUNCUL lebih dulu sebagai halaman placeholder "Menyiapkan invoice…" dan
+ *  isinya ditulis setelah fetch selesai. `waitForLoadState('domcontentloaded')`
+ *  jadi tidak cukup — ia sudah tercapai oleh placeholder. Tunggu penanda yang
+ *  SELALU ada di dokumen A4 mana pun: kaki "Dicetak melalui Ravaa POS pada:".
+ *  Bukan asersi (tidak menambah hitungan) — murni penantian. */
+export async function tungguDokumenA4(popup, timeout = 20000) {
+  await popup.waitForFunction(
+    () => (document.body?.innerText ?? '').includes('Dicetak melalui Ravaa POS'),
+    null,
+    { timeout },
+  );
+  return popup.innerText('body');
 }
