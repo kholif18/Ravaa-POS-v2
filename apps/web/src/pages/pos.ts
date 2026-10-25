@@ -29,7 +29,7 @@
 // Cache kasir hanya berisi is_active=1 (see AGENTS.md §3), jadi produk
 // nonaktif tidak mungkin masuk keranjang.
 
-import { apiGet, apiPost, cekJaringan, jaringanTersambung, uuid, HttpError, outboxCount, EVENT_JARINGAN } from '../api';
+import { apiGet, apiPost, cekJaringan, jaringanTersambung, uuid, HttpError, outboxCount, enqueue, EVENT_JARINGAN, EVENT_OUTBOX_DONE, EVENT_OUTBOX_DROP } from '../api';
 import {
   getCachedProducts, syncMaster, getHolds, saveHolds, getKeranjang, saveKeranjang,
   type Product,
@@ -825,11 +825,12 @@ function splitChipsHtml(kelas: string): string {
 /** Kembalian modal = uang diterima − total tagihan (0 bila uang belum diisi). */
 
 /** Bolehkah tombol Bayar / Bayar pas / form bayar aktif: keranjang terisi
- *  (produk/manual ATAU baris layanan — `keranjangTerisi()`, Opsi B) DAN server
- *  terjangkau. Syarat kedua bukan hiasan: tanpa server nota TIDAK mungkin
- *  tersimpan (tidak ada outbox otomatis — lihat kepala api.ts), jadi tombol
- *  mati lebih jujur daripada toast "Gagal menyimpan" setelah kasir menunggu. */
-const bisaBayar = () => keranjangTerisi() && jaringanTersambung();
+ *  (produk/manual ATAU baris layanan — `keranjangTerisi()`, Opsi B).
+ *  Butir ROADMAP 1.8 (ACC pemilik 2026-10-25): server TIDAK lagi syarat —
+ *  saat tak terjangkau `pay()` MENGANTREKAN transaksi ke outbox (`enqueue()`)
+ *  dan terkirim otomatis saat pulih, jadi tombol tetap hidup (banner memuju
+ *  status antrean, bukan memblokir). */
+const bisaBayar = () => keranjangTerisi();
 
 /** Banner "server tidak terjangkau" — markup SAMA dipakai sidebar desktop &
  *  header mobile (id `#pos-offline`; hanya satu shell yang hidup, jadi tidak
@@ -842,10 +843,10 @@ function bannerOfflineHtml(): string {
   // mengalahkan aturan `hidden`, jadi banner akan tampil terus (pelajaran
   // `.pm-bayarlayer` di pos-mobile.css). isi kartu = utility flex.
   return `<div id="pos-offline" role="status" class="${jaringanTersambung() ? 'hidden' : ''}">
-        <div class="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
+        <div class="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
           <span class="mt-0.5 shrink-0">${icon('alert')}</span>
           <div class="min-w-0 flex-1">
-            <b>Server tidak terjangkau.</b> Transaksi BELUM bisa disimpan — keranjang tetap aman di perangkat ini. Periksa kabel/WiFi server, lalu coba lagi.
+            <b>Server tidak terjangkau.</b> Transaksi tetap BISA dibayar — nota DIANTREKAN di perangkat ini dan terkirim otomatis begitu server hidup. Periksa kabel/WiFi server bila ingin langsung terkirim.
           </div>
           <button type="button" id="pos-offline-retry" class="btn btn-ghost shrink-0 !min-h-[30px] !px-2.5 !py-1 text-sm">Coba lagi</button>
         </div>
@@ -868,12 +869,13 @@ function terapkanJaringan(): void {
   const ok = document.querySelector<HTMLButtonElement>('#pos-pay');
   if (ok) ok.disabled = !bisaBayar() || busy;
   // Footer form bayar: kalimat "aman & tercatat" hanya boleh tampil saat
-  // server benar-benar terjangkau — ganti dengan peringatan merah saat putus.
+  // server benar-benar terjangkau — saat putus, jelaskan bahwa nota akan
+  // DIANTREKAN (butir 1.8), bukan "belum bisa disimpan" (perilaku lama).
   const trust = bayarEl()?.querySelector<HTMLElement>('.pos-bayar-trust');
   if (trust) {
     trust.innerHTML = on
-      ? `${icon('shieldCheck')}<span><b>Pembayaran aman &amp; tercatat</b><span>Data transaksi akan tersimpan ke server toko.</span></span>`
-      : `${icon('alert')}<span><b class="text-red-600 dark:text-red-400">Server tidak terjangkau</b><span>Transaksi belum bisa disimpan — periksa koneksi, lalu tutup form ini.</span></span>`;
+      ? `${icon('shieldCheck')}<span><b>Pembayaran aman & tercatat</b><span>Data transaksi akan tersimpan ke server toko.</span></span>`
+      : `${icon('alert')}<span><b class="text-amber-600 dark:text-amber-400">Server tidak terjangkau</b><span>Transaksi akan DIANTREKAN di perangkat ini dan terkirim otomatis begitu server pulih.</span></span>`;
   }
   if (!shift) paint(); // gate harus berganti kartu (offline vs buka shift)
 }
@@ -2196,12 +2198,9 @@ function bukaBayar(): void {
     return;
   }
   if (!bisaBayar()) {
-    // Bisa sampai di sini lewat F10 saat server putus (tombolnya disabled,
-    // pintasan tetap memanggil). Jelaskan sebabnya, jangan diam.
-    if (keranjangTerisi() && !jaringanTersambung()) {
-      toast('Server tidak terjangkau — form bayar dibuka setelah koneksi pulih.', 'error', 6000);
-      void cekJaringan();
-    }
+    // Bisa sampai di sini lewat F10 saat keranjang kosong (tombolnya disabled,
+    // pintasan tetap memanggil). Server mati TIDAK lagi menolak — butir 1.8:
+    // nota diantrekan, bukan diblokir.
     return;
   }
   // Putaran 10d (2026-10-05, "form uang diterima jangan langsung di isi uang
@@ -4325,14 +4324,8 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
 function bayarPas(): void {
   if (busy) return;
   if (!keranjangTerisi()) return;
-  // Server putus = nota tidak mungkin tersimpan. Tolak SEBELUM uang dianggap
-  // diterima, dengan kalimat yang menyuruh memeriksa koneksi — jangan biarkan
-  // kasir menunggu 20 detik lalu membaca "Gagal menyimpan".
-  if (!jaringanTersambung()) {
-    toast('Server tidak terjangkau — transaksi belum bisa disimpan. Periksa koneksi, lalu coba lagi.', 'error', 7000);
-    void cekJaringan();
-    return;
-  }
+  // Server mati TIDAK menolak (butir ROADMAP 1.8): bayar pas saat offline =
+  // nota diantrekan oleh pay() — perilaku identik tombol Bayar biasa.
   if (adaSisiTunai()) {
     // Uang pas = persis porsi TUNAI yang menempel tagihan: satu metode tunai
     // = TOTAL GABUNGAN (keranjang + baris layanan, Opsi B) — jalur "tanpa
@@ -4444,18 +4437,103 @@ async function segarkanStokPos(): Promise<void> {
   }
 }
 
+/** Reset state POS setelah transaksi SELESAI (sukses online ATAU diantrekan
+ *  offline — butir 1.8). Keranjang, uang, split, catatan, dan pelanggan
+ *  kembali ke bawaan; keranjang persisten ikut disimpan. */
+function resetSetelahTransaksi(): void {
+  cart = [];
+  cartTopup = [];
+  discount = 0;
+  cashIn = 0;
+  cashTouched = false;
+  resetSplit();
+  catatanBayar = '';
+  customerId = customers.find((c) => c.name === 'Pelanggan Umum')?.id ?? customers[0]?.id ?? null;
+  const selCust = host?.querySelector<HTMLSelectElement>('#pos-customer');
+  if (selCust) selCust.value = customerId === null ? '' : String(customerId);
+  simpanKeranjang();
+  paintTier();
+  const disc = host?.querySelector<HTMLInputElement>('#pos-discount');
+  if (disc) disc.value = '';
+  const cash = document.querySelector<HTMLInputElement>('#pos-cash');
+  if (cash) cash.value = '';
+  paintCart();
+  focusScan();
+}
+
+/* ---------- hutang offline (butir 1.8) ----------
+ * Nota yang diantrekan TIDAK mengirim charge hutang bersamaan — catatan ledger
+ * butuh `invoice_no` yang baru ada di balasan server saat flush. Maka:
+ * pay() offline mendaftarkan peta tunda ini (kunci = saleId), dan listener
+ * EVENT_OUTBOX_DONE di bawah mengirim charge ke /api/customer-debts begitu
+ * job nota terkirim. Listener dipasang LEVEL MODUL (bukan per-mount) supaya
+ * flush yang terjadi saat kasir membuka halaman lain tetap men-chain; data
+ * di localStorage sehingga restart pun aman. */
+type HutangTunda = { sisa: number; customer_id: number; nama: string };
+const LS_HUTANG_TUNDA = 'ravaa.outbox-debt';
+
+function muatHutangTunda(): Record<string, HutangTunda> {
+  try { return JSON.parse(localStorage.getItem(LS_HUTANG_TUNDA) ?? '{}') as Record<string, HutangTunda>; }
+  catch { return {}; }
+}
+function simpanHutangTunda(m: Record<string, HutangTunda>): void {
+  try {
+    if (Object.keys(m).length === 0) localStorage.removeItem(LS_HUTANG_TUNDA);
+    else localStorage.setItem(LS_HUTANG_TUNDA, JSON.stringify(m));
+  } catch { /* private mode — chaining hilang, catat manual tetap bisa */ }
+}
+function catatHutangTunda(saleId: string, sisa: number, custId: number, nama: string): void {
+  const m = muatHutangTunda();
+  m[saleId] = { sisa, customer_id: custId, nama };
+  simpanHutangTunda(m);
+}
+
+window.addEventListener(EVENT_OUTBOX_DONE, (ev) => {
+  const detail = (ev as CustomEvent<{ key?: string; path?: string; res?: unknown }>).detail;
+  if (!detail?.key || detail.path !== '/api/sales') return; // topup flush = senyap
+  const m = muatHutangTunda();
+  const tunda = m[detail.key];
+  if (!tunda) {
+    toast('Antrean terkirim — nota tersimpan di Riwayat', 'success', 5000);
+    return;
+  }
+  delete m[detail.key];
+  simpanHutangTunda(m);
+  const res = detail.res as { data?: { sale?: { invoice_no?: string | null; id?: string } } } | null;
+  const no = res?.data?.sale?.invoice_no ?? (res?.data?.sale?.id ?? detail.key).slice(0, 8);
+  void apiPost<{ data: { id: number } }>('/api/customer-debts', {
+    customer_id: tunda.customer_id,
+    type: 'charge',
+    amount: tunda.sisa,
+    note: `Nota ${no} — sisa bayar POS`,
+  })
+    .then(() => toast(`Antrean terkirim · hutang ${rp(tunda.sisa)} dicatat (${tunda.nama})`, 'success', 6000))
+    .catch((e) => toast(
+      `Nota antrean ${no} terkirim, tetapi sisa ${rp(tunda.sisa)} GAGAL dicatat hutang — catat manual di halaman Hutang (${e instanceof Error ? e.message : 'gagal'})`,
+      'error',
+      9000,
+    ));
+});
+// Job nota ditolak server saat flush (stok kurang, dsb.) = peta hutang tunda
+// ikut dibuang (toast penjelasan sudah dikirim api.ts di cabang poison-drop).
+window.addEventListener(EVENT_OUTBOX_DROP, (ev) => {
+  const detail = (ev as CustomEvent<{ key?: string }>).detail;
+  if (!detail?.key) return;
+  const m = muatHutangTunda();
+  if (m[detail.key]) {
+    delete m[detail.key];
+    simpanHutangTunda(m);
+  }
+});
+
 async function pay(opts?: { hutang?: boolean }): Promise<void> {
   if (!shift || busy) return;
   if (!keranjangTerisi()) return;
-  // Server tak terjangkau = nota TIDAK mungkin tersimpan (tidak ada outbox
-  // otomatis — lihat kepala api.ts). Tolak dengan kalimat eksplisit SEBELUM
-  // menyentuh uang, lalu picu cek ulang supaya tombol hidup lagi begitu
-  // server kembali.
-  if (!jaringanTersambung()) {
-    toast('Server tidak terjangkau — transaksi BELUM tersimpan. Periksa koneksi, lalu tekan Bayar lagi.', 'error', 8000);
-    void cekJaringan();
-    return;
-  }
+  // Butir ROADMAP 1.8 (ACC pemilik 2026-10-25): server tak terjangkau TIDAK
+  // lagi menolak transaksi — payload yang sama dimasukkan outbox (`enqueue()`)
+  // dan dikirim otomatis oleh flushOutbox() saat server pulih. Penolakan lama
+  // ("BELUM tersimpan, tekan Bayar lagi") digantikan antrean; baris offline
+  // ada di dalam try di bawah (`offline` + cabang enqueue).
   // Sanitasi izin terakhir sebelum menyentuh uang (jaring pengaman kalau
   // state lama lolos restore): baris layanan tanpa izin / item manual tanpa
   // izin tidak boleh membuat topup terkirim lalu nota ditolak 403 (uang
@@ -4546,9 +4624,24 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
   }
   busy = true;
   paintCart();
+  // Butir 1.8: satu bendera untuk seluruh cabang antrean di bawah. Online =
+  // jalur lama persis (POST + resume modal); offline = payload yang SAMA ke
+  // outbox, tanpa resume/struk/refresh stok (nomor invoice belum ada).
+  const offline = !jaringanTersambung();
   // Tahap untuk pesan catch: topup dikirim lebih dulu, jadi kegagalan bisa
   // datang dari dua request berbeda — pesan jangan menyesatkan.
   let tahap: 'topup' | 'penjualan' = 'topup';
+  // Payload yang SIAP KIRIM dikumpulkan di sini juga untuk jalur antrean:
+  // gagal jaringan DI TENGAH jalan (catch status 0) mengantrekan SEMUA yang
+  // belum pasti terkirim — idempotensi uuid membuat pengiriman ulang aman
+  // (server balas `duplicate:true` untuk topup/nota yang sudah masuk).
+  const antreLayanan: { path: string; data: Record<string, unknown> }[] = [];
+  let antreSale: Record<string, unknown> | null = null;
+  // Snapshot hutang di scope LUAR try — catch (gagal jaringan di tengah
+  // jalan) perlu mendaftarkan peta hutang tunda walau error terjadi setelah
+  // snapshot dihitung. 0/'' = bukan jalur hutang.
+  let sisaHutangSnap = 0;
+  let namaHutangSnap = '';
   try {
     // ---------- (Opsi B hybrid) baris LAYANAN dikirim DULU ----------
     // Urutan disepakati (TODO "Opsi B"): POST /api/topups per baris LALU baru
@@ -4569,7 +4662,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     const saleId = uuid();
     for (const t of cartTopup) {
       const keluar = isTarik(t);
-      await apiPost<{ data: unknown; duplicate?: boolean }>('/api/topups', {
+      const payload = {
         id: t.id,
         kind: keluar ? 'tarik' : 'topup',
         provider: t.jenis.toUpperCase(), // E-WALLET | PULSA | PLN-TOKEN | PLN-BILL | TARIK-*
@@ -4581,7 +4674,13 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         shift_id: shift.id,
         cashier: getCashier(),
         sale_id: saleId, // pengelompokan Riwayat — lihat catatan di atas
-      });
+      };
+      antreLayanan.push({ path: '/api/topups', data: payload });
+      if (offline) {
+        enqueue('/api/topups', payload);
+      } else {
+        await apiPost<{ data: unknown; duplicate?: boolean }>('/api/topups', payload);
+      }
     }
     // Snapshot SEBELUM apa pun direset — struk & modal resume tidak punya
     // sumber data lagi setelah cart/cashIn dibersihkan di bawah.
@@ -4607,6 +4706,8 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     const sisaHutang = opts?.hutang && payMethod === 'tunai' && cashIn < tot ? tot - cashIn : 0;
     const kontakStruk = customers.find((c) => c.id === customerId);
     const namaHutang = kontakStruk?.name ?? '';
+    sisaHutangSnap = sisaHutang;
+    namaHutangSnap = namaHutang;
     const qtyStruk = cart.reduce((a, l) => a + l.qty, 0);
 
     // Keranjang hanya berisi baris LAYANAN (tanpa produk): POST /api/sales
@@ -4624,6 +4725,16 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     // pilihCetakSelesai), sebab layanan-saja tidak punya nota sale.
     // Snapshot argumen SEBELUM cartTopup di-reset.
     if (!cart.length) {
+      if (offline) {
+        // Butir 1.8: baris layanan sudah mengantre di atas (urutan outbox
+        // terjaga). Tanpa resume modal/struk — nomor invoice tidak ada;
+        // cetak ulang dari Riwayat setelah job terkirim.
+        void cekJaringan(); // banner "diantrekan" tampil segera, bukan 15 detik
+        tutupBayar();
+        toast('Layanan DIANTREKAN — terkirim otomatis begitu server pulih', 'warning', 8000);
+        resetSetelahTransaksi();
+        return;
+      }
       const judulLayanan = adaTarik && !adaTopup ? 'Tarik' : adaTopup && adaTarik ? 'Layanan' : 'Topup';
       const strukTopOnly: Struk = {
         judul: getToko(),
@@ -4696,7 +4807,11 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     }
 
     tahap = 'penjualan';
-    const res = await apiPost<{ data: { sale: { id: string; total: number; invoice_no?: string | null; customer_name?: string } ; duplicate: boolean } }>('/api/sales', {
+    // Payload nota dibangun SEKALI (online POST & offline enqueue memakai
+    // objek yang sama — butir 1.8). `antreSale` juga dipakai catch: gagal
+    // jaringan di tengah jalan mengantrekan nota, bukan menyuruh "Cek
+    // Riwayat" (idempotensi uuid membuat pengiriman ulang aman).
+    const payloadSale = {
       id: saleId, // uuid yang sama di-stamp ke sale_id tiap baris topup di atas
       shift_id: shift.id,
       pay_method: payMethod,
@@ -4738,7 +4853,31 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         // sale_items.note; '' = tanpa catatan (server menerima apa adanya).
         note: l.note,
       })),
-    });
+    };
+    antreSale = payloadSale;
+    let res: { data: { sale: { id: string; total: number; invoice_no?: string | null; customer_name?: string }; duplicate: boolean } } | null = null;
+    if (offline) {
+      // Butir 1.8: nota masuk outbox dengan payload PERSIS seperti online —
+      // server nanti memvalidasi ulang stok/diskon/kadaluarsa. TANPA resume
+      // modal & cetak (nomor invoice belum ada); TANPA segarkanStokPos
+      // (server belum memotong stok — cache tetap angka lama, jujur).
+      enqueue('/api/sales', payloadSale);
+      // Hutang offline dicatat ke ledger SETELAH job terkirim (butuh
+      // `invoice_no` dari balasan flush) — daftarkan peta tundanya.
+      if (sisaHutang > 0 && customerId !== null) catatHutangTunda(saleId, sisaHutang, customerId, namaHutang);
+      void cekJaringan(); // banner "diantrekan" tampil segera, bukan 15 detik
+      tutupBayar();
+      toast(
+        `Transaksi DIANTREKAN (${rp(tot + topupTot)}${sisaHutang > 0 ? ` · hutang ${rp(sisaHutang)}` : ''})` +
+          ' — terkirim otomatis begitu server pulih',
+        'warning',
+        9000,
+      );
+      resetSetelahTransaksi();
+      return;
+    }
+    res = await apiPost<{ data: { sale: { id: string; total: number; invoice_no?: string | null; customer_name?: string }; duplicate: boolean } }>(
+      '/api/sales', payloadSale);
     // Stok di suggest/F3 ikut ter-refresh (server baru saja memotong stok) —
     // SEBELUM resume & paintCart berikutnya, supaya angka yang tampil sudah
     // sinkron. Lihat segarkanStokPos().
@@ -4928,16 +5067,26 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
   } catch (e) {
     const status = e instanceof HttpError ? e.status : 0;
     if (status === 0) {
-      // Jaringan putus / timeout di tengah request. JUJUR: request bisa saja
-      // sudah diterima server tapi jawabannya hilang, jadi jangan bilang
-      // "gagal" — suruh kasir memeriksa Riwayat dulu sebelum mengulang.
+      // Jaringan putus / timeout DI TENGAH jalan (butir 1.8): sebagian request
+      // bisa saja sudah diterima server, tapi payload kita idempotent per
+      // uuid — kirim ulang = `duplicate:true`, tidak menggandakan. Jadi semua
+      // yang belum pasti terkirim MASUK ANTREAN, bukan "Cek Riwayat dulu".
+      for (const j of antreLayanan) enqueue(j.path, j.data);
+      if (antreSale) enqueue('/api/sales', antreSale);
+      if (antreSale && sisaHutangSnap > 0 && customerId !== null) {
+        // saleId didefinisikan di try — catch bisa terjadi sebelum itu, maka
+        // guard antreSale (payload memuat sale_id/id yang sama).
+        const sid = (antreSale.id as string) ?? '';
+        if (sid) catatHutangTunda(sid, sisaHutangSnap, customerId, namaHutangSnap);
+      }
       toast(
         `Server tidak terjangkau saat menyimpan ${tahap === 'topup' ? 'data layanan' : 'penjualan'} — ` +
-          'transaksi BELUM terkonfirmasi. Cek Riwayat dulu; kalau belum ada, tekan Bayar lagi.',
-        'error',
+          'transaksi DIANTREKAN dan terkirim otomatis begitu server pulih.',
+        'warning',
         9000,
       );
       void cekJaringan();
+      resetSetelahTransaksi();
     } else {
       toast(`Gagal menyimpan ${tahap}: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
     }

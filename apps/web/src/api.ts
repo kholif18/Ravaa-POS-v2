@@ -2,13 +2,19 @@
 // untuk sales & topup. ID uuid dibuat di client -> POST ulang aman (server
 // idempotent).
 //
-// KEJUJURAN OFFLINE (2026-10-25) — baca sebelum menambah klaim "offline-first":
-// `enqueue()` di bawah BELUM dipanggil jalur tulis mana pun (POS menampilkan
-// toast + mematikan tombol bayar saat server tak terjangkau, BUKAN mengantre).
-// Antrean localStorage hanya terisi oleh pemanggil yang memanggil enqueue()
-// secara eksplisit (saat ini: tidak ada di app; suite test mengisinya langsung
-// untuk menguji chip notif). Jadi jangan pernah menulis bahwa penjualan offline
-// "masuk antrean lalu terkirim sendiri" sampai wiring itu benar-benar ada.
+// OUTBOX TERTULIS (butir ROADMAP 1.8, ACC pemilik 2026-10-25) — `pay()` POS
+// kini memanggil `enqueue()` saat server tak terjangkau (sebelum tekan Bayar
+// maupun gagal jaringan DI TENGAH jalan), jadi penjualan offline BENAR-BENAR
+// masuk antrean lalu terkirim otomatis oleh `flushOutbox()` (tick 5 detik +
+// event `online`). Revisi ini MENGGANTIKAN catatan "KEJUJURAN OFFLINE"
+// 2026-10-25 yang menyatakan wiring belum ada — jangan menulis ulang klaim
+// "belum ada outbox" di dokumen mana pun. Batas yang tetap jujur:
+//  * Shift WAJIB dibuka saat server hidup (gate POS offline tidak berubah).
+//  * Hutang offline tidak dikirim bareng nota — dicatat ke ledger oleh
+//    listener `EVENT_OUTBOX_DONE` di pos.ts SETELAH flush sukses (butuh
+//    `invoice_no` dari balasan server).
+//  * Struk/resume modal TIDAK ditampilkan untuk nota yang diantrekan (nomor
+//    invoice belum ada) — cetak ulang dari Riwayat setelah terkirim.
 
 import { toast } from './ui/toast';
 import { akunTersimpan, tokenAuth } from './ui/auth';
@@ -159,6 +165,18 @@ export function enqueue(path: string, data: Record<string, unknown>): string {
 
 export function outboxCount(): number { return load().length; }
 
+/** Event flush: satu job antrean BERHASIL terkirim. `detail.key` = id job
+ *  (uuid body), `detail.res` = balasan JSON server. Dipakai POS untuk
+ *  men-chain efek samping yang butuh balasan nota (cth: hutang offline —
+ *  butuh `invoice_no` dari `res.data.sale`). Dipancarkan GLOBAL (bukan hanya
+ *  saat halaman POS hidup) supaya flush yang terjadi di halaman lain tetap
+ *  men-chain; pos.ts memasang listener di level modul. */
+export const EVENT_OUTBOX_DONE = 'ravaa:outbox-done';
+/** Event flush: job DIBUANG karena gagal validasi permanen (4xx selain
+ *  401/403 — stok kurang, item kosong, dsb). POS membersihkan efek samping
+ *  yang menunggu job itu (cth: peta hutang tunda) + men-toast alasannya. */
+export const EVENT_OUTBOX_DROP = 'ravaa:outbox-drop';
+
 export async function flushOutbox(onDone?: (key: string) => void): Promise<void> {
   const jobs = load();
   if (jobs.length === 0) return;
@@ -175,8 +193,11 @@ export async function flushOutbox(onDone?: (key: string) => void): Promise<void>
       continue;
     }
     try {
-      await apiPost(j.path, j.data);
+      const res = await apiPost<unknown>(j.path, j.data);
       onDone?.(j.key);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(EVENT_OUTBOX_DONE, { detail: { key: j.key, path: j.path, res } }));
+      }
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 0;
       if (status === 401 || status === 403) {
@@ -189,7 +210,11 @@ export async function flushOutbox(onDone?: (key: string) => void): Promise<void>
         // Gagal validasi permanen (stok kurang, item kosong, dsb) — buang,
         // jangan retry tiap 5 detik selamanya hingga spam console + server.
         console.warn('[outbox] drop poison job', j.key, j.path, e);
-        toast(`Antrian dibuang (gagal validasi): ${e instanceof Error ? e.message : e}`, 'error');
+        const pesan = e instanceof Error ? e.message : String(e);
+        toast(`Antrian dibuang (gagal validasi): ${pesan}`, 'error');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(EVENT_OUTBOX_DROP, { detail: { key: j.key, pesan } }));
+        }
         continue;
       }
       rest.push(j); // jaringan mati / server 5xx -> coba lagi nanti
