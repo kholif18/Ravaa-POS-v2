@@ -244,7 +244,71 @@ bundling/paket · varian produk · akses dari luar LAN (Tailscale) ·
 pengingat hutang via WA (4.12) · absensi staf (4.14) — "tidak perlu karena
 tidak membutuhkannya". Tidak ada kandidat "belum dibahas" tersisa.
 
----
+### 1.7 Antrian eksekusi kedua — keputusan pemilik 2026-10-25 (riset Moka/Qasir/iReap)
+
+> Hasil lanjutan `docs/perbandingan-pos.md` (v2, 19 Okt): empat aplikasi
+> trending baru dicek 2026-10-25 (Moka — mokapos.com; Qasir — qasir.id +
+> /fitur-tambahan; iReap — ireappos.com; akses 25 Okt 2026). Dari semua pola
+> fitur yang mereka tawarkan, hanya 4 butir yang relevan DAN belum
+> berkeputusan (sisanya sudah tertutup §4/§4.1 dokumen itu). Keputusan
+> pemilik 2026-10-25 lewat chat: **scan LAN HTTPS + A outbox + B retur
+> supplier + C riwayat pesanan = semua ACC** — "ini dulu coba buat plannya
+> dan kerjakan".
+
+| # | Butir | Keputusan | Catatan |
+|---|-------|-----------|---------|
+| 1.7 | **Scan kamera di LAN (HTTPS)** — kamera getUserMedia/BarcodeDetector butuh konteks aman; `http://IP:5656` diblokir browser (terbukti: `scan-kamera.ts:44-48` + Caddyfile hanya `:80`) | **ACC 2026-10-25** | Solusi = `tls internal` Caddy (self-signed); HP tap "Lanjutkan" sekali. **Baca produk offline = SUDAH JALAN** — deteksi & keranjang 100% client-side, produk dari cache IndexedDB (`getCachedProducts()`), jadi begitu kamera lolos, scan bekerja offline penuh |
+| 1.8 | **Outbox tulis offline (kandidat 4.A)** — wiring `enqueue()` ke `pay()` | **ACC 2026-10-25** — "boleh diterapkan alih-alih jika server sedang maintenance" | Server mati = penjualan DIANTREKAN + terkirim otomatis saat pulih; hutang offline di-chaining ke ledger saat flush sukses |
+| 1.9 | **Retur ke supplier (retur pembelian)** (kandidat 4.B) | **ACC 2026-10-25** — "boleh diterapkan" | KulaPOS punya; Ravaa masih `~ (PO batal saja)`. Menyusul setelah 1.8 (fitur skema+API+UI penuh) |
+| 1.10 | **Riwayat pesanan jasa per pelanggan** (kandidat 4.C) | **ACC 2026-10-25** — "bisa disempurnakan" | Modal riwayat pelanggan kini hanya `GET /api/sales?customer_id` — pesanan dikerjakan/selesai TIDAK terlihat. Tambah filter `customer_id` di `GET /api/orders` + seksi di modal |
+
+Urutan eksekusi: **1.8 → 1.10 → 1.7 → 1.9** (1.8 & 1.10 = kode; 1.7 = infra
+yang wajib diuji pemilik di perangkat; 1.9 = fitur penuh terbesar).
+
+#### 1.8 Outbox tulis offline — desain eksekusi
+
+* **`api.ts`**: tambah event `EVENT_OUTBOX_DONE` (`ravaa:outbox-done`, detail
+  `{key, res}`) + `EVENT_OUTBOX_DROP` (`ravaa:outbox-drop`, detail
+  `{key, pesan}`) — dipancarkan di cabang sukses & poison-drop `flushOutbox()`
+  supaya POS bisa men-chain efek samping tanpa api.ts mengenal pos.ts.
+* **`pos.ts` `pay()`**: pindahkan penolakan offline. `bisaBayar()` = keranjang
+  terisi SAJA (server tidak lagi syarat); barrier uang/hutang TETAP berlaku
+  (kebenaran uang tidak bergantung server). Saat `!jaringanTersambung()`:
+  payload topup & sale yang SAMA di-`enqueue()` (urutan outbox = urutan
+  replay), TANPA resume modal/struk/segarkanStokPos — toast "DIANTREKAN",
+  state direset. Gagal jaringan DI TENGAH jalan (catch status 0) juga
+  mengantrekan (idempotensi uuid membuat replay aman walau topup sudah
+  terkirim — server balas `duplicate:true`).
+* **Hutang offline**: peta `ravaa.outbox-debt` (localStorage, kunci =
+  saleId) disaat mengantre; listener `ravaa:outbox-done` membacanya, ambil
+  `invoice_no` dari balasan sale, kirim charge `/api/customer-debts` (pola
+  catatan identik), hapus entri. Job sale yang ditolak server (poison) =
+  entri ikut dibuang + toast.
+* **Banner & trust**: teks jadi "transaksi akan DIANTREKAN… terkirim
+  otomatis"; gate shift offline TIDAK berubah (shift butuh server — jujur).
+* **Tes**: `offline-jujur-test.mjs` ditulis ulang (B = toast antrean + keranjang
+  kosong + localStorage outbox ≥1; D = flush otomatis + nota ada di DB +
+  hutang ikut tercatat) + `run.mjs` ekspek.
+
+#### 1.9 Retur ke supplier — desain (menyusul setelah 1.8)
+
+* **Skema**: dua tabel BARU `purchase_returns` (FK `purchases.id`, shift/cashier,
+  total, note, client_id UNIQUE idempotensi) + `purchase_return_items`
+  (FK `purchase_return_items.purchase_return_id` & `purchase_items.id`,
+  qty, harga_beli snapshot, amount) — pola 3.7; `migrate()` CREATE TABLE IF
+  NOT EXISTS cukup + SQL ALTER untuk install lama di AGENTS §5.
+* **Aturan**: stok KELUAR `stock_moves reason='retur-beli'` (qty negatif,
+  unit_cost = harga_beli baris PO, ref_id='PR-<id>') — HANYA `track_stock=1`;
+  `qty ≤ diterima_baris − sudah_diretur`; nilai retur mengurangi nilai
+  terima → `sisa = max(0, diterima − retur_total − terbayar)` (diterima =
+  Σ kedatangan − Σ retur); uang kembali dari supplier dicatat manual di Kas
+  Masuk (kandidat 1.9 v1 tidak menyentuh laci). PO batal tetap hanya bila
+  `n_terima === 0 && n_retur === 0`.
+* **UI**: tombol "Retur ke supplier" di sub-halaman `#/purchases/<id>` (form
+  per baris qty + catatan), riwayat retur tampil di detail + laporan harian
+  `purchase_retur:{n,total}`.
+* **Tes**: `purchase-retur-test.mjs` baru (API + agregat + UI) — ekspek di
+  `run.mjs`.
 
 ## 2. Fase 2 — Analitik (setelah Fase 1)
 

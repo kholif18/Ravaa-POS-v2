@@ -9,11 +9,17 @@
 //
 // Batas platform (FAKTA, bukan bug yang bisa ditambal di klien):
 //  * getUserMedia hanya tersedia di konteks aman (HTTPS atau localhost).
-//    Akses http://IP-LAN dari HP diblokir browser → pesan jelas, bukan tombol
-//    diam (lihat dukunganScanKamera()).
+//    Akses http://IP-LAN dari HP diblokir browser. BUTIR 1.7 (ACC 2026-10-25):
+//    solusinya infrastruktur — Caddy menyajikan HTTPS internal di
+//    https://<ip>:5656 (infra/Caddyfile). Di HP: peringatan sertifikat muncul
+//    sekali, tap "Lanjutkan ke situs" → konteks jadi aman → kamera aktif.
+//    Pesan di bawah mengarahkan ke langkah itu.
 //  * `BarcodeDetector` adalah API browser (tersedia di Chrome/Edge Android &
 //    sebagian desktop; tidak ada di Chrome Linux — terverifikasi 2026-10-19).
 //    Browser tanpa API itu mendapat pesan yang menjelaskan.
+//  * Deteksi & baca produk 100% OFFLINE: overlay ini TIDAK memanggil jaringan
+//    sama sekali — hasil kode masuk ke alur `#pos-q` yang membaca cache
+//    produk IndexedDB (store.ts getCachedProducts).
 import { icon } from './icons';
 import { toast } from './toast';
 
@@ -44,7 +50,7 @@ export function dukunganScanKamera(): { bisa: boolean; pesan: string } {
   if (!window.isSecureContext) {
     return {
       bisa: false,
-      pesan: 'Kamera butuh koneksi aman (HTTPS atau localhost) — buka Ravaa lewat alamat https://, bukan http:// alamat LAN',
+      pesan: 'Kamera butuh koneksi aman — buka https://IP-server:5656 di HP, lalu tap "Lanjutkan ke situs" pada peringatan sertifikat (sekali per perangkat)',
     };
   }
   if (!navigator.mediaDevices?.getUserMedia) {

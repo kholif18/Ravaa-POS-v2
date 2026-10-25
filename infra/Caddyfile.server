@@ -1,7 +1,14 @@
 # Caddy native di home server (tanpa Docker).
 # Install: sudo apt install -y caddy && sudo cp infra/Caddyfile.server /etc/caddy/Caddyfile && sudo systemctl reload caddy
 # {$HOME} di-expand otomatis oleh Caddy dari environment.
-:5656 {
+#
+# HTTPS LAN (butir ROADMAP 1.7, ACC pemilik 2026-10-25): pemindai barcode
+# kamera HP (getUserMedia/BarcodeDetector) butuh KONTEKS AMAN — http://IP
+# diblokir browser. Caddy menyajikan HTTPS dengan sertifikat internal
+# (self-signed): buka https://<ip-server>:5656, peringatan sertifikat di HP
+# muncul sekali → tap "Lanjutkan ke situs (tidak aman)". Deteksi barcode &
+# baca produk tetap 100% offline (cache IndexedDB).
+https://:5656 {
   root * {$HOME}/ravaaposv2/apps/web/dist
   file_server
   reverse_proxy /api/* localhost:3001

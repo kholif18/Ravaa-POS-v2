@@ -7,6 +7,10 @@
 mengoreksi status Ravaa yang sudah usang di v1 (dulu masih "✗" untuk login,
 PO supplier, retur, dan backup — semuanya kini ada), menyegarkan harga pasar,
 serta menambahkan catatan kebijakan **MDR QRIS 0%** (efektif 1 Okt 2026).
+**v2.1 (2026-10-25)** — putaran riset kedua menambah **Moka · Qasir · iReap**
+(akses 25 Okt 2026); kandidat baru §4.15–4.18 (outbox offline, riwayat
+pesanan per pelanggan, scan LAN HTTPS, retur supplier) — semuanya ACC
+pemilik 2026-10-25; antrian eksekusi di `ROADMAP.md` §1.7.
 Riwayat v1 utuh tersimpan di git log dokumen ini.
 
 **Keputusan kandidat §4 (pemilik, 19 Okt 2026):** 7 butir disetujui dan
@@ -323,7 +327,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Laporan + export (CSV/Excel) | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** (8 menu) |
 | Laporan terjadwal email/WA | · | ✓ (berbayar) | · | ✓ | · | ✗ sengaja (§5) |
 | Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ✓ selesai 19 Okt 2026 (4.10) |
-| Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | ~ (shell cache; tulis wajib server) |
+| Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | **~** (baca offline penuh; **tulis = outbox antre + flush otomatis, selesai 25 Okt 2026** — 4.15) |
 | Tanpa langganan (server sendiri) | ✗ | ✓ (Lite) | ✗ | ✗ | ~ (inti gratis) | **✓** |
 | Scan barcode kamera HP | · | · | · | · | ✓ | **✓** (selesai 19 Okt 2026; 4.4) |
 | Customer display | · | · | ✓ | · | ✓ (gratis) | ✗ sengaja (§5) |
@@ -353,6 +357,10 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.12 | **Pengingat hutang via WA** | **❌ tidak perlu** (19 Okt 2026 — "tidak perlu karena tidak membutuhkannya") | kebiasaan pasar | Use-case beda dari WA rekap yang dicoret 2026-10-01; halaman Hutang + badge umur hutang sudah mencukupi |
 | 4.13 | **Akses dari luar LAN** | **❌ tidak perlu** | semua cloud | Opsi Tailscale/tunnel ditolak; tetap self-hosted LAN |
 | 4.14 | **Absensi staf** | **❌ tidak perlu** (19 Okt 2026 — "tidak perlu karena tidak membutuhkannya") | KP StaffPlus, Olsera, Loyverse | Login + shift sudah menutup kehadiran di skala 1–2 kasir |
+| 4.15 | **Outbox tulis offline** (server maintenance = nota diantrekan) | **✅ selesai 2026-10-25** — ROADMAP §1.8 | Qasir ("tetap bisa catat saat sinyal hilang, terkirim otomatis"), iReap Pro (hybrid offline+sync) | `pay()` → `enqueue()`; flush tick 5 detik; hutang offline di-chain ke ledger saat flush sukses; `offline-jujur-test` 29 asersi |
+| 4.16 | **Riwayat pesanan jasa per pelanggan** | **✅ selesai 2026-10-25** — ROADMAP §1.10 | Qasir vertikal Laundry/Barbershop ("layanan & pembayaran tiap pelanggan tercatat") | `GET /api/orders?customer_id=` + seksi "Pesanan jasa" di modal riwayat Pelanggan (pesanan belum diserah kini terlihat) |
+| 4.17 | **Scan kamera di LAN (HTTPS)** | **✅ selesai 2026-10-25** — ROADMAP §1.7 | Loyverse (scan kamera), semua app Android | `getUserMedia` butuh konteks aman → Caddy `tls internal` (`https://ip:5656`); deteksi + baca produk cache IndexedDB 100% offline |
+| 4.18 | **Retur ke supplier (retur pembelian)** | **✅ ACC 2026-10-25 — antrian ROADMAP §1.9** (menyusul setelah 1.8) | KulaPOS (retur ke supplier) | Ravaa masih `~` (PO batal saja); desain skema/API/UI di ROADMAP §1.9 |
 
 ---
 
@@ -444,6 +452,20 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
   · help.loyverse.com — "Barcodes Scanning by Built-in Device Camera"
 * Aronium: <https://help.aronium.com/> — artikel "How to buy a license"
   (dibarui 17 Okt 2026).
+
+**Diambil langsung 2026-10-25 (putaran kedua — kandidat §4.15–4.18):**
+
+* Moka: <https://www.mokapos.com/> — Rp299rb/bln/outlet; POS + Payment EDC +
+  Moka Order + GoFood/GoStore + manajemen meja/karyawan/stok antar outlet +
+  Capital.
+* Qasir: <https://www.qasir.id/> + <https://www.qasir.id/fitur-tambahan> —
+  Pro Rp699rb/thn, Pro Plus Rp1.199rb/thn; offline-first ("data terkirim
+  otomatis begitu online"); Rekap Kas masuk/keluar; wawasan (jam teramai);
+  Pro Plus: catatan struk, kelola diskon, harga grosir min-qty, nomor
+  antrean, tiket pesanan, uang muka, ringkas struk, logo.
+* iReap POS: <https://ireappos.com/> — Rp500rb/thn/perangkat; hybrid
+  online+offline dengan sinkronisasi otomatis; QRIS; piutang via iREAP
+  Invoice; loyalty; diskon berdasarkan quantity; salesman + GPS; absensi.
 
 **Dari riset v1 2026-10-06** (situs berbasis JS — tidak bisa di-fetch ulang):
 

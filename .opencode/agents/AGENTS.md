@@ -140,16 +140,33 @@ apps/web/src/api.ts      fetch + outbox (localStorage, retry 5 detik, id uuid).
                          (toggles `hidden` + teks `n transaksi antre offline`) —
                          supaya chip notif POS ikut hidup tiap antrean berubah
                           tanpa menunggu repaint POS (revisi 2026-10-08).
-                         **KEJUJURAN OFFLINE (2026-10-25) — baca sebelum
-                         menulis klaim "offline-first" di dokumen mana pun**:
-                         `enqueue()` BELUM dipanggil jalur tulis mana pun.
-                         POS TIDAK mengantre penjualan saat server mati — ia
-                         menolak dengan pesan jelas (lihat `pos.ts`). Antrean
-                         hanya terisi bila ada kode yang memanggil `enqueue()`
-                         eksplisit; saat ini hanya suite test yang mengisinya
-                         langsung untuk menguji chip notif. Jangan pernah
-                         menulis "penjualan offline masuk antrean lalu terkirim
-                         sendiri" sampai wiring itu benar-benar ada.
+                          **OUTBOX TERTULIS (butir ROADMAP 1.8, ACC pemilik
+                          2026-10-25) — MENGGANTIKAN catatan "KEJUJURAN
+                          OFFLINE" pagi itu**: `pay()` POS kini memanggil
+                          `enqueue()` saat server tak terjangkau — sebelum
+                          tekan Bayar maupun gagal jaringan DI TENGAH jalan
+                          (catch `HttpError.status===0`) — jadi penjualan
+                          offline BENAR-BENAR masuk antrean dan terkirim
+                          otomatis oleh `flushOutbox()` (tick 5 detik + event
+                          `online`). Payload antrean = objek PERSIS jalur
+                          online (idempotensi uuid: replay = `duplicate:true`,
+                          tidak menggandakan). Dua event BARU dari flush:
+                          **`EVENT_OUTBOX_DONE`** (`ravaa:outbox-done`,
+                          detail `{key, path, res}`) + **`EVENT_OUTBOX_DROP`**
+                          (`ravaa:outbox-drop`, detail `{key, pesan}` — job
+                          poison 4xx). Batas yang tetap jujur: (1) shift
+                          WAJIB dibuka saat server hidup (gate POS offline
+                          tidak berubah); (2) **hutang offline** tidak ikut
+                          payload — `pay()` menulis peta
+                          `ravaa.outbox-debt` (localStorage, kunci = saleId)
+                          dan listener modul-level di pos.ts mengirim charge
+                          `/api/customer-debts` saat job nota terkirim
+                          (butuh `invoice_no` dari balasan); job ditolak
+                          server = entri ikut dibuang; (3) nota antrean
+                          TIDAK menampilkan resume modal/struk (nomor
+                          invoice belum ada) — cetak ulang dari Riwayat.
+                          Diuji `tests/offline-jujur-test.mjs` (29 asersi:
+                          antre + flush + DB + chaining hutang + gate).
                          **Batas waktu & status jaringan**: `BATAS_REQ_MS`
                          20.000 — fetch yang menggantung (WiFi putus di tengah
                          POST) di-abort dan dilempar `HttpError(status 0,
@@ -1084,34 +1101,38 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            6/7/12/20, `6*SKU`, edit manual, ganti satuan, grosir
                            termurah-menang, pulih setelah reload, nilai di
                            `sale_items.discount`, form produk).
-                           **Banner & gerbang OFFLINE (2026-10-25, pasangan
-                           `api.ts` di atas — MENGOREKSI klaim lama "POS
-                           offline-first")**: `bisaBayar()` = keranjang terisi
-                           **DAN `jaringanTersambung()`**; selama server tak
-                           terjangkau tombol Bayar/Bayar pas/OK form bayar
-                           `disabled` dan `pay()`/`bayarPas()`/`bukaBayar()`
-                           menolak dengan toast `"Server tidak terjangkau —
-                           transaksi belum bisa disimpan…"` (TIDAK ada
-                           `enqueue()`, lihat `api.ts`). `bannerOfflineHtml()`
-                           (`#pos-offline`, dipakai sidebar desktop & header
-                           mobile; `hidden` dipasang di PEMBUNGKUS, bukan
-                           elemen ber-utility `flex` — `hidden` kalah oleh
-                           `flex`) + tombol `#pos-offline-retry`
-                           (`cekJaringan()`); `terapkanJaringan()` menyegarkan
-                           banner, semua tombol bayar, kalimat trust
-                           `.pos-bayar-trust` ("aman & tercatat" → peringatan
-                           merah), dan me-render ulang gate shift — dipanggil
-                           listener `EVENT_JARINGAN` (didengar di
-                           `bindPintasan`, dilepas `unmountPosPage`) tanpa
-                           repaint penuh supaya fokus input tidak hilang.
-                           Gate shift punya dua kegagalan terpisah:
-                           `shiftError` `'jaringan'` (kartu "Server tidak
-                           terjangkau" + `#pos-gate-retry`, BUKAN "Buka shift
-                           dulu") vs `'info'` (pesan server apa adanya).
-                           Gagal simpan karena status 0 (`pay()`) menyuruh
-                           kasir **cek Riwayat dulu** — request bisa saja
-                           sudah diterima server tapi jawabannya hilang; jangan
-                           menulis "gagal".
+                            **Banner & gerbang OFFLINE (revisi butir ROADMAP
+                            1.8, ACC pemilik 2026-10-25 — menggantikan
+                            perilaku "tolak" pagi itu)**: `bisaBayar()` =
+                            **keranjang terisi SAJA** — server TIDAK lagi
+                            syarat. Selama tak terjangkau tombol Bayar/Bayar
+                            pas/OK tetap aktif; `pay()`/`bayarPas()`
+                            **MENGANTREKAN** transaksi (payload sama →
+                            `enqueue()`, lihat `api.ts`) dan toast
+                            `"Transaksi DIANTREKAN … terkirim otomatis"`.
+                            Gagal jaringan DI TENGAH jalan (catch status 0)
+                            juga mengantrekan (idempotensi uuid aman) — dulu
+                            menyuruh "cek Riwayat dulu".
+                            `bannerOfflineHtml()` (`#pos-offline`, dipakai
+                            sidebar desktop & header mobile; `hidden` dipasang
+                            di PEMBUNGKUS, bukan elemen ber-utility `flex` —
+                            `hidden` kalah oleh `flex`; kini warna AMBER +
+                            teks "DIANTREKAN", bukan merah "belum bisa
+                            disimpan") + tombol `#pos-offline-retry`
+                            (`cekJaringan()`); `terapkanJaringan()` menyegarkan
+                            banner, semua tombol bayar, kalimat trust
+                            `.pos-bayar-trust` ("aman & tercatat" → peringatan
+                            amber "akan DIANTREKAN"), dan me-render ulang gate
+                            shift — dipanggil listener `EVENT_JARINGAN`
+                            (didengar di `bindPintasan`, dilepas
+                            `unmountPosPage`) tanpa repaint penuh supaya fokus
+                            input tidak hilang.
+                            Gate shift punya dua kegagalan terpisah (TIDAK
+                            berubah — shift memang butuh server):
+                            `shiftError` `'jaringan'` (kartu "Server tidak
+                            terjangkau" + `#pos-gate-retry`, BUKAN "Buka shift
+                            dulu") vs `'info'` (pesan server apa adanya).
+                            Diuji `tests/offline-jujur-test.mjs` (29 asersi).
                            Diuji `tests/offline-jujur-test.mjs` (18 asersi:
                            banner saat server diputus, Bayar mati, pesan gate,
                            pulih setelah retry).
@@ -2445,6 +2466,16 @@ apps/web/src/ui/scan-kamera.ts  **Pemindai barcode lewat kamera HP** (butir
                            di "Meminta izin kamera…"). Konteks aman
                            (HTTPS/localhost) wajib; akses via http://IP-LAN
                            dijawab toast penjelas, bukan tombol diam.
+                           **Butir ROADMAP 1.7 (ACC pemilik 2026-10-25)**:
+                           solusi LAN = infrastruktur, bukan klien — Caddy
+                           menyajikan **HTTPS internal**
+                           (`https://<ip>:5656`, `tls internal` di
+                           `infra/Caddyfile`); di HP peringatan sertifikat
+                           muncul sekali → tap "Lanjutkan ke situs" → konteks
+                           aman → kamera aktif + PWA bisa dipasang. Deteksi
+                           & baca produk 100% OFFLINE: overlay tidak memanggil
+                           jaringan; hasil masuk alur `#pos-q` yang membaca
+                           cache produk IndexedDB (`getCachedProducts()`).
                            Diuji `tests/scan-kamera-test.mjs` (16 asersi:
                            stub kamera+detektor; desktop `Qty*Kode`, header
                            mobile, dan konteks tanpa BarcodeDetector).
@@ -2795,12 +2826,18 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `"maksimal 100 item per pesanan"`); per item `"item 1: nama wajib
       diisi"`, `"item 1: qty harus > 0"`, `"item 1: harga harus angka >= 0"`,
       catatan baris > 200 -> 400. Status awal `dikerjakan`.
-    - `GET /api/orders?status=&q=&limit=&offset=` ->
+    - `GET /api/orders?status=&q=&customer_id=&limit=&offset=` ->
       `{data:[<orders + dibayar/sisa/refund_total/n_items>], total, ringkas}`.
       `status` default `semua`; sah `dikerjakan|selesai|diambil|batal|semua`
       (400 `"status harus dikerjakan|selesai|diambil|batal|semua"`). `q`
       multi-kata: SEMUA kata cocok di `order_no` / `customer_name` / **nama
-      item** (EXISTS `order_items`). `ringkas` = hitungan per status +
+      item** (EXISTS `order_items`). **`customer_id` (butir ROADMAP 1.10,
+      ACC 2026-10-25)**: filter riwayat per pelanggan untuk modal Riwayat
+      halaman Pelanggan — pesanan `dikerjakan`/`selesai` (belum diserah)
+      TIDAK punya nota, jadi tanpa filter ini riwayat jasa pelanggan terlihat
+      kosong. Harus integer > 0 bila dikirim (400
+      `"customer_id harus integer"`); `''`/absen = tanpa filter. Kombinasi
+      dengan `status`/`q` sah (AND). `ringkas` = hitungan per status +
       `piutang` (Σ sisa pesanan dikerjakan/selesai) — semua `COALESCE` supaya
       tabel kosong mengirim 0, bukan null (sumber chip kepala halaman).
       `dibayar`/`sisa` dari `SQL_ORDER_UANG` (Σ `order_payments` net refund;
@@ -4003,9 +4040,9 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   (pola `cleanupDB()` + nota penjaga di `tests/product-delete-test.mjs`).
 * **PWA**: service worker HANYA boleh meng-cache shell + aset statis — data
   `/api/*` TIDAK PERNAH (angka kasir basi > layar error). Jalur tulis offline
-  lewat outbox **belum terpasang** — lihat aturan KEJUJURAN OFFLINE di §2
-  `api.ts`; jangan menulis klaim "penjualan offline diantrekan" di dokumen
-  mana pun sampai `enqueue()` benar-benar dipanggil jalur tulis. Ubah isi
+  lewat outbox **SUDAH TERTULIS** (butir ROADMAP 1.8, ACC 2026-10-25) —
+  lihat `api.ts` §2: `pay()` mengantrekan saat server mati, flush otomatis
+  tick 5 detik. Ubah isi
   `apps/web/public/sw.js` = NAIKKAN versi
   `ravaa-shell-v1` (cache lama baru dibuang saat activate). Registrasi SW
   tetap `import.meta.env.PROD` (dev jangan di-cache). Uji: `tests/pwa-test.mjs`.

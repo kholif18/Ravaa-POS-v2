@@ -56,7 +56,9 @@ curl localhost:3001/health
 cd ~/Projects/ravaaposv2/infra
 cp ../apps/api/.env.example ../apps/api/.env  # atau set ENV di compose
 docker compose up -d --build
-# web: http://<ip-server>:5656, api: http://<ip-server>:3001
+# web: https://<ip-server>:5656 (HTTPS internal — kamera scan butuh konteks
+#      aman; di HP tap "Lanjutkan ke situs" pada peringatan sertifikat
+#      sekali per perangkat), api: http://<ip-server>:3001
 ```
 
 Backup DB: API membuat **backup otomatis** — sekali saat hidup lalu cek tiap

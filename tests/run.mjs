@@ -68,7 +68,7 @@ const SUITE = [
   ['pos-qtykode-test.mjs', 26],
   // Kejujuran offline (2026-10-25): POST gagal jaringan -> toast "BELUM
   // terkonfirmasi", banner + tombol mati, keranjang utuh; retry setelah pulih.
-  ['offline-jujur-test.mjs', 19],
+  ['offline-jujur-test.mjs', 29],
   ['e2e-topup-keranjang.mjs', 61],
   ['e2e-split.mjs', 56],
   ['kategori-expiry-test.mjs', 14],
@@ -113,7 +113,7 @@ const SUITE = [
   ['login-test.mjs', 26],
   ['aging-test.mjs', 21],
   ['audit-test.mjs', 24],
-  ['orders-test.mjs', 68],
+  ['orders-test.mjs', 73],
   ['izin-test.mjs', 34],
   ['pin-lock-test.mjs', 13],
   // restore-test memulihkan DB ke snapshot yang ia buat SENDIRI di awal suite

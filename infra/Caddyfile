@@ -1,5 +1,18 @@
 # Web static + proxy /api ke service api (same-origin, tanpa CORS drama)
-:80 {
+#
+# HTTPS LAN (butir ROADMAP 1.7, ACC pemilik 2026-10-25): pemindai barcode
+# kamera HP (getUserMedia + BarcodeDetector) hanya jalan di KONTEKS AMAN —
+# http://IP:5656 diblokir browser ("Kamera butuh koneksi aman"). Karena itu
+# Caddy kini menyajikan HTTPS dengan sertifikat internal (self-signed):
+#   1. Buka https://<ip-server>:5656 dari HP.
+#   2. Peringatan sertifikat muncul SEKALI per perangkat — tap
+#      "Lanjutkan ke situs (tidak aman)".
+#   3. Kamera aktif; PWA & service worker ikut bisa dipasang.
+# Alternatif tanpa peringatan: ekspor root CA Caddy
+# (`docker compose exec web caddy trust --help` / file pki di volume) dan
+# pasang di HP. Deteksi barcode & baca produk tetap 100% offline
+# (cache IndexedDB) — sertifikat hanya men-buka gerbang kamera.
+https://:5656 {
   root * /srv
   file_server
   reverse_proxy /api/* api:3001

@@ -1,6 +1,8 @@
 # Home server: API + Web + Caddy. SQLite disimpan di volume api-data.
 # Jalankan: cd infra && docker compose up -d --build
-# Akses: http://<ip-server>:5656 (web), http://<ip-server>:3001/health (api)
+# Akses: https://<ip-server>:5656 (web — HTTPS internal untuk kamera scan,
+#        peringatan sertifikat di HP = tap "Lanjutkan" sekali),
+#        http://<ip-server>:3001/health (api)
 
 services:
   api:
