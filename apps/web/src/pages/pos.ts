@@ -35,8 +35,9 @@ import {
   type Product,
 } from '../store';
 import { diskonBorongan, type TingkatBorongan } from '../borongan';
-import { getCashier, getToko } from '../ui/user';
+import { getCashier, getToko, logout } from '../ui/user';
 import { akunTersimpan, punyaIzin } from '../ui/auth';
+import { bukaGantiAkun } from '../ui/lock';
 import { switchHtml } from '../ui/switch';
 import {
   getAutoPrint, getDrawerKick, getPrintPause, setAutoPrint, setStrukLayout,
@@ -1861,9 +1862,10 @@ function sidebarBayarHtml(): string {
                  (nominal = mutasi modal, BUKAN omzet — AGENTS §1; nominal
                  tarik = uang keluar). -->
             ${bolehLayanan() ? `<button type="button" id="pos-qa-topup" class="btn btn-ghost pos-qa" title="Tambah baris topup (pulsa/e-wallet/PLN) atau tarik tunai ke keranjang — dibayar bersama belanja">${icon('wallet')}<span>${bolehTopup() && bolehTarik() ? 'Topup/Tarik' : bolehTopup() ? 'Topup' : 'Tarik'}</span></button>` : ''}
-            ${bolehDiskon() ? `<button type="button" id="pos-qa-disc" class="btn btn-ghost pos-qa">Diskon${kbd('F6')}</button>` : ''}
             ${bisaRiwayat ? `<a href="#/history" class="btn btn-ghost pos-qa" title="Riwayat transaksi — linimasa penjualan & topup/tarik per hari">${icon('receipt')}<span>Riwayat</span></a>` : ''}
             ${bisaRiwayat ? `<button type="button" id="pos-reprint" class="btn btn-ghost pos-qa" title="Cetak ulang nota terakhir dari device ini" ${bacaNotaTerakhir() ? '' : 'disabled '}>${icon('print')}<span>Cetak ulang</span></button>` : ''}
+            <button type="button" id="pos-logout" class="btn pos-logout" title="Keluar dari sesi ini">${icon('logout')}<span>Keluar</span></button>
+            <button type="button" id="pos-switch" class="btn btn-ghost pos-qa" title="Ganti akun kasir cepat">${icon('users')}<span>Ganti akun</span></button>
           </div>
         </div>
         ${bisaProduk || bisaStok ? `<div class="pos-side-sep" role="separator"></div>
@@ -4998,6 +5000,11 @@ function bindSidebar(): void {
   // Cetak ulang nota terakhir (Tahap 2) — dialog jalur Riwayat, tanpa
   // pratinjau Lihat Struk (keputusan pemilik 2026-10-06).
   host!.querySelector('#pos-reprint')?.addEventListener('click', () => void cetakNotaTerakhir());
+
+  // Akun cepat — Logout & Ganti akun (POS kasir tidak punya dashboard)
+  host!.querySelector('#pos-logout')?.addEventListener('click', () => { void logout(); });
+  host!.querySelector('#pos-switch')?.addEventListener('click', () => { bukaGantiAkun(); });
+
   // Placeholder [data-soon]: tombol sudah dirender, fiturnya menyusul
   // (permintaan pemilik 2026-10-04 "placeholder/hardcode dulu tidak apa-apa").
   host!.querySelectorAll<HTMLElement>('[data-soon]').forEach((b) =>
