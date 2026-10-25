@@ -2961,6 +2961,18 @@ app.get('/api/orders', wajibIzin('pesanan.lihat'), (c) => {
   const where: string[] = [];
   const params: unknown[] = [];
   if (status !== 'semua') { where.push('o.status = ?'); params.push(status); }
+  // Filter riwayat per pelanggan (butir ROADMAP 1.10, ACC 2026-10-25): modal
+  // Riwayat di halaman Pelanggan memakai ini untuk menampilkan pesanan jasa
+  // yang BELUM diserah (dikerjakan/selesai) — hal yang tidak bisa dilihat
+  // dari GET /api/sales?customer_id. `date` sengaja tidak ikut: riwayat
+  // pelanggan = seluruh masa, bukan satu hari.
+  const cidQ = c.req.query('customer_id');
+  if (cidQ !== undefined && cidQ !== '') {
+    const cid = Number(cidQ);
+    if (!Number.isInteger(cid) || cid <= 0) return c.json({ error: 'customer_id harus integer' }, 400);
+    where.push('o.customer_id = ?');
+    params.push(cid);
+  }
   for (const k of kata) {
     where.push(`(lower(o.order_no) LIKE ? OR lower(o.customer_name) LIKE ?
       OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND lower(oi.name) LIKE ?))`);

@@ -49,6 +49,19 @@ type SalePelanggan = {
   order_no: string | null;
 };
 
+/** Baris pesanan jasa untuk modal riwayat pelanggan (subset GET /api/orders
+ *  — butir ROADMAP 1.10). `sisa` computed server (SQL_ORDER_UANG). */
+type OrderPelanggan = {
+  id: number;
+  order_no: string | null;
+  created_at: string;
+  status: 'dikerjakan' | 'selesai' | 'diambil' | 'batal';
+  total: number;
+  n_items: number;
+  dibayar: number;
+  sisa: number;
+};
+
 const state = {
   items: [] as Customer[],
   total: 0,
@@ -279,6 +292,7 @@ async function riwayatPelanggan(c: Customer): Promise<void> {
   }
   let rows: SalePelanggan[] = [];
   let total = 0;
+  let orders: OrderPelanggan[] = [];
   try {
     const r = await apiGet<{ data: SalePelanggan[]; total: number }>(
       `/api/sales?customer_id=${c.id}&limit=50`,
@@ -289,11 +303,70 @@ async function riwayatPelanggan(c: Customer): Promise<void> {
     toast(`Gagal memuat riwayat: ${errMsg(e)}`, 'error');
     return;
   }
+  // Pesanan jasa (butir ROADMAP 1.10): gagal = modal tetap tampil dengan nota
+  // saja — pesanan adalah pelengkap, bukan sumber utama riwayat.
+  try {
+    const r = await apiGet<{ data: OrderPelanggan[] }>(
+      `/api/orders?customer_id=${c.id}&limit=50`,
+    );
+    orders = r.data;
+  } catch {
+    orders = [];
+  }
   const semuaKasir = punyaIzin('riwayat.semua');
   const jumlahTampil = rows.reduce((a, s) => a + s.total, 0);
   const terpotong = total > rows.length;
+  // Status pesanan → label + warna chip (pola chip hutang/retur halaman ini).
+  const statusPesanan: Record<OrderPelanggan['status'], { label: string; kelas: string }> = {
+    dikerjakan: { label: 'Dikerjakan', kelas: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300' },
+    selesai: { label: 'Siap diambil', kelas: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' },
+    diambil: { label: 'Diambil', kelas: 'bg-gray-100 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300' },
+    batal: { label: 'Batal', kelas: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300' },
+  };
+  const nAktif = orders.filter((o) => o.status === 'dikerjakan' || o.status === 'selesai').length;
+  const seksiPesanan = orders.length === 0
+    ? ''
+    : `
+      <h3 class="form-sec mt-4">Pesanan jasa</h3>
+      <div class="table-wrap table-scroll">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th class="th">No.</th>
+              <th class="th">Waktu</th>
+              <th class="th text-right">Item</th>
+              <th class="th">Status</th>
+              <th class="th text-right">Dibayar</th>
+              <th class="th text-right">Sisa</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${orders
+              .map((o) => {
+                const st = statusPesanan[o.status] ?? { label: o.status, kelas: 'bg-gray-100 text-gray-600' };
+                const aktif = o.status === 'dikerjakan' || o.status === 'selesai';
+                return `
+              <tr class="tr">
+                <td class="td">
+                  <div class="cell-strong font-mono">${esc(o.order_no ?? String(o.id))}</div>
+                  ${o.status === 'diambil' ? '<div class="cell-sub">tercatat di Riwayat (nota)</div>' : ''}
+                </td>
+                <td class="td whitespace-nowrap">${esc(waktu(o.created_at))}</td>
+                <td class="td text-right tabular-nums">${o.n_items}</td>
+                <td class="td">
+                  <span class="chip ${st.kelas}">${st.label}</span>
+                  ${aktif && o.sisa > 0 ? `<div class="mt-1"><span class="chip bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300">Hutang ${rp(o.sisa)}</span></div>` : ''}
+                </td>
+                <td class="td text-right tabular-nums">${o.dibayar > 0 ? rp(o.dibayar) : '—'}</td>
+                <td class="td text-right font-semibold tabular-nums">${aktif && o.sisa > 0 ? rp(o.sisa) : '—'}</td>
+              </tr>`;
+              })
+              .join('')}
+          </tbody>
+        </table>
+      </div>`;
   const isi =
-    rows.length === 0
+    rows.length === 0 && orders.length === 0
       ? `<div class="empty">${icon('receipt')}<span>${
           semuaKasir
             ? 'Pelanggan ini belum pernah bertransaksi.'
@@ -303,8 +376,10 @@ async function riwayatPelanggan(c: Customer): Promise<void> {
       <div class="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <span class="chip">${icon('receipt')}<span>${total} nota</span></span>
         <span class="chip">${terpotong ? `${rows.length} terbaru` : 'Semua'} · ${rp(jumlahTampil)}</span>
+        ${orders.length ? `<span class="chip">${icon('clock')}<span>${orders.length} pesanan${nAktif ? ` (${nAktif} aktif)` : ''}</span></span>` : ''}
         ${!semuaKasir ? `<span class="chip">hanya nota Anda</span>` : ''}
       </div>
+      ${rows.length === 0 ? '' : `
       <div class="table-wrap table-scroll">
         <table class="table table-compact">
           <thead>
@@ -340,7 +415,8 @@ async function riwayatPelanggan(c: Customer): Promise<void> {
               .join('')}
           </tbody>
         </table>
-      </div>
+      </div>`}
+      ${seksiPesanan}
       ${terpotong
         ? `<p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Menampilkan ${rows.length} nota terbaru dari ${total}. Buka menu Riwayat transaksi untuk arsip per hari.</p>`
         : ''}`;

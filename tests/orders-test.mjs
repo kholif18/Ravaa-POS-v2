@@ -184,6 +184,29 @@ chk('cari nama pelanggan menemukan semua pesanan uji', cariCust.total === 2, Str
 const listBatal = await api('/api/orders?status=batal&limit=50');
 chk('filter status=batal memuat B', listBatal.data.some((o) => o.id === B.id) && listBatal.ringkas.batal >= 1, JSON.stringify(listBatal.ringkas));
 chk('status tak dikenal -> 400 pesan', (await status('/api/orders?status=waduh')) === 400);
+// Filter riwayat per pelanggan (butir ROADMAP 1.10, ACC 2026-10-25) — modal
+// Riwayat halaman Pelanggan memakai ini untuk pesanan jasa yang belum serah.
+const perCust = await api(`/api/orders?customer_id=${custId}&limit=50`);
+chk('filter customer_id memuat semua pesanan pelanggan itu',
+  perCust.total === 2 && perCust.data.every((o) => o.customer_id === custId),
+  JSON.stringify({ total: perCust.total }));
+const perCustDiambil = await api(`/api/orders?customer_id=${custId}&status=diambil`);
+chk('customer_id + status kombinasi tepat (hanya A yang diambil)',
+  perCustDiambil.total === 1 && perCustDiambil.data[0].id === A.id,
+  JSON.stringify({ total: perCustDiambil.total }));
+const perCustQ = await api(`/api/orders?customer_id=${custId}&q=UjiOrd%20Banner%20A`);
+chk('customer_id + cari kombinasi tepat', perCustQ.total === 1 && perCustQ.data[0].id === A.id,
+  JSON.stringify({ total: perCustQ.total }));
+const perCustKosong = await api('/api/orders?customer_id=999999');
+chk('customer_id tanpa pesanan -> total 0', perCustKosong.total === 0 && perCustKosong.data.length === 0,
+  JSON.stringify({ total: perCustKosong.total }));
+const errCid = await p.evaluate(async () => {
+  const r = await fetch('/api/orders?customer_id=abc');
+  return { status: r.status, json: await r.json().catch(() => ({})) };
+});
+chk('customer_id bukan angka -> 400 pesan',
+  errCid.status === 400 && errCid.json.error === 'customer_id harus integer',
+  JSON.stringify(errCid.json));
 const au = await api('/api/audit?entity=order&limit=100');
 const aksiOrder = new Set((au.data ?? []).map((r) => r.action));
 chk('jejak audit order: create + update tercatat', aksiOrder.has('create') && aksiOrder.has('update'), [...aksiOrder].join(','));
