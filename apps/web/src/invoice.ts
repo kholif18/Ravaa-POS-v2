@@ -198,11 +198,21 @@ export function cityToko(toko: Toko): string {
 
 /** Buka tab dokumen laporan dan cetak (window.print() — simpan sebagai PDF
  *  dari dialog browser). Kop diambil dari server; popup diblokir = Error
- *  (pemanggil toast saja, pola cetakInvoice). */
+ *  (pemanggil toast saja, pola cetakInvoice). Tab dibuka SINKRON sebelum
+ *  fetch — lihat `bukaTabCetak()`. */
 export async function cetakLaporan(dok: DokLaporan): Promise<void> {
-  const set = await apiGet<{ data: Toko }>('/api/settings');
-  const w = window.open('', '_blank');
-  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak laporan');
+  const w = bukaTabCetak(
+    'popup diblokir browser — izinkan popup untuk mencetak laporan',
+    'Menyiapkan laporan…',
+  );
+  let set: { data: Toko };
+  try {
+    set = await apiGet<{ data: Toko }>('/api/settings');
+  } catch (e) {
+    try { w.close(); } catch { /* sudah tertutup */ }
+    throw e;
+  }
+  if (w.closed) return;
   w.document.open();
   w.document.write(htmlLaporan(dok, set.data));
   w.document.close();
@@ -627,39 +637,62 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
 
 /** Ambil kop toko + buka tab rekap A4 dan cetak (window.print()).
  *  Baris shift SUDAH di tangan pemanggil (tanpa endpoint baru) — hanya kop
- *  yang di-fetch. Melempar Error bila popup diblokir (pemanggil toast saja). */
+ *  yang di-fetch. Melempar Error bila popup diblokir (pemanggil toast saja).
+ *  Tab dibuka SINKRON sebelum fetch — lihat `bukaTabCetak()`. */
 export async function cetakRekapShift(s: ShiftRow, fisik: number | null): Promise<void> {
-  const set = await apiGet<{ data: Toko }>('/api/settings');
+  const w = bukaTabCetak(
+    'popup diblokir browser — izinkan popup untuk mencetak rekap A4/PDF',
+    'Menyiapkan rekap shift…',
+  );
+  let set: { data: Toko };
+  try {
+    set = await apiGet<{ data: Toko }>('/api/settings');
+  } catch (e) {
+    try { w.close(); } catch { /* sudah tertutup */ }
+    throw e;
+  }
+  if (w.closed) return;
   const html = htmlRekapShift(s, set.data, fisik);
-  const w = window.open('', '_blank');
-  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak rekap A4/PDF');
   w.document.open();
   w.document.write(html);
   w.document.close();
+}
+
+/** Buka tab dokumen cetak SINKRON (di baris pertama fungsi, SEBELUM `await`
+ *  apa pun) lalu isi placeholder.
+ *
+ *  Kenapa: `window.open` SETELAH `await` bergantung pada "transient user
+ *  activation" dari klik kasir. Di mesin lambat rangkaian fetch bisa melewati
+ *  jendela aktivasi Chrome, hasilnya `window.open` = null dan kasir melihat
+ *  toast "popup diblokir" padahal tidak ada pemblokir (flake nyata 2026-10-25
+ *  di `cetakInvoice` — pola ini dipakai SEMUA builder dokumen A4). Tab kosong
+ *  yang muncul lebih dulu juga lebih jujur: kasir langsung melihat
+ *  "Menyiapkan …", isinya menyusul. Gagal fetch = tab ditutup lagi + Error
+ *  dilempar (pemanggil toast); tab ditutup user = batal senyap.
+ *
+ *  `pesanTolak` = pesan Error spesifik dokumen (dipakai toast pemanggil). */
+export function bukaTabCetak(pesanTolak: string, placeholder = 'Menyiapkan dokumen…'): Window {
+  const w = window.open('', '_blank');
+  if (!w) throw new Error(pesanTolak);
+  try {
+    w.document.write(
+      `<title>${placeholder}</title>` +
+        `<body style="font-family:system-ui,sans-serif;padding:24px;color:#475569">${placeholder}</body>`,
+    );
+  } catch {
+    /* tab sudah ditutup user / dokumen belum siap — isi menyusul di bawah */
+  }
+  return w;
 }
 
 /** Ambil nota + kop lalu buka tab invoice A4 dan cetak (window.print()).
  *  Melempar Error bila API tidak terjangkau / popup diblokir — pemanggil
  *  (pos.ts / history.ts) hanya memberi toast; penjualan TIDAK dibatalkan. */
 export async function cetakInvoice(saleId: string): Promise<void> {
-  // Tab dibuka SINKRON di baris pertama, SEBELUM fetch apa pun.
-  // Alasan (flake nyata di run suite penuh 2026-10-25): `window.open` SETELAH
-  // `await` bergantung pada "transient user activation" dari klik kasir. Di
-  // mesin lambat tiga roundtrip (nota + settings + ledger) bisa melewati jendela
-  // aktivasi Chrome, hasilnya `window.open` = null dan kasir melihat toast
-  // "popup diblokir" padahal tidak ada pemblokir. Membuka tab kosong lebih dulu
-  // juga UX lebih jujur: tab langsung muncul ("Menyiapkan invoice…"), isinya
-  // menyusul. Gagal fetch = tab ditutup lagi + Error dilempar (pemanggil toast).
-  const w = window.open('', '_blank');
-  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak invoice A4');
-  try {
-    w.document.write(
-      '<title>Menyiapkan invoice…</title>' +
-        '<body style="font-family:system-ui,sans-serif;padding:24px;color:#475569">Menyiapkan invoice…</body>',
-    );
-  } catch {
-    /* tab sudah ditutup user / dokumen belum siap — isi menyusul di bawah */
-  }
+  const w = bukaTabCetak(
+    'popup diblokir browser — izinkan popup untuk mencetak invoice A4',
+    'Menyiapkan invoice…',
+  );
   let nota: { data: { sale: SaleNota; items: ItemNota[]; payments?: { method: string; amount: number }[] } };
   try {
     nota = await apiGet<{ data: { sale: SaleNota; items: ItemNota[]; payments?: { method: string; amount: number }[] } }>(

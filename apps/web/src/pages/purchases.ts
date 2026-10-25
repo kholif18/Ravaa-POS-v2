@@ -46,7 +46,7 @@ import { tglPendek } from '../ui/waktu';
 import { rp } from '../escpos';
 // Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026) —
 // helper tinggal di invoice.ts, dipakai juga oleh debts.ts & rekap/laporan.
-import { CSS_LOGO_A4, footerDokumenA4, logoA4Html, rpIdr, tglSingkat, tglLengkap, cityToko } from '../invoice';
+import { CSS_LOGO_A4, bukaTabCetak, footerDokumenA4, logoA4Html, rpIdr, tglSingkat, tglLengkap, cityToko } from '../invoice';
 
 type Po = {
   id: number; created_at: string;
@@ -423,14 +423,26 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
 }
 
 async function cetakPoA4(id: number): Promise<void> {
-  const [det, set] = await Promise.all([
-    apiGet<{ data: { purchase: Po; items: PoItem[] } }>(`/api/purchases/${id}`),
-    apiGet<{ data: Toko }>('/api/settings'),
-  ]);
+  // Tab dibuka SINKRON sebelum fetch — lihat `bukaTabCetak()` di invoice.ts
+  // (popup setelah await bisa diblokir karena aktivasi pengguna kedaluwarsa).
+  const w = bukaTabCetak(
+    'popup diblokir browser — izinkan popup untuk mencetak A4',
+    'Menyiapkan nota pembelian…',
+  );
+  let det: { data: { purchase: Po; items: PoItem[] } };
+  let set: { data: Toko };
+  try {
+    [det, set] = await Promise.all([
+      apiGet<{ data: { purchase: Po; items: PoItem[] } }>(`/api/purchases/${id}`),
+      apiGet<{ data: Toko }>('/api/settings'),
+    ]);
+  } catch (e) {
+    try { w.close(); } catch { /* sudah tertutup */ }
+    throw e;
+  }
+  if (w.closed) return;
   const tglCetak = tglLengkap(new Date().toISOString());
   const html = htmlPoA4(det.data.purchase, det.data.items, set.data, tglCetak);
-  const w = window.open('', '_blank');
-  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak A4');
   w.document.open();
   w.document.write(html);
   w.document.close();

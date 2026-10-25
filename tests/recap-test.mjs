@@ -5,7 +5,7 @@ import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
-  import { pasangToken } from './bantuan-uji.mjs';
+  import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
@@ -126,7 +126,7 @@ await pasangToken(page);
     page.waitForEvent('popup'),
     page.click('[data-rekap="pdf"]'),
   ]);
-  await popPdf.waitForLoadState('domcontentloaded');
+  await tungguDokumenA4(popPdf);
   const pdfTeks = await popPdf.evaluate(() => document.title + ' ' + document.body.innerText.replace(/\s+/g, ' '));
   ok('PDF: judul + Kas seharusnya + Selisih absen (X)', /Rekap Shift #\d+/.test(pdfTeks)
     && pdfTeks.includes('Kas seharusnya') && !pdfTeks.includes('Selisih'), pdfTeks.slice(0, 160));

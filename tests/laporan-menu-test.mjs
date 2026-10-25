@@ -11,7 +11,7 @@ import { chromium } from 'playwright-core';
 import { execSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pasangToken } from './bantuan-uji.mjs';
+import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 const API = 'http://localhost:3001';
 const DB = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '../apps/api/data/data.db');
@@ -246,7 +246,7 @@ const [pop] = await Promise.all([
   p.waitForEvent('popup'),
   p.click('#rp-print'),
 ]);
-await pop.waitForLoadState('domcontentloaded');
+await tungguDokumenA4(pop);
 chk('popup cetak: judul + tabel + kaki', (await pop.title()).includes('STOK')
   && (await pop.content()).includes('Saran order')
   && (await pop.content()).includes('Dicetak melalui Ravaa POS pada:'));
@@ -263,7 +263,7 @@ const [popLaba] = await Promise.all([
   p.waitForEvent('popup'),
   p.click('#rp-print'),
 ]);
-await popLaba.waitForLoadState('domcontentloaded');
+await tungguDokumenA4(popLaba);
 chk('popup cetak Laba: judul + ringkasan total', (await popLaba.title()).includes('LABA')
   && (await popLaba.content()).includes('Total laba'));
 await popLaba.close().catch(() => {});
@@ -280,7 +280,7 @@ const [popKat] = await Promise.all([
   p.waitForEvent('popup'),
   p.click('#rp-print'),
 ]);
-await popKat.waitForLoadState('domcontentloaded');
+await tungguDokumenA4(popKat);
 chk('popup cetak Kategori: judul + ringkasan total', (await popKat.title()).includes('KATEGORI')
   && (await popKat.content()).includes('Total laba')
   && (await popKat.content()).includes('Dicetak melalui Ravaa POS pada:'));

@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pasangToken } from './bantuan-uji.mjs';
+import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 const API = 'http://localhost:3001';
 const WEB = 'http://localhost:5656';
@@ -242,7 +242,7 @@ chk('B8 CSV: dua seksi + fixture + baris Jumlah',
 
 await p.context().addInitScript(() => { window.print = () => {}; });
 const [pop] = await Promise.all([p.waitForEvent('popup'), p.click('#rp-print')]);
-await pop.waitForLoadState('domcontentloaded');
+await tungguDokumenA4(pop);
 const isiPop = await pop.content();
 const nTabelPop = await pop.locator('table.items').count();
 chk('B9 cetak satu dokumen: tabel valuasi + seksi TIDAK LAKU + kaki',

@@ -27,7 +27,7 @@ import {
   footerStruk, syncDariServerSettings,
 } from '../ui/identitas-struk';
 // Slot logo & footer bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026).
-import { CSS_LOGO_A4, footerDokumenA4, logoA4Html, rpIdr, tglSingkat, tglLengkap, cityToko } from '../invoice';
+import { CSS_LOGO_A4, bukaTabCetak, footerDokumenA4, logoA4Html, rpIdr, tglSingkat, tglLengkap, cityToko } from '../invoice';
 
 type Ringkasan = {
   customer_id: number;
@@ -422,14 +422,25 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
 }
 
 async function cetakHutangA4(customerId: number): Promise<void> {
-  const [rincian, set] = await Promise.all([
-    apiGet<{ data: Rincian }>(`/api/customer-debts/${customerId}`),
-    apiGet<{ data: Toko }>('/api/settings'),
-  ]);
+  // Tab dibuka SINKRON sebelum fetch — lihat `bukaTabCetak()` di invoice.ts.
+  const w = bukaTabCetak(
+    'popup diblokir browser — izinkan popup untuk mencetak A4',
+    'Menyiapkan rincian hutang…',
+  );
+  let rincian: { data: Rincian };
+  let set: { data: Toko };
+  try {
+    [rincian, set] = await Promise.all([
+      apiGet<{ data: Rincian }>(`/api/customer-debts/${customerId}`),
+      apiGet<{ data: Toko }>('/api/settings'),
+    ]);
+  } catch (e) {
+    try { w.close(); } catch { /* sudah tertutup */ }
+    throw e;
+  }
+  if (w.closed) return;
   const tglCetak = tglLengkap(new Date().toISOString());
   const html = htmlHutangA4(rincian.data, set.data, tglCetak);
-  const w = window.open('', '_blank');
-  if (!w) throw new Error('popup diblokir browser — izinkan popup untuk mencetak A4');
   w.document.open();
   w.document.write(html);
   w.document.close();

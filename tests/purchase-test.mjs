@@ -4,7 +4,7 @@ import { chromium } from 'playwright-core';
 import { execSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pasangToken } from './bantuan-uji.mjs';
+import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 let pass = 0, fail = 0;
 const chk = (name, ok, info = '') => {
@@ -212,7 +212,7 @@ const [popPo] = await Promise.all([
   p.waitForEvent('popup'),
   p.click('[data-po-cetak]'),
 ]);
-await popPo.waitForLoadState('domcontentloaded');
+await tungguDokumenA4(popPo);
 const a4po = await popPo.evaluate((id) => {
   const css = document.querySelector('style')?.textContent ?? '';
   const tbl = document.querySelector('table');

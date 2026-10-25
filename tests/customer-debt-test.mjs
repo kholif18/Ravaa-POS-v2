@@ -4,7 +4,7 @@ import { chromium } from 'playwright-core';
 import { execSync } from 'node:child_process';
 import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pasangToken } from './bantuan-uji.mjs';
+import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 let pass = 0, fail = 0;
 const chk = (name, ok, info = '') => {
@@ -206,7 +206,7 @@ const [popA4] = await Promise.all([
   p.waitForEvent('popup'),
   p.click('.modal [data-ok]'), // okLabel rincian = "Cetak A4" (modal tidak auto-close)
 ]);
-await popA4.waitForLoadState('domcontentloaded');
+await tungguDokumenA4(popA4);
 const a4 = await popA4.evaluate(() => {
   const css = document.querySelector('style')?.textContent ?? '';
   const rk = document.querySelector('.total-section');

@@ -15,7 +15,7 @@
 //   - suite membersihkan logonya sendiri (self-heal awal + hapus di akhir).
 // Jalankan: node a4-logo-test.mjs   (butuh API :3001 + vite :5656 hidup)
 import { chromium } from 'playwright-core';
-import { pasangToken } from './bantuan-uji.mjs';
+import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 const WEB = 'http://localhost:5656';
 let lolos = 0, gagal = 0;
@@ -137,7 +137,7 @@ try {
     `${unggah.status} / ${unggah.nama}`);
 
   const [popAda] = await Promise.all([page.waitForEvent('popup'), page.click('#rp-print')]);
-  await popAda.waitForLoadState('domcontentloaded');
+  await tungguDokumenA4(popAda);
   let b = null;
   for (let i = 0; i < 25; i++) {
     await popAda.waitForTimeout(200);
@@ -160,7 +160,7 @@ try {
   const hapus = await post('/api/settings/logo', { image: '' });
   ok('hapus logo uji (200 — koreksi/bersih)', hapus.status === 200, `status=${hapus.status}`);
   const [popKosong] = await Promise.all([page.waitForEvent('popup'), page.click('#rp-print')]);
-  await popKosong.waitForLoadState('domcontentloaded');
+  await tungguDokumenA4(popKosong);
   let c = null;
   for (let i = 0; i < 25; i++) {
     await popKosong.waitForTimeout(200);

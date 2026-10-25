@@ -2145,16 +2145,21 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           diambil `cetakInvoice()` bila `sale.customer_id` ada —
                           gagal dimuat -> 0, cetak TIDAK dibatalkan) bila > 0
                           DAN ≠ hutang nota ini (supaya tidak dobel). `cetakInvoice(saleId)`
-                          = **`window.open('', '_blank')` SINKRON di baris
-                          pertama** (flake 2026-10-25: membuka tab SETELAH tiga
-                          `await` fetch bergantung pada transient user
-                          activation klik kasir — di mesin lambat jendelanya
-                          habis, popup balik null, kasir melihat toast "popup
-                          diblokir" padahal tidak ada pemblokir) lalu tab diisi
-                          placeholder "Menyiapkan invoice…", fetch `GET
-                          /api/sales/:id` + `GET /api/settings` + ledger piutang
-                          (paralel) ditulis ke tab itu, dan gagal fetch = tab
-                          ditutup lagi + Error. `window.print()` otomatis saat
+                          = **`bukaTabCetak()`** (`window.open('', '_blank')`
+                          SINKRON di baris pertama, sebelum `await` apa pun —
+                          flake 2026-10-25: membuka tab SETELAH fetch bergantung
+                          pada transient user activation klik kasir; di mesin
+                          lambat jendelanya habis, popup balik null, kasir
+                          melihat toast "popup diblokir" padahal tidak ada
+                          pemblokir) lalu tab diisi placeholder "Menyiapkan
+                          invoice…", fetch `GET /api/sales/:id` +
+                          `GET /api/settings` + ledger piutang (paralel) ditulis
+                          ke tab itu, dan gagal fetch = tab ditutup lagi +
+                          Error. **Helper yang SAMA dipakai `cetakLaporan()`,
+                          `cetakRekapShift()`, `cetakPoA4()` (purchases.ts) dan
+                          `cetakHutangA4()` (debts.ts)** — jangan kembali ke
+                          `window.open` setelah fetch di builder mana pun.
+                          `window.print()` otomatis saat
                           load. **Tanpa print-agent** (rendering HTML tidak bisa
                           diserahkan ke server nol-dependensi — cetak lewat
                           browser/CUPS `lp -d EPSON-L3110-Series`). Lempar Error
@@ -2446,12 +2451,15 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        asersi != `ekspek` — angka `ekspek` wajib diperbarui bila
                        asersi memang sengaja ditambah. Prasyarat: API :3001
                        hidup + ada shift terbuka (runner membukanya sendiri).
-                       **Popup dokumen A4**: `cetakInvoice()` membuka tab SINKRON
-                       lalu mengisi placeholder "Menyiapkan invoice…" — jangan
-                       baca isi popup dengan `waitForLoadState('domcontentloaded')`
-                       (placeholder sudah tercapai). Pakai helper
-                       `tungguDokumenA4(popup)` dari `tests/bantuan-uji.mjs`
-                       (menunggu kaki "Dicetak melalui Ravaa POS pada:").
+                       **Popup dokumen A4**: SEMUA builder (`cetakInvoice`,
+                       `cetakLaporan`, `cetakRekapShift`, `cetakPoA4`,
+                       `cetakHutangA4`) membuka tab SINKRON lewat
+                       `bukaTabCetak()` lalu mengisi placeholder "Menyiapkan …"
+                       — jangan baca isi popup dengan
+                       `waitForLoadState('domcontentloaded')` (placeholder sudah
+                       tercapai). Pakai helper `tungguDokumenA4(popup)` dari
+                       `tests/bantuan-uji.mjs` (menunggu kaki "Dicetak melalui
+                       Ravaa POS pada:").
                        Pilih elemen per-KARTU (judul h2), jangan indeks tabel
                        ke-N — kartu empty-state tidak dirender saat data kosong
                        sehingga indeks bergeser (pelajaran 2026-10-19: kartu
