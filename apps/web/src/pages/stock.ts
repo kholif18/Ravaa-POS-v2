@@ -20,6 +20,7 @@ import { apiGet, apiPost, HttpError } from '../api';
 import { getCachedProducts, type Category, type Product } from '../store';
 import { icon } from '../ui/icons';
 import { toggleNavDrawer } from '../ui/shell';
+import { punyaIzin } from '../ui/auth';
 import { waktu } from '../ui/waktu';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
@@ -240,13 +241,17 @@ function toolbar(): string {
             `<button type="button" data-filter="${f.key}" class="btn btn-ghost${state.filter === f.key ? ' is-on' : ''}">${f.label} <span class="tabular-nums ${state.filter === f.key ? 'text-primary' : 'text-gray-400'}">${jml(f.key)}</span></button>`,
         ).join('')}
         <button type="button" id="st-export" class="btn btn-ghost ml-auto" title="Unduh daftar stok yang sedang tampil (ikut filter &amp; pencarian)">${icon('download')}<span class="hidden sm:inline">Ekspor</span></button>
-        <button type="button" id="st-import" class="btn btn-ghost" title="Terapkan stok dari CSV — tambah atau ganti">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>
+        ${punyaIzin('stok.opname') ? `<button type="button" id="st-import" class="btn btn-ghost" title="Terapkan stok dari CSV — impor stok = hitung fisik (opname)">${icon('upload')}<span class="hidden sm:inline">Impor</span></button>` : ''}
       </div>
     </div>`;
 }
 
 function tableCard(): string {
   const list = terlihat();
+  // Restock = masuk barang, opname = ganti hitungan fisik. Izinnya terpisah
+  // (server), jadi tombol dialog hanya muncul bila salah satunya dimiliki;
+  // isi dialognya sendiri yang menyembunyikan mode yang tak dizinkan.
+  const bolehAturStok = punyaIzin('stok.restock') || punyaIzin('stok.opname');
 
   let isi: string;
   if (state.loading) {
@@ -301,8 +306,8 @@ function tableCard(): string {
                     <div class="flex items-center justify-end gap-1">
                       <button type="button" data-hist="${p.id}" class="row-btn"
                         title="Riwayat mutasi" aria-label="Riwayat stok ${esc(p.name)}">${icon('clock')}</button>
-                      <button type="button" data-stock="${p.id}" class="row-btn"
-                        title="Stok &amp; opname" aria-label="Stok dan opname ${esc(p.name)}">${icon('truck')}</button>
+                      ${bolehAturStok ? `<button type="button" data-stock="${p.id}" class="row-btn"
+                        title="Stok &amp; opname" aria-label="Stok dan opname ${esc(p.name)}">${icon('truck')}</button>` : ''}
                     </div>
                   </td>
                 </tr>`;
@@ -417,12 +422,22 @@ function bind(): void {
   host.querySelector('#st-export')?.addEventListener('click', () => {
     unduhCSV(csvStok(terlihat()), 'stok-ravaa.csv');
   });
-  host.querySelector('#st-import')?.addEventListener('click', () => importStokForm());
+  host.querySelector('#st-import')?.addEventListener('click', () => {
+    if (!punyaIzin('stok.opname')) {
+      toast('Impor stok butuh izin Opname', 'warning');
+      return;
+    }
+    importStokForm();
+  });
 
   host.querySelectorAll<HTMLElement>('[data-stock]').forEach((b) =>
     b.addEventListener('click', () => {
       const p = state.products.find((x) => x.id === Number(b.dataset.stock));
       if (!p) return;
+      if (!punyaIzin('stok.restock') && !punyaIzin('stok.opname')) {
+        toast('Butuh izin Restock atau Opname untuk mengubah stok', 'warning');
+        return;
+      }
       // restockForm memanggil callback ini setelah menyimpan, supaya angka di
       // halaman ini ikut terbaru tanpa reload penuh.
       restockForm(p, () => load());

@@ -51,6 +51,9 @@ const SUITE = [
   ['escpos-test.ts', 70],
   ['labelsheet-test.ts', 80],
   ['borongan-test.ts', 31],
+  // Peta dependensi izin (2026-10-25): preset Standar/Ketat/Supervisor sehat,
+  // pengecualian sengaja tidak berubah, normalisasi & izin efektif.
+  ['izin-dependensi-test.ts', 27],
   ['sku-urut-test.mjs', 17],
   ['product-delete-test.mjs', 32],
   ['e2e-import.mjs', 43],
@@ -63,6 +66,9 @@ const SUITE = [
   ['e2e-duplikat.mjs', 37],
   ['e2e-aksi.mjs', 38],
   ['pos-qtykode-test.mjs', 26],
+  // Kejujuran offline (2026-10-25): POST gagal jaringan -> toast "BELUM
+  // terkonfirmasi", banner + tombol mati, keranjang utuh; retry setelah pulih.
+  ['offline-jujur-test.mjs', 19],
   ['e2e-topup-keranjang.mjs', 61],
   ['e2e-split.mjs', 56],
   ['kategori-expiry-test.mjs', 14],
@@ -77,7 +83,7 @@ const SUITE = [
   // ringkasan + penanda "belum disimpan". Read-only terhadap /api/settings.
   ['settings-ui-test.mjs', 49],
   ['skema-guard-test.mjs', 11],
-  ['customer-debt-test.mjs', 41],
+  ['customer-debt-test.mjs', 46],
   ['expense-supplier-test.mjs', 34],
   ['kas-masuk-test.mjs', 23],
   ['retur-test.mjs', 44],
@@ -104,7 +110,7 @@ const SUITE = [
   ['aging-test.mjs', 21],
   ['audit-test.mjs', 24],
   ['orders-test.mjs', 68],
-  ['izin-test.mjs', 19],
+  ['izin-test.mjs', 34],
   ['pin-lock-test.mjs', 13],
   // restore-test memulihkan DB ke snapshot yang ia buat SENDIRI di awal suite
   // (data suite sebelumnya ikut masuk snapshot) — taruh menjelang akhir supaya

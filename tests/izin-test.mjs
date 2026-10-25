@@ -81,18 +81,78 @@ const me = await api('GET', '/api/me', null, TSTANDAR);
 chk('me ada permissions field', me.status === 200 && me.json.data?.user?.permissions !== undefined);
 chk('standar permissions_custom false (default)', me.json.data?.user?.permissions_custom === false);
 
-console.log('=== E. Core rejection ===');
+console.log('=== F. Gate kategori & analitik (2026-10-25) ===');
+// `produk.kelola` kini juga menjaga mutasi kategori (dulu terbuka untuk semua
+// sesi). Membaca kategori tetap terbuka: semua form produk butuh daftarnya.
+chk('standar GET categories 200 (baca tetap terbuka)', (await api('GET', '/api/categories', null, TSTANDAR)).status === 200);
+chk('standar POST categories 403 (produk.kelola)', (await api('POST', '/api/categories', { name: 'Uji Izin' }, TSTANDAR)).status === 403);
+chk('standar DELETE categories 403 (produk.kelola)', (await api('DELETE', '/api/categories/atk', null, TSTANDAR)).status === 403);
+chk('standar GET analytics 403 (laporan.lihat)', (await api('GET', '/api/reports/analytics', null, TSTANDAR)).status === 403);
+
+// Analitik dulu `hanyaOwner`; kini cukup `laporan.lihat` (satu aturan dengan
+// laporan lain) — kasir yang diberi izin itu harus benar-benar bisa membuka.
+const uLap = `ujiizlp${ts}`;
+const createLap = await api('POST', '/api/users', {
+  username: uLap, name: 'Uji Izin Laporan', role: 'kasir', password: 'uji12345',
+  permissions: ['pos.jual', 'laporan.lihat', 'riwayat.lihat'],
+}, TOWNER);
+chk('buat kasir laporan custom', createLap.status === 201);
+const loginLap = await api('POST', '/api/login', { username: uLap, password: 'uji12345' });
+const TLAP = loginLap.json.data?.token;
+chk('login kasir laporan ok', loginLap.status === 200 && TLAP);
+await api('POST', '/api/users/password', { old_password: 'uji12345', password: 'uji12345' }, TLAP);
+chk('laporan GET analytics 200 (laporan.lihat cukup)', (await api('GET', '/api/reports/analytics', null, TLAP)).status === 200);
+chk('laporan POST categories 403 (bukan produk.kelola)', (await api('POST', '/api/categories', { name: 'Uji Izin' }, TLAP)).status === 403);
+
+console.log('=== G. Riwayat transaksi per pelanggan ===');
+// Nama EKSAK (bukan prefix) supaya cleanup tidak pernah menjaring data suite
+// lain; sisa run yang crash dibersihkan lebih dulu (self-heal) termasuk nota
+// anak-anaknya — CLI sqlite3 tidak menjalankan ON DELETE CASCADE.
+const CUST_UJI = 'UjiIzin Pelanggan Riwayat';
+const SALE_UJI_LAMA = `SELECT s.id FROM sales s JOIN customers c ON c.id = s.customer_id WHERE c.name = '${CUST_UJI}'`;
+sql(`DELETE FROM sale_items WHERE sale_id IN (${SALE_UJI_LAMA});
+DELETE FROM sale_payments WHERE sale_id IN (${SALE_UJI_LAMA});
+DELETE FROM sales WHERE id IN (${SALE_UJI_LAMA});
+DELETE FROM customers WHERE name = '${CUST_UJI}';`);
+const buatCust = await api('POST', '/api/customers', { name: CUST_UJI }, TOWNER);
+const custId = buatCust.json.data?.id;
+chk('buat pelanggan uji', buatCust.status === 201 && Number.isInteger(custId));
+// Nota manual tanpa shift: fokus tes = filter `customer_id`, bukan laci.
+const saleId = `ujiizin-${ts}`;
+const jual = await api('POST', '/api/sales', {
+  id: saleId, customer_id: custId, pay_method: 'tunai', cash_in: 1000,
+  items: [{ name: 'UjiIzin Jasa', qty: 1, price: 1000 }],
+}, TOWNER);
+chk('jual manual untuk pelanggan uji', jual.status === 201 && jual.json.data?.sale?.customer_id === custId);
+const riwayat = await api('GET', `/api/sales?customer_id=${custId}`, null, TOWNER);
+chk('GET sales?customer_id 200', riwayat.status === 200 && riwayat.json.total >= 1);
+chk('tanpa date = SELURUH riwayat pelanggan', Array.isArray(riwayat.json.data)
+  && riwayat.json.data.length >= 1
+  && riwayat.json.data.every((s) => s.customer_id === custId));
+chk('customer_id bukan integer -> 400', (await api('GET', '/api/sales?customer_id=abc', null, TOWNER)).status === 400);
+chk('customer_id 0 -> 400', (await api('GET', '/api/sales?customer_id=0', null, TOWNER)).status === 400);
+const riwayatLain = await api('GET', `/api/sales?customer_id=${custId}&date=2000-01-01`, null, TOWNER);
+chk('customer_id + date lain -> 0 baris', riwayatLain.status === 200 && riwayatLain.json.total === 0);
+
+console.log('=== H. Core rejection ===');
 const badPerm = await api('POST', '/api/users', {
   username: `ujiizinbad${ts}`, name: 'Bad', role: 'kasir', password: 'uji12345',
   permissions: ['pengaturan.ubah']
 }, TOWNER);
 chk('core izin ditolak saat buat kasir', badPerm.status === 400 && /core/.test(String(badPerm.json.error)));
 
-console.log('=== F. Cleanup ===');
+console.log('=== I. Cleanup ===');
 await api('DELETE', `/api/users/${idStandar}`, null, TOWNER);
 await api('DELETE', `/api/users/${createKetat.json.data?.id}`, null, TOWNER);
+await api('DELETE', `/api/users/${createLap.json.data?.id}`, null, TOWNER);
+// Baris nota uji: hapus anak dulu — CLI sqlite3 TIDAK menjalankan ON DELETE
+// CASCADE (foreign_keys OFF), dan `sale_payments` ber-UNIQUE(sale_id, method)
+// akan memblokir POST ulang id yang sama pada run berikutnya.
+sql(`DELETE FROM sale_items WHERE sale_id = '${saleId}'; DELETE FROM sale_payments WHERE sale_id = '${saleId}'; DELETE FROM sales WHERE id = '${saleId}';`);
+if (Number.isInteger(custId)) await api('DELETE', `/api/customers/${custId}`, null, TOWNER);
 // hapus sisa user uji
 sql(`DELETE FROM users WHERE username LIKE 'ujiiz%';`);
+sql(`DELETE FROM customers WHERE name = '${CUST_UJI}';`);
 
 console.log(`\n=== ${fail ? 'ADA GAGAL' : 'SEMUA LOLOS'} ===  (lolos: ${pass}, gagal: ${fail})  [izin-test.mjs]`);
 if (fail) process.exit(1);

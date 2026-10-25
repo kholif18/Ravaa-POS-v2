@@ -116,7 +116,9 @@ export async function keluar(): Promise<void> {
 
 /** Profil sesi berjalan. 401 = token mati -> sesi dibersihkan + null.
  *  Jaringan putus (offline) = pakai simpanan login terakhir supaya kasir
- *  tetap bisa buka POS dari cache + antre outbox (offline-first repo ini). */
+ *  tetap bisa membuka POS dari cache (baca saja). Transaksi TIDAK diantre:
+ *  POS menolak menyimpan selama server tak terjangkau — lihat
+ *  KEJUJURAN OFFLINE di api.ts. */
 export async function profilSaya(): Promise<{ akun: Akun; wajib: boolean } | null> {
   if (!tokenAuth()) return null;
   try {

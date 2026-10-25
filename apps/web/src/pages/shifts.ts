@@ -21,6 +21,7 @@
 import { apiGet, apiPost, HttpError } from '../api';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { icon } from '../ui/icons';
+import { punyaIzin } from '../ui/auth';
 import { toast } from '../ui/toast';
 import { openModal } from '../ui/modal';
 import { getCashier } from '../ui/user';
@@ -84,9 +85,9 @@ function toolbar(): string {
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" id="sh-reload" class="chip" title="Muat ulang">${icon('sync')}<span>Segarkan</span></button>
-        <button type="button" id="sh-open" class="btn btn-primary !min-h-[34px] !px-3 !py-1.5" title="Buka shift baru (Alt+N)">
+        ${punyaIzin('shift.buka') ? `<button type="button" id="sh-open" class="btn btn-primary !min-h-[34px] !px-3 !py-1.5" title="Buka shift baru (Alt+N)">
           ${icon('plus')}<span>Buka shift</span><kbd class="kbd">Alt+N</kbd>
-        </button>
+        </button>` : ''}
       </div>
     </div>
   </div>`;
@@ -137,7 +138,7 @@ function tabel(): string {
                 <td class="td">${s.status === 'open' ? '<span class="badge-ok">Terbuka</span>' : '<span class="badge-off">Tutup</span>'}</td>
                 <td class="td text-right">
                   ${
-                    s.status === 'open'
+                    s.status === 'open' && punyaIzin('shift.tutup')
                       ? `<button type="button" class="btn btn-ghost !min-h-[30px] !px-2.5 !py-1 text-xs" data-tutup="${s.id}">${icon('check')}<span>Tutup</span></button>`
                       : '<span class="cell-sub">—</span>'
                   }
@@ -202,10 +203,15 @@ function bind(): void {
   root.querySelector('#sh-open')?.addEventListener('click', bukaBaru);
   // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts). Didaftarkan di bind()
   // — bind() hanya jalan selama halaman ini hidup (paint() akhir load() dijaga
-  // host.isConnected), jadi aksi tidak bocor menimpa halaman lain.
-  pasangAksiBaru(bukaBaru);
+  // host.isConnected), jadi aksi tidak bocor menimpa halaman lain. Hanya bila
+  // `shift.buka` dimiliki (tombolnya pun tidak dirender tanpa izin itu).
+  if (punyaIzin('shift.buka')) pasangAksiBaru(bukaBaru);
   root.querySelectorAll<HTMLElement>('[data-tutup]').forEach((b) =>
     b.addEventListener('click', () => {
+      if (!punyaIzin('shift.tutup')) {
+        toast('Butuh izin Tutup shift', 'warning');
+        return;
+      }
       const id = Number(b.dataset.tutup);
       const s = state.rows.find((r) => r.id === id);
       // Dialog + rumus selisih = modul bersama `shift-tutup.ts` (juga dipakai
@@ -218,6 +224,10 @@ function bind(): void {
 /* ---------- aksi: buka shift ---------- */
 
 function dialogBuka(): void {
+  if (!punyaIzin('shift.buka')) {
+    toast('Butuh izin Buka shift', 'warning');
+    return;
+  }
   openModal({
     title: 'Buka shift',
     okLabel: 'Buka shift',

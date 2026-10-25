@@ -22,8 +22,13 @@ import {
   GRUP_IZIN,
   IZIN_KASIR_KETAT,
   IZIN_KASIR_STANDAR,
+  IZIN_KASIR_SUPERVISOR,
   IZIN_OPERASIONAL,
+  LABEL_IZIN,
+  dependenDari,
+  dependensiKurang,
   normalisasiIzin,
+  rapikanDependensi,
   type Izin,
 } from '../ui/izin';
 import { pasangAksiBaru } from '../ui/aksi-baru';
@@ -75,6 +80,8 @@ function badgeAkses(u: UserRow): string {
   if (u.role === 'owner') return `<span class="chip">Semua (owner)</span>`;
   if (!u.permissions_custom) return `<span class="chip">Standar</span>`;
   if (setIzinSama(u.permissions, IZIN_KASIR_KETAT)) return `<span class="chip">Ketat</span>`;
+  if (setIzinSama(u.permissions, IZIN_KASIR_SUPERVISOR))
+    return `<span class="chip bg-primary-soft text-primary dark:bg-primary/15 dark:text-[#6aa5ff]">Supervisor</span>`;
   if (!u.permissions.length) return `<span class="chip bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Tanpa izin</span>`;
   return `<span class="chip bg-primary-soft text-primary dark:bg-primary/15 dark:text-[#6aa5ff]">Custom · ${u.permissions.length}</span>`;
 }
@@ -169,8 +176,17 @@ function paint(): void {
 /** Editor izin: 6 grup, 36 kotak centang. Mode `default` = tidak mengirim
  *  `permissions` (server memakai preset role); `custom` = array eksplisit.
  *  Pemilihan disimpan di DOM saja (tidak ada re-render) supaya centang tidak
- *  hilang saat owner berpindah grup. */
-function editorIzinHtml(awal: { role: Peran; izin: string[]; custom: boolean }): string {
+ *  hilang saat owner berpindah grup.
+ *
+ *  `ditambahkan` = izin pendukung yang dilengkapi otomatis saat membuka akun
+ *  lama yang array izinnya belum memenuhi DEPENDENSI_IZIN. Ditampilkan
+ *  terang-terangan — menambah hak akses tanpa memberi tahu owner itu haram. */
+function editorIzinHtml(awal: {
+  role: Peran;
+  izin: string[];
+  custom: boolean;
+  ditambahkan?: string[];
+}): string {
   const terpilih = new Set(awal.izin);
   const grup = GRUP_IZIN.map(
     (g) => `
@@ -206,6 +222,7 @@ function editorIzinHtml(awal: { role: Peran; izin: string[]; custom: boolean }):
         <div class="flex flex-wrap gap-1" id="u-izin-preset">
           <button type="button" class="btn btn-ghost !min-h-[30px] !px-2.5 !py-1 text-xs" data-izin-preset="standar">Standar</button>
           <button type="button" class="btn btn-ghost !min-h-[30px] !px-2.5 !py-1 text-xs" data-izin-preset="ketat">Ketat</button>
+          <button type="button" class="btn btn-ghost !min-h-[30px] !px-2.5 !py-1 text-xs" data-izin-preset="supervisor">Supervisor</button>
           <button type="button" class="btn btn-ghost !min-h-[30px] !px-2.5 !py-1 text-xs" data-izin-preset="semua">Semua</button>
           <button type="button" class="btn btn-ghost !min-h-[30px] !px-2.5 !py-1 text-xs" data-izin-preset="kosong">Kosong</button>
         </div>
@@ -213,7 +230,15 @@ function editorIzinHtml(awal: { role: Peran; izin: string[]; custom: boolean }):
       <p class="mt-2 rounded-lg bg-primary-soft px-3 py-2 text-[11px] leading-relaxed text-primary dark:bg-primary/15 dark:text-[#6aa5ff]" id="u-izin-info">
         Owner selalu punya semua izin. Empat izin inti (Pengguna, Pengaturan,
         Backup, Audit) tetap khusus owner dan tidak bisa dicentang di sini.
+        Izin pendukung ikut tercentang otomatis — melepasnya melepas turunannya.
       </p>
+      ${awal.ditambahkan?.length
+        ? `<p class="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" id="u-izin-repair">
+            Data izin akun ini belum lengkap: ${awal.ditambahkan.length} izin pendukung
+            (${awal.ditambahkan.map((k) => esc(LABEL_IZIN[k] ?? k)).join(', ')})
+            ditambahkan otomatis saat editor dibuka. Periksa centangnya lalu simpan.
+          </p>`
+        : ''}
       <div class="mt-3 grid gap-2 sm:grid-cols-2" id="u-izin-grid">${grup}</div>
     </div>`;
 }
@@ -221,12 +246,16 @@ function editorIzinHtml(awal: { role: Peran; izin: string[]; custom: boolean }):
 function formSimpan(id: number | null, awal?: UserRow): void {
   const isNew = id === null;
   const roleAwal: Peran = awal?.role ?? 'kasir';
-  const izinAwal =
+  const izinMentah: Izin[] =
     roleAwal === 'owner'
       ? [...IZIN_OPERASIONAL]
       : awal?.permissions_custom
         ? normalisasiIzin(awal.permissions ?? [])
         : [...IZIN_KASIR_STANDAR];
+  // Akun lama bisa menyimpan array yang belum memenuhi dependensi keras
+  // (dibuat sebelum peta ini ada). Lengkapi di editor + tampilkan catatan.
+  const izinAwal = rapikanDependensi(izinMentah);
+  const izinTambahan = izinAwal.filter((k) => !izinMentah.includes(k));
   openModal({
     title: isNew ? 'Tambah Pengguna' : `Ubah Pengguna: ${awal?.username ?? ''}`,
     okLabel: isNew ? 'Tambah' : 'Simpan',
@@ -266,6 +295,7 @@ function formSimpan(id: number | null, awal?: UserRow): void {
         role: roleAwal,
         izin: izinAwal,
         custom: Boolean(awal?.permissions_custom),
+        ditambahkan: izinTambahan,
       })}`,
     onMount: ({ el, ok, close }) => {
       const first = el.querySelector<HTMLInputElement>(isNew ? '#u-username' : '#u-name');
@@ -297,23 +327,60 @@ function formSimpan(id: number | null, awal?: UserRow): void {
         preset.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
           b.disabled = owner;
         });
-        const n = bacaCentang().length;
+        const daftar = bacaCentang();
+        const n = daftar.length;
         if (owner) {
           ringkas.textContent = 'Owner — semua izin operasional + seluruh izin inti.';
           info.textContent =
             'Owner selalu punya semua izin. Empat izin inti (Pengguna, Pengaturan, Backup, Audit) tetap khusus owner.';
           return;
         }
+        const namaPreset = setIzinSama(daftar, IZIN_KASIR_SUPERVISOR)
+          ? 'Supervisor'
+          : setIzinSama(daftar, IZIN_KASIR_KETAT)
+            ? 'Ketat'
+            : null;
         ringkas.textContent = custom
-          ? `Custom — ${n} dari ${IZIN_OPERASIONAL.length} izin operasional.`
+          ? `${namaPreset ? `${namaPreset} — ` : 'Custom — '}${n} dari ${IZIN_OPERASIONAL.length} izin operasional.`
           : `Default role Kasir Standar — ${IZIN_KASIR_STANDAR.length} izin.`;
         info.textContent =
-          'Owner selalu punya semua izin. Empat izin inti (Pengguna, Pengaturan, Backup, Audit) tetap khusus owner dan tidak bisa dicentang di sini.';
+          'Owner selalu punya semua izin. Empat izin inti (Pengguna, Pengaturan, Backup, Audit) tetap khusus owner dan tidak bisa dicentang di sini. Izin pendukung ikut tercentang otomatis — melepasnya melepas turunannya.';
+      };
+
+      /** Centang satu izin = seluruh dependensi kerasnya ikut. */
+      const centangDenganDependensi = (kode: string): void => {
+        if (!kode) return;
+        const perlu = new Set<string>(rapikanDependensi([kode]));
+        for (const c of checks()) {
+          if (perlu.has(c.dataset.izinKode ?? '')) c.checked = true;
+        }
+      };
+      /** Lepas satu izin = seluruh izin yang (langsung/tidak langsung)
+       *  membutuhkannya ikut lepas, supaya tak tersisa kombinasi mustahil. */
+      const lepasDenganTurunan = (kode: string): void => {
+        if (!kode) return;
+        const lepas = new Set<string>([kode]);
+        const antre = [kode];
+        while (antre.length) {
+          const k = antre.pop()!;
+          for (const d of dependenDari(k)) {
+            if (!lepas.has(d)) {
+              lepas.add(d);
+              antre.push(d);
+            }
+          }
+        }
+        for (const c of checks()) {
+          if (lepas.has(c.dataset.izinKode ?? '')) c.checked = false;
+        }
       };
 
       checks().forEach((c) =>
         c.addEventListener('change', () => {
           custom = true;
+          const kode = c.dataset.izinKode ?? '';
+          if (c.checked) centangDenganDependensi(kode);
+          else lepasDenganTurunan(kode);
           paintRingkas();
         }),
       );
@@ -327,6 +394,9 @@ function formSimpan(id: number | null, awal?: UserRow): void {
           } else if (jenis === 'ketat') {
             custom = true;
             tulisCentang(IZIN_KASIR_KETAT);
+          } else if (jenis === 'supervisor') {
+            custom = true;
+            tulisCentang(IZIN_KASIR_SUPERVISOR);
           } else if (jenis === 'semua') {
             custom = true;
             tulisCentang(IZIN_OPERASIONAL);
@@ -362,7 +432,21 @@ function formSimpan(id: number | null, awal?: UserRow): void {
           };
           if (role === 'kasir') {
             // Default = null (server memakai preset role); custom = array.
-            payload.permissions = custom ? bacaCentang() : null;
+            if (!custom) {
+              payload.permissions = null;
+            } else {
+              const dipilih = rapikanDependensi(bacaCentang());
+              const kurang = dependensiKurang(dipilih);
+              if (kurang.length) {
+                const k = kurang[0];
+                toast(
+                  `Izin ${LABEL_IZIN[k.izin] ?? k.izin} butuh ${k.butuh.map((x) => LABEL_IZIN[x] ?? x).join(', ')}`,
+                  'warning',
+                );
+                return;
+              }
+              payload.permissions = dipilih;
+            }
           } else {
             payload.permissions = null;
           }

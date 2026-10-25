@@ -12,6 +12,7 @@
 
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
+import { punyaIzin } from '../ui/auth';
 import { confirmDialog } from '../ui/confirm';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { openModal } from '../ui/modal';
@@ -80,7 +81,7 @@ function renderPage(): string {
           <button type="button" id="ret-next" class="row-btn" title="Hari berikutnya" aria-label="Hari berikutnya">${icon('chevR')}</button>
           <span class="chip">${icon('calendar')}<span>${esc(tglPanjang(state.date))}</span></span>
         </div>
-        <button type="button" id="ret-new" class="btn btn-primary" title="Retur manual tanpa nota (Alt+N)">${icon('plus')}<span>Retur manual</span><kbd class="kbd">Alt+N</kbd></button>
+        ${punyaIzin('retur.buat') ? `<button type="button" id="ret-new" class="btn btn-primary" title="Retur manual tanpa nota (Alt+N)">${icon('plus')}<span>Retur manual</span><kbd class="kbd">Alt+N</kbd></button>` : ''}
       </div>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Retur dari nota dibuat lewat tombol “Retur” di tiap nota halaman Riwayat — otomatis terisi item nota.</p>
     </div>
@@ -183,12 +184,18 @@ async function bukaRincian(id: number): Promise<void> {
     onMount: ({ el, ok, close }) => {
       ok.addEventListener('click', () => close());
       const kaki = el.querySelector('.modal-footer [data-x]');
-      if (kaki) {
+      // Batalkan retur = stok keluar lagi + uang ditarik — server menjaga
+      // `retur.batal`, jadi tombolnya tidak dirender tanpa izin itu.
+      if (kaki && punyaIzin('retur.batal')) {
         const batal = document.createElement('button');
         batal.type = 'button';
         batal.className = 'btn btn-ghost !text-red-600 dark:!text-red-400';
         batal.innerHTML = `${icon('trash')}<span>Batalkan retur</span>`;
         batal.addEventListener('click', async () => {
+          if (!punyaIzin('retur.batal')) {
+            toast('Butuh izin Batalkan retur', 'warning');
+            return;
+          }
           const yes = await confirmDialog({
             title: `Batalkan retur #${retur.id}?`,
             message: 'Stok keluar lagi sebesar yang dikembalikan. Ditolak bila stok tidak cukup.',
@@ -217,6 +224,10 @@ async function bukaRincian(id: number): Promise<void> {
 type BarisManual = { product_id: number; name: string; qty: number; price: number };
 
 function dialogManual(): void {
+  if (!punyaIzin('retur.buat')) {
+    toast('Butuh izin Buat retur', 'warning');
+    return;
+  }
   const baris: BarisManual[] = [];
   const gambarBaris = (box: HTMLElement) => {
     const total = baris.reduce((s, b) => s + Math.round(b.qty * b.price), 0);
@@ -385,8 +396,9 @@ export async function mountReturnsPage(el: HTMLElement): Promise<void> {
   const bukaBaru = () => dialogManual();
   el.querySelector('#ret-new')?.addEventListener('click', bukaBaru);
   // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts) — retur DARI nota tetap
-  // lewat tombol di halaman Riwayat; ini retur manual tanpa nota.
-  pasangAksiBaru(bukaBaru);
+  // lewat tombol di halaman Riwayat; ini retur manual tanpa nota. Hanya
+  // didaftarkan bila izinnya ada, supaya pintasan tidak menabrak 403.
+  if (punyaIzin('retur.buat')) pasangAksiBaru(bukaBaru);
   el.querySelector('#ret-prev')?.addEventListener('click', () => setDate(geser(state.date, -1)));
   el.querySelector('#ret-next')?.addEventListener('click', () => setDate(geser(state.date, 1)));
   el.querySelector<HTMLInputElement>('#ret-date')?.addEventListener('change', (ev) => {

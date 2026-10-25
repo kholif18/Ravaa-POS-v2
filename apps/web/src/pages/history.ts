@@ -18,6 +18,7 @@
 import { apiGet, apiPost, HttpError } from '../api';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { icon } from '../ui/icons';
+import { punyaIzin } from '../ui/auth';
 import { jam, waktu, hariIni, geser, tglPanjang } from '../ui/waktu';
 import { toast } from '../ui/toast';
 import { getCashier, getToko } from '../ui/user';
@@ -390,9 +391,9 @@ function detailJual(s: SaleRow): string {
       <button type="button" data-reprint="${esc(s.id)}" class="btn btn-primary mt-3 w-full justify-center">
         ${icon('print')}<span>Cetak ulang struk</span>
       </button>
-      <button type="button" data-retur-nota="${esc(s.id)}" class="btn btn-ghost mt-2 w-full justify-center" title="Barang kembali + uang kembali ke pelanggan">
+      ${punyaIzin('retur.buat') ? `<button type="button" data-retur-nota="${esc(s.id)}" class="btn btn-ghost mt-2 w-full justify-center" title="Barang kembali + uang kembali ke pelanggan">
         ${icon('sync')}<span>Buat retur</span>
-      </button>
+      </button>` : ''}
     </div>
   </div>`;
 }
@@ -414,6 +415,10 @@ function detailJual(s: SaleRow): string {
  *  fetch = dialog tidak dibuka dengan angka basi; sesudah submit sukses
  *  linimasa + rincian ikut disegarkan (lihat handler ok). */
 async function dialogReturNota(s: SaleRow): Promise<void> {
+  if (!punyaIzin('retur.buat')) {
+    toast('Butuh izin Buat retur', 'warning');
+    return;
+  }
   let items: ItemRow[];
   try {
     const j = await apiGet<{ data: { items: ItemRow[] } }>(`/api/sales/${encodeURIComponent(s.id)}`);

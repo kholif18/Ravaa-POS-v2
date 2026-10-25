@@ -887,7 +887,11 @@ app.get('/api/categories', (c) => {
 // use_expiry=1  berarti form produk kategori ini MENAMPILKAN "Tanggal kadaluarsa"
 //   (lihat kolom `categories.use_expiry`) — ini yang menggantikan hardcode snack/eskrim.
 // slug opsional: kalau kosong, diturunkan otomatis dari name (huruf kecil + strip).
-app.post('/api/categories', hanyaOwner, async (c) => {
+// Izin = `produk.kelola` (bukan hanyaOwner): kategori DIKELOLA dari dalam form
+// Produk (#/products), jadi kasir yang boleh menambah produk TIDAK boleh
+// mentok 403 saat harus membuat kategori baru. Kategori tanpa produk tidak
+// menyentuh uang; audit tetap mencatat aktor.
+app.post('/api/categories', wajibIzin('produk.kelola'), async (c) => {
   try {
     const body = await c.req.json();
     const name = String(body?.name ?? '').trim();
@@ -928,7 +932,7 @@ app.post('/api/categories', hanyaOwner, async (c) => {
 
 // Hapus kategori — DITOLAK bila masih ada produk (FK categories<-products, foreign_keys=ON).
 // Produk yang sudah punya riwayat jual tidak bisa dihapus, jadi kategori bekas pakai praktis permanen.
-app.delete('/api/categories/:slug', hanyaOwner, (c) => {
+app.delete('/api/categories/:slug', wajibIzin('produk.kelola'), (c) => {
   const slug = c.req.param('slug');
   const cat = db.prepare('SELECT id FROM categories WHERE slug = ?').get(slug) as { id: number } | undefined;
   if (!cat) return c.json({ error: 'kategori tidak ada' }, 404);
@@ -2739,15 +2743,45 @@ function bacaHari(query: (k: string) => string | undefined): Hari {
 app.get('/api/sales', wajibIzin('riwayat.lihat'), (c) => {
   const h = bacaHari((k) => c.req.query(k));
   if (!h.ok) return c.json({ error: h.error }, 400);
+  // `customer_id` (2026-10-25, riwayat per pelanggan di halaman Pelanggan):
+  // filter nota milik satu pelanggan. Bila dikirim TANPA `date`, yang diminta
+  // adalah SELURUH riwayat pelanggan itu — bukan diam-diam hari ini saja
+  // (`bacaHari` mengisi hari ini saat `date` absen, jadi filter tanggal
+  // dipasang manual di bawah). `date` + `customer_id` = nota pelanggan pada
+  // hari itu. Nilai bukan integer -> 400 (jangan biarkan SQLite menganggap
+  // "abc" = 0 lalu membalas daftar kosong palsu).
+  const customerRaw = c.req.query('customer_id');
+  let customerId: number | null = null;
+  if (customerRaw !== undefined && customerRaw !== '') {
+    const n = Number(customerRaw);
+    if (!Number.isInteger(n) || n <= 0) {
+      return c.json({ error: 'customer_id harus integer' }, 400);
+    }
+    customerId = n;
+  }
+  const pakaiTanggal = c.req.query('date') !== undefined || customerId === null;
   // `riwayat.semua` = boleh melihat nota semua kasir. Tanpa izin itu (mis.
   // kasir ketat) daftar dibatasi ke nota atas nama akun sendiri. Filter
   // diterapkan di SQL, bukan setelah paginasi — `total` ikut benar.
   const u = c.get('user') as Pengguna;
   const semua = bolehIzin(u, 'riwayat.semua');
-  const cond = semua ? '' : ' AND s.cashier = ?';
-  const filter = semua ? [] : [u.name];
-  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sales s WHERE date(s.created_at)=date(?)${cond}`)
-    .get(h.hari, ...filter) as { n: number }).n;
+  const where: string[] = [];
+  const args: (string | number)[] = [];
+  if (pakaiTanggal) {
+    where.push('date(s.created_at)=date(?)');
+    args.push(h.hari);
+  }
+  if (!semua) {
+    where.push('s.cashier = ?');
+    args.push(u.name);
+  }
+  if (customerId !== null) {
+    where.push('s.customer_id = ?');
+    args.push(customerId);
+  }
+  const klausa = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sales s ${klausa}`)
+    .get(...args) as { n: number }).n;
   // `n_items` dihitung per baris lewat subquery: daftar riwayat hanya perlu
   // TAHU jumlah item ("3 item") — isi barisnya diambil saat dibuka lewat
   // GET /api/sales/:id, jadi satu hari ratusan nota tidak ditarik sekaligus.
@@ -2786,10 +2820,10 @@ app.get('/api/sales', wajibIzin('riwayat.lihat'), (c) => {
                SELECT sp.method AS m FROM sale_payments sp
                 WHERE sp.sale_id = s.id ORDER BY sp.id) x) AS pay_methods
        FROM sales s
-      WHERE date(s.created_at)=date(?)${cond}
+      ${klausa}
       ORDER BY s.created_at DESC, s.rowid DESC
       LIMIT ? OFFSET ?`,
-  ).all(h.hari, ...filter, h.limit, h.offset);
+  ).all(...args, h.limit, h.offset);
   return c.json({ data, total });
 });
 
@@ -4676,7 +4710,10 @@ app.get('/api/reports/profit', wajibIzin('laporan.lihat'), (c) => {
  *       `nilai` dihitung dari SELURUH baris sedangkan `rows` dibatasi
  *       BARIS_ANALITIK_MAKS + `terpotong` — angka kartu selalu penuh. */
 const BARIS_ANALITIK_MAKS = 200;
-app.get('/api/reports/analytics', hanyaOwner, (c) => {
+// Menu ke-8 halaman Laporan — izinnya sama dengan laporan lain
+// (`laporan.lihat`). Sebelumnya hanyaOwner padahal UI menampilkannya untuk
+// siapa pun yang bisa membuka #/reports → 403 di tengah menu (mismatch B4).
+app.get('/api/reports/analytics', wajibIzin('laporan.lihat'), (c) => {
   const r = bacaRentang((k) => c.req.query(k));
   if (!r.ok) return c.json({ error: r.error }, 400);
 

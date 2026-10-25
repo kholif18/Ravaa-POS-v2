@@ -1,10 +1,25 @@
-// Client API: fetch JSON + outbox (antrian offline) untuk sales & topup.
-// ID uuid dibuat di client -> POST ulang aman (server idempotent).
+// Client API: fetch JSON + status konektivitas server + outbox (antrian offline)
+// untuk sales & topup. ID uuid dibuat di client -> POST ulang aman (server
+// idempotent).
+//
+// KEJUJURAN OFFLINE (2026-10-25) — baca sebelum menambah klaim "offline-first":
+// `enqueue()` di bawah BELUM dipanggil jalur tulis mana pun (POS menampilkan
+// toast + mematikan tombol bayar saat server tak terjangkau, BUKAN mengantre).
+// Antrean localStorage hanya terisi oleh pemanggil yang memanggil enqueue()
+// secara eksplisit (saat ini: tidak ada di app; suite test mengisinya langsung
+// untuk menguji chip notif). Jadi jangan pernah menulis bahwa penjualan offline
+// "masuk antrean lalu terkirim sendiri" sampai wiring itu benar-benar ada.
 
 import { toast } from './ui/toast';
 import { akunTersimpan, tokenAuth } from './ui/auth';
 
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
+/** Batas keras satu request app. Server toko berjalan di mesin yang sama /
+ *  LAN — 20 detik berarti "tidak merespons", bukan "lambat". Tanpa batas ini
+ *  fetch yang menggantung (WiFi putus di tengah POST) membuat POS diam di
+ *  status busy tanpa pesan apa pun. */
+const BATAS_REQ_MS = 20_000;
 
 export class HttpError extends Error {
   status: number;
@@ -14,14 +29,67 @@ export class HttpError extends Error {
   }
 }
 
+/* ---------- status konektivitas server ----------
+ * `true` = request terakhir mendapat JAWABAN (status apa pun, termasuk 401/500
+ * — server hidup). `false` = fetch gagal/timeout. Dipakai POS untuk mematikan
+ * tombol bayar + banner, supaya kasir tidak menekan Bayar berulang kali
+ * sementara transaksi tidak mungkin tersimpan. */
+export const EVENT_JARINGAN = 'ravaa:jaringan';
+let tersambung = true;
+let cekBerjalan: Promise<boolean> | null = null;
+
+export function jaringanTersambung(): boolean {
+  return tersambung;
+}
+
+function setTersambung(nilai: boolean): void {
+  if (nilai === tersambung) return;
+  tersambung = nilai;
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(EVENT_JARINGAN, { detail: { tersambung: nilai } }));
+}
+
+/** Tembak endpoint API ringan untuk memastikan server benar-benar hidup.
+ *  SENGAJA `/api/*` (bukan `/health`): semua instalasi (vite dev & Caddy di
+ *  infra/) sudah meneruskan `/api/*` ke proses API, sedangkan `/health` TIDAK
+ *  diteruskan sehingga jatuh ke SPA fallback — HTTP 200 berisi index.html,
+ *  artinya server mati pun terlihat "hidup". Jawaban JSON dari API =
+ *  tersambung walau statusnya 401/500 (server menjawab); 502/503/504 atau
+ *  halaman HTML dari proxy = putus.
+ *  Satu pengecekan bersamaan saja (klik ganda tidak menumpuk request). */
+export async function cekJaringan(): Promise<boolean> {
+  if (cekBerjalan) return cekBerjalan;
+  cekBerjalan = (async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    try {
+      const res = await fetch(`${BASE}/api/me`, { cache: 'no-store', signal: ctrl.signal });
+      const tipe = res.headers.get('content-type') ?? '';
+      const hidup = res.status < 500 || tipe.includes('json');
+      setTersambung(hidup);
+      return hidup;
+    } catch {
+      setTersambung(false);
+      return false;
+    } finally {
+      clearTimeout(timer);
+      cekBerjalan = null;
+    }
+  })();
+  return cekBerjalan;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   // Token sesi ikut di SEMUA request app (termasuk flush outbox — header
   // dibaca saat kirim, jadi antrean offline tetap sah setelah login ulang).
   const token = tokenAuth();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), BATAS_REQ_MS);
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
+      signal: ctrl.signal,
       headers: {
         'content-type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -29,8 +97,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
   } catch (e) {
-    throw new HttpError(e instanceof Error ? e.message : 'jaringan terputus', 0);
+    setTersambung(false);
+    const pesan = ctrl.signal.aborted
+      ? `server tidak merespons dalam ${BATAS_REQ_MS / 1000} detik`
+      : e instanceof Error ? e.message : 'jaringan terputus';
+    throw new HttpError(pesan, 0);
+  } finally {
+    clearTimeout(timer);
   }
+  // Ada jawaban = server hidup, walau isinya 4xx/5xx.
+  setTersambung(true);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new HttpError((body as { error?: string }).error ?? `HTTP ${res.status}`, res.status);
   return body as T;
@@ -145,5 +221,15 @@ export function updateOutboxBadge(): void {
   }
 }
 
-setInterval(() => { void flushOutbox(); }, 5000);
-window.addEventListener('online', () => { void flushOutbox(); });
+// Jantung konektivitas: `offline` browser tidak selalu akurat (API restart di
+// mesin yang sama, WiFi router hidup tapi server mati, kabel LAN putus sesaat).
+// Saat putus cek tiap 5 detik supaya tombol Bayar cepat hidup lagi; saat
+// tersambung cukup tiap 15 detik (3 tick) — murah dan tidak mengganggu.
+let tikJaringan = 0;
+setInterval(() => {
+  void flushOutbox();
+  tikJaringan += 1;
+  if (!tersambung || tikJaringan % 3 === 0) void cekJaringan();
+}, 5000);
+window.addEventListener('online', () => { void cekJaringan(); void flushOutbox(); });
+window.addEventListener('offline', () => setTersambung(false));

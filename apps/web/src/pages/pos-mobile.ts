@@ -45,6 +45,9 @@ export interface PosMobileCtx {
   notifHtml: string;
   /** Isi `#pos-strips` (`stripKadaluarsa()` pos.ts). */
   stripsHtml: string;
+  /** Banner "server tidak terjangkau" (`bannerOfflineHtml()` pos.ts) —
+   *  SATU markup dengan sidebar desktop; header mobile hanya membungkus. */
+  offlineHtml: string;
   /** Semua produk cache (sumber tab Katalog). */
   products: Product[];
   /** Master kategori `GET /api/categories` (fallback: dipecah dari products). */
@@ -518,6 +521,10 @@ export function pmShellHtml(ctx: PosMobileCtx): string {
         <button type="button" id="pos-cust-cari" class="btn btn-ghost pm-iconbtn" title="Cari pelanggan (F9)" aria-label="Cari pelanggan (F9)">${icon('search')}</button>
       </div>` : ''}
       <div id="pos-notif" class="pm-notif">${ctx.notifHtml}</div>
+      <!-- Banner konektivitas server — SATU markup dengan sidebar desktop
+           (bannerOfflineHtml pos.ts); class hidden ditoggle terapkanJaringan()
+           tanpa repaint, jadi posisinya di atas body tidak menggeser isi. -->
+      ${ctx.offlineHtml}
     </header>
 
     <div class="pm-body">

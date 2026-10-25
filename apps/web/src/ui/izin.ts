@@ -49,6 +49,63 @@ export const IZIN_KASIR_KETAT: readonly Izin[] = [
   'shift.tutup',
 ];
 
+/** Preset "Supervisor" (2026-10-25): kasir dipercaya — Standar + laporan,
+ *  lihat hold semua kasir, kelola shift (menutup shift kasir lain), serta
+ *  pengeluaran & kas masuk. SENGAJA tanpa produk/supplier/pembelian:
+ *  master barang & nota kulakan tetap wewenang owner. */
+export const IZIN_KASIR_SUPERVISOR: readonly Izin[] = [
+  ...IZIN_KASIR_STANDAR,
+  'laporan.lihat',
+  'pos.hold_semua',
+  'shift.kelola',
+  'pengeluaran.kelola',
+  'kasmasuk.kelola',
+];
+
+/** Ketergantungan KERAS antar izin: izin kunci hanya punya permukaan di
+ *  halaman/endpoint yang dijaga izin nilai, jadi mencentangnya sendirian
+ *  menghasilkan tombol yang tak pernah bisa dipakai (atau halaman yang
+ *  403 di tengah jalan). SENGAJA hanya dependensi keras — bukan selera
+ *  (mis. `pos.topup` TIDAK memaksa `pos.tarik`).
+ *
+ *  Catatan yang sengaja TIDAK dimasukkan:
+ *  - `hutang.catat` → `hutang.lihat`: POS memakai izin ini untuk mencatat
+ *    sisa bayar otomatis tanpa pernah membuka halaman Hutang.
+ *  - `retur.buat` → `retur.lihat`/`riwayat.lihat`: pintunya dua (rincian
+ *    nota di Riwayat & retur manual di halaman Retur); memaksa salah satu
+ *    akan mematikan pintu yang lain. Tombolnya sendiri yang digate.
+ *  - `pembelian.kelola` → `supplier.kelola`: PO tanpa supplier tetap sah. */
+export const DEPENDENSI_IZIN: Partial<Record<Izin, readonly Izin[]>> = {
+  'pos.diskon': ['pos.jual'],
+  'pos.harga': ['pos.jual'],
+  'pos.item_manual': ['pos.jual'],
+  'pos.topup': ['pos.jual'],
+  'pos.tarik': ['pos.jual'],
+  'pos.hold_semua': ['pos.jual'],
+  'riwayat.semua': ['riwayat.lihat'],
+  'retur.batal': ['retur.lihat'],
+  'pelanggan.ubah': ['pelanggan.lihat'],
+  'pelanggan.hapus': ['pelanggan.lihat'],
+  'hutang.bayar': ['hutang.lihat'],
+  'hutang.hapus': ['hutang.lihat'],
+  'pesanan.buat': ['pesanan.lihat'],
+  'pesanan.bayar': ['pesanan.lihat'],
+  'pesanan.batal': ['pesanan.lihat'],
+  'stok.restock': ['stok.lihat'],
+  'stok.opname': ['stok.lihat'],
+  'shift.buka': ['shift.lihat'],
+  'shift.tutup': ['shift.lihat'],
+  'shift.kelola': ['shift.lihat'],
+  // POS tidak bisa memuat shift sendiri tanpa `shift.lihat` (GET
+  // /api/shifts/open) — layar kasir berhenti di gerbang "Buka shift".
+  'pos.jual': ['shift.lihat'],
+};
+
+/** Izin yang SECARA LANGSUNG membutuhkan `kode`. */
+export function dependenDari(kode: string): Izin[] {
+  return IZIN_OPERASIONAL.filter((k) => (DEPENDENSI_IZIN[k] ?? []).includes(kode as Izin));
+}
+
 export type GrupIzin = {
   judul: string;
   ket: string;
@@ -156,4 +213,40 @@ export function punyaIzinAkun(akun: AkunIzin | null | undefined, kode: string): 
 export function normalisasiIzin(daftar: Iterable<string>): Izin[] {
   const set = new Set(daftar);
   return IZIN_OPERASIONAL.filter((k) => set.has(k));
+}
+
+/** Lengkapi daftar dengan seluruh dependensi kerasnya (rekursif).
+ *  Dipakai form Pengguna: centang satu izin = izin pendukungnya ikut
+ *  tercentang, sehingga tidak ada kombinasi yang mustahil dipakai. */
+export function rapikanDependensi(daftar: Iterable<string>): Izin[] {
+  const set = new Set<string>(daftar);
+  let berubah = true;
+  while (berubah) {
+    berubah = false;
+    for (const k of [...set]) {
+      for (const d of DEPENDENSI_IZIN[k as Izin] ?? []) {
+        if (!set.has(d)) {
+          set.add(d);
+          berubah = true;
+        }
+      }
+    }
+  }
+  return normalisasiIzin(set);
+}
+
+/** Daftar pasangan `izin → butuh` yang belum terpenuhi. Kosong = sehat.
+ *  Form memakai ini sebagai validasi terakhir sebelum menyimpan (jaring
+ *  pengaman bila event `change` terlewat, mis. centang programatik). */
+export function dependensiKurang(
+  daftar: Iterable<string>,
+): { izin: Izin; butuh: Izin[] }[] {
+  const set = new Set(daftar);
+  const hasil: { izin: Izin; butuh: Izin[] }[] = [];
+  for (const k of IZIN_OPERASIONAL) {
+    if (!set.has(k)) continue;
+    const kurang = (DEPENDENSI_IZIN[k] ?? []).filter((d) => !set.has(d));
+    if (kurang.length) hasil.push({ izin: k, butuh: kurang });
+  }
+  return hasil;
 }

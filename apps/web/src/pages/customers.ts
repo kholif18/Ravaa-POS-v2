@@ -8,11 +8,14 @@
 
 import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
+import { punyaIzin } from '../ui/auth';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { rp } from '../escpos';
+import { waktu } from '../ui/waktu';
 
 type Customer = {
   id: number;
@@ -30,6 +33,21 @@ type Customer = {
 };
 
 type EditCustomer = { id: number | null; name: string; phone: string; address: string; note: string; code: string; tier: string };
+
+/** Baris nota yang dibutuhkan modal riwayat pelanggan (subset GET /api/sales). */
+type SalePelanggan = {
+  id: string;
+  invoice_no: string | null;
+  created_at: string;
+  total: number;
+  pay_method: string;
+  pay_methods: string | null;
+  n_items: number;
+  sisa_hutang: number;
+  n_retur: number;
+  retur_total: number;
+  order_no: string | null;
+};
 
 const state = {
   items: [] as Customer[],
@@ -70,7 +88,7 @@ function renderPage(): string {
             Kontak pembeli (nama, HP, catatan). Hutang mereka dicatat di halaman Hutang.
           </p>
         </div>
-        <button type="button" id="cust-new" class="btn btn-primary" title="Buat pelanggan baru (Alt+N)">${icon('plus')}<span>Tambah Pelanggan</span><kbd class="kbd">Alt+N</kbd></button>
+        ${punyaIzin('pelanggan.ubah') ? `<button type="button" id="cust-new" class="btn btn-primary" title="Buat pelanggan baru (Alt+N)">${icon('plus')}<span>Tambah Pelanggan</span><kbd class="kbd">Alt+N</kbd></button>` : ''}
       </div>
       <div class="mt-3 flex items-center gap-2">
         <div class="relative w-full max-w-sm">
@@ -114,8 +132,9 @@ function renderTable(): string {
         <td class="td">${u.note ? esc(u.note) : '<span class="text-gray-400">—</span>'}</td>
         <td class="td">
           <div class="flex items-center justify-end gap-1">
-            <button type="button" data-cust-edit="${u.id}" class="row-btn" title="Ubah pelanggan" aria-label="Ubah ${esc(u.name)}">${icon('pencil')}</button>
-            <button type="button" data-cust-del="${u.id}" class="row-btn row-btn-danger" title="Hapus pelanggan" aria-label="Hapus ${esc(u.name)}">${icon('trash')}</button>
+            ${punyaIzin('riwayat.lihat') ? `<button type="button" data-cust-hist="${u.id}" class="row-btn" title="Riwayat transaksi pelanggan" aria-label="Riwayat transaksi ${esc(u.name)}">${icon('clock')}</button>` : ''}
+            ${punyaIzin('pelanggan.ubah') ? `<button type="button" data-cust-edit="${u.id}" class="row-btn" title="Ubah pelanggan" aria-label="Ubah ${esc(u.name)}">${icon('pencil')}</button>` : ''}
+            ${punyaIzin('pelanggan.hapus') ? `<button type="button" data-cust-del="${u.id}" class="row-btn row-btn-danger" title="Hapus pelanggan" aria-label="Hapus ${esc(u.name)}">${icon('trash')}</button>` : ''}
           </div>
         </td>
       </tr>`,
@@ -155,6 +174,12 @@ function paint(): void {
 /* ---------- FORM ---------- */
 
 function customerForm(c: EditCustomer): void {
+  // Server menjaga `pelanggan.ubah`; formnya pun tidak dibuka untuk yang
+  // tidak berhak (tombolnya sudah disembunyikan — ini jaring kedua).
+  if (!punyaIzin('pelanggan.ubah')) {
+    toast('Butuh izin Ubah pelanggan', 'warning');
+    return;
+  }
   const isNew = c.id === null;
   // Nomor urut DI-ASSIGN SERVER (CUS-) — form hanya menampilkannya.
   // Baris baru belum punya nomor sampai disimpan (server mengisi saat INSERT).
@@ -221,6 +246,116 @@ function customerForm(c: EditCustomer): void {
   });
 }
 
+/* ---------- RIWAYAT PELANGGAN ---------- */
+
+const METODE: Record<string, string> = {
+  tunai: 'Tunai',
+  qris: 'QRIS',
+  transfer: 'Transfer',
+  campuran: 'Campuran',
+};
+
+/** Nama metode nota: satu metode = label biasa; `campuran` (split 1.6.5)
+ *  dibaca dari CSV `pay_methods` agar "Tunai + QRIS" tidak hilang. */
+function teksMetode(s: SalePelanggan): string {
+  if (s.pay_method === 'campuran' && s.pay_methods) {
+    return s.pay_methods
+      .split(',')
+      .map((m) => METODE[m] ?? m)
+      .join(' + ');
+  }
+  return METODE[s.pay_method] ?? s.pay_method;
+}
+
+/** Riwayat nota satu pelanggan (2026-10-25). Server: GET /api/sales?customer_id=
+ *  — tanpa `date` berarti SELURUH riwayat, bukan hari ini saja. Tanpa izin
+ *  `riwayat.semua`, server hanya mengirim nota atas nama akun ini; modal
+ *  menyebutkannya supaya angka tidak disangka "pelanggan tak pernah belanja".
+ *  Hanya-baca: tidak ada tombol simpan, cukup "Tutup". */
+async function riwayatPelanggan(c: Customer): Promise<void> {
+  if (!punyaIzin('riwayat.lihat')) {
+    toast('Butuh izin Riwayat transaksi', 'warning');
+    return;
+  }
+  let rows: SalePelanggan[] = [];
+  let total = 0;
+  try {
+    const r = await apiGet<{ data: SalePelanggan[]; total: number }>(
+      `/api/sales?customer_id=${c.id}&limit=50`,
+    );
+    rows = r.data;
+    total = r.total;
+  } catch (e) {
+    toast(`Gagal memuat riwayat: ${errMsg(e)}`, 'error');
+    return;
+  }
+  const semuaKasir = punyaIzin('riwayat.semua');
+  const jumlahTampil = rows.reduce((a, s) => a + s.total, 0);
+  const terpotong = total > rows.length;
+  const isi =
+    rows.length === 0
+      ? `<div class="empty">${icon('receipt')}<span>${
+          semuaKasir
+            ? 'Pelanggan ini belum pernah bertransaksi.'
+            : 'Belum ada nota atas nama Anda untuk pelanggan ini.'
+        }</span></div>`
+      : `
+      <div class="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <span class="chip">${icon('receipt')}<span>${total} nota</span></span>
+        <span class="chip">${terpotong ? `${rows.length} terbaru` : 'Semua'} · ${rp(jumlahTampil)}</span>
+        ${!semuaKasir ? `<span class="chip">hanya nota Anda</span>` : ''}
+      </div>
+      <div class="table-wrap table-scroll">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th class="th">Nota</th>
+              <th class="th">Waktu</th>
+              <th class="th text-right">Item</th>
+              <th class="th">Metode</th>
+              <th class="th text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows
+              .map(
+                (s) => `
+              <tr class="tr">
+                <td class="td">
+                  <div class="cell-strong font-mono">${esc(s.invoice_no ?? s.id.slice(0, 8))}</div>
+                  ${s.order_no ? `<div class="cell-sub">Pesanan ${esc(s.order_no)}</div>` : ''}
+                </td>
+                <td class="td whitespace-nowrap">${esc(waktu(s.created_at))}</td>
+                <td class="td text-right tabular-nums">${s.n_items}</td>
+                <td class="td">
+                  <div>${esc(teksMetode(s))}</div>
+                  <div class="mt-1 flex flex-wrap gap-1">
+                    ${s.sisa_hutang > 0 ? `<span class="chip bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300">Hutang ${rp(s.sisa_hutang)}</span>` : ''}
+                    ${s.n_retur > 0 ? `<span class="chip bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Retur ${rp(s.retur_total)}</span>` : ''}
+                  </div>
+                </td>
+                <td class="td text-right font-semibold tabular-nums">${rp(s.total)}</td>
+              </tr>`,
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+      ${terpotong
+        ? `<p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Menampilkan ${rows.length} nota terbaru dari ${total}. Buka menu Riwayat transaksi untuk arsip per hari.</p>`
+        : ''}`;
+  openModal({
+    title: `Riwayat transaksi — ${c.name}`,
+    wide: true,
+    cancelLabel: 'Tutup',
+    body: isi,
+    onMount: (api) => {
+      // Hanya-baca: satu tombol "Tutup" (pola riwayatForm di halaman Audit).
+      api.ok.remove();
+    },
+  });
+}
+
 /* ---------- AKSI ---------- */
 
 function bindRows(): void {
@@ -233,8 +368,19 @@ function bindRows(): void {
     state.offset = 0;
     void load();
   });
+  host!.querySelectorAll<HTMLElement>('[data-cust-hist]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const id = Number(b.dataset.custHist);
+      const c = state.items.find((x) => x.id === id);
+      if (c) void riwayatPelanggan(c);
+    }),
+  );
   host!.querySelectorAll<HTMLElement>('[data-cust-edit]').forEach((b) =>
     b.addEventListener('click', () => {
+      if (!punyaIzin('pelanggan.ubah')) {
+        toast('Butuh izin Ubah pelanggan', 'warning');
+        return;
+      }
       const id = Number(b.dataset.custEdit);
       const c = state.items.find((x) => x.id === id);
       if (c) customerForm({ id: c.id, name: c.name, phone: c.phone, address: c.address, note: c.note, code: c.code, tier: c.tier ?? 'ecer' });
@@ -242,6 +388,10 @@ function bindRows(): void {
   );
   host!.querySelectorAll<HTMLElement>('[data-cust-del]').forEach((b) =>
     b.addEventListener('click', async () => {
+      if (!punyaIzin('pelanggan.hapus')) {
+        toast('Butuh izin Hapus pelanggan', 'warning');
+        return;
+      }
       const id = Number(b.dataset.custDel);
       const c = state.items.find((x) => x.id === id);
       if (!c) return;
@@ -293,8 +443,9 @@ export async function mountCustomersPage(el: HTMLElement): Promise<void> {
   const bukaBaru = () =>
     customerForm({ id: null, name: '', phone: '', address: '', note: '', code: '', tier: 'ecer' });
   el.querySelector('#cust-new')?.addEventListener('click', bukaBaru);
-  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts).
-  pasangAksiBaru(bukaBaru);
+  // Alt+N = pintasan tombol yang sama (ui/aksi-baru.ts). Hanya bila izinnya
+  // ada — tombolnya sendiri juga tidak dirender tanpa `pelanggan.ubah`.
+  if (punyaIzin('pelanggan.ubah')) pasangAksiBaru(bukaBaru);
   // Debounce 250ms (pola halaman lain) — Enter mempercepat.
   el.querySelector<HTMLInputElement>('#cust-q')?.addEventListener('input', (ev) => {
     const v = (ev.target as HTMLInputElement).value;

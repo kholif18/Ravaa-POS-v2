@@ -50,6 +50,7 @@
 
 import { apiGet, HttpError } from '../api';
 import { icon } from '../ui/icons';
+import { punyaIzin } from '../ui/auth';
 import { hariIni, geser, tglPanjang, tglPendek, jam, awalMinggu, awalBulan, akhirBulan } from '../ui/waktu';
 import { unduhCSV } from '../importcsv';
 import { rp } from '../escpos';
@@ -166,6 +167,11 @@ type MenuDef = {
   label: string;
   grup: GrupMenu;
   filter: 'hari' | 'rentang';
+  /** Izin TAMBAHAN yang dibutuhkan menu ini di atas `laporan.lihat` (yang
+   *  sudah dijaga nav + semua endpoint laporan). Contoh: Piutang membaca
+   *  `/api/customer-debts` yang dijaga `hutang.lihat` — tanpa itu menu
+   *  disembunyikan, bukan dibiarkan 403 di tengah jalan. */
+  izin?: string;
   /** Kotak cari hanya dirender bila true (menu Produk). */
   cari?: boolean;
   ada: () => boolean;
@@ -1359,6 +1365,9 @@ const defPiutang: MenuDef = {
   label: 'Piutang',
   grup: 'Keuangan',
   filter: 'rentang',
+  // `ada()` memanggil /api/customer-debts untuk sisa berjalan — izin halaman
+  // Hutang wajib. Nav Laporan sendiri sudah menjaga `laporan.lihat`.
+  izin: 'hutang.lihat',
   ada: () => !!state.sumData,
   muat: async () => {
     const j = await apiGet<{ data: Omit<Laporan, 'date'> & { from: string; to: string } }>(
@@ -1411,7 +1420,12 @@ const defAnalitik: MenuDef = {
 };
 
 const MENUS: MenuDef[] = [defHarian, defLaba, defKasir, defProduk, defKategori, defPiutang, defStok, defAnalitik];
-const defAktif = (): MenuDef => MENUS.find((m) => m.id === state.menu) ?? defHarian;
+
+/** Menu yang boleh dilihat akun ini = registry penuh disaring izin tambahan.
+ *  Dipakai nav kiri DAN pemilihan menu aktif, supaya `state.menu` yang
+ *  tersimpan tidak menunjuk menu tersembunyi (fallback Harian). */
+const menuTerlihat = (): MenuDef[] => MENUS.filter((m) => !m.izin || punyaIzin(m.izin));
+const defAktif = (): MenuDef => menuTerlihat().find((m) => m.id === state.menu) ?? defHarian;
 
 /* ---------- preset & kalender dialog rentang ----------
  * Dialog rentang tanggal (permintaan pemilik 2026-10-17, referensi
@@ -1497,7 +1511,7 @@ function menuKiri(): string {
   const grupUrut: GrupMenu[] = ['Penjualan', 'Keuangan', 'Stok'];
   const seksi = grupUrut
     .map((g) => {
-      const tombol = MENUS.filter((m) => m.grup === g)
+      const tombol = menuTerlihat().filter((m) => m.grup === g)
         .map((m) => {
           const aktif = state.menu === m.id;
           return `<button type="button" data-menu="${m.id}" class="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
@@ -1916,6 +1930,10 @@ async function load(): Promise<void> {
 
 export async function mountReportsPage(el: HTMLElement): Promise<void> {
   host = el;
+  // Quick switch akun bisa mengganti izin tanpa reload dokumen — menu yang
+  // kini tak berizin jangan dipertahankan sebagai `state.menu` (Harian selalu
+  // tersedia selama `laporan.lihat` ada, dan nav halaman ini menjaganya).
+  if (!menuTerlihat().some((m) => m.id === state.menu)) state.menu = 'harian';
   // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
   // halaman Stok & Produk; tabel rekap makin lega di layar lebar.
   el.innerHTML = `<div class="space-y-3"><div id="rp-body"></div></div>`;

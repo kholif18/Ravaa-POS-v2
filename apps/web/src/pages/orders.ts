@@ -32,6 +32,7 @@ import {
   syncDariServerSettings, teksJumlahItem, footerStruk,
 } from '../ui/identitas-struk';
 import { getCashier, getToko } from '../ui/user';
+import { punyaIzin } from '../ui/auth';
 import { tglPendek } from '../ui/waktu';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { getPrintPause } from '../ui/print-pref';
@@ -210,7 +211,7 @@ function renderList(): string {
             ${icon('search')}
             <input id="ord-q" class="input input-sm" type="search" placeholder="Cari no. / pelanggan / item" value="${esc(state.q)}" autocomplete="off" aria-label="Cari pesanan" />
           </div>
-          <button type="button" id="ord-new" class="btn btn-primary" title="Pesanan baru (Alt+N)">${icon('plus')}<span>Pesanan baru</span><kbd class="kbd">Alt+N</kbd></button>
+          ${punyaIzin('pesanan.buat') ? `<button type="button" id="ord-new" class="btn btn-primary" title="Pesanan baru (Alt+N)">${icon('plus')}<span>Pesanan baru</span><kbd class="kbd">Alt+N</kbd></button>` : ''}
         </div>
       </div>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Pesanan jasa (cetak/desain/service) dikerjakan dulu, omzet tercatat saat <b>Serahkan</b>. DP boleh kapan saja; sisa saat serah otomatis masuk halaman Hutang pelanggan.</p>
@@ -476,6 +477,10 @@ function bindBaru(el: HTMLElement): void {
 }
 
 async function simpanBaru(): Promise<void> {
+  if (!punyaIzin('pesanan.buat')) {
+    toast('Butuh izin Buat pesanan', 'warning');
+    return;
+  }
   if (state.custId === null) {
     toast('Pilih pelanggan dulu', 'warning');
     return;
@@ -539,13 +544,13 @@ function renderDetail(): string {
   const o = state.detail.order;
   const aktif = o.status === 'dikerjakan' || o.status === 'selesai';
   const aksi = [
-    o.status === 'dikerjakan'
+    o.status === 'dikerjakan' && punyaIzin('pesanan.buat')
       ? `<button type="button" class="btn btn-ghost" data-oact="selesai">${icon('check')}<span>Tandai selesai</span></button>`
-      : o.status === 'selesai'
+      : o.status === 'selesai' && punyaIzin('pesanan.buat')
         ? `<button type="button" class="btn btn-ghost" data-oact="dikerjakan">${icon('sync')}<span>Kembali dikerjakan</span></button>`
         : '',
-    aktif ? `<button type="button" class="btn btn-primary" data-oact="serahkan">${icon('check')}<span>Serahkan</span></button>` : '',
-    aktif ? `<button type="button" class="btn btn-ghost !text-red-600 dark:!text-red-400" data-oact="batalkan">${icon('trash')}<span>Batalkan</span></button>` : '',
+    aktif && punyaIzin('pesanan.bayar') ? `<button type="button" class="btn btn-primary" data-oact="serahkan">${icon('check')}<span>Serahkan</span></button>` : '',
+    aktif && punyaIzin('pesanan.batal') ? `<button type="button" class="btn btn-ghost !text-red-600 dark:!text-red-400" data-oact="batalkan">${icon('trash')}<span>Batalkan</span></button>` : '',
     `<button type="button" class="btn btn-ghost" data-oact="cetak-nota">${icon('print')}<span>Nota pesanan</span></button>`,
     o.sale_id ? `<button type="button" class="btn btn-ghost" data-oact="cetak-struk">${icon('receipt')}<span>Struk penjualan</span></button>` : '',
   ].join('');
@@ -658,7 +663,7 @@ function renderDetail(): string {
           </div>
         </div>
         ${
-          aktif && o.sisa > 0
+          aktif && o.sisa > 0 && punyaIzin('pesanan.bayar')
             ? `<button type="button" class="btn btn-ghost" data-oact="dp">${icon('plus')}<span>Tambah DP</span></button>`
             : ''
         }
@@ -718,6 +723,20 @@ async function aksiDetail(act: string): Promise<void> {
   const d = state.detail;
   if (!d) return;
   const o = d.order;
+  // Cermin izin server per aksi — tombolnya sudah disembunyikan, ini jaring
+  // kedua supaya pintasan/klik programatik tidak menabrak 403 tanpa penjelasan.
+  const butuh: Record<string, string> = {
+    selesai: 'pesanan.buat',
+    dikerjakan: 'pesanan.buat',
+    serahkan: 'pesanan.bayar',
+    dp: 'pesanan.bayar',
+    batalkan: 'pesanan.batal',
+  };
+  const izin = butuh[act];
+  if (izin && !punyaIzin(izin)) {
+    toast(`Butuh izin ${izin === 'pesanan.buat' ? 'Buat pesanan' : izin === 'pesanan.bayar' ? 'Bayar pesanan' : 'Batalkan pesanan'}`, 'warning');
+    return;
+  }
   if (act === 'selesai' || act === 'dikerjakan') {
     try {
       await apiPost(`/api/orders/${o.id}/status`, { status: act });
@@ -776,6 +795,10 @@ function barisInfo(l: string, v: string, kelas = ''): string {
 /* ---------- DIALOG: TAMBAH DP ---------- */
 
 function dialogDp(o: OrderRow): void {
+  if (!punyaIzin('pesanan.bayar')) {
+    toast('Butuh izin Bayar pesanan', 'warning');
+    return;
+  }
   openModal({
     title: `Tambah DP — ${o.order_no}`,
     okLabel: 'Simpan DP',
@@ -841,6 +864,10 @@ function dialogDp(o: OrderRow): void {
 /* ---------- DIALOG: SERAHKAN (TAKE) ---------- */
 
 function dialogSerahkan(o: OrderRow): void {
+  if (!punyaIzin('pesanan.bayar')) {
+    toast('Butuh izin Bayar pesanan', 'warning');
+    return;
+  }
   openModal({
     title: `Serahkan — ${o.order_no}`,
     okLabel: 'Serahkan',
@@ -956,6 +983,10 @@ async function dialogSesudahSerah(orderNo: string, sale: SaleRow): Promise<void>
 /* ---------- DIALOG: BATALKAN ---------- */
 
 function dialogBatal(o: OrderRow): void {
+  if (!punyaIzin('pesanan.batal')) {
+    toast('Butuh izin Batalkan pesanan', 'warning');
+    return;
+  }
   const kembali = o.dibayar;
   openModal({
     title: `Batalkan — ${o.order_no}`,
@@ -1101,9 +1132,17 @@ export async function mountOrdersPage(el: HTMLElement): Promise<void> {
   } catch {}
   const sub = subRute();
   // Alt+N = pesanan baru (ui/aksi-baru.ts) — satu pintu dengan tombol toolbar.
-  pasangAksiBaru(() => {
-    location.hash = '#/orders/baru';
-  });
+  // Hanya didaftarkan bila boleh membuat pesanan (tombolnya pun disembunyikan).
+  if (punyaIzin('pesanan.buat')) {
+    pasangAksiBaru(() => {
+      location.hash = '#/orders/baru';
+    });
+  }
+  if (sub.view === 'baru' && !punyaIzin('pesanan.buat')) {
+    toast('Butuh izin Buat pesanan', 'warning');
+    location.hash = '#/orders';
+    return;
+  }
   if (sub.view === 'list') {
     state.status = 'semua';
     state.offset = 0;

@@ -36,6 +36,7 @@
 
 import { apiGet, apiPost, HttpError } from '../api';
 import { icon } from '../ui/icons';
+import { punyaIzin } from '../ui/auth';
 import { confirmDialog } from '../ui/confirm';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { pasangAksiBaru } from '../ui/aksi-baru';
@@ -612,6 +613,10 @@ function supOptsHtml(): string {
 }
 
 function halamanBaruHtml(): string {
+  // Supplier master dijaga `supplier.kelola` di server; PO tanpa supplier
+  // tetap sah. Tanpa izin itu dropdown-nya dikunci + diberi alasan, bukan
+  // dibiarkan kosong seolah master supplier memang belum ada.
+  const bolehSupplier = punyaIzin('supplier.kelola');
   return `
   <div class="space-y-3">
     <div class="card">
@@ -625,7 +630,10 @@ function halamanBaruHtml(): string {
       <div class="grid gap-3 sm:grid-cols-2">
         <div class="field">
           <label class="label" for="po-sup">Supplier</label>
-          <select id="po-sup" class="input">${supOptsHtml()}</select>
+          <select id="po-sup" class="input"${bolehSupplier ? '' : ' disabled'}>${supOptsHtml()}</select>
+          ${bolehSupplier
+            ? ''
+            : `<span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">Butuh izin Supplier untuk memilih pemasok — PO tanpa supplier tetap bisa disimpan.</span>`}
         </div>
         <div class="field">
           <label class="label" for="po-note">Catatan</label>
@@ -656,8 +664,12 @@ function halamanBaruHtml(): string {
 }
 
 /** Supplier dimuat ulang di sini: halaman `#/purchases/baru` bisa langsung
- *  dibuka (refresh/bookmark) tanpa melewati daftar yang biasa mengisinya. */
+ *  dibuka (refresh/bookmark) tanpa melewati daftar yang biasa mengisinya.
+ *  GET /api/suppliers dijaga `supplier.kelola` — tanpa izin itu jangan
+ *  memanggil sama sekali (dropdown sudah disabled + diberi alasan di
+ *  `halamanBaruHtml`; PO tanpa supplier tetap sah). */
 async function isiSupplier(el: HTMLElement): Promise<void> {
+  if (!punyaIzin('supplier.kelola')) return;
   try {
     const s = await apiGet<{ data: SupplierOpt[] }>('/api/suppliers');
     state.suppliers = s.data;
@@ -850,20 +862,34 @@ async function load(): Promise<void> {
   state.loading = true;
   state.error = '';
   paint();
+  // Supplier dimuat TERPISAH: GET /api/suppliers dijaga `supplier.kelola`
+  // sedangkan daftar PO cukup `pembelian.kelola`. Digabung di Promise.all,
+  // satu 403 supplier memerahkan seluruh daftar PO (akses yang sebenarnya sah).
+  void muatSupplier();
   try {
-    const [r, s] = await Promise.all([
-      apiGet<{ data: Po[]; total: number; lewat30: number }>(`/api/purchases?status=${encodeURIComponent(state.status)}&limit=${state.limit}&offset=${state.offset}`),
-      apiGet<{ data: SupplierOpt[]; total: number }>('/api/suppliers'),
-    ]);
+    const r = await apiGet<{ data: Po[]; total: number; lewat30: number }>(
+      `/api/purchases?status=${encodeURIComponent(state.status)}&limit=${state.limit}&offset=${state.offset}`,
+    );
     state.items = r.data;
     state.total = r.total;
     state.lewat30 = r.lewat30 ?? 0;
-    state.suppliers = s.data;
   } catch (e) {
     state.error = errMsg(e);
   }
   state.loading = false;
   if (host?.isConnected) paint();
+}
+
+/** Isi cache supplier untuk dropdown form PO baru (tanpa mengganggu daftar).
+ *  Gagal/403 = `state.suppliers` dibiarkan apa adanya. */
+async function muatSupplier(): Promise<void> {
+  if (!punyaIzin('supplier.kelola')) return;
+  try {
+    const s = await apiGet<{ data: SupplierOpt[]; total: number }>('/api/suppliers');
+    state.suppliers = s.data;
+  } catch {
+    /* daftar PO tetap tampil; dropdown form memakai cache lama/kosong */
+  }
 }
 
 async function loadShift(): Promise<void> {

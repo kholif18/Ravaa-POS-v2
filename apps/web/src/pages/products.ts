@@ -13,6 +13,7 @@ import { openModal } from '../ui/modal';
 import { switchHtml } from '../ui/switch';
 import { toast } from '../ui/toast';
 import { statusExpiry, tglExpiry } from '../ui/expiry';
+import { punyaIzin } from '../ui/auth';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
 
@@ -1527,16 +1528,28 @@ function productForm(
  *  bukan memakai `reload()` halaman Produk (halaman Stok punya state sendiri). */
 export function restockForm(p: Product, sesudah?: () => void | Promise<void>): void {
   type Mode = 'masuk' | 'opname';
-  let mode: Mode = 'masuk';
+  const bolehMasuk = punyaIzin('stok.restock');
+  const bolehOpname = punyaIzin('stok.opname');
+  if (!bolehMasuk && !bolehOpname) {
+    toast('Butuh izin Restock atau Opname untuk mengubah stok', 'warning');
+    return;
+  }
+  // Mode default = yang diizinkan; pemilih mode hanya dirender bila keduanya
+  // boleh (server menolak endpoint yang izinnya tidak dimiliki).
+  let mode: Mode = bolehMasuk ? 'masuk' : 'opname';
 
   openModal({
     title: `Stok: ${p.name}`,
-    okLabel: 'Tambah stok',
+    okLabel: mode === 'masuk' ? 'Tambah stok' : 'Simpan opname',
     body: `
-      <div class="mb-3 flex gap-2" role="group" aria-label="Mode stok">
+      ${
+        bolehMasuk && bolehOpname
+          ? `<div class="mb-3 flex gap-2" role="group" aria-label="Mode stok">
         <button type="button" class="chip" data-mode="masuk" aria-pressed="true">Masuk barang</button>
         <button type="button" class="chip" data-mode="opname" aria-pressed="false">Hitung fisik</button>
-      </div>
+      </div>`
+          : ''
+      }
       <div class="field">
         <label class="label" for="r-qty" id="r-label">Jumlah masuk *</label>
         <input id="r-qty" class="input" inputmode="numeric" value="1" placeholder="cth: 24" />
@@ -1641,11 +1654,20 @@ export function restockForm(p: Product, sesudah?: () => void | Promise<void>): v
       input.addEventListener('input', () => { if (mode === 'opname') hintOpname(); else hintMasuk(); });
       costInput.addEventListener('input', () => { if (mode === 'masuk') hintMasuk(); });
 
+      if (mode === 'opname') input.value = String(p.stock);
       paint();
       input.focus();
       input.select();
 
       ok.addEventListener('click', async () => {
+        if (mode === 'masuk' && !bolehMasuk) {
+          toast('Butuh izin Restock untuk menambah stok', 'warning');
+          return;
+        }
+        if (mode === 'opname' && !bolehOpname) {
+          toast('Butuh izin Opname untuk mengganti stok', 'warning');
+          return;
+        }
         const n = angka();
         if (mode === 'masuk') {
           if (n === null || !(n > 0)) { toast('Jumlah harus lebih dari 0', 'warning'); return; }

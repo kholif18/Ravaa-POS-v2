@@ -15,13 +15,19 @@ const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 
-// Bersihkan sisa run sebelumnya (urutan: ledger dulu, baru pelanggan — FK ON).
-// Nama EKSAK milik suite ini saja — prefix 'UjiHutang%' menjaring juga
-// pelanggan 'UjiHutang POS E2E' milik e2e-struk (memutus pelanggan durable
-// + menyisakan customer_id yatim di sales). Terbukti bentrok di run penuh
-// 2026-10-16; jangan kembalikan ke LIKE.
-sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih'));`);
-sql(`DELETE FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih');`);
+// Bersihkan sisa run sebelumnya (urutan: nota uji + ledger dulu, baru
+// pelanggan — FK ON). Nama EKSAK milik suite ini saja — prefix 'UjiHutang%'
+// menjaring juga pelanggan 'UjiHutang POS E2E' milik e2e-struk (memutus
+// pelanggan durable + menyisakan customer_id yatim di sales). Terbukti
+// bentrok di run penuh 2026-10-16; jangan kembalikan ke LIKE.
+const CUST_UJI = `'UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih'`;
+const SALE_UJI = `SELECT id FROM sales WHERE customer_id IN (SELECT id FROM customers WHERE name IN (${CUST_UJI}))`;
+// Nota anak dihapus eksplisit: CLI sqlite3 tidak menjalankan ON DELETE CASCADE.
+sql(`DELETE FROM sale_items WHERE sale_id IN (${SALE_UJI});`);
+sql(`DELETE FROM sale_payments WHERE sale_id IN (${SALE_UJI});`);
+sql(`DELETE FROM sales WHERE id IN (${SALE_UJI});`);
+sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name IN (${CUST_UJI}));`);
+sql(`DELETE FROM customers WHERE name IN (${CUST_UJI});`);
 
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
@@ -238,12 +244,51 @@ chk('A4 hutang: footer "Dicetak melalui Ravaa POS pada: <tgl> <jam:detik>" + tek
 await popA4.close().catch(() => {});
 await p.click('.modal [data-x]'); await p.waitForTimeout(300);
 
+console.log('=== 12. Riwayat transaksi pelanggan (modal read-only) ===');
+// 2026-10-25: tombol riwayat per baris -> GET /api/sales?customer_id= (tanpa
+// `date` = seluruh riwayat pelanggan). Dibuat satu nota manual supaya modal
+// punya isi yang bisa dicocokkan, bukan sekadar empty-state.
+const saleId = `uji-hutang-hist-${Date.now()}`;
+const dibuat = await p.evaluate(async ({ sid, cid }) => {
+  const r = await fetch('/api/sales', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: sid, customer_id: cid, pay_method: 'tunai', cash_in: 1000,
+      items: [{ name: 'UjiHutang Jasa', qty: 1, price: 1000 }],
+    }),
+  });
+  return { status: r.status, json: await r.json().catch(() => ({})) };
+}, { sid: saleId, cid: bersih.id });
+chk('nota uji pelanggan tersimpan', dibuat.status === 201 && dibuat.json?.data?.sale?.customer_id === bersih.id,
+  JSON.stringify(dibuat).slice(0, 120));
+await p.goto('http://localhost:5656/#/customers', { waitUntil: 'networkidle' });
+await p.waitForSelector('#cust-body tbody tr', { timeout: 15000 });
+await w('#cust-q', 'UjiHutang Bersih'); await p.waitForTimeout(700);
+await p.click('[data-cust-hist]'); await p.waitForSelector('.modal', { timeout: 8000 });
+await p.waitForTimeout(400);
+const judulRiwayat = await p.getAttribute('.modal', 'aria-label');
+const isiRiwayat = await p.textContent('.modal .modal-body');
+chk('judul modal = Riwayat transaksi pelanggan',
+  judulRiwayat === 'Riwayat transaksi — UjiHutang Bersih', String(judulRiwayat));
+chk('nota pelanggan tampil (1 nota, Rp1.000)',
+  isiRiwayat.includes('1 nota') && isiRiwayat.includes('Rp1.000') && !isiRiwayat.includes('belum pernah'),
+  isiRiwayat.replace(/\s+/g, ' ').slice(0, 110));
+chk('modal read-only: tanpa tombol Simpan, footer bertuliskan Tutup',
+  (await p.locator('.modal .modal-footer [data-ok]').count()) === 0
+  && (await p.textContent('.modal .modal-footer [data-x]')).trim() === 'Tutup');
+await p.click('.modal .modal-footer [data-x]'); await p.waitForTimeout(300);
+chk('Tutup menutup modal riwayat', (await p.locator('.modal').count()) === 0);
+
 chk('tidak ada pageerror', err.length === 0, err.join(' ~ '));
 await b.close();
 
-// Bersihkan data uji (ledger dulu — FK ON). Nama eksak, lihat catatan di atas.
-sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih'));`);
-sql(`DELETE FROM customers WHERE name IN ('UjiHutang Papa','UjiHutang Papa Baru','UjiHutang Bersih');`);
+// Bersihkan data uji (nota + ledger dulu — FK ON). Nama eksak, lihat catatan di atas.
+sql(`DELETE FROM sale_items WHERE sale_id IN (${SALE_UJI});`);
+sql(`DELETE FROM sale_payments WHERE sale_id IN (${SALE_UJI});`);
+sql(`DELETE FROM sales WHERE id IN (${SALE_UJI});`);
+sql(`DELETE FROM customer_debts WHERE customer_id IN (SELECT id FROM customers WHERE name IN (${CUST_UJI}));`);
+sql(`DELETE FROM customers WHERE name IN (${CUST_UJI});`);
 
 console.log(`\n=== ${fail ? 'ADA GAGAL' : 'SEMUA LOLOS'} ===  (lolos: ${pass}, gagal: ${fail})`);
 process.exit(fail ? 1 : 0);

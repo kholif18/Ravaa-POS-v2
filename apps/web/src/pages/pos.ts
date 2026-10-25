@@ -29,7 +29,7 @@
 // Cache kasir hanya berisi is_active=1 (see AGENTS.md §3), jadi produk
 // nonaktif tidak mungkin masuk keranjang.
 
-import { apiGet, apiPost, uuid, HttpError, outboxCount } from '../api';
+import { apiGet, apiPost, cekJaringan, jaringanTersambung, uuid, HttpError, outboxCount, EVENT_JARINGAN } from '../api';
 import {
   getCachedProducts, syncMaster, getHolds, saveHolds, getKeranjang, saveKeranjang,
   type Product,
@@ -147,6 +147,11 @@ const PAY_METHODS: { key: PayMethod; label: string; icon: IconName }[] = [
 
 let host: HTMLElement | null = null;
 let shift: Shift | null = null;
+/** Kenapa `shift` null setelah loadShift(): 'jaringan' = server tak terjangkau
+ *  (BUKAN berarti belum buka shift — jangan suruh kasir mengisi modal awal),
+ *  'info' = server menjawab tapi shift tidak ditemukan / error lain, null =
+ *  belum dicoba. `paint()` memakai ini untuk memilih kartu gate yang jujur. */
+let shiftError: 'jaringan' | 'info' | null = null;
 let products: Product[] = [];
 /** Master kategori `GET /api/categories` — sumber chip filter tab Katalog
  *  versi MOBILE (2026-10-17, pos-mobile.ts). Hanya tampilan; gagal dimuat
@@ -818,9 +823,59 @@ function splitChipsHtml(kelas: string): string {
 
 /** Kembalian modal = uang diterima − total tagihan (0 bila uang belum diisi). */
 
-/** Bolehkah tombol Bayar / Bayar pas aktif: keranjang terisi (produk/manual
- *  ATAU baris layanan — `keranjangTerisi()`, Opsi B). */
-const bisaBayar = () => keranjangTerisi();
+/** Bolehkah tombol Bayar / Bayar pas / form bayar aktif: keranjang terisi
+ *  (produk/manual ATAU baris layanan — `keranjangTerisi()`, Opsi B) DAN server
+ *  terjangkau. Syarat kedua bukan hiasan: tanpa server nota TIDAK mungkin
+ *  tersimpan (tidak ada outbox otomatis — lihat kepala api.ts), jadi tombol
+ *  mati lebih jujur daripada toast "Gagal menyimpan" setelah kasir menunggu. */
+const bisaBayar = () => keranjangTerisi() && jaringanTersambung();
+
+/** Banner "server tidak terjangkau" — markup SAMA dipakai sidebar desktop &
+ *  header mobile (id `#pos-offline`; hanya satu shell yang hidup, jadi tidak
+ *  pernah ada dua elemen ber-id sama). `hidden` ditoggle
+ *  `terapkanJaringan()` tanpa repaint penuh, supaya fokus kolom yang sedang
+ *  diketik tidak hilang saat status berubah. */
+function bannerOfflineHtml(): string {
+  // PENTING: `hidden`/display di PEMBUNGKUS saja. Elemen yang sama tidak boleh
+  // membawa `flex` + `hidden` sekaligus — `@apply flex` (atau utility `flex`)
+  // mengalahkan aturan `hidden`, jadi banner akan tampil terus (pelajaran
+  // `.pm-bayarlayer` di pos-mobile.css). isi kartu = utility flex.
+  return `<div id="pos-offline" role="status" class="${jaringanTersambung() ? 'hidden' : ''}">
+        <div class="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
+          <span class="mt-0.5 shrink-0">${icon('alert')}</span>
+          <div class="min-w-0 flex-1">
+            <b>Server tidak terjangkau.</b> Transaksi BELUM bisa disimpan — keranjang tetap aman di perangkat ini. Periksa kabel/WiFi server, lalu coba lagi.
+          </div>
+          <button type="button" id="pos-offline-retry" class="btn btn-ghost shrink-0 !min-h-[30px] !px-2.5 !py-1 text-sm">Coba lagi</button>
+        </div>
+      </div>`;
+}
+
+/** Sinkronkan SEMUA penanda konektivitas TANPA repaint penuh (dipanggil
+ *  listener `ravaa:jaringan`): banner, tombol bayar sidebar/mobile, tombol OK
+ *  form bayar, dan kalimat trust di footer form. Aman dipanggil kapan pun,
+ *  termasuk saat elemennya tidak ada (halaman lain / gate shift). */
+function terapkanJaringan(): void {
+  const on = jaringanTersambung();
+  document.querySelectorAll<HTMLElement>('#pos-offline').forEach((el) => el.classList.toggle('hidden', on));
+  // Tombol bayar: syarat = bisaBayar() (keranjang + server) & tidak busy.
+  for (const sel of ['#pos-bayar', '#pos-pay-pas']) {
+    document.querySelectorAll<HTMLButtonElement>(sel).forEach((b) => {
+      b.disabled = !bisaBayar() || busy;
+    });
+  }
+  const ok = document.querySelector<HTMLButtonElement>('#pos-pay');
+  if (ok) ok.disabled = !bisaBayar() || busy;
+  // Footer form bayar: kalimat "aman & tercatat" hanya boleh tampil saat
+  // server benar-benar terjangkau — ganti dengan peringatan merah saat putus.
+  const trust = bayarEl()?.querySelector<HTMLElement>('.pos-bayar-trust');
+  if (trust) {
+    trust.innerHTML = on
+      ? `${icon('shieldCheck')}<span><b>Pembayaran aman &amp; tercatat</b><span>Data transaksi akan tersimpan ke server toko.</span></span>`
+      : `${icon('alert')}<span><b class="text-red-600 dark:text-red-400">Server tidak terjangkau</b><span>Transaksi belum bisa disimpan — periksa koneksi, lalu tutup form ini.</span></span>`;
+  }
+  if (!shift) paint(); // gate harus berganti kartu (offline vs buka shift)
+}
 
 /** Kelas warna angka KEMBALIAN (hasil besar di form bayar: hijau = cukup/
  *  lebih, merah = kurang, abu = belum diisi). Dipakai lewat kelasPosChange()
@@ -1202,6 +1257,31 @@ function clampDiskonTransaksi(): void {
 /* ---------- gate shift ---------- */
 
 function shiftGateHtml(): string {
+  // Server tak terjangkau = status shift TIDAK DIKETAHUI (bukan berarti
+  // belum dibuka). Tampilkan kartu offline + tombol coba lagi; jangan
+  // menawarkan form buka shift yang pasti gagal (dan bisa dobel kalau
+  // ternyata shift masih terbuka).
+  if (shiftError === 'jaringan') {
+    return `
+  <div class="mx-auto max-w-md space-y-4 py-5">
+    <div class="card">
+      <div class="flex items-start gap-3">
+        <span class="inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+          ${icon('alert')}
+        </span>
+        <div class="min-w-0">
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Server tidak terjangkau</h2>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Status shift belum bisa diperiksa dan transaksi belum bisa disimpan.
+            Periksa kabel/WiFi server, lalu coba lagi — keranjang yang tersimpan di
+            perangkat ini tidak hilang.
+          </p>
+        </div>
+      </div>
+      <button type="button" id="pos-gate-retry" class="btn btn-primary mt-4 w-full">Coba lagi</button>
+    </div>
+  </div>`;
+  }
   // Tanpa izin shift.buka, form buka shift hanya akan ditolak server (403).
   // Tampilkan instruksi supaya kasir tidak mengetik modal awal sia-sia.
   if (!punyaIzin('shift.buka')) {
@@ -1261,6 +1341,21 @@ function bindShiftGate(): void {
   const modalAwal = host!.querySelector<HTMLInputElement>('#pos-modal-awal');
   const kasir = host!.querySelector<HTMLInputElement>('#pos-kasir');
   modalAwal?.focus();
+  // Gate OFFLINE (bukan "belum buka shift"): coba lagi = cek /health, lalu
+  // muat ulang status shift. paint() dipanggil di kedua ujung supaya kartu
+  // berganti (offline -> form buka shift, atau tombol hidup lagi).
+  host!.querySelector('#pos-gate-retry')?.addEventListener('click', () => {
+    const retry = host?.querySelector<HTMLButtonElement>('#pos-gate-retry');
+    if (retry) {
+      retry.disabled = true;
+      retry.textContent = 'Memeriksa…';
+    }
+    void (async () => {
+      await cekJaringan();
+      await loadShift();
+      paint();
+    })();
+  });
   btn?.addEventListener('click', async () => {
     if (busy) return;
     const name = (kasir?.value || '').trim();
@@ -1737,6 +1832,10 @@ function sidebarBayarHtml(): string {
   const bisaStok = punyaIzin('stok.lihat');
   return `
       <div class="card pos-side">
+        <!-- 0. Banner konektivitas (2026-10-25) — SATU markup dengan header
+             mobile (bannerOfflineHtml). Disembunyikan lewat class hidden saat
+             server hidup; terapkanJaringan() yang men-toggle tanpa repaint. -->
+        ${bannerOfflineHtml()}
         <!-- 1. Aksi cepat (permintaan pemilik 2026-10-04) — kini di POSISI
              ATAS kartu (permintaan pemilik 2026-10-06: "diskon item pindah
              ke bawah menu cepat di atas diskon"). Tahan/Pending = fitur
@@ -2094,7 +2193,15 @@ function bukaBayar(): void {
     sudah.querySelector<HTMLInputElement>('#pos-cash')?.focus();
     return;
   }
-  if (!bisaBayar()) return;
+  if (!bisaBayar()) {
+    // Bisa sampai di sini lewat F10 saat server putus (tombolnya disabled,
+    // pintasan tetap memanggil). Jelaskan sebabnya, jangan diam.
+    if (keranjangTerisi() && !jaringanTersambung()) {
+      toast('Server tidak terjangkau — form bayar dibuka setelah koneksi pulih.', 'error', 6000);
+      void cekJaringan();
+    }
+    return;
+  }
   // Putaran 10d (2026-10-05, "form uang diterima jangan langsung di isi uang
   // pas … jadi default 0"): auto-isi (P1) DIHAPUS — kolom SELALU dibuka
   // kosong, karena tujuannya memasukkan uang KURANG / LEBIH sesungguhnya.
@@ -2132,6 +2239,7 @@ function bukaBayar(): void {
       // Fokus kolom uang HANYA untuk tunai (auto-focus kolom kosong sudah
       // disepakati; QRIS/transfer tak butuh keyboard naik menutupi layar).
       if (payMethod === 'tunai') cash?.focus();
+      terapkanJaringan();
     }
     return;
   }
@@ -2166,7 +2274,7 @@ function bukaBayar(): void {
       if (kaki && !kaki.querySelector('.pos-bayar-trust')) {
         const trust = document.createElement('div');
         trust.className = 'pos-bayar-trust';
-        trust.innerHTML = `${icon('shieldCheck')}<span><b>Pembayaran aman & tercatat</b><span>Data transaksi akan tersimpan secara otomatis.</span></span>`;
+        trust.innerHTML = `${icon('shieldCheck')}<span><b>Pembayaran aman &amp; tercatat</b><span>Data transaksi akan tersimpan ke server toko.</span></span>`;
         kaki.prepend(trust);
       }
       for (const b of [api.ok, api.el.querySelector<HTMLElement>('.modal-footer [data-x]')]) {
@@ -2180,6 +2288,9 @@ function bukaBayar(): void {
       (api.el.querySelector<HTMLInputElement>('#pos-cash') ?? api.ok).focus();
     },
   });
+  // Status jaringan bisa berubah antara render sidebar & modal dibuka —
+  // sinkronkan tombol OK + kalimat trust segera.
+  terapkanJaringan();
 }
 
 /** Tutup form bayar bila masih terbuka (dipanggil setelah bayar sukses dan
@@ -2629,6 +2740,7 @@ function pmCtx(): PosMobileCtx {
     qtyNext,
     notifHtml: notifChips(),
     stripsHtml: stripKadaluarsa(),
+    offlineHtml: bannerOfflineHtml(),
     products,
     categories,
     cart,
@@ -2844,15 +2956,15 @@ function paintCart(): void {
     changeEl.className = kelasPosChange();
   }
   const pay = document.querySelector<HTMLButtonElement>('#pos-pay');
-  if (pay) pay.disabled = !keranjangTerisi() || busy;
-  // Bayar pas ikut mati saat keranjang kosong / sedang proses (disable-nya
-  // diperbarui bersama #pos-pay; keduanya kini di dalam form bayar).
+  if (pay) pay.disabled = !bisaBayar() || busy;
+  // Bayar pas ikut mati saat keranjang kosong / sedang proses / server putus
+  // (disable-nya diperbarui bersama #pos-pay; keduanya kini di dalam form bayar).
   const payPas = document.querySelector<HTMLButtonElement>('#pos-pay-pas');
-  if (payPas) payPas.disabled = !keranjangTerisi() || busy;
-  // Tombol Bayar di sidebar = pembuka form bayar; mati saat keranjang kosong
-  // atau sedang proses (sama aturan dengan #pos-pay dulu).
+  if (payPas) payPas.disabled = !bisaBayar() || busy;
+  // Tombol Bayar di sidebar = pembuka form bayar; mati saat keranjang kosong,
+  // sedang proses, atau server tak terjangkau (sama aturan dengan #pos-pay).
   const bayar = host!.querySelector<HTMLButtonElement>('#pos-bayar');
-  if (bayar) bayar.disabled = !keranjangTerisi() || busy;
+  if (bayar) bayar.disabled = !bisaBayar() || busy;
   const clr = host!.querySelector<HTMLButtonElement>('#pos-clear');
   if (clr) clr.disabled = !keranjangTerisi();
   // Aksi cepat (sidebar): Tahan mati saat keranjang kosong/sedang proses,
@@ -4211,6 +4323,14 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
 function bayarPas(): void {
   if (busy) return;
   if (!keranjangTerisi()) return;
+  // Server putus = nota tidak mungkin tersimpan. Tolak SEBELUM uang dianggap
+  // diterima, dengan kalimat yang menyuruh memeriksa koneksi — jangan biarkan
+  // kasir menunggu 20 detik lalu membaca "Gagal menyimpan".
+  if (!jaringanTersambung()) {
+    toast('Server tidak terjangkau — transaksi belum bisa disimpan. Periksa koneksi, lalu coba lagi.', 'error', 7000);
+    void cekJaringan();
+    return;
+  }
   if (adaSisiTunai()) {
     // Uang pas = persis porsi TUNAI yang menempel tagihan: satu metode tunai
     // = TOTAL GABUNGAN (keranjang + baris layanan, Opsi B) — jalur "tanpa
@@ -4325,6 +4445,15 @@ async function segarkanStokPos(): Promise<void> {
 async function pay(opts?: { hutang?: boolean }): Promise<void> {
   if (!shift || busy) return;
   if (!keranjangTerisi()) return;
+  // Server tak terjangkau = nota TIDAK mungkin tersimpan (tidak ada outbox
+  // otomatis — lihat kepala api.ts). Tolak dengan kalimat eksplisit SEBELUM
+  // menyentuh uang, lalu picu cek ulang supaya tombol hidup lagi begitu
+  // server kembali.
+  if (!jaringanTersambung()) {
+    toast('Server tidak terjangkau — transaksi BELUM tersimpan. Periksa koneksi, lalu tekan Bayar lagi.', 'error', 8000);
+    void cekJaringan();
+    return;
+  }
   // Sanitasi izin terakhir sebelum menyentuh uang (jaring pengaman kalau
   // state lama lolos restore): baris layanan tanpa izin / item manual tanpa
   // izin tidak boleh membuat topup terkirim lalu nota ditolak 403 (uang
@@ -4795,7 +4924,21 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
     paintCart();
     focusScan();
   } catch (e) {
-    toast(`Gagal menyimpan ${tahap}: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
+    const status = e instanceof HttpError ? e.status : 0;
+    if (status === 0) {
+      // Jaringan putus / timeout di tengah request. JUJUR: request bisa saja
+      // sudah diterima server tapi jawabannya hilang, jadi jangan bilang
+      // "gagal" — suruh kasir memeriksa Riwayat dulu sebelum mengulang.
+      toast(
+        `Server tidak terjangkau saat menyimpan ${tahap === 'topup' ? 'data layanan' : 'penjualan'} — ` +
+          'transaksi BELUM terkonfirmasi. Cek Riwayat dulu; kalau belum ada, tekan Bayar lagi.',
+        'error',
+        9000,
+      );
+      void cekJaringan();
+    } else {
+      toast(`Gagal menyimpan ${tahap}: ${e instanceof Error ? e.message : 'tidak diketahui'}`, 'error', 6000);
+    }
   } finally {
     busy = false;
     paintAktif();
@@ -5072,6 +5215,22 @@ function bindPintasan(): void {
     },
     { signal: posKeyAbort.signal },
   );
+
+  // Status konektivitas server (2026-10-25): satu listener per mount. Saat
+  // PUTUS cukup sinkronkan penanda (banner + tombol mati). Saat PULIH kita
+  // muat ulang shift (bisa saja server baru hidup dan shift sudah ditutup
+  // dari perangkat lain) lalu render ulang — gate/keranjang jadi jujur.
+  // Listener ikut posKeyAbort supaya tidak menumpuk tiap mount/kunjungan.
+  window.addEventListener(EVENT_JARINGAN, () => {
+    terapkanJaringan();
+    if (jaringanTersambung() && !shift) {
+      void loadShift().then(() => {
+        if (!shift) return;
+        paint();
+        toast('Server terjangkau lagi — shift siap', 'success');
+      });
+    }
+  }, { signal: posKeyAbort.signal });
 }
 
 function bindCart(): void {
@@ -5263,6 +5422,19 @@ function bindCart(): void {
 
   host!.querySelector('#pos-clear')?.addEventListener('click', () => bersihkanKeranjang());
 
+  // Banner offline (sidebar desktop / header mobile — id & kelas sama):
+  // "Coba lagi" menembak /health lalu menyegarkan status. Setelah tersambung,
+  // terapkanJaringan() (§ listener ravaa:jaringan di bindPintasan) yang
+  // menghidupkan tombol bayar dan menghapus banner.
+  host!.querySelector('#pos-offline-retry')?.addEventListener('click', () => {
+    const btn = host?.querySelector<HTMLButtonElement>('#pos-offline-retry');
+    if (btn) btn.disabled = true;
+    void cekJaringan().finally(() => {
+      if (btn) btn.disabled = false;
+      terapkanJaringan();
+    });
+  }, { signal });
+
   // Panel kanan (diskon transaksi, Bayar, Bayar pas, Tahan/Pending, Item
   // manual, Cetak ulang, placeholder) — listener di bindSidebar().
   // Listener khusus keranjang di atas (#pos-rows, #pos-clear) tetap di sini.
@@ -5278,8 +5450,19 @@ async function loadShift(): Promise<void> {
   try {
     const res = await apiGet<{ data: Shift | null }>(`/api/shifts/open?cashier=${encodeURIComponent(getCashier())}`);
     shift = res.data;
-  } catch {
-    shift = null; // offline: tetap bisa layar keranjang, bayar nanti masuk outbox
+    shiftError = res.data ? null : 'info';
+  } catch (e) {
+    const status = e instanceof HttpError ? e.status : 0;
+    if (status === 0) {
+      // Jaringan putus BUKAN "belum buka shift" — gate wajib menampilkan
+      // kartu offline supaya kasir tidak mengisi modal awal sia-sia.
+      // `shift` lama (kalau ada) DIPERTAHANKAN: keranjang tetap tampil dan
+      // tombol Bayar sudah dimatikan oleh status jaringan.
+      shiftError = 'jaringan';
+      return;
+    }
+    shift = null;
+    shiftError = 'info';
   }
 }
 
@@ -5303,6 +5486,7 @@ export function unmountPosPage(): void {
   results = [];
   host = null;
   shift = null;
+  shiftError = null;
 }
 
 /** Dipanggil router untuk route `pos`. */

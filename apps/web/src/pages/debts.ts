@@ -16,6 +16,7 @@ import { apiDelete, apiGet, apiPost, HttpError } from '../api';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { icon } from '../ui/icons';
+import { punyaIzin } from '../ui/auth';
 import { choiceDialog, confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
@@ -129,7 +130,7 @@ function renderPage(): string {
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button type="button" id="hutang-charge" class="btn btn-primary" title="Catat hutang baru (Alt+N)">${icon('plus')}<span>Catat hutang</span><kbd class="kbd">Alt+N</kbd></button>
+          ${punyaIzin('hutang.catat') ? `<button type="button" id="hutang-charge" class="btn btn-primary" title="Catat hutang baru (Alt+N)">${icon('plus')}<span>Catat hutang</span><kbd class="kbd">Alt+N</kbd></button>` : ''}
         </div>
       </div>
 
@@ -203,7 +204,8 @@ function renderTable(): string {
               // untuk yang masih berhutang — pelanggan lunas tak punya yang
               // bisa dibayar. Buka modal pembayaran yang sudah terkunci ke
               // pelanggan ini (tanpa dropdown), lengkap dengan sisa hutangnya.
-              lunas
+              // Server menjaga `hutang.bayar`, jadi tombolnya ikut disembunyikan.
+              lunas || !punyaIzin('hutang.bayar')
                 ? ''
                 : `<button type="button" data-bayar="${r.customer_id}" class="row-btn" title="Catat pembayaran${r.sisa > 0 ? ` — sisa ${rp(r.sisa)}` : ''}" aria-label="Bayar hutang ${esc(r.name)}">${icon('wallet')}</button>`
             }
@@ -700,7 +702,7 @@ async function muatRincian(el: HTMLElement, customerId: number): Promise<void> {
               <td class="td text-right tabular-nums ${charge ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}">${charge ? '+' : '−'}${rp(b.amount)}</td>
               <td class="td text-right font-semibold tabular-nums">${rp(b.sisa)}</td>
               <td class="td text-right">
-                <button type="button" data-del-baris="${b.id}" class="row-btn row-btn-danger" title="Hapus catatan ini" aria-label="Hapus catatan">${icon('trash')}</button>
+                ${punyaIzin('hutang.hapus') ? `<button type="button" data-del-baris="${b.id}" class="row-btn row-btn-danger" title="Hapus catatan ini" aria-label="Hapus catatan">${icon('trash')}</button>` : ''}
               </td>
             </tr>`;
             })
@@ -712,6 +714,10 @@ async function muatRincian(el: HTMLElement, customerId: number): Promise<void> {
 
     box.querySelectorAll<HTMLButtonElement>('[data-del-baris]').forEach((btn) =>
       btn.addEventListener('click', async () => {
+        if (!punyaIzin('hutang.hapus')) {
+          toast('Butuh izin Hapus catatan hutang', 'warning');
+          return;
+        }
         const id = Number(btn.dataset.delBaris);
         const baris = r.rows.find((x) => x.id === id);
         if (!baris) return;
@@ -770,6 +776,16 @@ function rincianForm(r: Ringkasan): void {
 type PrefillBayar = { id: number; name: string; sisa: number };
 
 async function catatForm(jenis: 'charge' | 'payment', prefill?: PrefillBayar): Promise<void> {
+  // Server menjaga `hutang.catat` / `hutang.bayar` (dua izin terpisah), jadi
+  // modalnya pun tidak boleh terbuka untuk yang tidak berhak.
+  if (jenis === 'charge' && !punyaIzin('hutang.catat')) {
+    toast('Butuh izin Catat hutang', 'warning');
+    return;
+  }
+  if (jenis === 'payment' && !punyaIzin('hutang.bayar')) {
+    toast('Butuh izin Bayar hutang', 'warning');
+    return;
+  }
   // Pelanggan dipilih dari master — kalau belum ada, suruh buat dulu.
   // Prefill tidak butuh master (namanya sudah jelas dari baris yang diklik).
   let pelanggan: Customer[] = [];
@@ -968,8 +984,9 @@ export async function mountDebtsPage(el: HTMLElement): Promise<void> {
   el.innerHTML = renderPage();
   paint();
   el.querySelector('#hutang-charge')?.addEventListener('click', () => void catatForm('charge'));
-  // Alt+N = pintasan tombol "Catat hutang" (ui/aksi-baru.ts).
-  pasangAksiBaru(() => void catatForm('charge'));
+  // Alt+N = pintasan tombol "Catat hutang" (ui/aksi-baru.ts). Hanya didaftarkan
+  // bila izinnya ada — pintasan tidak boleh menabrak 403 server.
+  if (punyaIzin('hutang.catat')) pasangAksiBaru(() => void catatForm('charge'));
   el.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((b) =>
     b.addEventListener('click', () => {
       const s = b.dataset.status === 'semua' ? 'semua' : 'open';
