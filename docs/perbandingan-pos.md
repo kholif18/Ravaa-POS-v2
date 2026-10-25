@@ -204,8 +204,15 @@ AI forecasting.
 * Web PWA **self-hosted di server toko** (LAN): API Hono + better-sqlite3
   (SQLite WAL; API satu-satunya penulis DB) · web vanilla-TS + Tailwind v4
   (tanpa framework) · print-agent nol-dependensi di PC kasir.
-* **Offline-first**: outbox tulis (id uuid idempoten) + delta sync IndexedDB
-  + tombstone; penjualan tetap tercatat saat jaringan putus.
+* **Online-terikat (jujur)**: semua TULIS (penjualan, topup, hutang, …)
+  wajib server hidup — **tidak ada outbox otomatis**; modul antrean
+  `enqueue()` ada tapi belum dipanggil jalur tulis mana pun. Saat server tak
+  terjangkau POS menampilkan banner + mematikan tombol bayar, dan bila POST
+  gagal di tengah jalan pesannya "BELUM terkonfirmasi — cek Riwayat", bukan
+  klaim gagal pasti. Yang tetap jalan offline: shell PWA ter-cache + cache
+  master produk/pelanggan (tampilan & susun keranjang; keranjang tersimpan di
+  localStorage). Delta sync IndexedDB + tombstone tetap dipakai untuk
+  menyegarkan master dari server.
 * 1–2 kasir per device, masing-masing nama kasir + shift sendiri (tanpa
   multi-outlet — batas sadar skala; lihat §5).
 
@@ -232,7 +239,8 @@ AI forecasting.
   cetak Thermal/A4; kick laci otomatis untuk tunai.
 * **Master**: produk (foto, diskon, kadaluarsa, catatan, harga dinamis,
   grosir, borongan, multi-satuan, tombstone), kategori (`track_stock` /
-  `use_expiry`), satuan, pelanggan (+tier, +umur hutang), supplier.
+  `use_expiry`), satuan, pelanggan (+tier, +umur hutang, +riwayat nota per
+  pelanggan), supplier.
 * **Stok & pembelian**: restock dengan HPP rata-rata tertimbang, opname,
   riwayat stok ber-referensi nomor nota; **PO supplier**: buat → terima
   (stok masuk + `avg_cost`) → bayar bertahap / batal, hutang supplier +
@@ -252,7 +260,10 @@ AI forecasting.
   EAN-13/EAN-8/Code 128; jeda cetak terpusat.
 * **Data & keamanan**: backup harian + manual (retensi 14) + **restore dari
   UI** (backup pengaman otomatis) + jejak audit + guard skema saat boot +
-  idempotensi uuid (retry offline aman).
+  idempotensi uuid (POST ulang aman setelah gagal jaringan); **hak akses
+  granular** 36 izin operasional + 4 core owner (preset Standar/Ketat/
+  Supervisor/Semua/Kosong, peta dependensi keras, gating tombol & menu =
+  izin server) + PIN 6 digit & layar kunci auto-lock.
 
 **Keputusan pemilik 19 Okt 2026 (§4):** dikerjakan & SELESAI — scan kamera
 HP · kas masuk · cetak/ekspor PO · logo struk · split payment · pesanan
@@ -312,7 +323,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | Laporan + export (CSV/Excel) | ✓ | ✓ | ✓ | ✓ | ✓ | **✓** (8 menu) |
 | Laporan terjadwal email/WA | · | ✓ (berbayar) | · | ✓ | · | ✗ sengaja (§5) |
 | Analitik lanjutan (valuasi/dead stock) | ~ | ✓ | ~ | ✓ | ~ | ✓ selesai 19 Okt 2026 (4.10) |
-| Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | **✓** |
+| Offline-first | · | ✓ (lokal) | ✓ (plugin) | · | ~ | ~ (shell cache; tulis wajib server) |
 | Tanpa langganan (server sendiri) | ✗ | ✓ (Lite) | ✗ | ✗ | ~ (inti gratis) | **✓** |
 | Scan barcode kamera HP | · | · | · | · | ✓ | **✓** (selesai 19 Okt 2026; 4.4) |
 | Customer display | · | · | ✓ | · | ✓ (gratis) | ✗ sengaja (§5) |

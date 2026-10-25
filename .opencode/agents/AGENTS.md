@@ -133,13 +133,38 @@ apps/web/public/sw.js    Service worker PWA (nol dependensi): shell+aset dari
                          (192/512 any + maskable-512 + apple-touch-icon).
                          Diuji `tests/pwa-test.mjs` (build dist + vite
                          preview :4179 + offline reload).
-apps/web/src/api.ts      fetch + outbox offline (localStorage, retry 5 detik, id uuid).
+apps/web/src/api.ts      fetch + outbox (localStorage, retry 5 detik, id uuid).
                          `updateOutboxBadge()` menghitung `outboxCount()` sekali
                          lalu merawat DUA penampil: `#outbox-badge` (header, lama)
                          + chip POS `a[data-notif-outbox]` di `#pos-notif`
                          (toggles `hidden` + teks `n transaksi antre offline`) —
                          supaya chip notif POS ikut hidup tiap antrean berubah
                           tanpa menunggu repaint POS (revisi 2026-10-08).
+                         **KEJUJURAN OFFLINE (2026-10-25) — baca sebelum
+                         menulis klaim "offline-first" di dokumen mana pun**:
+                         `enqueue()` BELUM dipanggil jalur tulis mana pun.
+                         POS TIDAK mengantre penjualan saat server mati — ia
+                         menolak dengan pesan jelas (lihat `pos.ts`). Antrean
+                         hanya terisi bila ada kode yang memanggil `enqueue()`
+                         eksplisit; saat ini hanya suite test yang mengisinya
+                         langsung untuk menguji chip notif. Jangan pernah
+                         menulis "penjualan offline masuk antrean lalu terkirim
+                         sendiri" sampai wiring itu benar-benar ada.
+                         **Batas waktu & status jaringan**: `BATAS_REQ_MS`
+                         20.000 — fetch yang menggantung (WiFi putus di tengah
+                         POST) di-abort dan dilempar `HttpError(status 0,
+                         "server tidak merespons dalam 20 detik")`, bukan diam
+                         selamanya. `tersambung`/`jaringanTersambung()` di-set
+                         dari hasil `req()`: ADA JAWABAN (status apa pun,
+                         termasuk 401/500) = server hidup; fetch gagal/timeout =
+                         putus. `EVENT_JARINGAN` (`ravaa:jaringan`) dipancarkan
+                         tiap perubahan supaya POS menyegarkan banner/tombol
+                         tanpa repaint. `cekJaringan()` = probe manual 4 detik
+                         ke **`/api/me`** (SENGAJA bukan `/health`: vite dev &
+                         Caddy hanya meneruskan `/api/*`, `/health` jatuh ke
+                         SPA fallback HTTP 200 berisi HTML sehingga server mati
+                         pun terlihat hidup); jawaban JSON / status <500 =
+                         tersambung, dan satu pengecekan bersamaan saja.
 apps/web/src/styles.css  Token + gaya BERSAMA Tailwind v4 (`@theme` + `@layer
                           components`) seluruh halaman (SATU sumber token;
                           pendamping khusus POS ada di `pos.css` di bawah).
@@ -1059,6 +1084,37 @@ apps/web/src/pages/pos.ts  UI kasir utama (rute POS). **Urutan atas-ke-bawah =
                            6/7/12/20, `6*SKU`, edit manual, ganti satuan, grosir
                            termurah-menang, pulih setelah reload, nilai di
                            `sale_items.discount`, form produk).
+                           **Banner & gerbang OFFLINE (2026-10-25, pasangan
+                           `api.ts` di atas — MENGOREKSI klaim lama "POS
+                           offline-first")**: `bisaBayar()` = keranjang terisi
+                           **DAN `jaringanTersambung()`**; selama server tak
+                           terjangkau tombol Bayar/Bayar pas/OK form bayar
+                           `disabled` dan `pay()`/`bayarPas()`/`bukaBayar()`
+                           menolak dengan toast `"Server tidak terjangkau —
+                           transaksi belum bisa disimpan…"` (TIDAK ada
+                           `enqueue()`, lihat `api.ts`). `bannerOfflineHtml()`
+                           (`#pos-offline`, dipakai sidebar desktop & header
+                           mobile; `hidden` dipasang di PEMBUNGKUS, bukan
+                           elemen ber-utility `flex` — `hidden` kalah oleh
+                           `flex`) + tombol `#pos-offline-retry`
+                           (`cekJaringan()`); `terapkanJaringan()` menyegarkan
+                           banner, semua tombol bayar, kalimat trust
+                           `.pos-bayar-trust` ("aman & tercatat" → peringatan
+                           merah), dan me-render ulang gate shift — dipanggil
+                           listener `EVENT_JARINGAN` (didengar di
+                           `bindPintasan`, dilepas `unmountPosPage`) tanpa
+                           repaint penuh supaya fokus input tidak hilang.
+                           Gate shift punya dua kegagalan terpisah:
+                           `shiftError` `'jaringan'` (kartu "Server tidak
+                           terjangkau" + `#pos-gate-retry`, BUKAN "Buka shift
+                           dulu") vs `'info'` (pesan server apa adanya).
+                           Gagal simpan karena status 0 (`pay()`) menyuruh
+                           kasir **cek Riwayat dulu** — request bisa saja
+                           sudah diterima server tapi jawabannya hilang; jangan
+                           menulis "gagal".
+                           Diuji `tests/offline-jujur-test.mjs` (18 asersi:
+                           banner saat server diputus, Bayar mati, pesan gate,
+                           pulih setelah retry).
                            **Mount paralel (revisi 2026-10-08, "terasa lemot
                            berpindah dari halaman admin ke POS")**:
                            `mountPosPage` dulu menjalankan 3 roundtrip network
@@ -1843,6 +1899,21 @@ apps/web/src/pages/customers.ts  Halaman #/customers (menu Pelanggan, baru
                            harus utuh"`) — pesanan menyimpan snapshot nama & nota
                            take-nya menunjuk pelanggan; nonaktifkan bukan opsi di
                            master pelanggan, jadi pesanan harus dibatalkan/dibiarkan.
+                           **Riwayat transaksi per pelanggan (2026-10-25)**:
+                           tiap baris punya tombol `[data-cust-hist]` (ikon jam,
+                           hanya dirender bila `riwayat.lihat`) yang memanggil
+                           `riwayatPelanggan()` — modal READ-ONLY berisi nota
+                           pelanggan dari **`GET /api/sales?customer_id=<id>&limit=50`**
+                           (tanpa `date` = seluruh riwayat, bukan hari ini saja).
+                           Isi: chip jumlah nota + total, tabel Nota/Waktu/Item/
+                           Metode/Total, chip `Hutang`/`Retur` per baris, baris
+                           `Pesanan ORD-…` bila nota lahir dari serah pesanan,
+                           dan catatan "n terbaru" bila total > baris termuat.
+                           Tanpa `riwayat.semua` server hanya mengirim nota atas
+                           nama akun itu — modal menampilkan chip **"hanya nota
+                           Anda"** supaya angka tidak disangka "tidak pernah
+                           belanja". Ditutup dengan `cancelLabel: 'Tutup'` +
+                           `api.ok.remove()` (pola modal read-only lain).
 apps/web/src/pages/debts.ts  Halaman #/debts (menu Hutang, baru 2026-10-04):
                            kartu "Total piutang berjalan" (dari total GET
                            /api/customer-debts), tabel per-pelanggan (sisa
@@ -2074,9 +2145,16 @@ apps/web/src/invoice.ts  **INVOICE A4 gaya Aronium** (baru 2026-10-03):
                           diambil `cetakInvoice()` bila `sale.customer_id` ada —
                           gagal dimuat -> 0, cetak TIDAK dibatalkan) bila > 0
                           DAN ≠ hutang nota ini (supaya tidak dobel). `cetakInvoice(saleId)`
-                          = fetch `GET /api/sales/:id` + `GET /api/settings` +
-                          ledger piutang (paralel) -> window.open
-                          -> document.write -> `window.print()` otomatis saat
+                          = **`window.open('', '_blank')` SINKRON di baris
+                          pertama** (flake 2026-10-25: membuka tab SETELAH tiga
+                          `await` fetch bergantung pada transient user
+                          activation klik kasir — di mesin lambat jendelanya
+                          habis, popup balik null, kasir melihat toast "popup
+                          diblokir" padahal tidak ada pemblokir) lalu tab diisi
+                          placeholder "Menyiapkan invoice…", fetch `GET
+                          /api/sales/:id` + `GET /api/settings` + ledger piutang
+                          (paralel) ditulis ke tab itu, dan gagal fetch = tab
+                          ditutup lagi + Error. `window.print()` otomatis saat
                           load. **Tanpa print-agent** (rendering HTML tidak bisa
                           diserahkan ke server nol-dependensi — cetak lewat
                           browser/CUPS `lp -d EPSON-L3110-Series`). Lempar Error
@@ -2186,6 +2264,29 @@ apps/web/src/ui/izin.ts   **Paket B4 (baru 2026-10-20)**: daftar 36 izin
                           operasional + 4 core owner, label/grup, preset
                           Standar/Ketat/Semua/Kosong, `punyaIzin()` — satu
                           sumber kebenaran UI untuk gating tombol/menu.
+                          **Peta dependensi + preset Supervisor (2026-10-25)**:
+                          `DEPENDENSI_IZIN` hanya berisi dependensi KERAS —
+                          izin yang membuat layar/endpoint tak terpakai bila
+                          pasangannya absen (mis. `pos.jual → shift.lihat`
+                          karena POS berhenti di gate "Buka shift"; semua izin
+                          POS → `pos.jual`). SENGAJA TIDAK memuat pasangan
+                          yang hanya "lazim" (`hutang.catat → hutang.lihat`
+                          karena POS mencatat hutang tanpa membuka halaman,
+                          `retur.buat` punya dua pintu masuk,
+                          `pembelian.kelola → supplier.kelola` karena PO tanpa
+                          supplier sah) — dikunci unit test supaya tidak
+                          ditambah tanpa keputusan. Helper: `dependenDari()`
+                          (arah terbalik, untuk auto-uncheck),
+                          `rapikanDependensi()` (tutup transitif untuk simpan/
+                          muat) dan `dependensiKurang()` (daftar pasangan
+                          kurang, dasar catatan `#u-izin-repair` halaman
+                          Pengguna). `IZIN_KASIR_SUPERVISOR` = Standar + lima
+                          izin (33): `laporan.lihat`, `pos.hold_semua`,
+                          `shift.kelola`, `pengeluaran.kelola`,
+                          `kasmasuk.kelola`. Diuji
+                          `tests/izin-dependensi-test.ts` (27 asersi: peta
+                          asiklik, preset sehat, pengecualian sengaja,
+                          normalisasi/izin efektif, registry UI lengkap).
 apps/web/src/ui/lock.ts   **Paket B5 (baru 2026-10-20)**: layar kunci 6 digit
                           (keypad), auto-lock idle (default 30 menit, opsi
                           per device), verifier lokal PBKDF2 WebCrypto
@@ -2345,6 +2446,12 @@ tests/                 Suite regresi (`npm test` / `node tests/run.mjs`).
                        asersi != `ekspek` — angka `ekspek` wajib diperbarui bila
                        asersi memang sengaja ditambah. Prasyarat: API :3001
                        hidup + ada shift terbuka (runner membukanya sendiri).
+                       **Popup dokumen A4**: `cetakInvoice()` membuka tab SINKRON
+                       lalu mengisi placeholder "Menyiapkan invoice…" — jangan
+                       baca isi popup dengan `waitForLoadState('domcontentloaded')`
+                       (placeholder sudah tercapai). Pakai helper
+                       `tungguDokumenA4(popup)` dari `tests/bantuan-uji.mjs`
+                       (menunggu kaki "Dicetak melalui Ravaa POS pada:").
                        Pilih elemen per-KARTU (judul h2), jangan indeks tabel
                        ke-N — kartu empty-state tidak dirender saat data kosong
                        sehingga indeks bergeser (pelajaran 2026-10-19: kartu
@@ -2404,7 +2511,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
 * `GET /api/categories` -> `{data}` (baris memuat `track_stock`, `sort`, **`use_expiry`**)
 * `POST /api/categories` `{name,slug?,track_stock?,sort?,use_expiry?}` (upsert by slug; `slug` OPSIONAL —
   bila kosong server turunkan otomatis dari `name` (lowercase `[a-z0-9-]`), client kirim
-  slug readonly. 200 update / 201 baru. Slug tidak bisa diganti setelah dipakai)
+  slug readonly. 200 update / 201 baru. Slug tidak bisa diganti setelah dipakai.
+  **Sejak 2026-10-25 dijaga `wajibIzin('produk.kelola')`** — dulu terbuka untuk
+  semua sesi padahal menambah kategori ikut mengubah form produk.)
   - **`use_expiry` (0/1)**: 1 = form produk kategori ini **menampilkan** kolom
     `Tanggal kadaluarsa`. Aturannya DATA di server (kolom `categories.use_expiry`,
     seed: snack + eskrim = 1), menggantikan daftar hardcode `KATEGORI_KADALUARSA`
@@ -2414,7 +2523,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     seluruh produk kategori itu. Dibaca klien lewat `perluExpiry()` di
     `apps/web/src/pages/products.ts` (produk yang sudah punya tanggal tetap
     menampilkan fieldnya).
-* `DELETE /api/categories/:slug` (400 bila masih ada produk — FK `products.category_id`, `foreign_keys=ON`; kategori bekas pakai praktis permanen)
+* `DELETE /api/categories/:slug` (400 bila masih ada produk — FK `products.category_id`, `foreign_keys=ON`; kategori bekas pakai praktis permanen).
+  Sejak 2026-10-25 dijaga `wajibIzin('produk.kelola')` (pasangan POST di atas;
+  `GET /api/categories` tetap terbuka karena semua form produk butuh daftarnya)
 * `GET /api/units` -> `{data}` (urutan `name` alfabetis) + kolom **`dipakai`**
   (jumlah produk per satuan, dihitung server-side). WAJIB pakai angka ini untuk dialog hapus: menghitung dari cache
   client pernah berbohong ("tidak dipakai produk") lalu user diklik server tetap 400.
@@ -3390,10 +3501,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     **"sudah retur N · sisa M"** per baris + `max` input qty = sisa (input
     MATI saat sisa 0). Retur yang dibatalkan (`DELETE /api/returns/:id`) ikut
     hilang dari penjumlahan ini.
-* `GET /api/sales?date=&limit=&offset=`
+* `GET /api/sales?date=&customer_id=&limit=&offset=`
   -> `{data:[{id,shift_id,created_at,invoice_no,customer_id,customer_name,sisa_hutang,n_retur,retur_total,pay_method,pay_methods,subtotal,discount,total,cash_in,change,cashier,n_items}], total}`
   - **Daftar penjualan untuk menu "Riwayat transaksi"** (baru 2026-09-30).
     Read-only: tidak mengubah `products.version` dan tidak perlu.
+  - **`customer_id` (baru 2026-10-25 — riwayat per pelanggan, tombol jam di
+    halaman Pelanggan)**: filter nota milik satu pelanggan; harus integer
+    `> 0` -> selain itu **400** `"customer_id harus integer"`. **Bila
+    `customer_id` dikirim dan `date` TIDAK**, filter tanggal DILEWATI =
+    seluruh riwayat pelanggan (bukan hari ini saja) — dijalankan lewat WHERE
+    dinamis; `date` + `customer_id` = kedua filter berlaku. Limit/offset/`total`
+    tetap sama.
   - `date` default hari UTC (`YYYY-MM-DD`). Divalidasi round-trip
     (`date('2026-02-31')` = NULL di SQLite -> halaman kosong palsu) -> selain
     itu **400** `"date harus format YYYY-MM-DD"`.
@@ -3535,7 +3653,8 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     nota terbaru** (urutan `created_at DESC, id DESC`; `total.n` = jumlah nota
     sesungguhnya — penanda "x dari y nota"); arsip penuh tetap menu Riwayat.
 * `GET /api/reports/analytics?from=&to=` (butir ROADMAP 1.6.7, 2026-10-19,
-  menu **Analitik**; `hanyaOwner`) -> `{data:{from,to,valuasi:{rows,total},
+  menu **Analitik**; **sejak 2026-10-25 `wajibIzin('laporan.lihat')`** — dulu
+  `hanyaOwner`; kini satu aturan dengan laporan lain) -> `{data:{from,to,valuasi:{rows,total},
   dead:{n,nilai,rows,terpotong}}}`; validasi = `bacaRentang` sama dengan
   profit (format round-trip, `from<=to`, maks 366 hari; `from`/`to` absen =
   hari ini).
@@ -3717,6 +3836,14 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   **tidak boleh** dimasukkan `users.permissions` (validasi menolak 400) — selalu
   dijaga `hanyaOwner` lewat role. Jangan menambah izin operasional baru tanpa
   update `IZIN_OPERASIONAL` (index.ts), `ui/izin.ts` (UI), dan §3 ini.
+  **Peta dependensi izin (2026-10-25)**: `DEPENDENSI_IZIN` di `ui/izin.ts`
+  hanya memuat dependensi KERAS; menambah pasangan "lazim" (mis.
+  `hutang.catat → hutang.lihat`) akan memerahkan
+  `tests/izin-dependensi-test.ts` — ubah peta + alasan di komentar + asersi
+  pengecualian bila memang keputusan pemilik. Setiap tombol/menu baru yang
+  memanggil endpoint ber-`wajibIzin` WAJIB digating dengan `punyaIzin()` yang
+  sama di klien (server tetap penjaga terakhir; tanpa gate klien kasir
+  menabrak 403 alih-alih melihat tombol yang jujur).
 * DILARANG menambah framework (React/Svelte/Electron) tanpa persetujuan — web vanilla-TS adalah keputusan sadar (ringan, tanpa build rapuh).
 * Tailwind CSS v4 DISETUJUI 2026-09-25 (hanya build-time `@tailwindcss/vite` di `apps/web`,
   tanpa CDN; logika tetap vanilla-TS, tanpa Alpine/jQuery/chart-lib/font-icon).
@@ -3765,8 +3892,11 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   dengan **baris penjaga** — data "pihak lain" harus selamat dari cleanup
   (pola `cleanupDB()` + nota penjaga di `tests/product-delete-test.mjs`).
 * **PWA**: service worker HANYA boleh meng-cache shell + aset statis — data
-  `/api/*` TIDAK PERNAH (angka kasir basi > layar error; outbox tetap jalur
-  tulis offline). Ubah isi `apps/web/public/sw.js` = NAIKKAN versi
+  `/api/*` TIDAK PERNAH (angka kasir basi > layar error). Jalur tulis offline
+  lewat outbox **belum terpasang** — lihat aturan KEJUJURAN OFFLINE di §2
+  `api.ts`; jangan menulis klaim "penjualan offline diantrekan" di dokumen
+  mana pun sampai `enqueue()` benar-benar dipanggil jalur tulis. Ubah isi
+  `apps/web/public/sw.js` = NAIKKAN versi
   `ravaa-shell-v1` (cache lama baru dibuang saat activate). Registrasi SW
   tetap `import.meta.env.PROD` (dev jangan di-cache). Uji: `tests/pwa-test.mjs`.
 * `apps/web/vite.config.ts` `preview.proxy` (`/api` -> :3001) itu untuk

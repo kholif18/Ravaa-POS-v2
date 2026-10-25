@@ -155,8 +155,10 @@ npm run dev:api
   worker, jadi bisa **dipasang ke home screen Android/HP atau desktop**
   (display standalone) dan **shell-nya tetap terbuka tanpa jaringan**. Data
   `/api/*` tidak pernah di-cache service worker (angka kasir yang basi lebih
-  berbahaya daripada layar error) — antrean tulis offline tetap lewat outbox
-  yang sudah ada. Registrasi SW hanya di build produksi.
+  berbahaya daripada layar error). Selama server tak terjangkau, POS
+  **menolak** menyimpan dengan pesan jelas (banner + tombol Bayar mati) —
+  antrean tulis offline (outbox) belum dipanggil jalur tulis mana pun.
+  Registrasi SW hanya di build produksi.
 * **Form produk** (`#/products` -> Tambah/Edit) memakai **modal 2 kolom ala
   RPOS** (lebar `max-w-5xl`): kolom **kiri = kotak foto persegi** (seluruh kotak
   diklik untuk pilih berkas — di mode Tambah/Duplikat pilihan ditahan di memori
@@ -956,7 +958,9 @@ npm run dev:api
   - **Tanpa pembatalan/refund**: riwayat bersifat catatan, sama seperti riwayat
     mutasi stok. Koreksi lewat stok opname + transaksi baru.
   - Endpoint baru: `GET /api/sales` dan `GET /api/topups`, keduanya berparameter
-    `date` / `limit` / `offset` (kontrak lengkap di AGENTS §3).
+    `date` / `limit` / `offset` (kontrak lengkap di AGENTS §3). `GET /api/sales`
+    juga menerima `customer_id` (riwayat satu pelanggan — tanpa `date` berarti
+    seluruh riwayat, dipakai tombol riwayat di halaman Pelanggan).
 * **Laporan** (`#/reports`, menu **Laporan** di sidebar) — laporan pemilik
   toko ala Aronium. **Refactor 2026-10-17** (permintaan pemilik *"perlu
   refactor juga halaman report untuk menampung seluruh menu laporan"*): menu
