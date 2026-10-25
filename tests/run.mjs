@@ -88,6 +88,10 @@ const SUITE = [
   ['kas-masuk-test.mjs', 23],
   ['retur-test.mjs', 44],
   ['purchase-test.mjs', 46],
+  // Penerimaan PO bertahap (butir 3.7, 2026-10-25): items opsional +
+  // idempotensi client_id, sisa = diterima−terbayar, agregat shift/laporan
+  // per kedatangan, fallback nota lama, UI daftar/detail/A4.
+  ['purchase-partial-test.mjs', 50],
   ['pager-test.mjs', 19],
   ['altn-test.mjs', 18],
   ['tier-harga-test.mjs', 16],

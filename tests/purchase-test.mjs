@@ -78,9 +78,12 @@ console.log('=== C. Hutang + cicil + cancel ===');
 const vH = await post(`/api/purchases/${oH.json.data.purchase.id}/receive`, { dibayar: 1000 });
 chk('hutang 7000 tercatat (sisa)', vH.status === 200 && vH.json.data.terbayar === 1000, JSON.stringify(vH.json.data));
 const gh1 = await api('/api/purchases?status=hutang');
-chk('filter hutang: hanya received bersisa + PO bersisa ikut',
+// Sejak 3.7 (2026-10-25) filter `hutang` = sisa atas barang yang SUDAH
+// diterima — PO bertahap berstatus tersimpan `order` (tampil "Sebagian")
+// ikut bila uangnya kurang, jadi syaratnya status_tampil bukan `cancel`.
+chk('filter hutang: hanya nota bersisa atas barang diterima (sebagian ikut)',
   gh1.data.some((o) => o.id === oH.json.data.purchase.id && o.sisa === 7000)
-  && gh1.data.every((o) => o.status === 'received' && o.sisa > 0), `n=${gh1.total}`);
+  && gh1.data.every((o) => (o.status_tampil ?? o.status) !== 'cancel' && o.sisa > 0), `n=${gh1.total}`);
 const y1 = await post(`/api/purchases/${oH.json.data.purchase.id}/pay`, { amount: 3000 });
 chk('cicil 3000 -> sisa 4000', y1.status === 200 && y1.json.data.terbayar === 4000, JSON.stringify(y1.json.data));
 chk('bayar melebihi sisa -> 400', (await post(`/api/purchases/${oH.json.data.purchase.id}/pay`, { amount: 99999 })).status === 400);

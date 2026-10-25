@@ -606,7 +606,7 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
         <tr><td>Retur (${s.n_retur})</td><td class="text-right">${rpIdr(s.retur_total)}</td></tr>
         <tr><td>Pengeluaran (${s.n_expense})</td><td class="text-right">${rpIdr(s.expense_total)}</td></tr>
         <tr><td>Kas masuk (${s.n_kas_masuk})</td><td class="text-right">${rpIdr(s.kas_masuk_total)}</td></tr>
-        <tr><td>Pembelian (${s.n_purchase})</td><td class="text-right">${rpIdr(s.purchase_total)}</td></tr>
+        <tr><td>Pembelian (${s.n_purchase} kedatangan)</td><td class="text-right">${rpIdr(s.purchase_total)}</td></tr>
         <tr><td>Hutang terbentuk</td><td class="text-right">${rpIdr(s.hutang_baru ?? 0)}</td></tr>
         <tr><td>Piutang terbayar</td><td class="text-right">${rpIdr(s.piutang_bayar ?? 0)}</td></tr>
       </tbody>

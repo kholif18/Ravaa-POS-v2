@@ -144,6 +144,16 @@ npm run dev:api
   hal yang sama untuk nota kulakan diterima-belum-lunas di `#/purchases`
   (umur sejak barang diterima). Angka dihitung server dari data asli saat
   dibaca (`umur_hari`/`lewat30`) — bukan saldo tersimpan.
+* **Penerimaan PO bertahap** (`#/purchases`, butir ROADMAP 3.7, 2026-10-25):
+  barang kulakan boleh datang beberapa kali — form **Terima** di rincian PO
+  menanyakan qty datang per baris (default = sisa), uang keluar dicatat per
+  kedatangan, dan status tampil **Sebagian** sampai semua qty terpenuhi
+  (status tersimpan tetap `order` sampai lengkap, lalu `received`). Sisa
+  hutang hanya dihitung dari barang yang SUDAH diterima; laporan & laci
+  menghitung tiap kedatangan di tanggalnya, dan nota lama tanpa riwayat
+  kedatangan tetap dihitung satu event (tanpa backfill). Setelah ada
+  penerimaan, PO tidak bisa dibatalkan — koreksi stok lewat Opname, kas
+  lewat Pengeluaran.
 * **Jejak audit** (`#/audit`, menu **Jejak Audit**, khusus owner, baru
   2026-10-16): catatan mutasi penting master & sistem — produk, kategori,
   satuan, pelanggan, supplier, hutang, user, pengaturan, stok, pengeluaran,

@@ -2246,12 +2246,24 @@ app.get('/api/shifts', wajibIzin('shift.lihat'), (c) => {
             -- (a)). Hanya yang terikat shift_id ini.
             (SELECT COUNT(*) FROM returns r WHERE r.shift_id = s.id) AS n_retur,
             (SELECT COALESCE(SUM(r.total),0) FROM returns r WHERE r.shift_id = s.id) AS retur_total,
-            -- Pembelian tunai (Tahap 3, 2026-10-11): kas KELUAR sebesar yang
-            -- DIBAYAR (terbayar, bukan total — sisa hutang tak gerakkan kas).
-            -- Hanya nota received yang terikat shift ini; cicilan susulan ikut
-            -- shift PO-nya (satu PO satu laci, lihat POST /:id/pay).
-            (SELECT COUNT(*) FROM purchases p WHERE p.shift_id = s.id AND p.status = 'received') AS n_purchase,
-            (SELECT COALESCE(SUM(p.terbayar),0) FROM purchases p WHERE p.shift_id = s.id AND p.status = 'received') AS purchase_total,
+            -- Pembelian tunai (Tahap 3, 2026-10-11; BERTAHAP sejak butir 3.7
+            -- 2026-10-25): kas KELUAR sebesar yang DIBAYAR, dihitung per
+            -- KEDATANGAN — satu PO bisa menerima barang di beberapa shift.
+            --   n_purchase = jumlah event kedatangan di shift ini + nota
+            --   LAMA (received tanpa baris kedatangan, fitur ini baru) supaya
+            --   riwayat lama tetap tampil 1 event di rekap.
+            --   purchase_total = Σ dibayar event di shift ini + sisa
+            --   pembayaran yang MENEMPEL ke PO (p.shift_id = kedatangan
+            --   PERTAMA, dipakai cicilan POST /:id/pay) — dibagi begini agar
+            --   uang yang sama tidak dihitung dua kali.
+            ((SELECT COUNT(*) FROM purchase_receives r WHERE r.shift_id = s.id)
+             + (SELECT COUNT(*) FROM purchases p
+                 WHERE p.shift_id = s.id AND p.status = 'received'
+                   AND NOT EXISTS (SELECT 1 FROM purchase_receives r2 WHERE r2.purchase_id = p.id))) AS n_purchase,
+            ((SELECT COALESCE(SUM(r.dibayar),0) FROM purchase_receives r WHERE r.shift_id = s.id)
+             + (SELECT COALESCE(SUM(p.terbayar - COALESCE(
+                    (SELECT SUM(r2.dibayar) FROM purchase_receives r2 WHERE r2.purchase_id = p.id), 0)),0)
+                  FROM purchases p WHERE p.shift_id = s.id AND p.status <> 'cancel')) AS purchase_total,
             -- Rekap tutup shift ala Z-report Aronium (2026-10-11): rentang
             -- nota + total diskon + hutang terbentuk + piutang terbayar.
             -- invoice_no YYMMDD-NNNNNN urut leksikal = kronologis, jadi
@@ -3750,9 +3762,63 @@ app.delete('/api/returns/:id', wajibIzin('retur.batal'), (c) => {
 // Kas keluar = `terbayar`, diatribusikan ke shift_id PO ini (bukan shift
 // saat bayar susulan — satu PO satu laci penanggung, sederhana & auditabel).
 type PoItemIn = { product_id?: number; qty?: number; harga_beli?: number };
-const ambilPo = (id: number) => db.prepare('SELECT * FROM purchases WHERE id = ?').get(id) as
-  | { id: number; status: string; total: number; terbayar: number; shift_id: number | null }
-  | undefined;
+type PoTerimaIn = { purchase_item_id?: number; qty?: number };
+type PoHitung = {
+  id: number; status: string; total: number; terbayar: number;
+  shift_id: number | null; received_at: string | null;
+  /** Nilai barang yang SUDAH diterima (Σ kedatangan; nota lama = total). */
+  diterima: number;
+  /** Sisa hutang supplier atas barang yang SUDAH diterima. */
+  sisa: number;
+  /** Nilai barang yang BELUM datang. */
+  sisa_terima: number;
+  status_tampil: 'order' | 'sebagian' | 'received' | 'cancel';
+  n_terima: number;
+};
+
+// Nilai barang yang SUDAH diterima (butir ROADMAP 3.7): Σ kedatangan.
+// Nota LAMA berstatus received tidak punya baris kedatangan (fitur ini baru),
+// jadi dianggap terkirim penuh lewat fallback `p.total` — tanpa ini seluruh
+// nota historis mendadak terlihat "belum diterima" & sisa hutangnya salah.
+const SQL_PO_DITERIMA = `COALESCE(
+  (SELECT SUM(ri.amount) FROM purchase_receives r
+     JOIN purchase_receive_items ri ON ri.receive_id = r.id
+    WHERE r.purchase_id = p.id),
+  CASE WHEN p.status = 'received' THEN p.total ELSE 0 END)`;
+
+// Satu sumber bentuk baris PO (list/detail/pay/receive): `sisa` dihitung dari
+// nilai yang SUDAH diterima (bukan total PO — barang yang belum datang bukan
+// hutang), `status_tampil` menurunkan "Sebagian" dari Σ kedatangan tanpa
+// menambah nilai CHECK pada kolom status tersimpan.
+const SQL_PO_HIT = `
+  WITH po AS (
+    SELECT p.*, ${SQL_PO_DITERIMA} AS diterima FROM purchases p
+  ), hit AS (
+    SELECT po.*,
+           MAX(0, po.diterima - po.terbayar) AS sisa,
+           -- Saat status sudah 'received', tidak ada qty tersisa — nol-kan
+           -- eksplisit supaya pembulatan per event (qty pecahan) tidak
+           -- memunculkan "Belum diterima Rp1" pada nota yang sudah lengkap.
+           CASE WHEN po.status = 'received' THEN 0
+                ELSE MAX(0, po.total - po.diterima) END AS sisa_terima,
+           CASE WHEN po.status = 'cancel' THEN 'cancel'
+                WHEN po.status = 'received' THEN 'received'
+                WHEN po.diterima > 0 THEN 'sebagian'
+                ELSE 'order' END AS status_tampil,
+           (SELECT COUNT(*) FROM purchase_receives r WHERE r.purchase_id = po.id) AS n_terima
+      FROM po
+  )`;
+
+// Qty yang sudah diterima untuk satu baris PO. Nota lama (received tanpa baris
+// kedatangan) = qty penuh; nota lain yang belum punya kedatangan = 0.
+const SQL_PO_BARIS_DITERIMA = `CASE
+  WHEN NOT EXISTS (SELECT 1 FROM purchase_receives r WHERE r.purchase_id = pi.purchase_id)
+    THEN CASE WHEN (SELECT status FROM purchases WHERE id = pi.purchase_id) = 'received'
+              THEN pi.qty ELSE 0 END
+  ELSE COALESCE((SELECT SUM(ri.qty) FROM purchase_receive_items ri
+                   JOIN purchase_receives r ON r.id = ri.receive_id
+                  WHERE r.purchase_id = pi.purchase_id AND ri.purchase_item_id = pi.id), 0)
+END`;
 
 // Kulakan HANYA barang fisik (track_stock=1, pola restock/retur): jasa tidak
 // punya stok untuk ditambah. Validasi dipakai order (awal) & receive (ulang,
@@ -3812,17 +3878,25 @@ app.post('/api/purchases', wajibIzin('pembelian.kelola'), async (c) => {
       return row;
     })();
     const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all((po as { id: number }).id);
-    return c.json({ data: { purchase: po, items } }, 201);
+    // Bentuk balasan SAMA dengan GET detail (butir 3.7): `diterima`/`sisa`/
+    // `sisa_terima`/`status_tampil`/`n_terima` computed ikut sejak POST supaya
+    // klien tidak perlu tebak-tebakan (PO baru = order, belum ada kedatangan).
+    const segar = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get((po as { id: number }).id);
+    return c.json({ data: { purchase: segar, items } }, 201);
   } catch (e) {
     const pesan = e instanceof Error ? e.message : 'gagal simpan pembelian';
     return c.json({ error: pesan }, /tidak dikenal/.test(pesan) ? 404 : 400);
   }
 });
 
-// Terima barang: status order -> received + stok masuk per item (RUMUS SAMA
-// PERSIS dengan restock: avg tertimbang + version++ + stock_moves 'beli') +
-// terbayar bawaan = total (tunai penuh; kirim `dibayar` lebih kecil bila
-// hutang — sisa = total − terbayar).
+// Terima barang — BERTAHAP (butir ROADMAP 3.7, 2026-10-25). Body opsional
+// `items:[{purchase_item_id, qty}]`; TANPA `items` = terima SEMUA sisa
+// (perilaku lama, pemanggil/klien lama tetap sah). Stok masuk per baris yang
+// diterima (RUMUS SAMA PERSIS dengan restock: avg tertimbang + version++ +
+// stock_moves 'beli') dan `dibayar` = uang keluar pada KEDATANGAN INI
+// (bawaan = nilai kedatangan; maks = nilai kumulatif diterima − terbayar).
+// Status tersimpan baru jadi 'received' saat SEMUA qty terpenuhi; selain itu
+// tetap 'order' dan tampil "Sebagian" (computed).
 app.post('/api/purchases/:id/receive', wajibIzin('pembelian.kelola'), async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
@@ -3832,35 +3906,119 @@ app.post('/api/purchases/:id/receive', wajibIzin('pembelian.kelola'), async (c) 
     // memakai shiftnya sendiri, owner bebas (satu-satunya validasi shift).
     const sh = aturShift(c, body?.shift_id, body?.cashier);
     if (!sh.ok) return c.json({ error: sh.error }, sh.status);
-    const rawBayar = body?.dibayar;
-    const out = db.transaction(() => {
-      const po = ambilPo(id);
-      if (!po) throw new Error('pembelian tidak ada');
-      if (po.status !== 'order') throw new Error(`hanya PO order yang bisa diterima (status: ${po.status})`);
-      const dibayar = rawBayar === undefined || rawBayar === null || rawBayar === '' ? po.total : Number(rawBayar);
-      if (!Number.isInteger(dibayar) || dibayar < 0 || dibayar > po.total) {
-        throw new Error(`dibayar harus bulat 0..${po.total}`);
+    // Kunci idempotensi retry (pola `id` uuid POST /api/sales): kirim ulang
+    // request yang sama TIDAK menambah stok/uang dua kali.
+    const clientId = String(body?.client_id ?? body?.id ?? '').trim();
+    if (clientId.length > 64) return c.json({ error: 'client_id maks 64 karakter' }, 400);
+    const note = String(body?.note ?? '').trim();
+    if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    const rawItems = body?.items;
+    if (rawItems !== undefined && (!Array.isArray(rawItems) || rawItems.length === 0)) {
+      return c.json({ error: 'items harus array non-kosong (kosongkan untuk terima semua sisa)' }, 400);
+    }
+    if (Array.isArray(rawItems) && rawItems.length > 200) {
+      return c.json({ error: 'maks 200 baris per kedatangan' }, 400);
+    }
+    const out = transaksi(() => {
+      if (clientId) {
+        const ada = db.prepare('SELECT * FROM purchase_receives WHERE client_id = ?').get(clientId) as
+          { id: number; purchase_id: number } | undefined;
+        if (ada) {
+          if (ada.purchase_id !== id) throw new Error('client_id sudah dipakai pembelian lain');
+          const po = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id);
+          if (!po) throw new Error('pembelian tidak ada');
+          const receive = db.prepare('SELECT * FROM purchase_receives WHERE id = ?').get(ada.id);
+          return { ...(po as object), receive, duplicate: true };
+        }
       }
-      const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id) as
-        { product_id: number; qty: number; harga_beli: number }[];
-      const cashier = sh.cashier;
-      items.forEach((it, i) => {
-        cekProdukKulakan(it.product_id, i);
-        const p = db.prepare('SELECT stock, avg_cost FROM products WHERE id = ?').get(it.product_id) as
+      const po = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id) as PoHitung | undefined;
+      if (!po) throw new Error('pembelian tidak ada');
+      if (po.status === 'cancel') throw new Error('pembelian sudah dibatalkan');
+      if (po.status === 'received') throw new Error('pembelian sudah diterima lengkap');
+      const itemRows = db.prepare(
+        `SELECT pi.*, ${SQL_PO_BARIS_DITERIMA} AS diterima
+           FROM purchase_items pi WHERE pi.purchase_id = ? ORDER BY pi.id`,
+      ).all(id) as { id: number; product_id: number; name: string; qty: number; harga_beli: number; diterima: number }[];
+      const sisaPer = new Map(itemRows.map((it) => [it.id, Math.max(0, it.qty - it.diterima)]));
+      const dipilih: { item: (typeof itemRows)[number]; qty: number }[] = [];
+      if (rawItems === undefined) {
+        // Kompatibilitas penuh: pemanggil lama tidak mengirim items = terima
+        // semua sisa sekaligus (dulu selalu 100% karena belum ada kedatangan).
+        for (const it of itemRows) {
+          const sisa = sisaPer.get(it.id) ?? 0;
+          if (sisa > 1e-9) dipilih.push({ item: it, qty: sisa });
+        }
+      } else {
+        const terpakai = new Set<number>();
+        (rawItems as PoTerimaIn[]).forEach((raw, i) => {
+          const pid = Number(raw?.purchase_item_id);
+          const qty = Number(raw?.qty);
+          if (!Number.isInteger(pid)) throw new Error(`baris ${i + 1}: purchase_item_id harus integer`);
+          const row = itemRows.find((it) => it.id === pid);
+          if (!row) throw new Error(`baris ${i + 1}: purchase_item_id tidak dikenal di PO ini`);
+          if (terpakai.has(pid)) throw new Error(`baris ${i + 1}: purchase_item_id duplikat`);
+          terpakai.add(pid);
+          if (!Number.isFinite(qty) || qty <= 0) throw new Error(`baris ${i + 1}: qty harus > 0`);
+          const sisa = sisaPer.get(pid) ?? 0;
+          if (qty > sisa + 1e-9) throw new Error(`baris ${i + 1}: qty melebihi sisa (sisa ${sisa})`);
+          dipilih.push({ item: row, qty });
+        });
+      }
+      if (!dipilih.length) throw new Error('tidak ada qty yang diterima');
+      const baris = dipilih.map(({ item, qty }) => ({
+        ...item, qty_terima: qty, amount: Math.round(qty * item.harga_beli),
+      }));
+      const eventTotal = baris.reduce((s, b) => s + b.amount, 0);
+      // Sisa hutang setelah event ini = nilai kumulatif diterima − terbayar.
+      // Boleh melunasi kekurangan kedatangan sebelumnya, tapi tidak boleh
+      // melebihi nilai barang yang benar-benar sudah masuk.
+      const maksBayar = Math.max(0, po.diterima + eventTotal - po.terbayar);
+      const dibayar = body?.dibayar === undefined || body?.dibayar === null || body?.dibayar === ''
+        ? eventTotal
+        : Number(body.dibayar);
+      if (!Number.isInteger(dibayar) || dibayar < 0 || dibayar > maksBayar) {
+        throw new Error(`dibayar harus bulat 0..${maksBayar}`);
+      }
+      baris.forEach((b, i) => {
+        cekProdukKulakan(b.product_id, i);
+        const p = db.prepare('SELECT stock, avg_cost FROM products WHERE id = ?').get(b.product_id) as
           { stock: number; avg_cost: number };
-        const avgBaru = Math.round((p.stock * p.avg_cost + it.qty * it.harga_beli) / (p.stock + it.qty));
+        const avgBaru = Math.round((p.stock * p.avg_cost + b.qty_terima * b.harga_beli) / (p.stock + b.qty_terima));
         db.prepare(
           `UPDATE products SET stock = stock + ?, avg_cost = ?, updated_at = datetime('now'),
              version = (SELECT COALESCE(MAX(version),0) + 1 FROM products)
            WHERE id = ?`,
-        ).run(it.qty, avgBaru, it.product_id);
+        ).run(b.qty_terima, avgBaru, b.product_id);
         db.prepare(`INSERT INTO stock_moves (product_id, qty, reason, ref_id, unit_cost, cashier) VALUES (?, ?, 'beli', ?, ?, ?)`)
-          .run(it.product_id, it.qty, `PO-${id}`, Math.round(it.harga_beli), cashier);
+          .run(b.product_id, b.qty_terima, `PO-${id}`, Math.round(b.harga_beli), sh.cashier);
       });
-      return db.prepare(
-        `UPDATE purchases SET status = 'received', shift_id = ?, terbayar = ?,
-           received_at = datetime('now'), cashier = ? WHERE id = ? RETURNING *`,
-      ).get(sh.shift_id, dibayar, cashier, id);
+      const receive = db.prepare(
+        `INSERT INTO purchase_receives (purchase_id, shift_id, cashier, total, dibayar, note, client_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ).get(id, sh.shift_id, sh.cashier, eventTotal, dibayar, note, clientId || null) as { id: number };
+      const insBaris = db.prepare(
+        `INSERT INTO purchase_receive_items (receive_id, purchase_item_id, qty, harga_beli, amount)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      for (const b of baris) insBaris.run(receive.id, b.id, b.qty_terima, b.harga_beli, b.amount);
+      // Lengkap = tidak ada baris yang sisa qty-nya masih > 0 (toleransi float).
+      const sisaQty = (db.prepare(
+        `SELECT COALESCE(SUM(
+           CASE WHEN pi.qty - ${SQL_PO_BARIS_DITERIMA} > 0.0000001 THEN 1 ELSE 0 END), 0) AS n
+           FROM purchase_items pi WHERE pi.purchase_id = ?`,
+      ).get(id) as { n: number }).n;
+      const lengkap = sisaQty === 0;
+      db.prepare(
+        `UPDATE purchases SET status = ?, terbayar = terbayar + ?,
+           shift_id = COALESCE(shift_id, ?),
+           cashier = CASE WHEN received_at IS NULL THEN ? ELSE cashier END,
+           received_at = COALESCE(received_at, datetime('now'))
+         WHERE id = ?`,
+      ).run(lengkap ? 'received' : 'order', dibayar, sh.shift_id, sh.cashier, id);
+      // Bentuk balasan SAMA dengan versi lama (`data` = baris purchases) +
+      // field computed & `receive` — klien/pemanggil lama tidak rusak.
+      const segar = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id);
+      return { ...(segar as object), receive };
     })();
     return c.json({ data: out });
   } catch (e) {
@@ -3869,8 +4027,11 @@ app.post('/api/purchases/:id/receive', wajibIzin('pembelian.kelola'), async (c) 
   }
 });
 
-// Bayar sisa hutang supplier (cicil): terbayar += amount, maks = total.
-// Kas keluar susulan diatribusikan ke shift_id PO ini (satu PO satu laci).
+// Bayar sisa hutang supplier (cicil): terbayar += amount, maks = nilai yang
+// SUDAH diterima − terbayar (barang yang belum datang bukan hutang). Kas
+// keluar susulan diatribusikan ke shift_id PO ini (satu PO satu laci) — juga
+// berlaku untuk PO yang baru diterima sebagian, supaya kekurangan bayar saat
+// kedatangan bisa dilunasi tanpa menunggu seluruh barang datang.
 app.post('/api/purchases/:id/pay', wajibIzin('pembelian.kelola'), async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
@@ -3878,12 +4039,14 @@ app.post('/api/purchases/:id/pay', wajibIzin('pembelian.kelola'), async (c) => {
     const body = await c.req.json();
     const amount = Number(body?.amount ?? 0);
     if (!Number.isInteger(amount) || amount <= 0) return c.json({ error: 'amount harus rupiah bulat > 0' }, 400);
-    const row = db.transaction(() => {
-      const po = ambilPo(id);
+    const row = transaksi(() => {
+      const po = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id) as PoHitung | undefined;
       if (!po) throw new Error('pembelian tidak ada');
-      if (po.status !== 'received') throw new Error(`hanya nota received yang bisa dibayar (status: ${po.status})`);
-      if (po.terbayar + amount > po.total) throw new Error(`melebihi sisa hutang (sisa ${po.total - po.terbayar})`);
-      return db.prepare(`UPDATE purchases SET terbayar = terbayar + ? WHERE id = ? RETURNING *`).get(amount, id);
+      if (po.status === 'cancel') throw new Error('pembelian sudah dibatalkan');
+      if (po.diterima <= 0) throw new Error('belum ada barang yang diterima — tidak ada hutang');
+      if (amount > po.sisa) throw new Error(`melebihi sisa hutang (sisa ${po.sisa})`);
+      db.prepare(`UPDATE purchases SET terbayar = terbayar + ? WHERE id = ?`).run(amount, id);
+      return db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id);
     })();
     return c.json({ data: row });
   } catch (e) {
@@ -3892,69 +4055,107 @@ app.post('/api/purchases/:id/pay', wajibIzin('pembelian.kelola'), async (c) => {
   }
 });
 
-// Batalkan PO (hanya status order — yang received sudah masuk stok; koreksi
-// stok lewat opname, koreksi kas lewat pengeluaran).
+// Batalkan PO HANYA bila belum ada barang masuk sama sekali. Setelah ada
+// penerimaan (walau sebagian) stok & kas sudah bergerak — koreksi lewat
+// opname (stok) / retur-pengeluaran (kas), bukan menghapus riwayat.
 app.post('/api/purchases/:id/cancel', wajibIzin('pembelian.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
-  const po = ambilPo(id);
+  const po = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id) as PoHitung | undefined;
   if (!po) return c.json({ error: 'pembelian tidak ada' }, 404);
+  if (po.status === 'cancel') return c.json({ error: 'pembelian sudah dibatalkan' }, 400);
+  if (po.n_terima > 0) {
+    return c.json({
+      error: 'sudah ada penerimaan barang — PO tidak bisa dibatalkan; koreksi stok lewat opname / kas lewat pengeluaran',
+    }, 400);
+  }
   if (po.status !== 'order') return c.json({ error: `hanya PO order yang bisa dibatalkan (status: ${po.status})` }, 400);
   const row = db.prepare(`UPDATE purchases SET status = 'cancel' WHERE id = ? RETURNING *`).get(id);
   return c.json({ data: row });
 });
 
 // Daftar pembelian: filter status (default semua) + limit/offset (pola
-// GET /api/shifts). Urutan id DESC (nota terbaru di atas). `sisa` computed
-// (total − terbayar) — prinsip ledger: saldo tak disimpan (pola debts).
+// GET /api/shifts). Urutan id DESC (nota terbaru di atas).
+//
+// `sisa` = nilai yang SUDAH diterima − terbayar (bukan total − terbayar:
+// barang yang belum datang bukan hutang), `sisa_terima` = nilai yang belum
+// datang, `status_tampil` = "sebagian" bila sudah ada kedatangan tapi belum
+// lengkap. Filter `sebagian` baru; `received` tetap berarti lengkap.
 //
 // AGING (2026-10-16): `umur_hari` = lama nota DITERIMA-tapi-belum-lunas
-// menunggu (dari `received_at`; julianday SQLite = UTC). `lewat30` = jumlah
-// hutang PO >= 30 hari di SELURUH baris cocok filter (chip header).
+// menunggu (dari `received_at` kedatangan PERTAMA; julianday SQLite = UTC).
+// `lewat30` = jumlah hutang PO >= 30 hari di SELURUH baris cocok filter.
 app.get('/api/purchases', wajibIzin('pembelian.kelola'), (c) => {
   const status = c.req.query('status') ?? 'semua';
-  if (!['semua', 'order', 'received', 'cancel', 'hutang'].includes(status)) {
-    return c.json({ error: 'status harus order|received|cancel|hutang|semua' }, 400);
+  if (!['semua', 'order', 'sebagian', 'received', 'cancel', 'hutang'].includes(status)) {
+    return c.json({ error: 'status harus order|sebagian|received|cancel|hutang|semua' }, 400);
   }
   const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
-  // `hutang` = nota DITERIMA yang masih bersisa (computed, sejalan dengan
-  // kolom `sisa` — bukan status tersimpan; permintaan pemilik 2026-10-17
-  // "kebingungan mencari purchasing yang belum lunas"). Klausul literal tanpa
-  // parameter supaya query `lewat30` di bawah bisa tetap memakai pola yang sama.
-  let klausul = '';
-  const params: unknown[] = [];
-  if (status === 'hutang') {
-    klausul = `WHERE p.status = 'received' AND p.total - p.terbayar > 0`;
-  } else if (status !== 'semua') {
-    klausul = 'WHERE p.status = ?';
-    params.push(status);
-  }
-  const total = (db.prepare(`SELECT COUNT(*) AS n FROM purchases p ${klausul}`).get(...params) as { n: number }).n;
+  // `hutang` = nota yang masih bersisa atas barang yang SUDAH diterima —
+  // mencakup PO diterima sebagian (barang kurang bukan hutang). Sejalan
+  // dengan kolom `sisa`, bukan status tersimpan (permintaan pemilik
+  // 2026-10-17 "kebingungan mencari purchasing yang belum lunas").
+  const klausul: Record<string, string> = {
+    semua: '',
+    order: `WHERE status_tampil = 'order'`,
+    sebagian: `WHERE status_tampil = 'sebagian'`,
+    received: `WHERE status_tampil = 'received'`,
+    cancel: `WHERE status_tampil = 'cancel'`,
+    hutang: `WHERE status_tampil <> 'cancel' AND sisa > 0`,
+  };
+  const where = klausul[status];
+  const total = (db.prepare(`${SQL_PO_HIT} SELECT COUNT(*) AS n FROM hit ${where}`).get() as { n: number }).n;
   const data = db.prepare(
-    `SELECT p.*, p.total - p.terbayar AS sisa,
-            CASE WHEN p.status = 'received' AND p.total - p.terbayar > 0 AND p.received_at IS NOT NULL
-                 THEN MAX(0, CAST(julianday('now') - julianday(p.received_at) AS INTEGER))
+    `${SQL_PO_HIT}
+     SELECT hit.*,
+            CASE WHEN hit.sisa > 0 AND hit.received_at IS NOT NULL
+                 THEN MAX(0, CAST(julianday('now') - julianday(hit.received_at) AS INTEGER))
                  ELSE NULL END AS umur_hari,
-            (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS n_items
-       FROM purchases p ${klausul} ORDER BY p.id DESC LIMIT ? OFFSET ?`,
-  ).all(...params, limit, offset);
+            (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = hit.id) AS n_items
+       FROM hit ${where} ORDER BY hit.id DESC LIMIT ? OFFSET ?`,
+  ).all(limit, offset);
   const lewat30 = (db.prepare(
-    `SELECT COUNT(*) AS n FROM purchases p ${klausul ? `${klausul} AND` : 'WHERE'}
-        p.status = 'received' AND p.total - p.terbayar > 0 AND p.received_at IS NOT NULL
-        AND julianday('now') - julianday(p.received_at) >= 30`,
-  ).get(...params) as { n: number }).n;
+    `${SQL_PO_HIT} SELECT COUNT(*) AS n FROM hit
+      WHERE sisa > 0 AND status_tampil <> 'cancel' AND received_at IS NOT NULL
+        AND julianday('now') - julianday(received_at) >= 30`,
+  ).get() as { n: number }).n;
   return c.json({ data, total, lewat30 });
 });
 
-// Isi lengkap satu nota pembelian.
+// Isi lengkap satu nota pembelian: header + baris (dengan qty diterima/sisa
+// per baris) + RIWAYAT KEDATANGAN (butir 3.7) — sumber tabel "Kedatangan" dan
+// prefill form Terima di halaman #/purchases/<id>.
 app.get('/api/purchases/:id', wajibIzin('pembelian.kelola'), (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
-  const purchase = db.prepare(`SELECT *, total - terbayar AS sisa FROM purchases WHERE id = ?`).get(id);
+  const purchase = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id) as PoHitung | undefined;
   if (!purchase) return c.json({ error: 'pembelian tidak ada' }, 404);
-  const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id').all(id);
-  return c.json({ data: { purchase, items } });
+  const items = db.prepare(
+    `SELECT pi.*, ${SQL_PO_BARIS_DITERIMA} AS diterima,
+            MAX(0, pi.qty - ${SQL_PO_BARIS_DITERIMA}) AS sisa_terima
+       FROM purchase_items pi WHERE pi.purchase_id = ? ORDER BY pi.id`,
+  ).all(id);
+  const receives = db.prepare(
+    `SELECT r.*, (SELECT COUNT(*) FROM purchase_receive_items ri WHERE ri.receive_id = r.id) AS n_items
+       FROM purchase_receives r WHERE r.purchase_id = ? ORDER BY r.id DESC`,
+  ).all(id) as { id: number }[];
+  const barisTerima = db.prepare(
+    `SELECT ri.*, pi.name, pi.qty AS qty_po
+       FROM purchase_receive_items ri
+       JOIN purchase_receives r ON r.id = ri.receive_id
+       JOIN purchase_items pi ON pi.id = ri.purchase_item_id
+      WHERE r.purchase_id = ? ORDER BY ri.id`,
+  ).all(id) as { receive_id: number }[];
+  const petaItems = new Map<number, unknown[]>();
+  for (const it of barisTerima) {
+    const list = petaItems.get(it.receive_id) ?? [];
+    list.push(it);
+    petaItems.set(it.receive_id, list);
+  }
+  return c.json({
+    data: { purchase, items, receives: receives.map((r) => ({ ...r, items: petaItems.get(r.id) ?? [] })) },
+  });
 });
 
 // ---------- Pengaturan toko ----------
@@ -4540,13 +4741,25 @@ function laporanRentang(dari: string, sampai: string) {
     `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
      FROM returns WHERE ${dl('created_at')}`,
   ).get(...ps) as { n: number; total: number };
-  // Pembelian yang DITERIMA (Tahap 3, 2026-10-11) — dihitung dari
-  // tanggal terima (`received_at`, bukan tanggal PO) karena itulah hari
-  // barang (dan kas) bergerak. Total = nilai nota yang diterima.
+  // Pembelian yang DITERIMA (Tahap 3, 2026-10-11; BERTAHAP sejak butir 3.7
+  // 2026-10-25) — per KEDATANGAN, bukan per nota: satu PO yang datang
+  // bertahap tercatat 1 kedatangan di hari masing-masing (nilai = barang yang
+  // benar-benar masuk hari itu). Nota LAMA (received tanpa baris kedatangan,
+  // fitur ini baru) tetap dihitung 1 event lewat tanggal `received_at` —
+  // tanpa fallback ini seluruh riwayat pembelian hilang dari laporan.
   const purchase = db.prepare(
-    `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
-     FROM purchases WHERE status = 'received' AND ${dl('received_at')}`,
-  ).get(...ps) as { n: number; total: number };
+    `SELECT
+       (SELECT COUNT(*) FROM purchase_receives r WHERE ${dl('r.created_at')})
+       + (SELECT COUNT(*) FROM purchases p
+           WHERE p.status = 'received' AND NOT EXISTS (
+             SELECT 1 FROM purchase_receives r2 WHERE r2.purchase_id = p.id)
+             AND ${dl('p.received_at')}) AS n,
+       (SELECT COALESCE(SUM(r.total),0) FROM purchase_receives r WHERE ${dl('r.created_at')})
+       + (SELECT COALESCE(SUM(p.total),0) FROM purchases p
+           WHERE p.status = 'received' AND NOT EXISTS (
+             SELECT 1 FROM purchase_receives r2 WHERE r2.purchase_id = p.id)
+             AND ${dl('p.received_at')}) AS total`,
+  ).get(...ps, ...ps, ...ps, ...ps) as { n: number; total: number };
   // Piutang (butir credit Z-report Aronium): TERBENTUK = porsi tunai tak
   // masuk laci (CASE persis penanda sisa_hutang) + hutang serah pesanan jasa
   // (butir ROADMAP 1.6.6, 2026-10-19: orders.hutang_sisa saat diserahkan —

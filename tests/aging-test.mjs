@@ -42,6 +42,10 @@ for (const yid of yatim) {
     }
   }
   sql(`DELETE FROM stock_moves WHERE ref_id = 'PO-${yid}';`);
+  // Butir 3.7 (2026-10-25): kedatangan bertahap punya baris anak — CLI
+  // sqlite3 TIDAK menegakkan ON DELETE CASCADE, jadi hapus anak dulu.
+  sql(`DELETE FROM purchase_receive_items WHERE receive_id IN (SELECT id FROM purchase_receives WHERE purchase_id = ${yid});`);
+  sql(`DELETE FROM purchase_receives WHERE purchase_id = ${yid};`);
   sql(`DELETE FROM purchase_items WHERE purchase_id = ${yid};`);
   sql(`DELETE FROM purchases WHERE id = ${yid};`);
 }
@@ -137,6 +141,8 @@ await b.close();
 
 // Bersihkan: stok & avg_cost dikembalikan apa adanya, nota + mutasi dihapus.
 sql(`DELETE FROM stock_moves WHERE ref_id = 'PO-${poId}';`);
+sql(`DELETE FROM purchase_receive_items WHERE receive_id IN (SELECT id FROM purchase_receives WHERE purchase_id = ${poId});`);
+sql(`DELETE FROM purchase_receives WHERE purchase_id = ${poId};`);
 sql(`DELETE FROM purchase_items WHERE purchase_id = ${poId};`);
 sql(`DELETE FROM purchases WHERE id = ${poId};`);
 sql(`UPDATE products SET stock = ${stokAwal}, avg_cost = ${avgAwal} WHERE id = ${pid};`);

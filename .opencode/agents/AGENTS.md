@@ -1604,6 +1604,31 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           gagal = toast. `tests/purchase-test.mjs`
                           46 asersi (section F uji popup: kop + supplier +
                           nomor + baris + ringkas + slot logo + footer).
+                          **Penerimaan bertahap 3.7 (2026-10-25)**: tipe `Po`
+                          mendapat `diterima`/`sisa_terima`/`status_tampil`/
+                          `n_terima`; `PoItem` + `diterima`/`sisa_terima`;
+                          `receives[]` per kedatangan. Daftar: badge
+                          **`data-po-badge`** (Batal/Order/Sebagian/Hutang/
+                          Lunas — test WAJIB membaca badge, bukan teks baris;
+                          nama supplier bisa memuat kata "Sebagian"/"Lunas"),
+                          subline `Hutang RpX` merah bila `sisa>0`, dan
+                          progress `diterima/total` untuk PO sebagian. Detail:
+                          tabel Qty PO/Diterima/Sisa per baris + tfoot
+                          Total/Terbayar/Sisa, **form Terima** berisi qty
+                          datang per baris (default = sisa) dengan
+                          `#pt-bayar` prefill nilai event + maks
+                          `diterima+event−terbayar` (diperbarui live saat qty
+                          berubah), `#pt-ok` kirim `items` HANYA baris qty>0
+                          + **SATU `client_id` per form** (bukan per klik —
+                          retry/klik ganda tidak menggandakan stok/uang),
+                          riwayat **Kedatangan** (`receives` + items), dan
+                          tombol batal HANYA saat `n_terima===0`; setelah ada
+                          penerimaan tampil pesan koreksi opname/pengeluaran.
+                          Tombol `[data-pt-max]` mengisi sisa qty; sukses
+                          `mountDetail()` ulang (id baru untuk kedatangan
+                          berikutnya). Diuji `tests/purchase-partial-test.mjs`
+                          (50 asersi: API bertahap + idempotensi + agregat
+                          shift/laporan + form/UI).
 apps/web/src/labelsheet.ts  **Model cetak label (baru 2026-10-17, refactor
                          halaman Label harga)**: LEMBAR label A4/Folio lewat
                          CETAK BROWSER (`window.print()` + `@page` mm), bukan
@@ -2641,40 +2666,105 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       (`n_retur`/`retur_total` di `GET /api/shifts` → `kasSeharusnya()`);
       rekap harian `GET /api/reports/daily` (`retur:{n,total}` — kartu Retur +
       Omzet bersih hybrid, tidak menggerus laba).
-  - **Pembelian / kulakan (Tahap 3, 2026-10-11, halaman `#/purchases`)** —
-    nota PO: order → receive → pay/cancel. Satu `db.transaction` per aksi.
+  - **Pembelian / kulakan (Tahap 3, 2026-10-11; BERTAHAP sejak butir ROADMAP
+    3.7, 2026-10-25, halaman `#/purchases`)** — nota PO:
+    order → receive (boleh berkali-kali) → pay/cancel. Satu `transaksi(fn)`
+    per aksi. **Status TERSIMPAN tetap `order|received|cancel`** (CHECK tidak
+    diubah): `order` selama qty belum lengkap (walau sudah ada kedatangan),
+    `received` saat semua baris terpenuhi. **"Sebagian" = COMPUTED** dari
+    Σ kedatangan (`status_tampil`) — jangan menambah nilai status baru tanpa
+    rebuild tabel.
+    - **Dua tabel kedatangan** (lihat §5): `purchase_receives` (satu baris per
+      EVENT kedatangan: `shift_id`/`cashier`/`total`/`dibayar`/`note`/
+      `client_id`) + `purchase_receive_items` (`purchase_item_id`, `qty`,
+      `harga_beli` snapshot, `amount`). Σ `qty` per `purchase_item_id` = qty
+      diterima; tidak ada kolom qty di `purchase_items`.
     - `POST /api/purchases` `{supplier_id?,items:[{product_id,qty>0,harga_beli>=0}],note?≤200,cashier?}`
-      -> 201 `{data:{purchase,status:'order',terbayar:0},items}}`. Supplier
-      harus ada bila dikirim (404, nama di-snapshot); item HANYA barang fisik
-      (`track_stock=1`, 400 untuk jasa — pola restock); total = Σ; TANPA stok.
-    - `POST /api/purchases/:id/receive` `{shift_id?,dibayar?=total,cashier?}`
-      -> 200. Hanya dari `order` (400 bila `received`/`cancel`); per item rumus
-      **sama persis** restock (`avg_cost` tertimbang + `stock+=qty` +
-      `version++` + `stock_moves reason='beli'`, `unit_cost=harga_beli`,
-      `ref_id='PO-<id>'`); `dibayar` bulat 0..total (default = total = tunai
-      penuh; kurang = sisa hutang — keputusan pemilik (b)); `shift_id` harus
-      ada bila dikirim (400); produk yang hilang di tengah jalan → 400.
-    - `POST /api/purchases/:id/pay` `{amount>0}` -> 200 (`terbayar+=amount`,
-      maks total — 400 `"melebihi sisa hutang..."`); hanya `received`.
-      Kas susulan diatribusikan ke `shift_id` PO (satu PO satu laci).
-    - `POST /api/purchases/:id/cancel` -> 200 (hanya `order`; received tak bisa
-      batal — koreksi stok via opname). Tak ada DELETE (nota PO = arsip).
-    - `GET /api/purchases?status=order|received|cancel|hutang|semua&limit=&offset=`
-      -> `{data:[{...,sisa, n_items, umur_hari}], total, lewat30}` (`sisa = total−terbayar`
-      computed, prinsip ledger; `id DESC`).
-      **`status=hutang` (2026-10-17)** = nota `received` bersisa > 0 —
-      klausul `p.status = 'received' AND p.total - p.terbayar > 0` (computed,
-      bukan status tersimpan; sumber chip "Belum lunas" halaman Pembelian).
-      Error 400 `"status harus order|received|cancel|hutang|semua"`.
-      **Aging (2026-10-16)**: `umur_hari` = lama hutang sejak `received_at`
-      (julianday SQLite = UTC; hanya `received` sisa>0 — null untuk
-      order/batal/lunas); `lewat30` = jumlah baris sisa>0 berumur >= 30 hari
-      (sumber chip `#po-lewat` halaman Pembelian + asersi aging-test).
-    - `GET /api/purchases/:id` -> `{data:{purchase(+sisa),items}}`.
-    - Laci: `SUM(terbayar)` nota received terikat shift (`n_purchase`/
-      `purchase_total` di `GET /api/shifts` → `kasSeharusnya()`); rekap harian
-      `GET /api/reports/daily` (`purchase:{n,total}` = nilai DITERIMA,
-      by `received_at`, kartu ke-8 — tidak menggerus laba).
+      -> 201 `{data:{purchase,items}}`. Supplier harus ada bila dikirim (404,
+      nama di-snapshot); item HANYA barang fisik (`track_stock=1`, 400 untuk
+      jasa — pola restock); total = Σ; TANPA stok. **Sejak 3.7 balasan
+      `purchase` = bentuk computed penuh** (sama dengan GET detail/list:
+      `diterima:0`, `sisa:0`, `sisa_terima:total`, `status_tampil:'order'`,
+      `n_terima:0`) supaya klien tidak menebak.
+    - `POST /api/purchases/:id/receive` (TERIMA BERTAHAP) body
+      `{items?:[{purchase_item_id,qty>0}], dibayar?, shift_id?, cashier?, note?≤200, client_id?}`
+      -> 200 `{data:<baris computed + receive + duplicate?>}`.
+      **TANPA `items` = terima SEMUA SISA** (perilaku lama: klien/pemanggil
+      lama tetap sah; nota `order` yang belum punya kedatangan = seluruh nota).
+      Dengan `items`: tiap baris harus milik PO ini, unik, `qty ≤ sisa baris`
+      (`"baris N: qty melebihi sisa (sisa X)"`); array kosong ditolak
+      `"items harus array non-kosong (kosongkan untuk terima semua sisa)"`;
+      maks 200 baris. Hanya dari status bukan `cancel`/`received`
+      (`"pembelian sudah dibatalkan"` / `"pembelian sudah diterima lengkap"`);
+      produk yang hilang di tengah jalan → 400.
+      **Stok per baris memakai RUMUS RESTOCK yang sama persis** (`avg_cost`
+      tertimbang + `stock+=qty` + `version++` + `stock_moves reason='beli'`,
+      `unit_cost=harga_beli`, `ref_id='PO-<id>'`).
+      **`dibayar` = uang keluar pada KEDATANGAN INI** (bukan total PO):
+      default = nilai event ini; batas `0..diterima+eventTotal−terbayar`
+      (boleh melunasi kekurangan kedatangan sebelumnya, tapi tidak boleh
+      melebihi nilai barang yang benar-benar sudah masuk) — 400
+      `"dibayar harus bulat 0..<maks>"`. `shift_id` opsional (pola
+      `aturShift`: harus ada bila dikirim, kasir hanya shift sendiri),
+      `cashier` efektif akun. Header PO: `terbayar += dibayar`,
+      `received_at = COALESCE(received_at, now)` (kedatangan PERTAMA — dasar
+      aging), `shift_id = COALESCE(shift_id, …)` + `cashier` hanya diisi saat
+      `received_at` masih NULL (satu PO satu laci penanggung).
+      **Idempotensi retry**: `client_id` (alias body `id`, maks 64 char,
+      UNIQUE global) — kirim ulang = 200 dengan baris yang sama +
+      `duplicate:true`, TANPA menambah stok/uang; `client_id` milik PO lain →
+      400 `"client_id sudah dipakai pembelian lain"`. UI memakai SATU id per
+      form (bukan per klik).
+    - `POST /api/purchases/:id/pay` `{amount>0}` -> 200. Sejak 3.7 berlaku
+      untuk PO **bertahap** juga: `terbayar += amount`, maks = `sisa`
+      (`diterima − terbayar`, bukan `total`) — 400
+      `"melebihi sisa hutang (sisa X)"`; belum ada kedatangan → 400
+      `"belum ada barang yang diterima — tidak ada hutang"`; cancel → 400.
+      Kas susulan diatribusikan ke `shift_id` PO (kedatangan pertama / satu PO
+      satu laci).
+    - `POST /api/purchases/:id/cancel` -> 200 **HANYA bila `n_terima === 0`**.
+      Setelah ada penerimaan (walau sebagian) stok & kas sudah bergerak → 400
+      `"sudah ada penerimaan barang — PO tidak bisa dibatalkan; koreksi stok
+      lewat opname / kas lewat pengeluaran"`. `received`/`cancel` tetap
+      ditolak. Tak ada DELETE (nota PO = arsip).
+    - `GET /api/purchases?status=order|sebagian|received|cancel|hutang|semua&limit=&offset=`
+      -> `{data:[<baris computed + umur_hari + n_items>], total, lewat30}`
+      (`id DESC`). Baris computed: **`diterima`** = Σ nilai kedatangan (nota
+      LAMA received tanpa baris kedatangan = `total`, fallback), **`sisa =
+      max(0, diterima − terbayar)`** (barang belum datang bukan hutang),
+      **`sisa_terima`** = `0` saat status `received`, selain itu
+      `max(0, total − diterima)`, **`status_tampil`** = `cancel|received|
+      sebagian (diterima>0)|order`, **`n_terima`** = jumlah event.
+      Filter: `order`/`sebagian`/`received` memakai `status_tampil`;
+      **`hutang` (direvisi 3.7)** = `status_tampil <> 'cancel' AND sisa > 0`
+      — ikut memuat PO bertahap yang barangnya sudah sebagian datang tapi
+      uangnya kurang (dulu mensyaratkan `status='received'`; asersi
+      `purchase-test` disesuaikan). Error 400
+      `"status harus order|sebagian|received|cancel|hutang|semua"`.
+      **Aging (2026-10-16, dasar 3.7)**: `umur_hari` = lama hutang sejak
+      `received_at` kedatangan PERTAMA (julianday SQLite = UTC; hanya
+      `sisa>0` & bukan cancel — null untuk order/batal/lunas); `lewat30` =
+      jumlah baris `sisa>0` bukan cancel berumur >= 30 hari (sumber chip
+      `#po-lewat` halaman Pembelian + asersi aging-test).
+    - `GET /api/purchases/:id` -> `{data:{purchase(+computed),items,receives}}`.
+      `items[]` memuat **`diterima` + `sisa_terima` per baris** (nota lama =
+      qty penuh); `receives` = riwayat kedatangan `id DESC`, tiap baris +
+      `n_items` + `items[]` (`purchase_receive_items` JOIN nama produk —
+      sumber tabel "Kedatangan" dan prefill form Terima).
+    - **Laci (rumus 3.7, per KEDATANGAN)**: `GET /api/shifts` mengirim
+      `n_purchase` = jumlah event `purchase_receives.shift_id` shift itu +
+      nota LAMA received tanpa baris kedatangan (fallback 1 event), dan
+      `purchase_total` = Σ `purchase_receives.dibayar` di shift itu + sisa
+      `(p.terbayar − Σ dibayar event)` untuk PO `status <> 'cancel'` dengan
+      `p.shift_id = shift` (cicilan susulan menempel laci kedatangan pertama;
+      dibagi begini supaya uang yang sama tidak dihitung dua kali).
+      Keduanya masuk `kasSeharusnya()` (kas KELUAR).
+      `GET /api/reports/daily`/`summary` `purchase:{n,total}` = per
+      KEDATANGAN pada tanggal `purchase_receives.created_at` (nilai = barang
+      yang benar-benar masuk hari itu) + fallback nota lama `received`
+      by `received_at` (tanpa fallback seluruh riwayat lama hilang) — kartu
+      ke-8, tidak menggerus laba. Rekap tutup shift (thermal + PDF) dan kartu
+      laporan memakai istilah **kedatangan**, bukan "nota".
     - **Cetak A4 nota PO (butir ROADMAP 1.6.3, 2026-10-19) — TANPA endpoint
       baru**: dokumen dibangun klien di `purchases.ts` (`htmlPoA4`/
       `cetakPoA4`, pola `cetakHutangA4` — popup + `window.print()` browser,
@@ -2685,6 +2775,10 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       klik (`GET /api/purchases/:id` + `GET /api/settings`) sehingga nota
       tercetak selalu cermin server; popup diblokir/gagal = toast, tidak
       pernah mengubah data.
+      **Sejak 3.7 (2026-10-25)**: tabel A4 menambah kolom **Diterima** dan
+      ringkas tetap TEPAT 3 `.total-row` (kontrak `purchase-test`) — baris
+      ketiga berlabel prioritas `Dibatalkan` → `Sisa hutang` (sisa>0) →
+      `Belum diterima` (sisa_terima>0) → `Sisa (lunas)`.
   - **Pesanan jasa + DP + serah (butir ROADMAP 1.6.6, ACC pemilik 2026-10-19,
     halaman `#/orders`)** — alur bengkel-style: dikerjakan → selesai →
     diambil/batal. **Omzet DIKAKUI SAAT SERAH** (nota penjualan penuh; DP =
@@ -3891,6 +3985,14 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `UNIQUE constraint failed: sale_payments.sale_id, sale_payments.method`;
   sekarang tiap suite yang menghapus sales via CLI ikut membuang
   `sale_payments`-nya (recap/restore/kadaluarsa-jual/product-delete).
+  **Pembelian bertahap (3.7, 2026-10-25)**: hapus `purchases` via CLI juga
+  TIDAK men-cascade `purchase_receives`/`purchase_receive_items` — urutannya
+  `purchase_receive_items` (lewat `receive_id IN (SELECT …)`) →
+  `purchase_receives` → `purchase_items` → `purchases`, lalu `stock_moves
+  ref_id='PO-<id>'` bila suite menghapus PO yang sudah diterima
+  (`aging-test`/`purchase-partial-test`). Yatim receive membuat agregat
+  laci/laporan menghitung uang dua kali dan supplier suite tidak bisa
+  dibuang.
   **DILARANG `DELETE FROM` tanpa WHERE di DB bersama** — itu menghapus data
   PEMILIK, bukan artefak suite. Nyata 2026-10-18: `product-delete-test.mjs`
   menjalankan `DELETE FROM sale_items; DELETE FROM sales;` + invarian hitung
@@ -3925,7 +4027,49 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-20 (atribusi laci pembayaran hutang — Paket A):**
+  **Migrasi terakhir 2026-10-25 (penerimaan PO bertahap — butir ROADMAP 3.7):**
+  dua tabel BARU **`purchase_receives`** (satu baris per EVENT kedatangan;
+  FK `purchases.id ON DELETE CASCADE`, `shift_id -> shifts(id)`, `client_id
+  TEXT UNIQUE` = kunci idempotensi retry, `dibayar` = uang keluar event itu)
+  + **`purchase_receive_items`** (FK `purchase_receives.id` &
+  `purchase_items.id` CASCADE, `qty REAL > 0`, `harga_beli`/`amount`
+  snapshot) + lima indeks. **Murni tabel tambahan** — `migrate()` (`CREATE
+  TABLE IF NOT EXISTS`) cukup: di DB dev sudah dijalankan lewat `npm run
+  seed` (data lama utuh, diverifikasi curl di API hidup). `purchases.status`
+  CHECK **TIDAK diubah** (`order|received|cancel`) — status "Sebagian"
+  computed dari Σ kedatangan, jadi tanpa rebuild tabel. Install yang tidak
+  boleh di-seed karena alasan lain jalankan SQL yang sama:
+  ```sql
+  CREATE TABLE IF NOT EXISTS purchase_receives (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    shift_id    INTEGER REFERENCES shifts(id),
+    cashier     TEXT NOT NULL DEFAULT 'kasir',
+    total       INTEGER NOT NULL CHECK (total >= 0),
+    dibayar     INTEGER NOT NULL DEFAULT 0 CHECK (dibayar >= 0),
+    note        TEXT NOT NULL DEFAULT '',
+    client_id   TEXT UNIQUE
+  );
+  CREATE TABLE IF NOT EXISTS purchase_receive_items (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    receive_id       INTEGER NOT NULL REFERENCES purchase_receives(id) ON DELETE CASCADE,
+    purchase_item_id INTEGER NOT NULL REFERENCES purchase_items(id) ON DELETE CASCADE,
+    qty              REAL NOT NULL CHECK (qty > 0),
+    harga_beli       INTEGER NOT NULL CHECK (harga_beli >= 0),
+    amount           INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_purchase_receives_purchase ON purchase_receives(purchase_id);
+  CREATE INDEX IF NOT EXISTS idx_purchase_receives_shift ON purchase_receives(shift_id);
+  CREATE INDEX IF NOT EXISTS idx_purchase_receives_tanggal ON purchase_receives(created_at);
+  CREATE INDEX IF NOT EXISTS idx_purchase_receive_items_receive ON purchase_receive_items(receive_id);
+  CREATE INDEX IF NOT EXISTS idx_purchase_receive_items_item ON purchase_receive_items(purchase_item_id);
+  ```
+  **Jangan backfill** nota lama: fallback `status='received'` tanpa baris
+  kedatangan (`diterima = total`, 1 event di laporan/laci via `received_at`)
+  justru bergantung pada ketiadaan baris; backfill massal bisa menggandakan
+  stok/kas historis.
+  **Migrasi sebelumnya 2026-10-20 (atribusi laci pembayaran hutang — Paket A):**
   dua kolom BARU **`customer_debts.shift_id`** (`INTEGER REFERENCES
   shifts(id)`, NULL = di luar shift) + **`customer_debts.cashier`**
   (`TEXT NOT NULL DEFAULT ''`) dan indeks **`idx_customer_debts_shift`**.

@@ -151,7 +151,9 @@ export function bangunStrukRekap(s: ShiftRow, toko: string, fisik: number | null
     { kiri: `Retur (${s.n_retur})`, kanan: rp(s.retur_total) },
     { kiri: `Pengeluaran (${s.n_expense})`, kanan: rp(s.expense_total) },
     { kiri: `Kas masuk (${s.n_kas_masuk})`, kanan: rp(s.kas_masuk_total) },
-    { kiri: `Pembelian (${s.n_purchase})`, kanan: rp(s.purchase_total) },
+    // BERTAHAP sejak butir 3.7 (2026-10-25): satu PO bisa datang beberapa
+    // kali, jadi angka ini = jumlah KEDATANGAN (event) di shift ini.
+    { kiri: `Pembelian (${s.n_purchase} kedatangan)`, kanan: rp(s.purchase_total) },
     { kiri: 'Hutang terbentuk', kanan: rp(s.hutang_baru ?? 0) },
     { kiri: 'Piutang terbayar', kanan: rp(s.piutang_bayar ?? 0) },
     { kiri: 'Kas seharusnya', kanan: rp(kasHarus), tebal: true },
@@ -272,7 +274,7 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         ${s.n_expense > 0 || s.expense_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pengeluaran — mengurangi laci</div>${baris(`Kas keluar (${s.n_expense} catatan)`, s.expense_total)}` : ''}
         ${s.n_kas_masuk > 0 || s.kas_masuk_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Kas masuk — menambah laci</div>${baris(`Kas masuk (${s.n_kas_masuk} catatan)`, s.kas_masuk_total)}` : ''}
         ${s.n_retur > 0 || s.retur_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Retur — uang kembali, mengurangi laci</div>${baris(`Kembali ke pelanggan (${s.n_retur} retur)`, s.retur_total)}` : ''}
-        ${s.n_purchase > 0 || s.purchase_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pembelian — kulakan tunai, mengurangi laci</div>${baris(`Bayar supplier (${s.n_purchase} nota)`, s.purchase_total)}` : ''}
+        ${s.n_purchase > 0 || s.purchase_total > 0 ? `<div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pembelian — kulakan tunai, mengurangi laci</div>${baris(`Bayar supplier (${s.n_purchase} kedatangan)`, s.purchase_total)}` : ''}
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Piutang (butir Z-report: credit)</div>
         ${baris('Hutang terbentuk (tak masuk laci)', s.hutang_baru ?? 0)}
         ${baris('Piutang terbayar (masuk laci)', s.piutang_bayar ?? 0)}

@@ -52,18 +52,46 @@ type Po = {
   id: number; created_at: string;
   supplier_id: number | null; supplier_name: string;
   status: 'order' | 'received' | 'cancel';
-  total: number; terbayar: number; sisa: number;
+  /** Status TAMPIL dari server (butir 3.7, 2026-10-25): `sebagian` = sudah ada
+   *  kedatangan tapi qty belum lengkap — status tersimpan tetap `order` (CHECK
+   *  lama tidak diubah). Klien tidak menurunkan sendiri dari angka. */
+  status_tampil: 'order' | 'sebagian' | 'received' | 'cancel';
+  total: number; terbayar: number;
+  /** Nilai barang yang SUDAH diterima (Σ kedatangan; nota lama = total). */
+  diterima: number;
+  /** Sisa hutang supplier atas barang yang SUDAH diterima (0 = lunas). */
+  sisa: number;
+  /** Nilai barang yang BELUM datang — bukan hutang, hanya progress. */
+  sisa_terima: number;
+  n_terima: number;
   cashier: string; shift_id: number | null; received_at: string | null;
   note: string; n_items: number;
   /** Usia hutang supplier (hari sejak DITERIMA, dihitung server 2026-10-16).
-   *  null = bukan hutang received (order/batal/lunas) — badge umur hanya muncul
-   *  saat masih ada sisa. */
+   *  null = bukan hutang (order/batal/lunas) — badge umur hanya muncul saat
+   *  masih ada sisa. */
   umur_hari: number | null;
 };
 
 type PoItem = {
   id: number; purchase_id: number; product_id: number; name: string;
   qty: number; harga_beli: number; amount: number;
+  /** Qty yang sudah diterima (Σ kedatangan; nota lama = qty penuh). */
+  diterima: number;
+  /** Qty yang masih ditunggu (qty − diterima). */
+  sisa_terima: number;
+};
+
+type PoReceiveItem = {
+  id: number; receive_id: number; purchase_item_id: number;
+  qty: number; harga_beli: number; amount: number;
+  name: string; qty_po: number;
+};
+
+type PoReceive = {
+  id: number; purchase_id: number; created_at: string;
+  shift_id: number | null; cashier: string;
+  total: number; dibayar: number; note: string;
+  n_items: number; items: PoReceiveItem[];
 };
 
 type SupplierOpt = { id: number; code: string; name: string };
@@ -102,6 +130,9 @@ function errMsg(e: unknown): string {
 const STATUS: { key: string; label: string }[] = [
   { key: 'semua', label: 'Semua' },
   { key: 'order', label: 'Order' },
+  // Computed di server (butir 3.7, 2026-10-25): sudah ada kedatangan tapi qty
+  // belum lengkap. Status tersimpan tetap `order` sampai barang terakhir masuk.
+  { key: 'sebagian', label: 'Sebagian' },
   { key: 'received', label: 'Diterima' },
   // Computed di server: nota received yang masih bersisa (bukan status
   // tersimpan) — jawaban "kebingungan mencari purchasing yang belum lunas".
@@ -110,16 +141,33 @@ const STATUS: { key: string; label: string }[] = [
 ];
 
 function badge(p: Po): string {
-  if (p.status === 'cancel') {
-    return `<span class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-500/15 dark:text-gray-400">Batal</span>`;
+  const tampil = p.status_tampil ?? p.status;
+  // `data-po-badge` = penanda status (bukan teks bebas) — nama supplier bisa
+  // memuat kata "Sebagian"/"Lunas" dan membuat pembaca baris salah sangka.
+  if (tampil === 'cancel') {
+    return `<span data-po-badge class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-500/15 dark:text-gray-400">Batal</span>`;
   }
-  if (p.status === 'order') {
-    return `<span class="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">Order</span>`;
+  if (tampil === 'order') {
+    return `<span data-po-badge class="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">Order</span>`;
   }
-  if (p.sisa > 0) {
-    return `<span class="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700 dark:bg-red-500/15 dark:text-red-400">Hutang ${rp(p.sisa)}</span>`;
+  // "Sebagian" = progress kedatangan, BUKAN status bayar — badge biru supaya
+  // tidak tertukar dengan chip merah "Hutang" (uang).
+  if (tampil === 'sebagian') {
+    return `<span data-po-badge class="rounded bg-primary-soft px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary dark:bg-primary/15 dark:text-[#6aa5ff]">Sebagian</span>`;
   }
-  return `<span class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Lunas</span>`;
+  if ((p.sisa ?? 0) > 0) {
+    return `<span data-po-badge class="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700 dark:bg-red-500/15 dark:text-red-400">Hutang ${rp(p.sisa)}</span>`;
+  }
+  return `<span data-po-badge class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Lunas</span>`;
+}
+
+/** Sub-baris status: untuk PO "Sebagian" yang uangnya masih kurang, badge
+ *  biru saja menyembunyikan hutang — filter "Belum lunas" menampungnya, jadi
+ *  angkanya wajib terlihat di baris daftar. */
+function subHutang(p: Po): string {
+  return (p.status_tampil ?? p.status) === 'sebagian' && (p.sisa ?? 0) > 0
+    ? `<div class="cell-sub font-semibold !text-red-600 dark:!text-red-400">Hutang ${rp(p.sisa)}</div>`
+    : '';
 }
 
 function renderPage(): string {
@@ -138,7 +186,7 @@ function renderPage(): string {
           <button type="button" id="po-new" class="btn btn-primary" title="Buat PO baru (Alt+N)">${icon('plus')}<span>Buat PO</span><kbd class="kbd">Alt+N</kbd></button>
         </div>
       </div>
-      <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Order dulu, barang datang baru Terima (stok masuk + kas keluar). Bawaan tunai penuh — kurangi bila hutang; sisa tiap nota disaring lewat filter <b>Belum lunas</b>.</p>
+      <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Order dulu, barang datang baru Terima — boleh bertahap: tiap kedatangan menambah stok & mencatat kas keluar sendiri. Barang yang belum datang bukan hutang; sisa uang disaring lewat filter <b>Belum lunas</b>.</p>
     </div>
     <div id="po-body"></div>
   </div>`;
@@ -167,11 +215,14 @@ function renderTable(): string {
   const rows = state.items
     .map((o) => {
       // Umur hutang supplier (2026-10-16): hari sejak barang diterima; server
-      // hanya mengirim angka untuk PO received yang masih bersisa.
+      // hanya mengirim angka untuk nota yang masih bersisa.
       const umur = o.umur_hari ?? null;
-      const sisa = o.status === 'received' && o.sisa > 0
+      const sisa = (o.status_tampil ?? o.status) !== 'cancel' && o.sisa > 0
         ? `<span class="font-semibold text-red-600 dark:text-red-400">${rp(o.sisa)}</span>`
         : '<span class="text-gray-400">—</span>';
+      const progress = (o.diterima ?? 0) > 0 && (o.diterima ?? 0) < o.total
+        ? `<div class="cell-sub tabular-nums">diterima ${rp(o.diterima)}</div>`
+        : '';
       return `
       <tr data-row="${o.id}" class="cursor-pointer" data-po-buka="${o.id}" title="Buka rincian">
         <td class="td">
@@ -182,14 +233,14 @@ function renderTable(): string {
           <div class="cell-strong">${esc(o.supplier_name || 'Tanpa supplier')}</div>
           <div class="cell-sub">${o.n_items} baris${o.shift_id ? ` · Shift #${o.shift_id}` : ''} · ${esc(o.cashier)}</div>
         </td>
-        <td class="td">${badge(o)}${
+        <td class="td">${badge(o)}${subHutang(o)}${
           umur === null
             ? ''
             : `<div class="cell-sub tabular-nums${umur >= 30 ? ' font-semibold !text-red-600 dark:!text-red-400' : ''}"
                     title="Usia hutang sejak barang diterima">${umur <= 0 ? 'baru' : `${umur} hari`}</div>`
         }</td>
-        <td class="td td-num">${rp(o.total)}</td>
-        <td class="td td-num">${o.status === 'received' ? rp(o.terbayar) : '<span class="text-gray-400">—</span>'}</td>
+        <td class="td td-num">${rp(o.total)}${progress}</td>
+        <td class="td td-num">${(o.diterima ?? 0) > 0 || o.status === 'received' ? rp(o.terbayar) : '<span class="text-gray-400">—</span>'}</td>
         <td class="td td-num">${sisa}</td>
       </tr>`;
     })
@@ -293,23 +344,36 @@ function tglLokal(iso: string): string {
  *  `htmlHutangA4` debts.ts: kop store_* + supplier + tabel barang +
  *  ringkas Total/Terbayar/Sisa (striping, print-color-adjust: exact). */
 function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string {
+  const tampil = po.status_tampil ?? po.status;
   const baris = items
     .map((it, i) => `<tr>
         <td class="text-center">${i + 1}</td>
         <td><strong>${esc(it.name)}</strong></td>
         <td class="text-right nowrap">${it.qty}</td>
+        <td class="text-right nowrap">${it.diterima ?? it.qty}</td>
         <td class="text-right nowrap">${rpIdr(it.harga_beli)}</td>
         <td class="text-right nowrap">${rpIdr(it.amount)}</td>
       </tr>`)
     .join('');
 
+  // Baris ringkas KETIGA (tepat 3 `.total-row`, kontrak purchase-test F):
+  // urutan prioritas batal -> sisa hutang (uang kurang atas barang yang sudah
+  // datang) -> sisa barang yang belum datang -> lunas.
   const sisa = Math.max(0, po.sisa);
-  const labelSisa = po.status === 'cancel'
+  const belum = Math.max(0, po.sisa_terima ?? (po.total - (po.diterima ?? 0)));
+  const labelSisa = tampil === 'cancel'
     ? 'Dibatalkan'
-    : po.status === 'order'
-      ? 'Sisa (belum diterima)'
-      : sisa > 0 ? 'Sisa hutang' : 'Sisa (lunas)';
-  const labelStatus = po.status === 'cancel' ? 'DIBATALKAN' : po.status === 'received' ? 'DITERIMA' : 'ORDER';
+    : sisa > 0
+      ? 'Sisa hutang'
+      : belum > 0
+        ? 'Belum diterima'
+        : 'Sisa (lunas)';
+  const nilaiSisa = tampil === 'cancel' ? 0 : sisa > 0 ? sisa : belum;
+  const labelStatus = tampil === 'cancel'
+    ? 'DIBATALKAN'
+    : tampil === 'sebagian'
+      ? 'SEBAGIAN'
+      : tampil === 'received' ? 'DITERIMA' : 'ORDER';
 
   return `<!DOCTYPE html>
 <html lang="id">
@@ -388,11 +452,12 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
         : `<table class="items">
       <thead>
         <tr>
-          <th class="text-center" width="40">#</th>
+          <th class="text-center" width="36">#</th>
           <th>Barang</th>
-          <th class="text-right" width="64">Qty</th>
-          <th class="text-right" width="120">Harga beli</th>
-          <th class="text-right" width="120">Sub total</th>
+          <th class="text-right" width="52">Qty</th>
+          <th class="text-right" width="58">Diterima</th>
+          <th class="text-right" width="110">Harga beli</th>
+          <th class="text-right" width="110">Sub total</th>
         </tr>
       </thead>
       <tbody>${baris}</tbody>
@@ -404,7 +469,7 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
       <div class="total-section">
         <div class="total-row"><span>Total</span><span>${rpIdr(po.total)}</span></div>
         <div class="total-row"><span>Terbayar</span><span>${rpIdr(po.terbayar)}</span></div>
-        <div class="total-row grand-total"><span>${labelSisa}</span><span>${rpIdr(sisa)}</span></div>
+        <div class="total-row grand-total"><span>${labelSisa}</span><span>${rpIdr(nilaiSisa)}</span></div>
       </div>
     </div>
 
@@ -450,41 +515,144 @@ async function cetakPoA4(id: number): Promise<void> {
 
 /* ---------- RINCIAN (halaman #/purchases/<id>) ---------- */
 
-function detailHtml(po: Po, items: PoItem[]): string {
-  const aksiTerima = po.status === 'order'
+function detailHtml(po: Po, items: PoItem[], receives: PoReceive[]): string {
+  const tampil = po.status_tampil ?? po.status;
+  const diterimaNilai = po.diterima ?? 0;
+  const belumNilai = Math.max(0, po.sisa_terima ?? (po.total - diterimaNilai));
+  const barisSisa = items
+    .map((it) => ({
+      it,
+      sisa: Math.max(0, it.sisa_terima ?? (it.qty - (it.diterima ?? 0))),
+      sudah: it.diterima ?? 0,
+    }))
+    .filter((x) => x.sisa > 0);
+  // Default qty = SEMUA sisa (perilaku lama "terima semua" sekali klik) —
+  // kasir menurunkan baris yang belum datang. Ringkasan uang dihitung live.
+  const totalSisa = barisSisa.reduce((s, x) => s + Math.round(x.sisa * x.it.harga_beli), 0);
+  const maksBayar = Math.max(0, diterimaNilai + totalSisa - po.terbayar);
+
+  const aksiTerima = tampil !== 'cancel' && barisSisa.length
     ? `
     <div class="card">
-      <h3 class="mb-2 text-sm font-bold">Terima barang</h3>
-      <div class="field">
-        <label class="label" for="pt-bayar">Dibayar tunai (Rp)</label>
-        <input id="pt-bayar" class="input text-right font-bold tabular-nums" type="number" inputmode="numeric" min="0" max="${po.total}" step="500" value="${po.total}" />
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Isi penuh = lunas. Kurangi bila hutang — sisanya tercatat sebagai hutang supplier.</p>
+      <h3 class="mb-2 text-sm font-bold">Terima barang${tampil === 'sebagian' ? ' (kedatangan berikutnya)' : ''}</h3>
+      <div class="table-wrap">
+        <table class="table table-compact !min-w-[520px]">
+          <thead>
+            <tr>
+              <th class="th">Barang</th>
+              <th class="th !w-28 text-right">Qty datang</th>
+              <th class="th !w-28 text-right">Harga beli</th>
+              <th class="th !w-32 text-right">Nilai</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${barisSisa.map(({ it, sisa, sudah }) => `
+            <tr>
+              <td class="td">
+                <span class="cell-strong">${esc(it.name)}</span>
+                <div class="cell-sub tabular-nums">PO ${it.qty} · sudah diterima ${sudah}</div>
+              </td>
+              <td class="td td-num"><input data-pt-qty="${it.id}" data-harga="${it.harga_beli}" data-sisa="${sisa}"
+                    class="input input-sm !w-24 text-right tabular-nums" type="number" min="0" max="${sisa}" step="any"
+                    value="${sisa}" aria-label="Qty datang ${esc(it.name)}" /></td>
+              <td class="td td-num">${rp(it.harga_beli)}</td>
+              <td class="td td-num" data-pt-sub="${it.id}">${rp(Math.round(sisa * it.harga_beli))}</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="td font-semibold" colspan="3">Nilai kedatangan ini</td>
+              <td class="td td-num font-bold" id="pt-total">${rp(totalSisa)}</td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
-      <p class="text-xs text-gray-500 dark:text-gray-400">${
+      <div class="field mt-3">
+        <label class="label" for="pt-bayar">Dibayar tunai (Rp)</label>
+        <input id="pt-bayar" class="input text-right font-bold tabular-nums" type="number" inputmode="numeric" min="0" max="${maksBayar}" step="500" value="${totalSisa}" />
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Bawaan = nilai kedatangan ini (lunas). Boleh kurang (jadi hutang supplier) atau lebih untuk melunasi kekurangan kedatangan sebelumnya — maksimal ${rp(maksBayar)}.</p>
+      </div>
+      <div class="field mt-2">
+        <label class="label" for="pt-note">Catatan kedatangan (opsional)</label>
+        <input id="pt-note" class="input" maxlength="200" placeholder="cth: datang 1 dari 2 dus" />
+      </div>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">${
         state.shiftId
-          ? `Masuk hitungan Shift #${state.shiftId} (stok masuk, kas keluar ${rp(po.total)}).`
-          : 'Di luar shift — tercatat + masuk laporan.'
+          ? `Masuk hitungan Shift #${state.shiftId} (stok masuk, kas keluar sebesar dibayar di atas).`
+          : 'Di luar shift — stok tetap masuk, kas tercatat di laporan tanpa menggerakkan laci shift mana pun.'
       }</p>
       <div class="mt-3 flex flex-wrap gap-2">
-        <button type="button" id="pt-ok" class="btn btn-primary">${icon('check')}<span>Terima + bayar</span></button>
-        <button type="button" data-po-batal class="btn btn-ghost !text-red-600 dark:!text-red-400">Batalkan PO</button>
+        <button type="button" id="pt-ok" class="btn btn-primary">${icon('check')}<span>Terima barang</span></button>
+        ${po.n_terima === 0
+          ? `<button type="button" data-po-batal class="btn btn-ghost !text-red-600 dark:!text-red-400">Batalkan PO</button>`
+          : ''}
       </div>
+      ${po.n_terima > 0
+        ? `<p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Sudah ada penerimaan — PO ini tidak bisa dibatalkan. Koreksi stok lewat Opname, koreksi kas lewat Pengeluaran.</p>`
+        : ''}
     </div>`
-    : '';
-  const aksiBayar = po.status === 'received' && po.sisa > 0
+    : tampil !== 'cancel'
+      ? `<div class="card">
+          <h3 class="mb-1 text-sm font-bold">Semua barang sudah diterima</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Tidak ada qty yang masih ditunggu. Koreksi stok lewat Opname bila ada selisih fisik.</p>
+          ${po.n_terima === 0 && tampil === 'order' ? `<div class="mt-3"><button type="button" data-po-batal class="btn btn-ghost !text-red-600 dark:!text-red-400">Batalkan PO</button></div>` : ''}
+        </div>`
+      : '';
+
+  const aksiBayar = po.sisa > 0 && diterimaNilai > 0
     ? `
     <div class="card">
       <h3 class="mb-2 text-sm font-bold">Bayar sisa hutang</h3>
       <div class="field">
         <label class="label" for="pb-amount">Jumlah bayar (Rp)</label>
         <input id="pb-amount" class="input text-right font-bold tabular-nums" type="number" inputmode="numeric" min="1" max="${po.sisa}" step="500" value="${po.sisa}" />
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Maks sisa hutang. Kas keluar diatribusikan ke Shift #${po.shift_id ?? '—'} PO ini.</p>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Maks sisa hutang. Kas keluar diatribusikan ke Shift #${po.shift_id ?? '—'} (shift kedatangan pertama).</p>
       </div>
       <div class="mt-3">
         <button type="button" id="pb-ok" class="btn btn-primary">${icon('wallet')}<span>Bayar</span></button>
       </div>
     </div>`
     : '';
+
+  // Riwayat kedatangan (butir 3.7): satu baris per event — sumber angka
+  // laporan/laci harian. Waktu lokal (created_at UTC dari server).
+  const riwayat = receives.length
+    ? `
+    <div class="card-flush">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200/70 px-3 py-2 dark:border-gray-700/70">
+        <h3 class="text-sm font-bold">Riwayat kedatangan <span class="font-normal text-gray-500 dark:text-gray-400">(${receives.length})</span></h3>
+        <span class="text-xs text-gray-500 dark:text-gray-400">Stok & kas dihitung per baris ini, bukan per tanggal PO.</span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact !min-w-[720px]">
+          <thead>
+            <tr>
+              <th class="th">Waktu</th>
+              <th class="th">Barang</th>
+              <th class="th">Shift / kasir</th>
+              <th class="th text-right">Nilai</th>
+              <th class="th text-right">Dibayar</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${receives.map((r) => `
+            <tr>
+              <td class="td tabular-nums">${esc(tglLokal(r.created_at))}</td>
+              <td class="td">
+                <div class="cell-strong">${r.n_items} baris</div>
+                <div class="cell-sub">${esc((r.items ?? []).map((x) => `${x.qty}× ${x.name}`).join(', ') || '—')}</div>
+                ${r.note ? `<div class="cell-sub italic">${esc(r.note)}</div>` : ''}
+              </td>
+              <td class="td"><div>${r.shift_id ? `Shift #${r.shift_id}` : 'di luar shift'}</div><div class="cell-sub">${esc(r.cashier || '—')}</div></td>
+              <td class="td td-num">${rp(r.total)}</td>
+              <td class="td td-num font-semibold">${rp(r.dibayar)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`
+    : '';
+
   return `
   <div class="space-y-3">
     <div class="card">
@@ -494,7 +662,7 @@ function detailHtml(po: Po, items: PoItem[]): string {
         ${badge(po)}
         <button type="button" data-po-cetak class="btn btn-ghost ml-auto">${icon('print')}<span>Cetak A4</span></button>
       </div>
-      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">dibuat ${esc(po.created_at)}${po.received_at ? ` · diterima ${esc(po.received_at)}` : ''}${po.shift_id ? ` · Shift #${po.shift_id}` : ''}</p>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">dibuat ${esc(tglLokal(po.created_at))}${po.received_at ? ` · kedatangan pertama ${esc(tglLokal(po.received_at))}` : ''}${po.shift_id ? ` · Shift #${po.shift_id}` : ''} · ${esc(po.cashier || '—')}</p>
       ${po.note ? `<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Catatan: ${esc(po.note)}</p>` : ''}
     </div>
     <div class="card-flush">
@@ -503,33 +671,50 @@ function detailHtml(po: Po, items: PoItem[]): string {
           <thead>
             <tr>
               <th class="th">Barang</th>
-              <th class="th text-right">Qty</th>
+              <th class="th text-right">Qty PO</th>
+              <th class="th text-right">Diterima</th>
+              <th class="th text-right">Sisa</th>
               <th class="th text-right">Harga beli</th>
               <th class="th text-right">Sub total</th>
             </tr>
           </thead>
           <tbody>
-            ${items.map((it) => `
+            ${items.map((it) => {
+              const sudah = it.diterima ?? 0;
+              const sisa = Math.max(0, it.sisa_terima ?? (it.qty - sudah));
+              return `
             <tr>
               <td class="td"><span class="cell-strong">${esc(it.name)}</span></td>
               <td class="td td-num">${it.qty}</td>
+              <td class="td td-num${sudah > 0 ? ' font-semibold text-emerald-700 dark:text-emerald-400' : ''}">${sudah}</td>
+              <td class="td td-num${sisa > 0 ? ' text-amber-700 dark:text-amber-400' : ''}">${sisa > 0 ? sisa : '—'}</td>
               <td class="td td-num">${rp(it.harga_beli)}</td>
               <td class="td td-num font-semibold">${rp(it.amount)}</td>
-            </tr>`).join('')}
+            </tr>`;
+            }).join('')}
           </tbody>
           <tfoot>
             <tr>
-              <td class="td font-semibold" colspan="3">Total</td>
+              <td class="td font-semibold" colspan="5">Total PO</td>
               <td class="td td-num font-bold">${rp(po.total)}</td>
             </tr>
             <tr>
-              <td class="td" colspan="3">Terbayar</td>
+              <td class="td" colspan="5">Nilai barang diterima</td>
+              <td class="td td-num">${rp(diterimaNilai)}</td>
+            </tr>
+            <tr>
+              <td class="td" colspan="5">Terbayar</td>
               <td class="td td-num">${rp(po.terbayar)}</td>
             </tr>
-            ${po.status === 'received' && po.sisa > 0 ? `
+            ${po.sisa > 0 ? `
             <tr>
-              <td class="td font-semibold text-red-600 dark:text-red-400" colspan="3">Sisa hutang</td>
+              <td class="td font-semibold text-red-600 dark:text-red-400" colspan="5">Sisa hutang</td>
               <td class="td td-num font-semibold text-red-600 dark:text-red-400">${rp(po.sisa)}</td>
+            </tr>` : ''}
+            ${belumNilai > 0 ? `
+            <tr>
+              <td class="td text-amber-700 dark:text-amber-400" colspan="5">Belum datang (bukan hutang)</td>
+              <td class="td td-num text-amber-700 dark:text-amber-400">${rp(belumNilai)}</td>
             </tr>` : ''}
           </tfoot>
         </table>
@@ -537,14 +722,15 @@ function detailHtml(po: Po, items: PoItem[]): string {
     </div>
     ${aksiTerima}
     ${aksiBayar}
+    ${riwayat}
   </div>`;
 }
 
 async function mountDetail(el: HTMLElement, id: number): Promise<void> {
   el.innerHTML = `<div class="card"><div class="skel h-6 w-40"></div></div>`;
-  let data: { purchase: Po; items: PoItem[] } | null = null;
+  let data: { purchase: Po; items: PoItem[]; receives: PoReceive[] } | null = null;
   try {
-    const r = await apiGet<{ data: { purchase: Po; items: PoItem[] } }>(`/api/purchases/${id}`);
+    const r = await apiGet<{ data: { purchase: Po; items: PoItem[]; receives: PoReceive[] } }>(`/api/purchases/${id}`);
     data = r.data;
   } catch (e) {
     el.innerHTML = `
@@ -555,8 +741,8 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
     bindKembali(el);
     return;
   }
-  const { purchase: po, items } = data;
-  el.innerHTML = detailHtml(po, items);
+  const { purchase: po, items, receives } = data;
+  el.innerHTML = detailHtml(po, items, receives ?? []);
   bindKembali(el);
 
   el.querySelector<HTMLElement>('[data-po-cetak]')?.addEventListener('click', () => {
@@ -581,19 +767,78 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
     }
   });
 
+  // Form Terima BERTAHAP: qty per baris (bawaan = semua sisa), nilai & batas
+  // bayar dihitung live — angka yang dikirim harus sama dengan yang dilihat.
+  const inputBayar = el.querySelector<HTMLInputElement>('#pt-bayar');
+  const rowInputs = [...el.querySelectorAll<HTMLInputElement>('[data-pt-qty]')];
+  // SATU id per form (bukan per klik): klik ganda / retry setelah jawaban
+  // hilang memakai kunci yang sama sehingga server mengenali event yang sama.
+  // Setelah sukses mountDetail() menggambar ulang form = id baru untuk
+  // kedatangan berikutnya.
+  const clientIdTerima = crypto.randomUUID();
+  let bayarDisentuh = false;
+  const qtyTerima = (inp: HTMLInputElement) => {
+    const maks = Number(inp.dataset.sisa ?? 0);
+    const v = Number(inp.value || 0);
+    return Number.isFinite(v) ? Math.min(Math.max(0, v), maks) : 0;
+  };
+  const hitungEvent = () => rowInputs.reduce((s, inp) =>
+    s + Math.round(qtyTerima(inp) * Number(inp.dataset.harga ?? 0)), 0);
+  const paintEvent = () => {
+    const total = hitungEvent();
+    let adaQty = false;
+    for (const inp of rowInputs) {
+      const q = qtyTerima(inp);
+      if (q > 0) adaQty = true;
+      const sub = el.querySelector<HTMLElement>(`[data-pt-sub="${inp.dataset.ptQty}"]`);
+      if (sub) sub.textContent = rp(Math.round(q * Number(inp.dataset.harga ?? 0)));
+    }
+    const t = el.querySelector<HTMLElement>('#pt-total');
+    if (t) t.textContent = rp(total);
+    if (inputBayar) {
+      const maks = Math.max(0, (po.diterima ?? 0) + total - po.terbayar);
+      inputBayar.max = String(maks);
+      if (!bayarDisentuh) inputBayar.value = String(adaQty ? total : 0);
+      else if (Number(inputBayar.value || 0) > maks) inputBayar.value = String(maks);
+    }
+    el.querySelector<HTMLButtonElement>('#pt-ok')?.toggleAttribute('disabled', !adaQty);
+  };
+  rowInputs.forEach((inp) => {
+    inp.addEventListener('input', paintEvent);
+    inp.addEventListener('change', paintEvent);
+  });
+  inputBayar?.addEventListener('input', () => { bayarDisentuh = true; });
+
   el.querySelector<HTMLElement>('#pt-ok')?.addEventListener('click', async () => {
-    const dibayar = Number((el.querySelector('#pt-bayar') as HTMLInputElement).value || 0);
-    if (!Number.isInteger(dibayar) || dibayar < 0 || dibayar > po.total) {
-      toast(`Dibayar harus bulat 0..${po.total}`, 'warning');
+    const dipilih = rowInputs
+      .map((inp) => ({ purchase_item_id: Number(inp.dataset.ptQty), qty: qtyTerima(inp) }))
+      .filter((x) => x.qty > 0);
+    if (!dipilih.length) { toast('Isi qty kedatangan minimal satu baris', 'warning'); return; }
+    const eventTotal = hitungEvent();
+    const maks = Math.max(0, (po.diterima ?? 0) + eventTotal - po.terbayar);
+    const dibayar = Number(inputBayar?.value || 0);
+    if (!Number.isInteger(dibayar) || dibayar < 0 || dibayar > maks) {
+      toast(`Dibayar harus bulat 0..${maks}`, 'warning');
+      inputBayar?.focus();
       return;
     }
+    const note = (el.querySelector('#pt-note') as HTMLInputElement | null)?.value.trim() ?? '';
     try {
-      await apiPost(`/api/purchases/${po.id}/receive`, {
+      // client_id stabil per form: klik ganda / retry setelah jawaban hilang
+      // tidak menggandakan stok & kas (server mengenali event yang sama).
+      const r = await apiPost<{ data: Po }>(`/api/purchases/${po.id}/receive`, {
+        items: dipilih,
         dibayar,
+        note,
         cashier: getCashier(),
+        client_id: clientIdTerima,
         ...(state.shiftId !== null ? { shift_id: state.shiftId } : {}),
       });
-      toast(dibayar === po.total ? `PO-${po.id} diterima lunas` : `PO-${po.id} diterima · hutang ${rp(po.total - dibayar)}`, 'success');
+      const sisaDatang = Math.max(0, r.data.sisa_terima ?? 0);
+      const pesan = sisaDatang > 0
+        ? `PO-${po.id} kedatangan dicatat · sisa barang ${rp(sisaDatang)}`
+        : `PO-${po.id} diterima lengkap`;
+      toast(r.data.sisa > 0 ? `${pesan} · hutang ${rp(r.data.sisa)}` : pesan, 'success');
       await mountDetail(el, id);
     } catch (e) {
       toast(`Gagal: ${errMsg(e)}`, 'error');

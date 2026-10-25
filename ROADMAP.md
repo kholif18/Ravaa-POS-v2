@@ -268,7 +268,7 @@ tidak membutuhkannya". Tidak ada kandidat "belum dibahas" tersisa.
 | 3.4 | **Split payment** (tunai+QRIS satu nota) — **SELESAI 2026-10-19** (skema `sale_payments` + laporan byMethod + modal 2 metode) | Tren 2026, Erzap/Moka | Terjawab: atribusi per metode (Σ = total); split hanya 2 metode & butuh uang tunai cukup; hutang tetap jalur satu metode |
 | 3.5 | **Harga bertingkat per jumlah qty** — **SELESAI 2026-10-19** (tabel `product_borongan` + API `borongan` + blok form produk + potongan otomatis POS) | Kasir Pintar "Tipe Harga", Olsera harga grosir + pertanyaan pemilik 2026-10-18 saat membedah form "Satuan jual" (*"jika qty tercapai harga juga berubah?"*) | Terjawab — keputusan pemilik 2026-10-18/19 (3 opsi rekomendasi dipilih); detail + implementasi di bawah |
 | 3.6 | **Supplier & riwayat pembelian (PO)** — **SELESAI Tahap 3, 2026-10-11** | Kasir Pintar free, Loyverse purchase order | Terjawab: master `suppliers` penuh + PO (order → terima → bayar/cancel) + hutang supplier + aging |
-| 3.7 | **Penerimaan PO sebagian (partial receive)** — **USULAN, belum dikerjakan** | Aronium/Loyverse: barang datang bertahap per qty | **Butuh ACC + migrasi kolom.** Sekarang `POST /api/purchases/:id/receive` menerima SELURUH nota sekaligus (`order → received`, stok + `avg_cost` per baris). Bertahap butuh penyimpan qty diterima (`purchase_items.qty_terima` atau tabel `purchase_receives`) + guard status baru + `sisa` per baris + laporan. Ditunda 2026-10-25 karena tidak bisa tanpa perubahan skema (kebijakan §5: ALTER manual + backup dulu). |
+| 3.7 | **Penerimaan PO sebagian (partial receive)** — **SELESAI 2026-10-25** (tabel `purchase_receives` + `purchase_receive_items`, receive bertahap + idempotensi `client_id`, UI form Terima & riwayat kedatangan) | Aronium/Loyverse: barang datang bertahap per qty | Terjawab: status tersimpan tetap `order`/`received` ("Sebagian" computed), uang dicatat per kedatangan, laporan/laci per tanggal kedatangan, PO hanya bisa dibatalkan sebelum ada penerimaan |
 
 ### 3.5 Harga bertingkat per jumlah qty — **SELESAI 2026-10-19**
 - **Keputusan pemilik 2026-10-19 (semua opsi rekomendasi dipilih):**
@@ -308,6 +308,42 @@ tidak membutuhkannya". Tidak ada kandidat "belum dibahas" tersisa.
   (*"harga bertingkat OK"*); skema usulan riset `min_qty` di `product_units`
   **diganti** tabel tingkatan per produk (`product_borongan`) supaya
   tingkatan bisa beberapa level terpisah dari satuan jual.
+
+### 3.7 Penerimaan PO sebagian (partial receive) — **SELESAI 2026-10-25**
+- **Keputusan pemilik 2026-10-25 (opsi A + rekomendasi 1–3 diterima):**
+  1. **Penyimpan = dua tabel baru** — `purchase_receives` (satu baris per
+     EVENT kedatangan: shift, kasir, nilai, `dibayar`, catatan, `client_id`)
+     + `purchase_receive_items` (qty & harga beli snapshot per baris PO).
+     **Status tersimpan TIDAK diubah** (`order|received|cancel`): "Sebagian"
+     dihitung dari Σ kedatangan, `received` hanya saat semua qty terpenuhi.
+  2. **Uang per kedatangan** — `dibayar` = uang keluar pada kedatangan ITU
+     (bawaan = nilai barang yang datang), `purchases.terbayar` mengakumulasi.
+     Boleh melunasi kekurangan kedatangan sebelumnya, **tidak boleh** melebihi
+     nilai barang yang sudah diterima (barang belum datang bukan hutang).
+  3. **Laporan & laci per tanggal kedatangan** — `reports/daily`/`summary`
+     dan agregat `GET /api/shifts` menghitung tiap event pada `created_at`-nya;
+     nota lama `received` tanpa baris kedatangan tetap dihitung 1 event lewat
+     `received_at` (fallback, **tanpa backfill**).
+  4. **Koreksi, bukan hapus riwayat** — setelah ada penerimaan (walau
+     sebagian) PO tidak bisa dibatalkan; koreksi stok lewat Opname, kas lewat
+     Pengeluaran. Pembatalan hanya selama `n_terima === 0`.
+- **Implementasi 2026-10-25:** API `POST /:id/receive` menerima `items`
+  opsional (`{purchase_item_id, qty}`; tanpa `items` = terima semua sisa —
+  pemanggil lama sah), idempotensi retry `client_id` (UNIQUE global, kirim
+  ulang = `duplicate:true` tanpa menambah stok/uang), `sisa`/`sisa_terima`/
+  `status_tampil`/`n_terima` computed di list/detail/POST; filter baru
+  `status=sebagian` + `hutang` diperluas ke PO bertahap bersisa; `GET
+  /:id` mengirim `receives[]` (riwayat kedatangan + items). UI
+  `#/purchases`: badge `data-po-badge` (Order/Sebagian/Hutang/Lunas/Batal),
+  progress qty diterima, form Terima per baris (default sisa, `#pt-bayar`
+  live dengan maks nilai diterima), riwayat kedatangan, tombol batal hanya
+  sebelum ada penerimaan; A4 menambah kolom **Diterima** + label baris
+  ketiga kontekstual (`Belum diterima`/`Sisa hutang`/`Sisa (lunas)`).
+  Uji: `tests/purchase-partial-test.mjs` (50 asersi: API bertahap,
+  idempotensi, agregat shift/laporan, fallback nota lama, form/detail/A4) +
+  penyesuaian `purchase-test` (46), `aging-test` (21), `recap-test` (16),
+  `shift-test` (23), `laporan-test` (20). SQL migrasi: AGENTS §5 (murni tabel
+  tambahan — `migrate()`/`npm run seed` cukup, tanpa ALTER).
 
 ## 4. Sengaja TIDAK diusulkan (domain 1–2 kasir toko fisik)
 

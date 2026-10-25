@@ -300,10 +300,43 @@ CREATE TABLE IF NOT EXISTS purchase_items (
   harga_beli    INTEGER NOT NULL CHECK (harga_beli >= 0),
   amount        INTEGER NOT NULL         -- qty*harga_beli
 );
+-- Penerimaan PO BERTAHAP (butir ROADMAP 3.7, 2026-10-25): satu baris per
+-- KEDATANGAN barang (sebagian atau penuh). Header `purchases` tetap menyimpan
+-- status tersimpan: 'order' selama qty belum lengkap, 'received' saat semua
+-- baris terpenuhi — status "Sebagian" adalah COMPUTED dari Σ kedatangan,
+-- jadi CHECK lama tidak perlu diubah (tanpa rebuild tabel).
+-- `dibayar` = uang keluar pada kedatangan INI (bukan total PO); sisa hutang
+-- dihitung dari nilai yang SUDAH diterima (`diterima - terbayar`), bukan
+-- total PO. `client_id` = kunci idempotensi retry (uuid dari klien); NULL
+-- untuk pemanggil lama — SQLite mengizinkan banyak NULL di kolom UNIQUE.
+CREATE TABLE IF NOT EXISTS purchase_receives (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  shift_id    INTEGER REFERENCES shifts(id),          -- NULL = di luar shift
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  total       INTEGER NOT NULL CHECK (total >= 0),    -- nilai barang kedatangan ini
+  dibayar     INTEGER NOT NULL DEFAULT 0 CHECK (dibayar >= 0),
+  note        TEXT NOT NULL DEFAULT '',               -- maks 200 char
+  client_id   TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS purchase_receive_items (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  receive_id       INTEGER NOT NULL REFERENCES purchase_receives(id) ON DELETE CASCADE,
+  purchase_item_id INTEGER NOT NULL REFERENCES purchase_items(id) ON DELETE CASCADE,
+  qty              REAL NOT NULL CHECK (qty > 0),
+  harga_beli       INTEGER NOT NULL CHECK (harga_beli >= 0), -- snapshot saat terima
+  amount           INTEGER NOT NULL                          -- round(qty*harga_beli)
+);
 CREATE INDEX IF NOT EXISTS idx_purchases_status ON purchases(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_purchases_shift ON purchases(shift_id);
 CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_receives_purchase ON purchase_receives(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_receives_shift ON purchase_receives(shift_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_receives_tanggal ON purchase_receives(created_at);
+CREATE INDEX IF NOT EXISTS idx_purchase_receive_items_receive ON purchase_receive_items(receive_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_receive_items_item ON purchase_receive_items(purchase_item_id);
 
 -- Topup & tarik tunai: nominal bebas + admin editable.
 -- nominal = mutasi modal/e-money, admin = pendapatan jasa.

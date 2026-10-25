@@ -256,7 +256,7 @@ function ringkasan(l: Laporan): string {
     { label: 'Pengeluaran', nilai: rp(exp.total), sub: `${exp.n} catatan · kas keluar`, link: '#/expenses' },
     { label: 'Kas masuk', nilai: rp(km.total), sub: `${km.n} catatan · kas masuk`, link: '#/kas-masuk' },
     // Pembelian diterima (Tahap 3) — nilai kulakan masuk hari itu.
-    { label: 'Pembelian', nilai: rp(po.total), sub: `${po.n} nota diterima`, link: '#/purchases' },
+    { label: 'Pembelian', nilai: rp(po.total), sub: `${po.n} kedatangan`, link: '#/purchases' },
   ];
   return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
     ${kartu
@@ -935,7 +935,7 @@ function csvHarian(): (string | number)[][] {
     ['Omzet bersih', l.sales.omzet - ret.total],
     ['Pengeluaran', (l.expense ?? { n: 0, total: 0 }).total],
     ['Kas masuk', (l.kas_masuk ?? { n: 0, total: 0 }).total],
-    ['Pembelian diterima', (l.purchase ?? { n: 0, total: 0 }).total],
+    ['Pembelian diterima (kedatangan)', (l.purchase ?? { n: 0, total: 0 }).total],
     [],
     ['Penjualan per jam (UTC)'],
     ['Jam', 'Transaksi', 'Omzet'],
@@ -1101,7 +1101,7 @@ async function cetakHarian(): Promise<void> {
     ['Diskon', rp(l.sales.diskon)],
     ['Pengeluaran', rp((l.expense ?? { n: 0, total: 0 }).total)],
     ['Kas masuk', rp((l.kas_masuk ?? { n: 0, total: 0 }).total)],
-    ['Pembelian diterima', rp((l.purchase ?? { n: 0, total: 0 }).total)],
+    ['Pembelian diterima (kedatangan)', rp((l.purchase ?? { n: 0, total: 0 }).total)],
     ...(teramai && teramai.n > 0
       ? [[`Jam teramai ${pad2(teramai.jam)}:00`, `${rp(teramai.omzet)} · ${teramai.n} trx`]]
       : []),
