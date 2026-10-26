@@ -51,6 +51,21 @@ chk('username asing = sandi salah (tak bocor)', asing.status === 401 && salah.st
   && asing.json.error === salah.json.error, `${asing.json.error}`);
 chk('kosong -> 400', (await api('POST', '/api/login', { username: '', password: '' })).status === 400);
 
+console.log('=== B2. Rate limit login (5 gagal beruntun -> 429) ===');
+// Username KHUSUS supaya counter UJI_USER milik suite lain tidak tersentuh
+// (kunci rate limit per-username di index.ts `LOGIN_GAGAL`; login sukses
+// me-reset counter — 4 gagal beruntun ini di bawah ambang 5).
+const rl = await api('POST', '/api/users', { username: `ujirl${Date.now().toString(36)}`, name: 'Uji Rate Limit', role: 'kasir', password: 'rl123456' }, T);
+const rlUser = rl.json.data.username;
+const rlId = rl.json.data.id;
+let status4 = 0;
+for (let i = 0; i < 4; i++) status4 = (await api('POST', '/api/login', { username: rlUser, password: 'salah-rl' })).status;
+chk('4 gagal beruntun -> masih 401', status4 === 401);
+const kunci5 = await api('POST', '/api/login', { username: rlUser, password: 'salah-rl' });
+chk('gagal ke-5 -> 429 + retry_after 60', kunci5.status === 429 && kunci5.json.retry_after === 60, `${kunci5.json.error}`);
+chk('sandi BENAR pun terkunci selama 429',
+  (await api('POST', '/api/login', { username: rlUser, password: 'rl123456' })).status === 429);
+
 console.log('=== C. Kasir ditolak di jalur pemilik ===');
 const k1 = await api('POST', '/api/users', { username: `ujilogin${Date.now().toString(36)}`, name: 'Uji Login Kasir', role: 'kasir', password: 'kasir123' }, T);
 const kasirId = k1.json.data.id;
@@ -137,8 +152,9 @@ await b.close();
 
 // Bersihkan: kasir uji + shift lain-uji (sales tak ada di shift itu — FK aman).
 await api('DELETE', `/api/users/${kasirId}`, null, T);
+await api('DELETE', `/api/users/${rlId}`, null, T);
 sql(`DELETE FROM shifts WHERE cashier = 'kasir-lain-uji';`);
-sql(`DELETE FROM users WHERE username LIKE 'ujilogin%';`);
+sql(`DELETE FROM users WHERE username LIKE 'ujilogin%' OR username LIKE 'ujirl%';`);
 
 console.log(`\n=== ${fail ? 'ADA GAGAL' : 'SEMUA LOLOS'} ===  (lolos: ${pass}, gagal: ${fail})  [login-test.mjs]`);
 if (fail) process.exit(1);

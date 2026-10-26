@@ -100,6 +100,9 @@ type Laporan = {
   /** Pembelian yang DITERIMA hari itu (Tahap 3, 2026-10-11) — total = nilai
    *  nota diterima. Opsional, alasan sama. */
   purchase?: { n: number; total: number };
+  /** Retur ke supplier (butir ROADMAP 1.9, 2026-10-26) — total = nilai barang
+   *  diretur. Dilaporkan TERPISAH dari `purchase`; tidak menggerus laba. */
+  purchase_retur?: { n: number; total: number };
   /** Piutang (butir credit Z-report): TERBENTUK + TERBAYAR. Opsional. */
   piutang?: { baru: number; bayar: number };
 };
@@ -241,6 +244,7 @@ function ringkasan(l: Laporan): string {
   const km = l.kas_masuk ?? { n: 0, total: 0 };
   const ret = l.retur ?? { n: 0, total: 0 };
   const po = l.purchase ?? { n: 0, total: 0 };
+  const poRet = l.purchase_retur ?? { n: 0, total: 0 };
   // Hybrid keputusan (c): Omzet KOTOR + Retur terpisah + Omzet bersih.
   // Bersih = omzet − retur, dihitung di klien dari dua angka server (preseden:
   // `nonTunai = omzet − tunai` di shift-tutup.ts) — agregatnya tetap server.
@@ -257,6 +261,9 @@ function ringkasan(l: Laporan): string {
     { label: 'Kas masuk', nilai: rp(km.total), sub: `${km.n} catatan · kas masuk`, link: '#/kas-masuk' },
     // Pembelian diterima (Tahap 3) — nilai kulakan masuk hari itu.
     { label: 'Pembelian', nilai: rp(po.total), sub: `${po.n} kedatangan`, link: '#/purchases' },
+    // Retur ke supplier (1.9) — barang kembali ke pemasok, terpisah dari baris
+    // Pembelian; tidak menggerus laba (modal sudah dicatat saat beli).
+    { label: 'Retur supplier', nilai: rp(poRet.total), sub: `${poRet.n} retur · barang keluar`, link: '#/purchases' },
   ];
   return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
     ${kartu
@@ -936,6 +943,7 @@ function csvHarian(): (string | number)[][] {
     ['Pengeluaran', (l.expense ?? { n: 0, total: 0 }).total],
     ['Kas masuk', (l.kas_masuk ?? { n: 0, total: 0 }).total],
     ['Pembelian diterima (kedatangan)', (l.purchase ?? { n: 0, total: 0 }).total],
+    ['Retur ke supplier', (l.purchase_retur ?? { n: 0, total: 0 }).total],
     [],
     ['Penjualan per jam (UTC)'],
     ['Jam', 'Transaksi', 'Omzet'],
@@ -1102,6 +1110,7 @@ async function cetakHarian(): Promise<void> {
     ['Pengeluaran', rp((l.expense ?? { n: 0, total: 0 }).total)],
     ['Kas masuk', rp((l.kas_masuk ?? { n: 0, total: 0 }).total)],
     ['Pembelian diterima (kedatangan)', rp((l.purchase ?? { n: 0, total: 0 }).total)],
+    ['Retur ke supplier', rp((l.purchase_retur ?? { n: 0, total: 0 }).total)],
     ...(teramai && teramai.n > 0
       ? [[`Jam teramai ${pad2(teramai.jam)}:00`, `${rp(teramai.omzet)} · ${teramai.n} trx`]]
       : []),

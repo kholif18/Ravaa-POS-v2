@@ -1567,7 +1567,23 @@ apps/web/src/pages/history.ts  Halaman #/history (menu Riwayat transaksi):
                           halaman yang membaca sisa hash). Tombol
                           `[data-po-kembali]` di semua sub-halaman. JANGAN
                           kembalikan ke `openModal` — alasan eksplisit di
-                          header file. **Pengingat aging
+                          header file. **Retur ke supplier (butir ROADMAP
+                          1.9, SELESAI 2026-10-26)**: kartu form di rincian
+                          PO (tampil bila `n_terima>0`, bukan cancel, dan
+                          masih ada qty bisa diretur = diterima − Σ retur
+                          `PoRetur[]` dari `returns[]` detail) — input
+                          `data-pr-qty` bawaan **0** (retur aksi sengaja,
+                          bukan "kirim semua" seperti Terima), nilai live
+                          `#pr-total`/`data-pr-sub`, alasan `#pr-note`,
+                          kirim `#pr-ok` → POST `/:id/returns` dengan
+                          `client_id` SATU per form (pola terima) + hint
+                          "uang kembali dicatat manual di Kas masuk"
+                          (retur TIDAK menggerakkan laci); kartu **Riwayat
+                          retur ke supplier** mirror riwayat kedatangan;
+                          form HILANG saat semua yang datang sudah diretur.
+                          Label Riwayat Stok `retur-beli` = "Retur ke
+                          supplier" (ALASAN map stock.ts, menyertakan label
+                          `retur`/`beli` lama yang dulu tampil mentah). **Pengingat aging
                           (2026-10-16)**: chip kuning `#po-lewat` ("n lewat 30
                           hari", dari `lewat30` GET /api/purchases) + badge
                           umur per baris (`umur_hari` sejak `received_at`,
@@ -2810,6 +2826,42 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       ringkas tetap TEPAT 3 `.total-row` (kontrak `purchase-test`) — baris
       ketiga berlabel prioritas `Dibatalkan` → `Sisa hutang` (sisa>0) →
       `Belum diterima` (sisa_terima>0) → `Sisa (lunas)`.
+    - **Retur ke supplier (butir ROADMAP 1.9, ACC pemilik 2026-10-25, SELESAI
+      2026-10-26)** — barang dikembalikan ke pemasok. Dua tabel BARU
+      `purchase_returns` + `purchase_return_items` (lihat §5 — murni tabel
+      tambahan, `migrate()` cukup). Satu `transaksi(fn)` per retur.
+      * `POST /api/purchases/:id/returns` `{items:[{purchase_item_id,qty>0}],note?≤200,shift_id?,cashier?,client_id?}`
+        -> 200 `{data:<purchase segar + retur>}` (pola receive). Validasi 400:
+        PO cancel (`"pembelian sudah dibatalkan"`), tanpa kedatangan
+        (`"belum ada barang yang diterima — tidak ada yang bisa diretur"`),
+        `qty > diterima − sudah_diretur` (`"baris N: qty melebihi sisa retur
+        (sisa X)"`), baris duplikat, `stok kurang` kecuali
+        `allow_negative_stock` (pola batal-retur-jual: barang yang sudah
+        terjual tidak dikurangi diam-diam). **Idempotensi `client_id`** (pola
+        receive; milik PO lain -> 400). Stok KELUAR: `stock_moves
+        reason='retur-beli'` qty NEGATIF + `unit_cost = harga_beli` baris PO +
+        `ref_id='PR-<id retur>'` + `version++`. **Retur TIDAK menggerakkan
+        laci** — uang kembali dari supplier dicatat manual di halaman Kas
+        masuk (desain ROADMAP §1.9 v1). Retur = arsip (TANPA DELETE) —
+        koreksi salah ketik lewat opname/pengeluaran, pola PO.
+      * **Computed di `SQL_PO_HIT` (SEMUA bentuk baris PO ikut)**:
+        `retur_total` = Σ `purchase_returns.total`, `n_retur` = COUNT event,
+        **`sisa` = max(0, diterima − retur_total − terbayar)** (barang yang
+        dikembalikan bukan hutang lagi), `diterima` tetap GROSS (status
+        "Sebagian"/"received" menggambarkan kedatangan, bukan isi rak).
+        `POST /:id/cancel` guard baru `n_retur > 0` -> 400 (redundan dengan
+        `n_terima`, dijaga eksplisit sesuai kontrak ROADMAP).
+      * `GET /api/purchases/:id` mengirim **`returns[]`** mirror `receives[]`
+        (tiap baris + `n_items` + `items[]` snapshot `name`/`qty_po`).
+      * Laporan: `reports/daily`+`summary` **`purchase_retur:{n,total}`** per
+        tanggal retur — TERPISAH dari `purchase` (yang memasok HPP), tidak
+        menggerus laba. UI: kartu "Retur supplier" menu Harian + baris CSV +
+        cetak; label Riwayat Stok `retur-beli` = "Retur ke supplier".
+      * UI (`purchases.ts`): kartu form **Retur ke supplier** (bawaan qty 0 —
+        aksi sengaja, bukan "kirim semua"), nilai live `#pr-total`, client_id
+        SATU per form (pola terima), riwayat retur mirror riwayat kedatangan,
+        form hilang saat semua yang datang sudah diretur. Diuji
+        `tests/purchase-retur-test.mjs` (34 asersi).
   - **Pesanan jasa + DP + serah (butir ROADMAP 1.6.6, ACC pemilik 2026-10-19,
     halaman `#/orders`)** — alur bengkel-style: dikerjakan → selesai →
     diambil/batal. **Omzet DIKAKUI SAAT SERAH** (nota penjualan penuh; DP =
@@ -3179,6 +3231,16 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - `POST /api/login` `{username,password}` -> `{data:{token,user,must_change}}}`;
     username tak ada & sandi salah = PESAN SAMA (401, anti-enumerasi); akun
     nonaktif = 403. `POST /api/logout` (idempotent), `GET /api/me`.
+    **Rate limit login (2026-10-26, temuan audit produksi)**: 5 gagal
+    BERUNTUN per username -> **429** `{error:"terlalu banyak percobaan login —
+    coba lagi dalam 60 detik",retry_after:60}` (10 -> 300 dtk, 15+ -> 900 dtk;
+    pola persis rate-limit PIN), sandi BENAR pun ditolak sampai kunci habis,
+    counter reset oleh login SUKSES (bukan habisnya kunci). Kunci = string
+    username apa adanya (termasuk yang tak dikenal). **In-memory SENGAJA**
+    (proses API tunggal skala 1-2 kasir; restart = counter bersih) — tanpa
+    kolom skema baru supaya install lama tidak perlu ALTER (§5); peta dibatasi
+    500 username (penuh = clear, efek samping hanya penalti kosong). Diuji
+    `login-test.mjs` seksi B2 (29 asersi).
   - `GET/POST/DELETE /api/users` (+`POST /api/users/:id/password`) — SEMUA
     `hanyaOwner` (28 rute dilindungi: master uang/modal/laporan/aturan —
     daftar di index.ts). Update parsial: username TAK bisa diganti; guard 400:
@@ -3232,11 +3294,14 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - **Cakupan instrumentasi**: produk (create/update/delete/restock/opname/
     import), kategori, satuan, pelanggan, supplier, hutang (charge/payment/
     hapus baris), user (create/update/reset sandi), settings, pengeluaran,
-    kas masuk (create/delete, butir 1.6.2), retur, pembelian (buat/terima/
-    bayar/batal), backup + restore, dan
-    login/login-gagal. Penjualan/topup SENGAJA tidak diaudit per nota
-    (sudah punya linimasa Riwayat + laporan) — jangan tambahkan tanpa
-    permintaan.
+    kas masuk (create/delete, butir 1.6.2), retur-jual (delete pembatalan),
+    backup + restore, dan
+    login/login-gagal. Penjualan/topup/**pembelian** SENGAJA tidak diaudit per
+    nota (sudah punya tabel/linimasa sendiri — komentar `index.ts` seksi audit;
+    retur pembelian 1.9 ikut prinsip ini — koreksinya lewat opname/pengeluaran).
+    **Koreksi 2026-10-26**: baris ini dulu mengklaim "pembelian (buat/terima/
+    bayar/batal)" diaudit — grep membuktikan 0 `catatAudit` di blok endpoint
+    pembelian; klaim itu keliru dan kini dicabut.
   - Diuji `tests/audit-test.mjs` (24 asersi): pencatatan create/update/delete,
     filter q/tanggal/limit, 401 tanpa token, kasir 403, login-gagal tercatat,
     dan UI `#/audit` (chip jumlah, cari, modal detail, Esc).
@@ -4064,7 +4129,45 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-25 (penerimaan PO bertahap — butir ROADMAP 3.7):**
+  **Migrasi terakhir 2026-10-26 (retur ke supplier — butir ROADMAP 1.9):**
+  dua tabel BARU **`purchase_returns`** (satu baris per EVENT retur; FK
+  `purchases.id ON DELETE CASCADE`, `shift_id -> shifts(id)`, `client_id
+  TEXT UNIQUE` = kunci idempotensi retry, `total` = nilai barang diretur)
+  + **`purchase_return_items`** (FK `purchase_returns.id` &
+  `purchase_items.id` CASCADE, `qty REAL > 0`, `harga_beli`/`amount`
+  snapshot baris PO) + empat indeks. **Murni tabel tambahan** — `migrate()`
+  (`CREATE TABLE IF NOT EXISTS`) cukup: di DB dev sudah dijalankan lewat
+  `npm run seed` (data lama utuh, diverifikasi curl di API hidup). TANPA
+  kolom baru di tabel lama & tanpa backfill. Install yang tidak boleh
+  di-seed karena alasan lain jalankan SQL yang sama (SQL lengkap ada di
+  `db/schema.sql` seksi "Retur ke supplier"):
+  ```sql
+  CREATE TABLE IF NOT EXISTS purchase_returns (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    shift_id    INTEGER REFERENCES shifts(id),
+    cashier     TEXT NOT NULL DEFAULT 'kasir',
+    total       INTEGER NOT NULL CHECK (total >= 0),
+    note        TEXT NOT NULL DEFAULT '',
+    client_id   TEXT UNIQUE
+  );
+  CREATE TABLE IF NOT EXISTS purchase_return_items (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    retur_id         INTEGER NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+    purchase_item_id INTEGER NOT NULL REFERENCES purchase_items(id) ON DELETE CASCADE,
+    qty              REAL NOT NULL CHECK (qty > 0),
+    harga_beli       INTEGER NOT NULL CHECK (harga_beli >= 0),
+    amount           INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_purchase_returns_purchase ON purchase_returns(purchase_id);
+  CREATE INDEX IF NOT EXISTS idx_purchase_returns_tanggal ON purchase_returns(created_at);
+  CREATE INDEX IF NOT EXISTS idx_purchase_return_items_retur ON purchase_return_items(retur_id);
+  CREATE INDEX IF NOT EXISTS idx_purchase_return_items_item ON purchase_return_items(purchase_item_id);
+  ```
+  **Jangan backfill** retur historis (tidak ada datanya — fitur baru; nilai
+  retur hanya hidup mulai dari event pertama yang dibuat lewat API).
+  **Migrasi sebelumnya 2026-10-25 (penerimaan PO bertahap — butir ROADMAP 3.7):**
   dua tabel BARU **`purchase_receives`** (satu baris per EVENT kedatangan;
   FK `purchases.id ON DELETE CASCADE`, `shift_id -> shifts(id)`, `client_id
   TEXT UNIQUE` = kunci idempotensi retry, `dibayar` = uang keluar event itu)

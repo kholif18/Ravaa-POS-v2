@@ -462,7 +462,7 @@ type StockMove = {
   sku: string;
   name: string;
   qty: number; // TANDA: masuk +, keluar - (sale sengaja disimpan negatif)
-  reason: 'sale' | 'restock' | 'opname' | 'rusak';
+  reason: 'sale' | 'restock' | 'opname' | 'rusak' | 'retur' | 'retur-beli';
   ref_id: string | null;
   /** Nomor invoice penjualan (YYMMDD-NNNNNN) bila `reason='sale'` — diisi
    *  server via subquery `sales.invoice_no`; NULL untuk mutasi non-penjualan
@@ -477,6 +477,10 @@ const ALASAN: Record<StockMove['reason'], string> = {
   restock: 'Masuk barang',
   opname: 'Opname',
   rusak: 'Rusak / hilang',
+  // Dua reason DB yang sudah lama ada (retur jual 2026-10-11, penerimaan PO
+  // 3.7) + retur ke supplier (1.9) — dulu tampil mentah kode reason di tabel.
+  retur: 'Retur jual',
+  'retur-beli': 'Retur ke supplier',
 };
 
 /** Waktu mutasi pakai `waktu()` dari `ui/waktu.ts` (satu sumber bersama dengan
@@ -491,6 +495,8 @@ function ket(m: StockMove): string {
   }
   if (m.reason === 'restock') return 'Pembelian masuk';
   if (m.reason === 'opname') return 'Selisih hitung fisik';
+  if (m.reason === 'retur') return m.ref_id && m.qty < 0 ? 'Pembatalan retur jual' : 'Retur dari pelanggan';
+  if (m.reason === 'retur-beli') return m.ref_id ? `Retur PO ${String(m.ref_id).replace(/^PR-/, '')}` : 'Retur ke supplier';
   return 'Kerusakan / kehilangan';
 }
 

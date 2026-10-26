@@ -208,12 +208,14 @@ AI forecasting.
 * Web PWA **self-hosted di server toko** (LAN): API Hono + better-sqlite3
   (SQLite WAL; API satu-satunya penulis DB) · web vanilla-TS + Tailwind v4
   (tanpa framework) · print-agent nol-dependensi di PC kasir.
-* **Online-terikat (jujur)**: semua TULIS (penjualan, topup, hutang, …)
-  wajib server hidup — **tidak ada outbox otomatis**; modul antrean
-  `enqueue()` ada tapi belum dipanggil jalur tulis mana pun. Saat server tak
-  terjangkau POS menampilkan banner + mematikan tombol bayar, dan bila POST
-  gagal di tengah jalan pesannya "BELUM terkonfirmasi — cek Riwayat", bukan
-  klaim gagal pasti. Yang tetap jalan offline: shell PWA ter-cache + cache
+* **Online-terikat → offline-write (butir 1.8 SELESAI 2026-10-25)**: dulu
+  semua TULIS wajib server hidup; kini `pay()` POS **mengantrekan** nota ke
+  outbox saat server tak terjangkau (payload sama, idempotensi uuid) dan
+  `flushOutbox()` mengirimnya otomatis (tick 5 detik + event online); hutang
+  offline di-chain ke ledger saat job nota terkirim (lihat `api.ts` §2
+  AGENTS + `offline-jujur-test` 29 asersi). Yang tetap butuh server: shift
+  (gate POS) — jujur by design. Yang jalan penuh offline: shell PWA
+  ter-cache + cache
   master produk/pelanggan (tampilan & susun keranjang; keranjang tersimpan di
   localStorage). Delta sync IndexedDB + tombstone tetap dipakai untuk
   menyegarkan master dari server.
@@ -360,7 +362,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.15 | **Outbox tulis offline** (server maintenance = nota diantrekan) | **✅ selesai 2026-10-25** — ROADMAP §1.8 | Qasir ("tetap bisa catat saat sinyal hilang, terkirim otomatis"), iReap Pro (hybrid offline+sync) | `pay()` → `enqueue()`; flush tick 5 detik; hutang offline di-chain ke ledger saat flush sukses; `offline-jujur-test` 29 asersi |
 | 4.16 | **Riwayat pesanan jasa per pelanggan** | **✅ selesai 2026-10-25** — ROADMAP §1.10 | Qasir vertikal Laundry/Barbershop ("layanan & pembayaran tiap pelanggan tercatat") | `GET /api/orders?customer_id=` + seksi "Pesanan jasa" di modal riwayat Pelanggan (pesanan belum diserah kini terlihat) |
 | 4.17 | **Scan kamera di LAN (HTTPS)** | **✅ selesai 2026-10-25** — ROADMAP §1.7 | Loyverse (scan kamera), semua app Android | `getUserMedia` butuh konteks aman → Caddy `tls internal` (`https://ip:5656`); deteksi + baca produk cache IndexedDB 100% offline |
-| 4.18 | **Retur ke supplier (retur pembelian)** | **✅ ACC 2026-10-25 — antrian ROADMAP §1.9** (menyusul setelah 1.8) | KulaPOS (retur ke supplier) | Ravaa masih `~` (PO batal saja); desain skema/API/UI di ROADMAP §1.9 |
+| 4.18 | **Retur ke supplier (retur pembelian)** | **✅ selesai 2026-10-26** — ROADMAP §1.9 | KulaPOS (retur ke supplier) | Tabel `purchase_returns` + stok keluar `retur-beli` + sisa hutang net + idempotensi `client_id`; uang kembali dicatat manual di Kas masuk; `purchase-retur-test` 34 asersi |
 
 ---
 

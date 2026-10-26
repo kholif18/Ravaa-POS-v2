@@ -92,6 +92,7 @@ const SUITE = [
   // idempotensi client_id, sisa = diterima−terbayar, agregat shift/laporan
   // per kedatangan, fallback nota lama, UI daftar/detail/A4.
   ['purchase-partial-test.mjs', 50],
+  ['purchase-retur-test.mjs', 34],
   ['pager-test.mjs', 19],
   ['altn-test.mjs', 18],
   ['tier-harga-test.mjs', 16],
@@ -110,7 +111,7 @@ const SUITE = [
   ['pos-mobile-test.mjs', 43],
   ['scan-kamera-test.mjs', 16],
   ['profil-test.mjs', 18],
-  ['login-test.mjs', 26],
+  ['login-test.mjs', 29],
   ['aging-test.mjs', 21],
   ['audit-test.mjs', 24],
   ['orders-test.mjs', 73],

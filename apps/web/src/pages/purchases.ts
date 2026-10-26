@@ -64,6 +64,10 @@ type Po = {
   /** Nilai barang yang BELUM datang — bukan hutang, hanya progress. */
   sisa_terima: number;
   n_terima: number;
+  /** Retur ke supplier (butir ROADMAP 1.9, 2026-10-26): Σ nilai retur +
+   *  jumlah event — mengurangi hutang via `sisa` (computed server). */
+  retur_total: number;
+  n_retur: number;
   cashier: string; shift_id: number | null; received_at: string | null;
   note: string; n_items: number;
   /** Usia hutang supplier (hari sejak DITERIMA, dihitung server 2026-10-16).
@@ -92,6 +96,20 @@ type PoReceive = {
   shift_id: number | null; cashier: string;
   total: number; dibayar: number; note: string;
   n_items: number; items: PoReceiveItem[];
+}
+
+/** Retur ke supplier (butir ROADMAP 1.9) — bentuk mirror PoReceive. */
+type PoReturItem = {
+  id: number; retur_id: number; purchase_item_id: number;
+  qty: number; harga_beli: number; amount: number;
+  name: string; qty_po: number;
+};
+
+type PoRetur = {
+  id: number; purchase_id: number; created_at: string;
+  shift_id: number | null; cashier: string;
+  total: number; note: string;
+  n_items: number; items: PoReturItem[];
 };
 
 type SupplierOpt = { id: number; code: string; name: string };
@@ -515,7 +533,7 @@ async function cetakPoA4(id: number): Promise<void> {
 
 /* ---------- RINCIAN (halaman #/purchases/<id>) ---------- */
 
-function detailHtml(po: Po, items: PoItem[], receives: PoReceive[]): string {
+function detailHtml(po: Po, items: PoItem[], receives: PoReceive[], returs: PoRetur[]): string {
   const tampil = po.status_tampil ?? po.status;
   const diterimaNilai = po.diterima ?? 0;
   const belumNilai = Math.max(0, po.sisa_terima ?? (po.total - diterimaNilai));
@@ -614,6 +632,64 @@ function detailHtml(po: Po, items: PoItem[], receives: PoReceive[]): string {
     </div>`
     : '';
 
+  // Retur ke supplier (butir ROADMAP 1.9, 2026-10-26): per baris = diterima −
+  // sudah_diretur (Σ dari events retur). Bawaan input qty = 0 (retur aksi
+  // sengaja, bukan "kirim semua" seperti terima). Nilai retur TIDAK menggerakkan
+  // laci — uang kembali dari supplier dicatat manual di Kas masuk (desain §1.9).
+  const sudahReturPer = new Map<number, number>();
+  for (const r of returs) for (const ri of r.items ?? []) {
+    sudahReturPer.set(ri.purchase_item_id, (sudahReturPer.get(ri.purchase_item_id) ?? 0) + ri.qty);
+  }
+  const barisRetur = items
+    .map((it) => ({ it, bisa: Math.max(0, (it.diterima ?? 0) - (sudahReturPer.get(it.id) ?? 0)) }))
+    .filter((x) => x.bisa > 1e-9);
+  const aksiRetur = tampil !== 'cancel' && po.n_terima > 0 && barisRetur.length
+    ? `
+    <div class="card">
+      <h3 class="mb-2 text-sm font-bold">Retur ke supplier</h3>
+      <div class="table-wrap">
+        <table class="table table-compact !min-w-[520px]">
+          <thead>
+            <tr>
+              <th class="th">Barang</th>
+              <th class="th !w-28 text-right">Qty retur</th>
+              <th class="th !w-28 text-right">Harga beli</th>
+              <th class="th !w-32 text-right">Nilai</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${barisRetur.map(({ it, bisa }) => `
+            <tr>
+              <td class="td">
+                <span class="cell-strong">${esc(it.name)}</span>
+                <div class="cell-sub tabular-nums">diterima ${it.diterima ?? 0} · bisa diretur ${bisa}</div>
+              </td>
+              <td class="td td-num"><input data-pr-qty="${it.id}" data-harga="${it.harga_beli}" data-bisa="${bisa}"
+                    class="input input-sm !w-24 text-right tabular-nums" type="number" min="0" max="${bisa}" step="any"
+                    value="0" aria-label="Qty retur ${esc(it.name)}" /></td>
+              <td class="td td-num">${rp(it.harga_beli)}</td>
+              <td class="td td-num" data-pr-sub="${it.id}">Rp0</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="td font-semibold" colspan="3">Nilai retur ini</td>
+              <td class="td td-num font-bold" id="pr-total">Rp0</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="field mt-3">
+        <label class="label" for="pr-note">Alasan retur (opsional)</label>
+        <input id="pr-note" class="input" maxlength="200" placeholder="cth: kemasan rusak, 2 pcs bocor" />
+      </div>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Stok keluar otomatis; sisa hutang ${rp(po.sisa)} berkurang senilai retur. <strong>Uang kembali dari supplier dicatat manual di halaman Kas masuk</strong> — retur ini tidak menggerakkan laci.</p>
+      <div class="mt-3">
+        <button type="button" id="pr-ok" class="btn btn-ghost !text-red-600 dark:!text-red-400">${icon('sync')}<span>Kirim retur</span></button>
+      </div>
+    </div>`
+    : '';
+
   // Riwayat kedatangan (butir 3.7): satu baris per event — sumber angka
   // laporan/laci harian. Waktu lokal (created_at UTC dari server).
   const riwayat = receives.length
@@ -646,6 +722,42 @@ function detailHtml(po: Po, items: PoItem[], receives: PoReceive[]): string {
               <td class="td"><div>${r.shift_id ? `Shift #${r.shift_id}` : 'di luar shift'}</div><div class="cell-sub">${esc(r.cashier || '—')}</div></td>
               <td class="td td-num">${rp(r.total)}</td>
               <td class="td td-num font-semibold">${rp(r.dibayar)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`
+    : '';
+
+  // Riwayat retur ke supplier (butir 1.9) — bentuk mirror riwayat kedatangan.
+  const riwayatRetur = returs.length
+    ? `
+    <div class="card-flush">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200/70 px-3 py-2 dark:border-gray-700/70">
+        <h3 class="text-sm font-bold">Riwayat retur ke supplier <span class="font-normal text-gray-500 dark:text-gray-400">(${returs.length})</span></h3>
+        <span class="text-xs text-gray-500 dark:text-gray-400">Stok keluar & hutang berkurang per baris ini.</span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact !min-w-[640px]">
+          <thead>
+            <tr>
+              <th class="th">Waktu</th>
+              <th class="th">Barang</th>
+              <th class="th">Shift / kasir</th>
+              <th class="th text-right">Nilai retur</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${returs.map((r) => `
+            <tr>
+              <td class="td tabular-nums">${esc(tglLokal(r.created_at))}</td>
+              <td class="td">
+                <div class="cell-strong">${r.n_items} baris</div>
+                <div class="cell-sub">${esc((r.items ?? []).map((x) => `${x.qty}× ${x.name}`).join(', ') || '—')}</div>
+                ${r.note ? `<div class="cell-sub italic">${esc(r.note)}</div>` : ''}
+              </td>
+              <td class="td"><div>${r.shift_id ? `Shift #${r.shift_id}` : 'di luar shift'}</div><div class="cell-sub">${esc(r.cashier || '—')}</div></td>
+              <td class="td td-num font-semibold">${rp(r.total)}</td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -722,15 +834,17 @@ function detailHtml(po: Po, items: PoItem[], receives: PoReceive[]): string {
     </div>
     ${aksiTerima}
     ${aksiBayar}
+    ${aksiRetur}
     ${riwayat}
+    ${riwayatRetur}
   </div>`;
 }
 
 async function mountDetail(el: HTMLElement, id: number): Promise<void> {
   el.innerHTML = `<div class="card"><div class="skel h-6 w-40"></div></div>`;
-  let data: { purchase: Po; items: PoItem[]; receives: PoReceive[] } | null = null;
+  let data: { purchase: Po; items: PoItem[]; receives: PoReceive[]; returns?: PoRetur[] } | null = null;
   try {
-    const r = await apiGet<{ data: { purchase: Po; items: PoItem[]; receives: PoReceive[] } }>(`/api/purchases/${id}`);
+    const r = await apiGet<{ data: { purchase: Po; items: PoItem[]; receives: PoReceive[]; returns?: PoRetur[] } }>(`/api/purchases/${id}`);
     data = r.data;
   } catch (e) {
     el.innerHTML = `
@@ -742,7 +856,10 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
     return;
   }
   const { purchase: po, items, receives } = data;
-  el.innerHTML = detailHtml(po, items, receives ?? []);
+  // returns = retur ke supplier (butir 1.9); server lama tanpa field itu
+  // dinormalisasi [] supaya detail tetap tergambar tanpa form retur.
+  const returs = data.returns ?? [];
+  el.innerHTML = detailHtml(po, items, receives ?? [], returs);
   bindKembali(el);
 
   el.querySelector<HTMLElement>('[data-po-cetak]')?.addEventListener('click', () => {
@@ -856,6 +973,60 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
       toast(`Gagal: ${errMsg(e)}`, 'error');
     }
   });
+
+  // Form retur ke supplier (butir 1.9): qty per baris (bawaan 0), nilai live.
+  // client_id SATU per form (pola terima) — klik ganda/retry tidak menggandakan
+  // pengurangan stok/hutang; mountDetail() ulang = id baru untuk retur berikut.
+  const returInputs = [...el.querySelectorAll<HTMLInputElement>('[data-pr-qty]')];
+  if (returInputs.length) {
+    const clientIdRetur = crypto.randomUUID();
+    const qtyRetur = (inp: HTMLInputElement) => {
+      const maks = Number(inp.dataset.bisa ?? 0);
+      const v = Number(inp.value || 0);
+      return Number.isFinite(v) ? Math.min(Math.max(0, v), maks) : 0;
+    };
+    const paintRetur = () => {
+      let total = 0;
+      for (const inp of returInputs) {
+        const q = qtyRetur(inp);
+        total += Math.round(q * Number(inp.dataset.harga ?? 0));
+        const sub = el.querySelector<HTMLElement>(`[data-pr-sub="${inp.dataset.prQty}"]`);
+        if (sub) sub.textContent = rp(Math.round(q * Number(inp.dataset.harga ?? 0)));
+      }
+      const t = el.querySelector<HTMLElement>('#pr-total');
+      if (t) t.textContent = rp(total);
+      el.querySelector<HTMLButtonElement>('#pr-ok')?.toggleAttribute('disabled', total <= 0);
+    };
+    returInputs.forEach((inp) => {
+      inp.addEventListener('input', paintRetur);
+      inp.addEventListener('change', paintRetur);
+    });
+    paintRetur();
+    el.querySelector<HTMLElement>('#pr-ok')?.addEventListener('click', async () => {
+      const dipilih = returInputs
+        .map((inp) => ({ purchase_item_id: Number(inp.dataset.prQty), qty: qtyRetur(inp) }))
+        .filter((x) => x.qty > 0);
+      if (!dipilih.length) { toast('Isi qty retur minimal satu baris', 'warning'); return; }
+      const total = dipilih.reduce((s, x) => {
+        const inp = returInputs.find((i) => Number(i.dataset.prQty) === x.purchase_item_id)!;
+        return s + Math.round(x.qty * Number(inp.dataset.harga ?? 0));
+      }, 0);
+      const note = (el.querySelector('#pr-note') as HTMLInputElement | null)?.value.trim() ?? '';
+      try {
+        const r = await apiPost<{ data: Po & { retur?: { total: number } } }>(`/api/purchases/${po.id}/returns`, {
+          items: dipilih,
+          note,
+          cashier: getCashier(),
+          client_id: clientIdRetur,
+          ...(state.shiftId !== null ? { shift_id: state.shiftId } : {}),
+        });
+        toast(`Retur ${rp(total)} dicatat · sisa hutang ${rp(r.data.sisa)}${r.data.retur?.total ? ` · stok keluar` : ''}`, 'success');
+        await mountDetail(el, id);
+      } catch (e) {
+        toast(`Gagal: ${errMsg(e)}`, 'error');
+      }
+    });
+  }
 }
 
 /* ---------- BUAT PO (halaman #/purchases/baru) ---------- */

@@ -156,20 +156,31 @@ npm run dev:api
   kedatangan tetap dihitung satu event (tanpa backfill). Setelah ada
   penerimaan, PO tidak bisa dibatalkan — koreksi stok lewat Opname, kas
   lewat Pengeluaran.
+* **Retur ke supplier** (`#/purchases/<id>`, butir ROADMAP 1.9, 2026-10-26):
+  barang kulakan yang salah/rusak dikembalikan ke pemasok — form **Retur ke
+  supplier** di rincian PO meminta qty per baris (bawaan 0, maks = diterima −
+  sudah diretur). Stok **keluar** otomatis (`stock_moves` reason `retur-beli`),
+  sisa hutang supplier **berkurang** senilai retur, dan PO tidak bisa
+  dibatalkan setelahnya. **Uang kembali dari supplier dicatat manual** di
+  halaman Kas masuk — retur tidak menggerakkan laci. Retur = arsip (tanpa
+  hapus); koreksi salah ketik lewat Opname/koreksi kas.
 * **Jejak audit** (`#/audit`, menu **Jejak Audit**, khusus owner, baru
   2026-10-16): catatan mutasi penting master & sistem — produk, kategori,
   satuan, pelanggan, supplier, hutang, user, pengaturan, stok, pengeluaran,
-  retur, pembelian, backup/restore, plus login berhasil/gagal (dengan nama
+  retur-jual (pembatalan), backup/restore, plus login berhasil/gagal (dengan
+  nama
   akun sebagai snapshot). Filter entitas/aksi/tanggal + cari multi-kata;
-  klik baris = modal detail. Penjualan tidak diduplikasi di sini (sudah ada
-  Riwayat + Laporan).
+  klik baris = modal detail. Penjualan/topup/pembelian tidak diduplikasi di
+  sini (masing-masing sudah punya tabel/linimasa sendiri).
 * **PWA (bisa dipasang, 2026-10-16)**: aplikasi web punya manifest + service
   worker, jadi bisa **dipasang ke home screen Android/HP atau desktop**
   (display standalone) dan **shell-nya tetap terbuka tanpa jaringan**. Data
   `/api/*` tidak pernah di-cache service worker (angka kasir yang basi lebih
   berbahaya daripada layar error). Selama server tak terjangkau, POS
-  **menolak** menyimpan dengan pesan jelas (banner + tombol Bayar mati) —
-  antrean tulis offline (outbox) belum dipanggil jalur tulis mana pun.
+  **DIANTREKAN** ke outbox dan terkirim otomatis begitu server terjangkau
+  lagi (butir 1.8, 2026-10-25 — `pay()` → `enqueue()`, flush tick 5 detik +
+  event online; hutang offline di-chain ke ledger saat nota terkirim). Yang
+  tetap butuh server: buka/tutup shift (gate POS jujur by design).
   Registrasi SW hanya di build produksi.
 * **Form produk** (`#/products` -> Tambah/Edit) memakai **modal 2 kolom ala
   RPOS** (lebar `max-w-5xl`): kolom **kiri = kotak foto persegi** (seluruh kotak

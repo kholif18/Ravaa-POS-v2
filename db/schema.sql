@@ -338,6 +338,40 @@ CREATE INDEX IF NOT EXISTS idx_purchase_receives_tanggal ON purchase_receives(cr
 CREATE INDEX IF NOT EXISTS idx_purchase_receive_items_receive ON purchase_receive_items(receive_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_receive_items_item ON purchase_receive_items(purchase_item_id);
 
+-- Retur ke supplier (butir ROADMAP 1.9, ACC pemilik 2026-10-25): satu baris
+-- per EVENT retur barang ke pemasok. Barang KELUAR dari rak (stock_moves
+-- reason='retur-beli', qty NEGATIF, unit_cost = harga_beli baris PO) dan
+-- nilai retur MENGURANGI hutang supplier: sisa = max(0, diterima - retur_total
+-- - terbayar) — computed di SQL_PO_HIT, bukan kolom. `diterima` (Σ kedatangan)
+-- tetap GROSS: status "Sebagian"/"received" menggambarkan kedatangan barang,
+-- bukan barang yang masih ada di rak. Uang kembali dari supplier dicatat
+-- MANUAL di halaman Kas masuk (v1 tidak menyentuh laci — desain ROADMAP §1.9).
+-- Retur = arsip (tanpa DELETE): koreksi salah ketik lewat opname/koreksi kas,
+-- pola sama dengan PO itu sendiri. client_id = kunci idempotensi retry
+-- (pola purchase_receives); NULL sah untuk pemanggil lama.
+CREATE TABLE IF NOT EXISTS purchase_returns (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  shift_id    INTEGER REFERENCES shifts(id),          -- NULL = di luar shift
+  cashier     TEXT NOT NULL DEFAULT 'kasir',
+  total       INTEGER NOT NULL CHECK (total >= 0),    -- nilai barang diretur
+  note        TEXT NOT NULL DEFAULT '',               -- maks 200 char
+  client_id   TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS purchase_return_items (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  retur_id         INTEGER NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+  purchase_item_id INTEGER NOT NULL REFERENCES purchase_items(id) ON DELETE CASCADE,
+  qty              REAL NOT NULL CHECK (qty > 0),
+  harga_beli       INTEGER NOT NULL CHECK (harga_beli >= 0), -- snapshot baris PO
+  amount           INTEGER NOT NULL                          -- round(qty*harga_beli)
+);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_purchase ON purchase_returns(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_tanggal ON purchase_returns(created_at);
+CREATE INDEX IF NOT EXISTS idx_purchase_return_items_retur ON purchase_return_items(retur_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_return_items_item ON purchase_return_items(purchase_item_id);
+
 -- Topup & tarik tunai: nominal bebas + admin editable.
 -- nominal = mutasi modal/e-money, admin = pendapatan jasa.
 CREATE TABLE IF NOT EXISTS topup_txns (

@@ -259,7 +259,7 @@ tidak membutuhkannya". Tidak ada kandidat "belum dibahas" tersisa.
 |---|-------|-----------|---------|
 | 1.7 | **Scan kamera di LAN (HTTPS)** — kamera getUserMedia/BarcodeDetector butuh konteks aman; `http://IP:5656` diblokir browser (terbukti: `scan-kamera.ts:44-48` + Caddyfile hanya `:80`) | **ACC 2026-10-25** | Solusi = `tls internal` Caddy (self-signed); HP tap "Lanjutkan" sekali. **Baca produk offline = SUDAH JALAN** — deteksi & keranjang 100% client-side, produk dari cache IndexedDB (`getCachedProducts()`), jadi begitu kamera lolos, scan bekerja offline penuh |
 | 1.8 | **Outbox tulis offline (kandidat 4.A)** — wiring `enqueue()` ke `pay()` | **ACC 2026-10-25** — "boleh diterapkan alih-alih jika server sedang maintenance" | Server mati = penjualan DIANTREKAN + terkirim otomatis saat pulih; hutang offline di-chaining ke ledger saat flush sukses |
-| 1.9 | **Retur ke supplier (retur pembelian)** (kandidat 4.B) | **ACC 2026-10-25** — "boleh diterapkan" | KulaPOS punya; Ravaa masih `~ (PO batal saja)`. Menyusul setelah 1.8 (fitur skema+API+UI penuh) |
+| 1.9 | **Retur ke supplier (retur pembelian)** (kandidat 4.B) | **SELESAI 2026-10-26** (tabel `purchase_returns` + `purchase_return_items`, stok keluar `retur-beli`, sisa hutang net, idempotensi `client_id`, UI form + riwayat + laporan; TIDAK menggerakkan laci) | KulaPOS punya; Ravaa kini setara — uang kembali dari supplier dicatat manual di Kas masuk (desain §1.9 v1) |
 | 1.10 | **Riwayat pesanan jasa per pelanggan** (kandidat 4.C) | **ACC 2026-10-25** — "bisa disempurnakan" | Modal riwayat pelanggan kini hanya `GET /api/sales?customer_id` — pesanan dikerjakan/selesai TIDAK terlihat. Tambah filter `customer_id` di `GET /api/orders` + seksi di modal |
 
 Urutan eksekusi: **1.8 → 1.10 → 1.7 → 1.9** (1.8 & 1.10 = kode; 1.7 = infra
@@ -290,7 +290,7 @@ yang wajib diuji pemilik di perangkat; 1.9 = fitur penuh terbesar).
   kosong + localStorage outbox ≥1; D = flush otomatis + nota ada di DB +
   hutang ikut tercatat) + `run.mjs` ekspek.
 
-#### 1.9 Retur ke supplier — desain (menyusul setelah 1.8)
+#### 1.9 Retur ke supplier — **SELESAI 2026-10-26** (desain di bawah = arsip eksekusi)
 
 * **Skema**: dua tabel BARU `purchase_returns` (FK `purchases.id`, shift/cashier,
   total, note, client_id UNIQUE idempotensi) + `purchase_return_items`

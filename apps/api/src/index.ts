@@ -368,14 +368,69 @@ function verifikasiPin(userId: number, pin: string):
 // ---------- sesi & pengguna (login 2026-10-11) ----------
 const BOLEH_SANDI_MIN = 4;
 
+// ---------- rate limit login password (2026-10-26, temuan audit produksi) ----------
+// Login password dulu TANPA penalti (rate-limit PIN saja yang ada) — brute force
+// di LAN tidak tertahan. Pola = PERSIS rate-limit PIN (`gagalPin` di atas):
+// ambang berjenjang 5 gagal BERUNTUN -> 60 dtk, 10 -> 300 dtk, 15+ -> 900 dtk;
+// counter di-reset oleh login SUKSES (bukan oleh habisnya kunci — sama PIN).
+// Kunci PER-USERNAME (string apa adanya, termasuk username tak dikenal —
+// anti-enumerasi tidak bocor karena 401 & 429 keduanya balasan generik).
+// In-memory SENGAJA: proses API tunggal (skala 1-2 kasir, AGENTS §1) dan
+// restart = counter bersih; tanpa kolom skema baru supaya install lama tidak
+// perlu ALTER (kebijakan migrasi manual §5). Peta dibatasi 500 username
+// (serangan penuh kunci dengan ratusan username acak = peta di-reset —
+// efek sampingnya hanya "penalti kosong", bukan kebocoran).
+const LOGIN_KUNCI_MAKS = 500;
+const LOGIN_GAGAL = new Map<string, { gagal: number; kunciHingga: number }>();
+
+function kunciLogin(username: string): string {
+  return username.trim().toLowerCase();
+}
+
+function detikSisaKunciLogin(username: string): number {
+  const entri = LOGIN_GAGAL.get(kunciLogin(username));
+  if (!entri) return 0;
+  const sisa = Math.ceil((entri.kunciHingga - Date.now()) / 1000);
+  return sisa > 0 ? sisa : 0;
+}
+
+/** Catat 1 login gagal; kembalikan penalti HANYA bila ambang tercapai
+ *  (pola `gagalPin`: di bawah ambang = 401 polos, bukan 429). */
+function catatLoginGagal(username: string): { status: 401 | 429; error: string; retry_after: number } {
+  const kunci = kunciLogin(username);
+  if (LOGIN_GAGAL.size > LOGIN_KUNCI_MAKS) LOGIN_GAGAL.clear();
+  const entri = LOGIN_GAGAL.get(kunci) ?? { gagal: 0, kunciHingga: 0 };
+  entri.gagal += 1;
+  const detik = entri.gagal >= 15 ? 900 : entri.gagal >= 10 ? 300 : entri.gagal >= 5 ? 60 : 0;
+  LOGIN_GAGAL.set(kunci, entri);
+  if (detik > 0) {
+    entri.kunciHingga = Date.now() + detik * 1000;
+    return {
+      status: 429,
+      error: `terlalu banyak percobaan login — coba lagi dalam ${detik} detik`,
+      retry_after: detik,
+    };
+  }
+  return { status: 401, error: 'username atau password salah', retry_after: 0 };
+}
+
 // Masuk: username+password -> token 30 hari. Username tak ada DAN sandi salah
 // SAMA-SAMA 401 (jangan membocorkan mana yang salah). Akun nonaktif = 403.
+// 429 = username terkunci sementara (rate limit, di atas) — sandi benar pun
+// ditolak sampai kunci habis.
 app.post('/api/login', async (c) => {
   try {
     const body = await c.req.json();
     const username = String(body?.username ?? '').trim();
     const password = String(body?.password ?? '');
     if (!username || !password) return c.json({ error: 'username dan password wajib diisi' }, 400);
+    const sisaKunci = detikSisaKunciLogin(username);
+    if (sisaKunci > 0) {
+      return c.json(
+        { error: `terlalu banyak percobaan login — coba lagi dalam ${sisaKunci} detik`, retry_after: sisaKunci },
+        429,
+      );
+    }
     const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as
       | {
           id: number; username: string; name: string; role: string; password_hash: string;
@@ -384,10 +439,19 @@ app.post('/api/login', async (c) => {
         }
       | undefined;
     if (!u || !verifyPassword(password, u.password_hash)) {
+      const penalti = catatLoginGagal(username);
       catatAudit(c, 'login-gagal', 'session', '', { username });
-      return c.json({ error: 'username atau password salah' }, 401);
+      // Ambang tercapai = 429 (sandi benar pun terkunci); selain itu 401 lama
+      // apa adanya (kontrak anti-enumerasi tidak berubah).
+      return c.json(
+        penalti.status === 429
+          ? { error: penalti.error, retry_after: penalti.retry_after }
+          : { error: 'username atau password salah' },
+        penalti.status,
+      );
     }
     if (!u.is_active) return c.json({ error: 'akun ini dinonaktifkan — hubungi owner' }, 403);
+    LOGIN_GAGAL.delete(kunciLogin(username));
     db.prepare(`DELETE FROM sessions WHERE expires_at <= datetime('now')`).run();
     const token = randomBytes(32).toString('hex');
     db.prepare(
@@ -3780,8 +3844,12 @@ type PoHitung = {
   shift_id: number | null; received_at: string | null;
   /** Nilai barang yang SUDAH diterima (Σ kedatangan; nota lama = total). */
   diterima: number;
-  /** Sisa hutang supplier atas barang yang SUDAH diterima. */
+  /** Sisa hutang supplier atas barang yang SUDAH diterima, DIKURANGI retur. */
   sisa: number;
+  /** Σ nilai retur ke supplier PO ini (butir 1.9). */
+  retur_total: number;
+  /** Jumlah event retur ke supplier. */
+  n_retur: number;
   /** Nilai barang yang BELUM datang. */
   sisa_terima: number;
   status_tampil: 'order' | 'sebagian' | 'received' | 'cancel';
@@ -3800,14 +3868,21 @@ const SQL_PO_DITERIMA = `COALESCE(
 
 // Satu sumber bentuk baris PO (list/detail/pay/receive): `sisa` dihitung dari
 // nilai yang SUDAH diterima (bukan total PO — barang yang belum datang bukan
-// hutang), `status_tampil` menurunkan "Sebagian" dari Σ kedatangan tanpa
-// menambah nilai CHECK pada kolom status tersimpan.
+// hutang) DIKURANGI nilai retur ke supplier (butir 1.9: barang yang dikembali
+// bukan hutang lagi), `status_tampil` menurunkan "Sebagian" dari Σ kedatangan
+// tanpa menambah nilai CHECK pada kolom status tersimpan. `diterima` tetap
+// GROSS (Σ kedatangan) — status menggambarkan barang yang datang, bukan yang
+// masih di rak; yang diringankan retur hanya hutangnya.
 const SQL_PO_HIT = `
   WITH po AS (
     SELECT p.*, ${SQL_PO_DITERIMA} AS diterima FROM purchases p
   ), hit AS (
     SELECT po.*,
-           MAX(0, po.diterima - po.terbayar) AS sisa,
+           COALESCE((SELECT SUM(pr.total) FROM purchase_returns pr
+                      WHERE pr.purchase_id = po.id), 0) AS retur_total,
+           (SELECT COUNT(*) FROM purchase_returns pr WHERE pr.purchase_id = po.id) AS n_retur,
+           MAX(0, po.diterima - COALESCE((SELECT SUM(pr.total) FROM purchase_returns pr
+                      WHERE pr.purchase_id = po.id), 0) - po.terbayar) AS sisa,
            -- Saat status sudah 'received', tidak ada qty tersisa — nol-kan
            -- eksplisit supaya pembulatan per event (qty pecahan) tidak
            -- memunculkan "Belum diterima Rp1" pada nota yang sudah lengkap.
@@ -4081,9 +4156,139 @@ app.post('/api/purchases/:id/cancel', wajibIzin('pembelian.kelola'), (c) => {
       error: 'sudah ada penerimaan barang — PO tidak bisa dibatalkan; koreksi stok lewat opname / kas lewat pengeluaran',
     }, 400);
   }
+  // n_retur tidak mungkin > 0 tanpa kedatangan (retur mensyaratkan barang
+  // sudah diterima), tapi guard eksplisit sesuai kontrak ROADMAP §1.9.
+  if (po.n_retur > 0) {
+    return c.json({ error: 'sudah ada retur ke supplier — PO tidak bisa dibatalkan' }, 400);
+  }
   if (po.status !== 'order') return c.json({ error: `hanya PO order yang bisa dibatalkan (status: ${po.status})` }, 400);
   const row = db.prepare(`UPDATE purchases SET status = 'cancel' WHERE id = ? RETURNING *`).get(id);
   return c.json({ data: row });
+});
+
+// Retur ke supplier (butir ROADMAP 1.9, ACC pemilik 2026-10-25): barang
+// dikembalikan ke pemasok. SATU transaction (pola receive): validasi qty ≤
+// diterima − sudah_diretur per baris → stok KELUAR (stock_moves
+// reason='retur-beli' qty NEGATIF, unit_cost = harga_beli baris PO, version++,
+// ref_id='PR-<id retur>') → header + baris retur. NILAI retur TIDAK menggerakkan
+// laci — uang kembali dari supplier dicatat manual di halaman Kas masuk
+// (desain ROADMAP §1.9 v1). `sisa` hutang otomatis turun via SQL_PO_HIT.
+// Retur = arsip (tanpa DELETE): koreksi salah ketik lewat opname/pengeluaran,
+// pola sama dengan PO itu sendiri (nota = riwayat).
+app.post('/api/purchases/:id/returns', wajibIzin('pembelian.kelola'), async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
+  try {
+    const body = await c.req.json();
+    // Atribusi shift opsional (pola receive) — dokumentasi saja: retur tidak
+    // mengubah expected-cash (tidak ada uang bergerak di endpoint ini).
+    const sh = aturShift(c, body?.shift_id, body?.cashier);
+    if (!sh.ok) return c.json({ error: sh.error }, sh.status);
+    // Kunci idempotensi retry (pola `client_id` receive): kirim ulang request
+    // yang sama TIDAK mengurangi stok/hutang dua kali.
+    const clientId = String(body?.client_id ?? body?.id ?? '').trim();
+    if (clientId.length > 64) return c.json({ error: 'client_id maks 64 karakter' }, 400);
+    const note = String(body?.note ?? '').trim();
+    if (note.length > 200) return c.json({ error: 'catatan terlalu panjang (maks 200 karakter)' }, 400);
+    const rawItems = body?.items;
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      return c.json({ error: 'items wajib array non-kosong' }, 400);
+    }
+    if (rawItems.length > 200) return c.json({ error: 'maks 200 baris per retur' }, 400);
+    const out = transaksi(() => {
+      if (clientId) {
+        const ada = db.prepare('SELECT * FROM purchase_returns WHERE client_id = ?').get(clientId) as
+          { id: number; purchase_id: number } | undefined;
+        if (ada) {
+          if (ada.purchase_id !== id) throw new Error('client_id sudah dipakai retur pembelian lain');
+          const po = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id);
+          if (!po) throw new Error('pembelian tidak ada');
+          const retur = db.prepare('SELECT * FROM purchase_returns WHERE id = ?').get(ada.id);
+          const items = db.prepare(
+            `SELECT pri.*, pi.name FROM purchase_return_items pri
+               JOIN purchase_items pi ON pi.id = pri.purchase_item_id
+              WHERE pri.retur_id = ? ORDER BY pri.id`,
+          ).all(ada.id);
+          return { ...(po as object), retur, items, duplicate: true };
+        }
+      }
+      const po = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id) as PoHitung | undefined;
+      if (!po) throw new Error('pembelian tidak ada');
+      if (po.status === 'cancel') throw new Error('pembelian sudah dibatalkan');
+      if (po.n_terima <= 0) throw new Error('belum ada barang yang diterima — tidak ada yang bisa diretur');
+      const itemRows = db.prepare(
+        `SELECT pi.*, ${SQL_PO_BARIS_DITERIMA} AS diterima,
+                COALESCE((SELECT SUM(pri.qty) FROM purchase_return_items pri
+                           WHERE pri.purchase_item_id = pi.id), 0) AS sudah_retur
+           FROM purchase_items pi WHERE pi.purchase_id = ? ORDER BY pi.id`,
+      ).all(id) as { id: number; product_id: number; name: string; qty: number; harga_beli: number; diterima: number; sudah_retur: number }[];
+      const dipilih: { item: (typeof itemRows)[number]; qty: number }[] = [];
+      const terpakai = new Set<number>();
+      (rawItems as PoTerimaIn[]).forEach((raw, i) => {
+        const pid = Number(raw?.purchase_item_id);
+        const qty = Number(raw?.qty);
+        if (!Number.isInteger(pid)) throw new Error(`baris ${i + 1}: purchase_item_id harus integer`);
+        const row = itemRows.find((it) => it.id === pid);
+        if (!row) throw new Error(`baris ${i + 1}: purchase_item_id tidak dikenal di PO ini`);
+        if (terpakai.has(pid)) throw new Error(`baris ${i + 1}: purchase_item_id duplikat`);
+        terpakai.add(pid);
+        if (!Number.isFinite(qty) || qty <= 0) throw new Error(`baris ${i + 1}: qty harus > 0`);
+        const sisaRetur = Math.max(0, row.diterima - row.sudah_retur);
+        if (qty > sisaRetur + 1e-9) throw new Error(`baris ${i + 1}: qty melebihi sisa retur (sisa ${sisaRetur})`);
+        dipilih.push({ item: row, qty });
+      });
+      if (!dipilih.length) throw new Error('tidak ada qty yang diretur');
+      const baris = dipilih.map(({ item, qty }) => ({
+        ...item, qty_retur: qty, amount: Math.round(qty * item.harga_beli),
+      }));
+      const total = baris.reduce((s, b) => s + b.amount, 0);
+      if (total <= 0) throw new Error('total retur harus > 0');
+      const retur = db.prepare(
+        `INSERT INTO purchase_returns (purchase_id, shift_id, cashier, total, note, client_id)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+      ).get(id, sh.shift_id, sh.cashier, total, note, clientId || null) as { id: number };
+      // Stok KELUAR per baris (track_stock diulang cek — produk bisa berubah
+      // di antaranya). Stok kurang = 400 kecuali allow_negative_stock (pola
+      // batal-retur-jual: barang yang sudah terjual tidak dikurangi diam-diam).
+      const allowMinus = settingBool(K_STOK_MINUS, false);
+      const insBaris = db.prepare(
+        `INSERT INTO purchase_return_items (retur_id, purchase_item_id, qty, harga_beli, amount)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      baris.forEach((b, i) => {
+        cekProdukKulakan(b.product_id, i);
+        const p = db.prepare(
+          `SELECT p.stock, c.track_stock FROM products p
+             JOIN categories c ON c.id = p.category_id WHERE p.id = ?`,
+        ).get(b.product_id) as { stock: number; track_stock: number };
+        if (p.track_stock && p.stock - b.qty_retur < 0 && !allowMinus) {
+          throw new Error(`baris ${i + 1}: stok ${b.name} tidak cukup (sisa ${p.stock}) — barang mungkin sudah terjual; izinkan stok minus di Sistem bila tetap mau meretur`);
+        }
+        if (p.track_stock) {
+          db.prepare(
+            `UPDATE products SET stock = stock - ?, updated_at = datetime('now'),
+                version = (SELECT COALESCE(MAX(version),0) + 1 FROM products)
+              WHERE id = ?`,
+          ).run(b.qty_retur, b.product_id);
+          db.prepare(`INSERT INTO stock_moves (product_id, qty, reason, ref_id, unit_cost, cashier) VALUES (?, ?, 'retur-beli', ?, ?, ?)`)
+            .run(b.product_id, -b.qty_retur, `PR-${retur.id}`, Math.round(b.harga_beli), sh.cashier);
+        }
+        insBaris.run(retur.id, b.id, b.qty_retur, b.harga_beli, b.amount);
+      });
+      // Bentuk balasan = bentuk baris PO segar (computed termasuk retur_total)
+      // + retur — pola receive; klien langsung tahu sisa terbaru.
+      const segar = db.prepare(`${SQL_PO_HIT} SELECT * FROM hit WHERE id = ?`).get(id);
+      return { ...(segar as object), retur };
+    })();
+    return c.json({ data: out });
+  } catch (e) {
+    const pesan = e instanceof Error ? e.message : 'gagal retur ke supplier';
+    // 404 HANYA untuk "pembelian tidak ada" — pesan state lain (sudah
+    // dibatalkan / belum ada kedatangan / qty melebihi) = 400. Regex /tidak ada/
+    // polos salah menangkap "belum ada barang yang diterima — tidak ada yang
+    // bisa diretur" sebagai 404.
+    return c.json({ error: pesan }, /pembelian tidak ada/.test(pesan) ? 404 : 400);
+  }
 });
 
 // Daftar pembelian: filter status (default semua) + limit/offset (pola
@@ -4165,8 +4370,30 @@ app.get('/api/purchases/:id', wajibIzin('pembelian.kelola'), (c) => {
     list.push(it);
     petaItems.set(it.receive_id, list);
   }
+  // Riwayat retur ke supplier (butir 1.9) — bentuk sama dengan `receives`.
+  const returs = db.prepare(
+    `SELECT pr.*, (SELECT COUNT(*) FROM purchase_return_items pri WHERE pri.retur_id = pr.id) AS n_items
+       FROM purchase_returns pr WHERE pr.purchase_id = ? ORDER BY pr.id DESC`,
+  ).all(id) as { id: number }[];
+  const barisRetur = db.prepare(
+    `SELECT pri.*, pi.name, pi.qty AS qty_po
+       FROM purchase_return_items pri
+       JOIN purchase_returns pr ON pr.id = pri.retur_id
+       JOIN purchase_items pi ON pi.id = pri.purchase_item_id
+      WHERE pr.purchase_id = ? ORDER BY pri.id`,
+  ).all(id) as { retur_id: number }[];
+  const petaRetur = new Map<number, unknown[]>();
+  for (const it of barisRetur) {
+    const list = petaRetur.get(it.retur_id) ?? [];
+    list.push(it);
+    petaRetur.set(it.retur_id, list);
+  }
   return c.json({
-    data: { purchase, items, receives: receives.map((r) => ({ ...r, items: petaItems.get(r.id) ?? [] })) },
+    data: {
+      purchase, items,
+      receives: receives.map((r) => ({ ...r, items: petaItems.get(r.id) ?? [] })),
+      returns: returs.map((r) => ({ ...r, items: petaRetur.get(r.id) ?? [] })),
+    },
   });
 });
 
@@ -4772,6 +4999,13 @@ function laporanRentang(dari: string, sampai: string) {
              SELECT 1 FROM purchase_receives r2 WHERE r2.purchase_id = p.id)
              AND ${dl('p.received_at')}) AS total`,
   ).get(...ps, ...ps, ...ps, ...ps) as { n: number; total: number };
+  // Retur ke supplier (butir ROADMAP 1.9, 2026-10-26): barang kembali ke
+  // pemasok per tanggal retur. Dilaporkan TERPISAH dari `purchase` (yang
+  // memasok HPP) — tidak menggerus laba; nilai modal sudah dicatat saat beli.
+  const purchaseRetur = db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total
+       FROM purchase_returns WHERE ${dl('created_at')}`,
+  ).get(...ps) as { n: number; total: number };
   // Piutang (butir credit Z-report Aronium): TERBENTUK = porsi tunai tak
   // masuk laci (CASE persis penanda sisa_hutang) + hutang serah pesanan jasa
   // (butir ROADMAP 1.6.6, 2026-10-19: orders.hutang_sisa saat diserahkan —
@@ -4792,7 +5026,7 @@ function laporanRentang(dari: string, sampai: string) {
      WHERE type = 'payment' AND ${dl('created_at')}`,
   ).get(...ps) as { t: number }).t;
   return {
-    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, kas_masuk: kasMasuk, retur, purchase, byHour, byCategory,
+    sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, kas_masuk: kasMasuk, retur, purchase, purchase_retur: purchaseRetur, byHour, byCategory,
     piutang: { baru: piutangBaru, bayar: piutangBayar },
   };
 }
