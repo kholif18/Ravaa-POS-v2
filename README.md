@@ -55,6 +55,10 @@ curl localhost:3001/health
 ```bash
 cd ~/Projects/ravaaposv2/infra
 cp ../apps/api/.env.example ../apps/api/.env  # atau set ENV di compose
+bash gen-cert.sh   # HTTPS LAN: generate cert self-signed SEKALI
+#   (SAN: localhost, ravaa-pos, 127.0.0.1, IP LAN; hasil di infra/certs/
+#    *.crt|key — di-gitignore; compose mount read-only ke /certs/).
+#   Bila IP LAN berubah / cert hampir kedaluwarsa: jalankan ulang.
 docker compose up -d --build
 # web: https://<ip-server>:5656 (HTTPS internal — kamera scan butuh konteks
 #      aman; di HP tap "Lanjutkan ke situs" pada peringatan sertifikat

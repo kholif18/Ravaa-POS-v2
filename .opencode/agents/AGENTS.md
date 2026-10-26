@@ -2484,10 +2484,28 @@ apps/web/src/ui/scan-kamera.ts  **Pemindai barcode lewat kamera HP** (butir
                            dijawab toast penjelas, bukan tombol diam.
                            **Butir ROADMAP 1.7 (ACC pemilik 2026-10-25)**:
                            solusi LAN = infrastruktur, bukan klien — Caddy
-                           menyajikan **HTTPS internal**
-                           (`https://<ip>:5656`, `tls internal` di
-                           `infra/Caddyfile`); di HP peringatan sertifikat
-                           muncul sekali → tap "Lanjutkan ke situs" → konteks
+                           menyajikan **HTTPS internal** `https://<ip>:5656`.
+                           **Sertifikat via FILE, BUKAN `tls internal` (2026-10-27)**:
+                           `tls internal` GAGAL total di site address kosong
+                           `https://:5656` — Caddy memperlakukan host kosong
+                           tanpa identifier lalu menolak tiap ClientHello
+                           `"no certificate available for 'localhost'"`
+                           (handshake alert 80; ACME/Let's Encrypt mustahil
+                           tanpa domain publik). Solusi: **`infra/gen-cert.sh`**
+                           generate sertifikat self-signed SEKALI di host
+                           (SAN: localhost, ravaa-pos, 127.0.0.1, IP LAN) →
+                           `infra/certs/ravaa-selfsigned.{crt,key}`
+                           (**di-gitignore** — key rahasia) → compose mount
+                           read-only ke `/certs/` → `infra/Caddyfile` +
+                           `Caddyfile.server` pakai `tls /certs/….crt /certs/….key`.
+                           **Routing Caddy**: `root`+`file_server` di level
+                           site ikut men-serve `/api/*` sebagai file → SPA
+                           fallback (API balik HTML, login 405 — terbukti
+                           2026-10-27). Solusi: `@api path /api/*` +
+                           `handle @api { reverse_proxy … }` TERPISAH dari
+                           `handle { try_files … file_server }`. Di HP
+                           peringatan sertifikat muncul sekali → tap
+                           "Lanjutkan ke situs" → konteks
                            aman → kamera aktif + PWA bisa dipasang. Deteksi
                            & baca produk 100% OFFLINE: overlay tidak memanggil
                            jaringan; hasil masuk alur `#pos-q` yang membaca
@@ -3247,7 +3265,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     ubah peran/nonaktifkan diri sendiri, turunkan/nonaktifkan/hapus owner
     aktif terakhir. Reset sandi = must_change 1 + semua sesi target diputus.
     Ganti sandi sendiri (`/api/users/password`) = verifikasi sandi lama,
-    membersihkan must_change. Seed: `owner`/`admin123` (name `kasir`,
+    membersihkan must_change. **Sandi minimal 8 karakter (2026-10-27,
+    `BOLEH_SANDI_MIN` di index.ts — sebelumnya 4)**: berlaku untuk set/reset
+    sandi (login sendiri TANPA min-length, hanya cek non-kosong). Semua
+    label/validasi web (users/ubah-sandi/profil) ikut "min. 8". Seed:
+    `owner`/`admin1234` (name `kasir`,
     role `owner`, must_change 1) HANYA bila tabel kosong.
   - **Profil (2026-10-12)**: `users.avatar` (nama file di img/, pola
     products.image; dataURL <=120KB di-resize client 256px) + `users.email`
@@ -4013,6 +4035,10 @@ npm run dev:agent            # :9100 (di PC kasir)
 curl localhost:3001/health
 curl 'localhost:3001/api/topups/suggest-admin?nominal=100000'
 cd infra && docker compose up -d --build
+# HTTPS LAN (ROADMAP 1.7): generate cert self-signed SEKALI sebelum up
+#   (hasil di infra/certs/*.crt|key — di-gitignore; compose mount read-only).
+#   bash infra/gen-cert.sh              # IP otomatis dari `hostname -I`
+#   bash infra/gen-cert.sh 192.168.1.5  # atau IP eksplisit
 # Native STB/ARM tanpa Docker: sh infra/deploy-native.sh (lihat README).
 #   Service: infra/ravaa-api.service (user systemd, DB ~/ravaa-data/data.db),
 #   Web: infra/Caddyfile.server. JANGAN ubah path DB tanpa update service + README.
@@ -4020,6 +4046,17 @@ cd infra && docker compose up -d --build
 
 Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
 `apps/web/vite.config.ts`, `infra/*`, dan README sekaligus.
+
+**Env API (penting untuk deploy)**:
+* `CORS_ORIGIN` — default **kosong** = same-origin saja (2026-10-27, kebijakan
+  CORS ketat — lihat baris ~29–54 `apps/api/src/index.ts`). Deploy Docker/native
+  = Caddy proxy `/api` → :3001 dari origin sendiri, jadi **tidak perlu diisi**.
+  Isi CSV origin asli **hanya** bila ada host lintas-origin nyata (mis
+  `https://kasir.example,https://admin.example`). Nilai `*` TIDAK didukung —
+  kode mengevaluasi `asalDiizinkan.includes(asal)`, jadi `*` tidak pernah
+  cocok dengan origin browser (bukan wildcard, tapi daftar origin eksak).
+* `BOLEH_SANDI_MIN` — hardcode `8` di `apps/api/src/index.ts` (konstanta, bukan env);
+  sandi minimal saat set/reset sandi via API. Login sendiri tanpa min-length.
 
 ## 5. Batasan perubahan (anti-merusak)
 
@@ -4384,7 +4421,8 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   AUTOINCREMENT ikut dijaga manual (`UPDATE sqlite_sequence SET
   seq=<nilai lama> WHERE name='users'`). DB dev repo ini sudah dijalankan
   2026-10-17 (backup `data.db.bak.role-owner`; login tetap `owner`/
-  `admin123`, sesi browser lama ikut pulih sendiri — token menunjuk
+  `admin123` — kini **`admin1234`** sejak hardening sandi min-8
+  2026-10-27; sesi browser lama ikut pulih sendiri — token menunjuk
   `user_id`, bukan username). Install berdata yang TIDAK boleh di-recreate
   (mis. STB native `~/ravaa-data/data.db`) jalankan blok yang sama dengan
   path DB-nya — API boleh hidup (DDL di WAL), tidak perlu restart.
