@@ -12,7 +12,9 @@ services:
     environment:
       PORT: '3001'
       DB_PATH: /data/data.db
-      CORS_ORIGIN: '*'
+      # CORS default KETAT (same-origin). Deploy Docker = Caddy di :5656 proxy
+      # /api → :3001, jadi selalu same-origin. Set hanya bila ada host
+      # lintas-origin nyata: CORS_ORIGIN: 'https://contoh,https://lain'.
       CASHIER_DEFAULT: kasir
     volumes:
       - api-data:/data
@@ -29,8 +31,17 @@ services:
     build:
       context: ..
       dockerfile: infra/Dockerfile.web
-    args:
-      VITE_API_URL: '' # same-origin via caddy /api
+      # HARUS di bawah build: — `args` langsung di service = skema compose
+      # invalid (ditemukan 2026-10-26 lewat `docker compose config`, compose
+      # menolak `up` sebelum container apa pun dibangun).
+      args:
+        VITE_API_URL: '' # same-origin via caddy /api
+    volumes:
+      # Sertifikat self-signed untuk HTTPS LAN (ROADMAP 1.7). Di-generate host
+      # sekali oleh operator (lihat infra/Caddyfile + README "HTTPS LAN");
+      # di-mount read-only — Caddy tidak membuat/memutakhirkan cert sendiri.
+      - ./certs/ravaa-selfsigned.crt:/certs/ravaa-selfsigned.crt:ro
+      - ./certs/ravaa-selfsigned.key:/certs/ravaa-selfsigned.key:ro
     ports:
       # Caddy di container listen https://:5656 (lihat infra/Caddyfile — butir
       # ROADMAP 1.7) — mapping HARUS 5656:5656, bukan 5656:80 (bug 2026-10-26:

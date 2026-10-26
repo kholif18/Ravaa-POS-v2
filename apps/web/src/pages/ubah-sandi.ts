@@ -41,7 +41,7 @@ export function renderUbahSandiPage(el: HTMLElement): void {
         </div>
       </div>
       <div class="field">
-        <label class="label !text-white/75" for="gs-baru">Sandi baru (min. 4 karakter)</label>
+        <label class="label !text-white/75" for="gs-baru">Sandi baru (min. 8 karakter)</label>
         <div class="login-field">
           ${icon('lock')}
           <input id="gs-baru" class="input login-input pl-9" type="password" autocomplete="new-password" />
@@ -72,7 +72,7 @@ export function renderUbahSandiPage(el: HTMLElement): void {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!lama.value) return gagal('Sandi lama wajib diisi.', lama);
-    if (baru.value.length < 4) return gagal('Sandi baru minimal 4 karakter.', baru);
+    if (baru.value.length < 8) return gagal('Sandi baru minimal 8 karakter.', baru);
     if (baru.value !== ulang.value) return gagal('Ulangi tidak sama dengan sandi baru.', ulang);
     btn.disabled = true;
     btn.textContent = 'Menyimpan…';

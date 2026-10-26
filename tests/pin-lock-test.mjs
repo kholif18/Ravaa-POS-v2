@@ -23,10 +23,10 @@ const api = async (method, path, body, token) => {
   return { status: r.status, json: await r.json().catch(() => ({})) };
 };
 
-const ownerLogin = await api('POST', '/api/login', { username: 'owner', password: 'admin123' });
+const ownerLogin = await api('POST', '/api/login', { username: 'owner', password: 'admin1234' });
 chk('login owner', ownerLogin.status === 200);
 let TOWNER = ownerLogin.json.data?.token;
-await api('POST', '/api/users/password', { old_password: 'admin123', password: 'admin123' }, TOWNER);
+await api('POST', '/api/users/password', { old_password: 'admin1234', password: 'admin1234' }, TOWNER);
 
 console.log('=== A. Set PIN owner ===');
 const setPin = await api('POST', '/api/users/pin', { pin: '123456' }, TOWNER);
@@ -64,9 +64,9 @@ chk('token switch aktif dan user kasir', meSwitch.status === 200 && meSwitch.jso
 
 console.log('=== D. Reset PIN via owner memutus sesi ===');
 // Login owner lagi
-const ownerReLogin = await api('POST', '/api/login', { username: 'owner', password: 'admin123' });
+const ownerReLogin = await api('POST', '/api/login', { username: 'owner', password: 'admin1234' });
 const TOWNER2 = ownerReLogin.json.data?.token;
-await api('POST', '/api/users/password', { old_password: 'admin123', password: 'admin123' }, TOWNER2);
+await api('POST', '/api/users/password', { old_password: 'admin1234', password: 'admin1234' }, TOWNER2);
 // Hapus PIN kasir
 const delPin = await api('DELETE', `/api/users/${uid}/pin`, null, TOWNER2);
 chk('owner delete PIN kasir -> 200', delPin.status === 200);
@@ -75,12 +75,12 @@ chk('sesi kasir dicabut setelah reset PIN', checkSession.status === 401);
 
 console.log('=== E. Ganti sandi menghapus PIN ===');
 // Login owner lagi untuk set PIN baru
-const ownerLogin2 = await api('POST', '/api/login', { username: 'owner', password: 'admin123' });
+const ownerLogin2 = await api('POST', '/api/login', { username: 'owner', password: 'admin1234' });
 let TOWNER3 = ownerLogin2.json.data?.token;
-await api('POST', '/api/users/password', { old_password: 'admin123', password: 'admin123' }, TOWNER3);
+await api('POST', '/api/users/password', { old_password: 'admin1234', password: 'admin1234' }, TOWNER3);
 await api('POST', '/api/users/pin', { pin: '111111' }, TOWNER3);
 // Ubah sandi
-const chPass = await api('POST', '/api/users/password', { old_password: 'admin123', password: 'admin123' }, TOWNER3);
+const chPass = await api('POST', '/api/users/password', { old_password: 'admin1234', password: 'admin1234' }, TOWNER3);
 chk('ganti sandi sendiri ok', chPass.status === 200);
 const me3 = await api('GET', '/api/me', null, TOWNER3);
 chk('pin_set hilang setelah ganti sandi', me3.json.data?.user?.pin_set === false);

@@ -225,7 +225,7 @@ export function renderProfilPage(el: HTMLElement): void {
               <input id="pf-lama" class="input" type="password" autocomplete="current-password" />
             </div>
             <div class="field">
-              <label class="label" for="pf-baru">Sandi baru (min. 4 karakter) *</label>
+              <label class="label" for="pf-baru">Sandi baru (min. 8 karakter) *</label>
               <input id="pf-baru" class="input" type="password" autocomplete="new-password" />
             </div>
             <div class="field">
@@ -368,7 +368,7 @@ export function renderProfilPage(el: HTMLElement): void {
   });
   el.querySelector('#pf-sandi-simpan')?.addEventListener('click', async () => {
     if (!lamaEl.value) { toast('Sandi lama wajib diisi', 'warning'); lamaEl.focus(); return; }
-    if (baruEl.value.length < 4) { toast('Sandi baru minimal 4 karakter', 'warning'); baruEl.focus(); return; }
+    if (baruEl.value.length < 8) { toast('Sandi baru minimal 8 karakter', 'warning'); baruEl.focus(); return; }
     if (baruEl.value !== ulangEl.value) { toast('Konfirmasi tidak sama dengan sandi baru', 'warning'); ulangEl.focus(); return; }
     try {
       await apiPost('/api/users/password', { old_password: lamaEl.value, password: baruEl.value });

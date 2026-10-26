@@ -251,6 +251,6 @@ export function seed(): void {
     db.prepare(
       `INSERT INTO users (username, name, password_hash, role, must_change)
        VALUES ('owner', 'kasir', ?, 'owner', 1)`,
-    ).run(hashPassword('admin123'));
+    ).run(hashPassword('admin1234'));
   }
 }

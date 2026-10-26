@@ -18,7 +18,7 @@ const sql = (q) => execFileSync('sqlite3', [DB, q], { encoding: 'utf8' }).trim()
 const API = 'http://localhost:3001';
 const WEB = 'http://localhost:5656';
 const UJI_USER = process.env.RAVAA_UJI_USER || 'owner';
-const UJI_PASS = process.env.RAVAA_UJI_PASS || 'admin123';
+const UJI_PASS = process.env.RAVAA_UJI_PASS || 'admin1234';
 
 const api = async (method, path, body, token) => {
   const r = await fetch(`${API}${path}`, {

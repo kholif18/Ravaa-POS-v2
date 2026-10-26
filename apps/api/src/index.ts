@@ -26,7 +26,32 @@ function imgDir(): string {
 }
 
 const app = new Hono<{ Variables: { user: Pengguna } }>();
-app.use('*', cors({ origin: (process.env.CORS_ORIGIN ?? '*').split(',') }));
+// CORS default KETAT (2026-10-27): semua pemakaian nyata same-origin (deploy
+// Docker/native: Caddy di :5656 proxy /api → :3001, jadi Origin = origin
+// sendiri) atau dev Vite (:3000 → :3001 lewat proxy). Default lama `'*'`
+// mengizinkan origin mana pun membaca respons API dari browser — permukaan
+// yang tak perlu. Set `CORS_ORIGIN` (CSV) hanya bila ada host lintas-origin
+// nyata. `null` (tanpa Origin) = asal file:// / about:blank (fetch lokal)
+// tetap diizinkan — bukan lintas-origin sungguhan.
+const asalDiizinkan = (process.env.CORS_ORIGIN ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+app.use('*', cors({
+  // PENTING (bug 2026-10-27): callback `origin` hono/cors HARUS mengembalikan
+  // string (untuk echo) atau null/string-kosong (untuk menolak) — BUKAN
+  // `undefined`. Mengembalikan undefined membuat `if (allowOrigin)` falsy sehingga
+  // header ACAO tak pernah dipasang untuk origin mana pun (bug awal: same-origin
+  // ikut dianggap ditolak). Default tanpa CORS_ORIGIN = `() => null` = tolak
+  // semua origin lintas (same-origin tak butuh header CORS).
+  origin: (asal) => {
+    // `asal` = `c.req.header("origin") || ""` dari hono/cors (baris 39 middleware).
+    // ""  = request tanpa header Origin (curl, fetch server-ke-server, <img>,
+    //       <script>, fetch file://) — echo literal "null" supaya browser menerima.
+    // "null" (string literal, dari tag <img>/<script> atau fetch file://) —
+    //       juga asal aman/bukan lintas-origin sungguhan — echo "null".
+    if (!asal || asal === 'null') return 'null';
+    if (asalDiizinkan.length === 0) return null; // default same-origin: tolak asal lintas
+    return asalDiizinkan.includes(asal) ? asal : null;
+  },
+}));
 
 // 500 informatif (2026-10-18): error yang lolos dari try/catch halaman —
 // terutama "no such column / has no column named" dari DB yang ketinggalan
@@ -366,7 +391,7 @@ function verifikasiPin(userId: number, pin: string):
 }
 
 // ---------- sesi & pengguna (login 2026-10-11) ----------
-const BOLEH_SANDI_MIN = 4;
+const BOLEH_SANDI_MIN = 8;
 
 // ---------- rate limit login password (2026-10-26, temuan audit produksi) ----------
 // Login password dulu TANPA penalti (rate-limit PIN saja yang ada) — brute force

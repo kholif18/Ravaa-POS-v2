@@ -40,7 +40,7 @@ export function renderLoginPage(el: HTMLElement): void {
       <button type="submit" id="login-ok" class="btn login-btn w-full">Masuk</button>
     </form>
     <p class="mt-4 border-t border-white/10 pt-3 text-center text-xs leading-relaxed text-white/60">
-      Akun bawaan: <span class="font-mono text-white/85">owner</span> / <span class="font-mono text-white/85">admin123</span> — wajib diganti saat masuk pertama.
+      Akun bawaan: <span class="font-mono text-white/85">owner</span> / <span class="font-mono text-white/85">admin1234</span> — wajib diganti saat masuk pertama.
     </p>`);
   const form = el.querySelector<HTMLFormElement>('#login-form')!;
   const user = el.querySelector<HTMLInputElement>('#login-user')!;

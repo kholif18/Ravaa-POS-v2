@@ -9,10 +9,23 @@
 # muncul sekali → tap "Lanjutkan ke situs (tidak aman)". Deteksi barcode &
 # baca produk tetap 100% offline (cache IndexedDB).
 https://:5656 {
-  root * {$HOME}/ravaaposv2/apps/web/dist
-  file_server
-  reverse_proxy /api/* localhost:3001
+  # Sertifikat internal SELF-SIGNED (wajib — tanpa ini handshake gagal:
+  # host kosong `:5656` tidak bisa divalidasi ACME, terbukti 2026-10-26).
+  # Sertifikat internal SELF-SIGNED lewat FILE (bukan `tls internal` — yang
+  # terakhir gagal di site address kosong: "no certificate available for
+  # 'localhost'", terbukti 2026-10-27). Generate cert di server sekali:
+  #   bash infra/gen-cert.sh  →  infra/certs/ravaa-selfsigned.{crt,key}
+  # Untuk native, salin/kunci file cert ini lalu tunjuk path absolut di bawah.
+  tls /etc/caddy/certs/ravaa-selfsigned.crt /etc/caddy/certs/ravaa-selfsigned.key
+  # /api/* di-proxy; sisanya SPA. Bungkus `handle` terpisah — root+file_server
+  # tanpa handle ikut men-serve /api/* sebagai file → balik HTML (bug 2026-10-27).
+  @api path /api/*
+  handle @api {
+    reverse_proxy localhost:3001
+  }
   handle {
+    root * {$HOME}/ravaaposv2/apps/web/dist
     try_files {path} /index.html
+    file_server
   }
 }

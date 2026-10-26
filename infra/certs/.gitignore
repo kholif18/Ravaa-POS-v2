@@ -1,0 +1,4 @@
+# Kunci & sertifikat self-signed HTTPS LAN — JANGAN masuk git (rahasia).
+# Di-generate sekali di host lewat infra/gen-cert.sh (lihat README "HTTPS LAN").
+*.crt
+*.key

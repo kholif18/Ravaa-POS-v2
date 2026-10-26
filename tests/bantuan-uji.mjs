@@ -8,7 +8,7 @@
 // - fetch node ke localhost:3001/api* otomatis membawa Authorization.
 // - browser: addInitScript menyetel localStorage + membungkus window.fetch
 //   (fetch mentah di page.evaluate ikut tersuntik).
-// - login memakai RAVAA_UJI_USER/PASS (bawaan owner/admin123 hasil seed),
+// - login memakai RAVAA_UJI_USER/PASS (bawaan owner/admin1234 hasil seed),
 //   lalu self-change sandi-ke-sandi-sendiri (idempoten) untuk membersihkan
 //   flag must_change — tanpa ini UI suite mental ke layar ganti sandi.
 import { execFileSync } from 'node:child_process';
@@ -25,7 +25,7 @@ export function tokenUji() {
   if (process.env.RAVAA_UJI_TOKEN) return process.env.RAVAA_UJI_TOKEN;
   if (tokenCache) return tokenCache;
   const user = process.env.RAVAA_UJI_USER || 'owner';
-  const pass = process.env.RAVAA_UJI_PASS || 'admin123';
+  const pass = process.env.RAVAA_UJI_PASS || 'admin1234';
   let login;
   try {
     login = curlJson(
@@ -40,7 +40,7 @@ export function tokenUji() {
   const token = login?.data?.token ?? '';
   if (!token) {
     throw new Error(
-      `bantuan-uji: login gagal sebagai "${user}" — cocokkan RAVAA_UJI_USER/RAVAA_UJI_PASS dengan akun pemilik (bawaan seed: owner/admin123)`,
+      `bantuan-uji: login gagal sebagai "${user}" — cocokkan RAVAA_UJI_USER/RAVAA_UJI_PASS dengan akun pemilik (bawaan seed: owner/admin1234)`,
     );
   }
   // Bersihkan must_change (agar UI suite tidak mental ke layar ganti sandi).

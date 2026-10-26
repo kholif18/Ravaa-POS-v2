@@ -58,7 +58,7 @@ function bersihkanPelangganUji() {
 const login = await fetch('http://localhost:3001/api/login', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ username: 'owner', password: 'admin123' }),
+  body: JSON.stringify({ username: 'owner', password: 'admin1234' }),
 }).then((r) => r.json());
 const TOKEN = login?.data?.token ?? '';
 if (!TOKEN) {

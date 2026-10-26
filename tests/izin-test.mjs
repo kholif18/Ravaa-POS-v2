@@ -25,13 +25,13 @@ const api = async (method, path, body, token) => {
   return { status: r.status, json: await r.json().catch(() => ({})) };
 };
 
-const ownerLogin = await api('POST', '/api/login', { username: 'owner', password: 'admin123' });
+const ownerLogin = await api('POST', '/api/login', { username: 'owner', password: 'admin1234' });
 chk('login owner 200', ownerLogin.status === 200 && ownerLogin.json.data?.token);
 const TOWNER = ownerLogin.json.data?.token;
 if (ownerLogin.status !== 200) { console.log('Gagal login owner'); process.exit(1); }
 
 // Bersihkan must_change owner
-await api('POST', '/api/users/password', { old_password: 'admin123', password: 'admin123' }, TOWNER);
+await api('POST', '/api/users/password', { old_password: 'admin1234', password: 'admin1234' }, TOWNER);
 
 console.log('=== A. Buat kasir Standar & Ketat ===');
 const ts = Date.now().toString(36);

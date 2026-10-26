@@ -288,7 +288,7 @@ function formSimpan(id: number | null, awal?: UserRow): void {
         </select>
       </div>`}
       <div class="field">
-        <label class="label" for="u-pass">Sandi${isNew ? ' * (min. 4 karakter)' : ' (kosongkan bila tidak diganti)'}</label>
+        <label class="label" for="u-pass">Sandi${isNew ? ' * (min. 8 karakter)' : ' (kosongkan bila tidak diganti)'}</label>
         <input id="u-pass" class="input" type="password" autocomplete="new-password" />
       </div>
       ${editorIzinHtml({
@@ -480,7 +480,7 @@ function bindRows(): void {
         okLabel: 'Reset',
         body: `
           <div class="field">
-            <label class="label" for="u-newpass">Sandi baru (min. 4 karakter)</label>
+            <label class="label" for="u-newpass">Sandi baru (min. 8 karakter)</label>
             <input id="u-newpass" class="input" type="password" autocomplete="new-password" />
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400">

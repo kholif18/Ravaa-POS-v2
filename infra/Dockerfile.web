@@ -11,4 +11,10 @@ RUN npm run build -w apps/web
 FROM caddy:2-alpine
 COPY --from=build /app/apps/web/dist /srv
 COPY infra/Caddyfile /etc/caddy/Caddyfile
+# Hardening (2026-10-27): image statis — tambah HEALTHCHECK supaya orkestrasi
+# mendapat sinyal sehat (cek HTTPS lokal, abaikan verifikasi cert self-signed
+# lewat -k). Caddy di image resmi sudah USER caddy (non-root) — tak perlu di-set
+# ulang; jangan tambah USER di sini tanpa memastikan port 5656 (>1024, aman).
 EXPOSE 5656
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -qO/dev/null --no-check-certificate https://localhost:5656/ || exit 1

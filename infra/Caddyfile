@@ -13,10 +13,31 @@
 # pasang di HP. Deteksi barcode & baca produk tetap 100% offline
 # (cache IndexedDB) — sertifikat hanya men-buka gerbang kamera.
 https://:5656 {
-  root * /srv
-  file_server
-  reverse_proxy /api/* api:3001
+  # Sertifikat self-signed buatan sendiri (di-generate host sekali lalu
+  # di-mount read-only, bukan `tls internal`).
+  #
+  # Alasan (terbukti 2026-10-27): `tls internal` TIDAK mem-buka handshake di
+  # site address kosong `https://:5656` — Caddy memperlakukan host kosong
+  # tanpa identifier, lalu menolak tiap ClientHello dengan
+  # "no certificate available for 'localhost'" (alert internal error).
+  # ACME/Let's Encrypt juga mustahil di sini (tak ada domain publik).
+  #
+  # File cert punya SAN eksplisit (localhost + IP LAN) sehingga perangkat
+  # kasir yang mengakses via IP LAN mendapat sertifikat yang match. Peringatan
+  # "tidak aman" muncul sekali per perangkat → tap "Lanjutkan ke situs".
+  tls /certs/ravaa-selfsigned.crt /certs/ravaa-selfsigned.key
+  # /api/* di-proxy ke API; semua sisanya = SPA (try_files + file_server).
+  # KEDUANYA dibungkus `handle` terpisah (bukan root/file_server di level site):
+  # root+file_server tanpa handle ikut men-serve request /api/* sebagai file
+  # → SPA fallback /index.html, sehingga /api/* balik HTML, bukan JSON
+  # (terbukti 2026-10-27: GET /api/me balik <doctype html>, login POST 405).
+  @api path /api/*
+  handle @api {
+    reverse_proxy api:3001
+  }
   handle {
+    root * /srv
     try_files {path} /index.html
+    file_server
   }
 }

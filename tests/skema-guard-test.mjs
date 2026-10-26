@@ -67,10 +67,10 @@ try {
   const log1 = await startApi();
   chk('start API DB sehat: TANPA peringatan skema', !log1().includes('[SKEMA DB TIDAK SINKRON]'));
 
-  const masuk = await (await api('POST', '/api/login', { username: 'owner', password: 'admin123' })).json();
+  const masuk = await (await api('POST', '/api/login', { username: 'owner', password: 'admin1234' })).json();
   const T = masuk?.data?.token;
   chk('login owner di DB uji', !!T, `must_change=${masuk?.data?.must_change}`);
-  await api('POST', '/api/users/password', { old_password: 'admin123', password: 'admin123' }, T);
+  await api('POST', '/api/users/password', { old_password: 'admin1234', password: 'admin1234' }, T);
   const jual = await api('GET', '/api/sales', undefined, T);
   chk('GET /api/sales DB sehat -> 200', jual.status === 200, `status=${jual.status}`);
   stopApi(procs[0]);
@@ -83,9 +83,9 @@ try {
   chk('peringatan menyebut kolom yang hilang', log2().includes('sales.customer_name'));
   chk('peringatan memuat perintah ALTER siap tempel', log2().includes('ALTER TABLE sales ADD COLUMN customer_name'));
 
-  const masuk2 = await (await api('POST', '/api/login', { username: 'owner', password: 'admin123' })).json();
+  const masuk2 = await (await api('POST', '/api/login', { username: 'owner', password: 'admin1234' })).json();
   const T2 = masuk2?.data?.token;
-  await api('POST', '/api/users/password', { old_password: 'admin123', password: 'admin123' }, T2);
+  await api('POST', '/api/users/password', { old_password: 'admin1234', password: 'admin1234' }, T2);
   const rusak = await api('GET', '/api/sales', undefined, T2);
   const isiRusak = await rusak.json().catch(() => null);
   chk('GET /api/sales DB rusak -> 500 JSON (bukan teks polos)',
