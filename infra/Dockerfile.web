@@ -11,4 +11,4 @@ RUN npm run build -w apps/web
 FROM caddy:2-alpine
 COPY --from=build /app/apps/web/dist /srv
 COPY infra/Caddyfile /etc/caddy/Caddyfile
-EXPOSE 80
+EXPOSE 5656
