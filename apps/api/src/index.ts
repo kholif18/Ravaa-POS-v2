@@ -2313,6 +2313,8 @@ app.get('/api/shifts', wajibIzin('shift.lihat'), (c) => {
               WHERE t.shift_id = s.id AND t.kind='topup') AS topup_nominal,
             (SELECT COALESCE(SUM(t.admin),0) FROM topup_txns t
               WHERE t.shift_id = s.id AND t.kind='topup') AS topup_admin,
+            (SELECT COALESCE(SUM(t.bank_fee),0) FROM topup_txns t
+              WHERE t.shift_id = s.id AND t.kind='topup') AS topup_bank_fee,
             (SELECT COALESCE(SUM(t.nominal),0) FROM topup_txns t
               WHERE t.shift_id = s.id AND t.kind='tarik') AS tarik_nominal,
             (SELECT COALESCE(SUM(t.admin),0) FROM topup_txns t
@@ -3442,6 +3444,10 @@ app.post('/api/topups', async (c) => {
     const admin = Number(body?.admin ?? 0);
     if (!(nominal > 0)) return c.json({ error: 'nominal harus > 0' }, 400);
     if (!(admin >= 0)) return c.json({ error: 'admin harus >= 0' }, 400);
+    // `bank_fee` (2026-10-27): potongan bank/agen dari porsi admin. Laba bersih
+    // topup = admin − bank_fee. Laci TIDAK berubah (kasir menerima admin penuh).
+    const bankFee = Math.max(0, Math.round(Number(body?.bank_fee ?? 0)));
+    if (bankFee > admin) return c.json({ error: 'potongan bank tidak boleh melebihi admin' }, 400);
     // `nomor` OPSIONAL sejak 2026-10-06 (permintaan pemilik): e-wallet/pulsa
     // "untuk pencatatan saja tidak perlu nomor HP" dan tarik tunai cukup
     // nominal+admin — kosong = memang tanpa nomor (PLN token/tagihan tetap
@@ -3466,10 +3472,10 @@ app.post('/api/topups', async (c) => {
     }
     const total = nominal + admin; // yang dibayar pelanggan
     const row = db.prepare(
-      `INSERT INTO topup_txns (id, shift_id, kind, provider, nomor, token, nominal, admin, total, pay_method, cashier, sale_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO topup_txns (id, shift_id, kind, provider, nomor, token, nominal, admin, bank_fee, total, pay_method, cashier, sale_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     ).get(id, sh.shift_id, kind, String(body.provider).toUpperCase(), nomor, token,
-      nominal, admin, total, body.pay_method ?? 'tunai', sh.cashier, saleId);
+      nominal, admin, bankFee, total, body.pay_method ?? 'tunai', sh.cashier, saleId);
     return c.json({ data: row }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'gagal simpan topup' }, 400);
@@ -3497,11 +3503,73 @@ app.get('/api/topups', wajibIzin('riwayat.lihat'), (c) => {
   return c.json({ data, total });
 });
 
-// Saran admin default (boleh diubah kasir per transaksi)
+// Saran admin default (boleh diubah kasir per transaksi). Sejak 2026-10-27
+// memakai master `topup_services` bila ada baris cocok (admin + bank_fee);
+// fallback tier lama bila tidak ada konfigurasi (backward-compatible).
 app.get('/api/topups/suggest-admin', (c) => {
   const nominal = Number(c.req.query('nominal') ?? 0);
+  const provider = String(c.req.query('provider') ?? '').toUpperCase();
+  // Coba master layanan topup dulu (jika provider dikirim & ada di tabel)
+  if (provider) {
+    const svc = db.prepare(
+      'SELECT admin_default, bank_fee_default FROM topup_services WHERE provider = ? AND is_active = 1',
+    ).get(provider) as { admin_default: number; bank_fee_default: number } | undefined;
+    if (svc) {
+      return c.json({ data: { nominal, admin: svc.admin_default, bank_fee: svc.bank_fee_default } });
+    }
+  }
+  // Fallback tier lama (tanpa konfigurasi per layanan)
   const admin = nominal <= 0 ? 0 : nominal < 50000 ? 3000 : nominal < 200000 ? 5000 : 7000;
-  return c.json({ data: { nominal, admin } });
+  return c.json({ data: { nominal, admin, bank_fee: 0 } });
+});
+
+// ---------- Master layanan topup (2026-10-27) ----------
+// Pemilik mengatur admin default + potongan bank per jenis layanan.
+// Kasir memilih jenis → admin & bank fee otomatis terisi di dialog POS.
+app.get('/api/topup-services', (c) => {
+  const data = db.prepare(
+    'SELECT * FROM topup_services ORDER BY is_active DESC, label COLLATE NOCASE',
+  ).all();
+  return c.json({ data });
+});
+
+app.post('/api/topup-services', hanyaOwner, async (c) => {
+  try {
+    const body = await c.req.json();
+    const provider = String(body?.provider ?? '').trim().toUpperCase();
+    const label = String(body?.label ?? '').trim();
+    if (!provider) return c.json({ error: 'provider wajib' }, 400);
+    if (!label) return c.json({ error: 'label wajib' }, 400);
+    const adminDefault = Math.max(0, Math.round(Number(body?.admin_default ?? 0)));
+    const bankFeeDefault = Math.max(0, Math.round(Number(body?.bank_fee_default ?? 0)));
+    if (bankFeeDefault > adminDefault) return c.json({ error: 'potongan bank default tidak boleh melebihi admin default' }, 400);
+    const isActive = body?.is_active === false ? 0 : 1;
+    const existing = db.prepare('SELECT id FROM topup_services WHERE provider = ?').get(provider) as { id: number } | undefined;
+    if (existing) {
+      db.prepare(
+        `UPDATE topup_services SET label=?, admin_default=?, bank_fee_default=?, is_active=?, updated_at=datetime('now')
+         WHERE provider=?`,
+      ).run(label, adminDefault, bankFeeDefault, isActive, provider);
+    } else {
+      db.prepare(
+        `INSERT INTO topup_services (provider, label, admin_default, bank_fee_default, is_active)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run(provider, label, adminDefault, bankFeeDefault, isActive);
+    }
+    catatAudit(c, existing ? 'update' : 'create', 'topup_service', provider, { label, admin_default: adminDefault, bank_fee_default: bankFeeDefault, is_active: isActive });
+    return c.json({ data: db.prepare('SELECT * FROM topup_services WHERE provider = ?').get(provider) }, existing ? 200 : 201);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'gagal simpan layanan topup' }, 400);
+  }
+});
+
+app.delete('/api/topup-services/:provider', hanyaOwner, (c) => {
+  const provider = c.req.param('provider').toUpperCase();
+  const row = db.prepare('SELECT * FROM topup_services WHERE provider = ?').get(provider);
+  if (!row) return c.json({ error: 'layanan tidak ditemukan' }, 404);
+  db.prepare('DELETE FROM topup_services WHERE provider = ?').run(provider);
+  catatAudit(c, 'delete', 'topup_service', provider, {});
+  return c.json({ data: { provider, deleted: true } });
 });
 
 // ---------- pengeluaran kas (Tahap 1, 2026-10-11) ----------
@@ -4924,7 +4992,8 @@ function laporanRentang(dari: string, sampai: string) {
       ORDER BY metode`,
   ).all(...ps, ...ps) as { pay_method: string; n: number; total: number }[];
   const topup = db.prepare(
-    `SELECT kind, COUNT(*) AS n, COALESCE(SUM(nominal),0) AS nominal, COALESCE(SUM(admin),0) AS admin
+    `SELECT kind, COUNT(*) AS n, COALESCE(SUM(nominal),0) AS nominal, COALESCE(SUM(admin),0) AS admin,
+            COALESCE(SUM(bank_fee),0) AS bank_fee
      FROM topup_txns WHERE ${dl('created_at')} GROUP BY kind`,
   ).all(...ps);
   // Dikelompokkan per (name, unit) — tanpa `unit`, penjualan "2 pack" dan

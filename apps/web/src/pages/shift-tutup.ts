@@ -65,6 +65,9 @@ export type ShiftRow = {
   n_sales: number; omzet: number; tunai: number; qris: number; transfer: number;
   n_topup: number;
   topup_nominal: number; topup_admin: number;
+  /** Potongan bank/agen topup (2026-10-27): porsi admin yang dibayar ke bank.
+   *  Laba bersih topup = topup_admin − topup_bank_fee. Laci TIDAK berubah. */
+  topup_bank_fee: number;
   tarik_nominal: number; tarik_admin: number;
   n_expense: number; expense_total: number;
   /** Kas masuk non-penjualan (butir ROADMAP 1.6.2, 2026-10-19) — menambah laci. */
@@ -146,6 +149,10 @@ export function bangunStrukRekap(s: ShiftRow, toko: string, fisik: number | null
     { kiri: 'Nota pesanan (keluar)', kanan: (s.order_omzet_total ?? 0) > 0 ? `-${rp(s.order_omzet_total)}` : rp(0) },
     { kiri: 'Topup nominal', kanan: rp(s.topup_nominal) },
     { kiri: 'Topup admin', kanan: rp(s.topup_admin) },
+    ...(s.topup_bank_fee > 0 ? [
+      { kiri: '  Potongan bank', kanan: `-${rp(s.topup_bank_fee)}` },
+      { kiri: '  Laba bersih topup', kanan: rp(s.topup_admin - s.topup_bank_fee), tebal: true },
+    ] : []),
     { kiri: 'Tarik nominal', kanan: rp(s.tarik_nominal) },
     { kiri: 'Tarik admin', kanan: rp(s.tarik_admin) },
     { kiri: `Retur (${s.n_retur})`, kanan: rp(s.retur_total) },
@@ -268,6 +275,7 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Topup — pelanggan bayar, laci naik</div>
         ${baris('Nominal', s.topup_nominal)}
         ${baris('Admin', s.topup_admin)}
+        ${s.topup_bank_fee > 0 ? baris('Potongan bank', -s.topup_bank_fee) + baris('Laba bersih topup', s.topup_admin - s.topup_bank_fee) : ''}
         <div class="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tarik tunai — dicatat saja, di luar hitungan</div>
         ${baris('Nominal', s.tarik_nominal)}
         ${baris('Admin', s.tarik_admin)}

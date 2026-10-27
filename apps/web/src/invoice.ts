@@ -601,6 +601,7 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
         <tr><td>Nota pesanan (keluar)</td><td class="text-right">${orderOmzet > 0 ? '-' + rpIdr(orderOmzet) : rpIdr(0)}</td></tr>
         <tr><td>Topup nominal</td><td class="text-right">${rpIdr(s.topup_nominal)}</td></tr>
         <tr><td>Topup admin</td><td class="text-right">${rpIdr(s.topup_admin)}</td></tr>
+        ${(s.topup_bank_fee ?? 0) > 0 ? `<tr><td style="padding-left:20px">Potongan bank</td><td class="text-right">-${rpIdr(s.topup_bank_fee)}</td></tr><tr><td style="padding-left:20px"><b>Laba bersih topup</b></td><td class="text-right"><b>${rpIdr(s.topup_admin - s.topup_bank_fee)}</b></td></tr>` : ''}
         <tr><td>Tarik nominal</td><td class="text-right">${rpIdr(s.tarik_nominal)}</td></tr>
         <tr><td>Tarik admin</td><td class="text-right">${rpIdr(s.tarik_admin)}</td></tr>
         <tr><td>Retur (${s.n_retur})</td><td class="text-right">${rpIdr(s.retur_total)}</td></tr>

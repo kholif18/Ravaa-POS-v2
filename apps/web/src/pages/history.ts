@@ -80,6 +80,9 @@ type TopupRow = {
   id: string; shift_id: number | null; created_at: string; kind: 'topup' | 'tarik';
   provider: string; nomor: string; token?: string; nominal: number; admin: number; total: number;
   pay_method: string; cashier: string;
+  /** Potongan bank/agen dari porsi admin (2026-10-27) — laba bersih =
+   *  admin − bank_fee. Laci TIDAK berubah; hanya pelaporan laba. */
+  bank_fee?: number;
   /** id nota penjualan induk (Opsi B hybrid, 2026-10-08) — di-stamp client saat
    *  bayar bersama produk. NULL / tanpa nota yang cocok = topup/tarik mandiri
    *  (tampil baris sendiri di linimasa). */
@@ -529,6 +532,7 @@ function detailTopup(t: TopupRow): string {
         <h3 class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">Nilai</h3>
         ${ket('Nominal', rp(t.nominal))}
         ${ket('Admin', rp(t.admin))}
+        ${(t.bank_fee ?? 0) > 0 ? ket('Potongan bank', `-${rp(t.bank_fee!)}`) + ket('Laba bersih', rp(Math.max(0, t.admin - t.bank_fee!))) : ''}
         ${ket('Total dibayar', rp(t.total), true)}
         ${ket('Kasir', esc(t.cashier)) + ket('Shift', t.shift_id ? `#${t.shift_id}` : '—')}
       </div>
@@ -549,6 +553,15 @@ function subRowHtml(t: TopupRow): string {
     ? `<span class="mr-1.5 rounded bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">Tarik</span>`
     : `<span class="mr-1.5 rounded bg-emerald-50 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Topup</span>`;
   const detail = [t.nomor, t.token ? `token ${t.token}` : ''].filter(Boolean).join(' · ');
+  // Potongan bank (2026-10-27) — sub-baris laba bersih dari porsi admin.
+  const infoAdmin = (() => {
+    const parts: string[] = [];
+    if (!tarik && t.admin) parts.push(`admin ${rp(t.admin)}`);
+    if ((t.bank_fee ?? 0) > 0) parts.push(`bank ${rp(t.bank_fee!)} · laba ${rp(Math.max(0, t.admin - t.bank_fee!))}`);
+    return parts.length
+      ? `<div class="cell-sub">${parts.join(' · ')}${tarik ? '' : ' — topup, bukan stok'}</div>`
+      : '';
+  })();
   return `
       <tr class="topup-subrow">
         <td class="td !py-1.5"></td>
@@ -557,7 +570,7 @@ function subRowHtml(t: TopupRow): string {
           <div class="flex items-center justify-between gap-3 pl-6">
             <div class="min-w-0">
               <div class="text-sm text-gray-800 dark:text-gray-200">${badgeSub}${esc(layanan(t.provider))}${detail ? ` <span class="cell-sub">${esc(detail)}</span>` : ''}</div>
-              ${tarik ? '' : t.admin ? `<div class="cell-sub">admin ${rp(t.admin)} — topup, bukan stok</div>` : ''}
+              ${infoAdmin}
             </div>
             <span class="shrink-0 font-semibold tabular-nums text-gray-900 dark:text-white">${rp(tarik ? t.admin : t.nominal + t.admin)}</span>
           </div>
@@ -620,6 +633,8 @@ function renderTabel(): string {
         : `<div class="cell-strong">${esc(layanan(b.t!.provider))}${b.t!.nomor ? ` · ${esc(b.t!.nomor)}` : ''}</div>
            <div class="cell-sub">Kasir ${esc(b.t!.cashier)}${
              b.t!.kind === 'topup' && b.t!.admin ? ` · admin ${rp(b.t!.admin)}` : ''
+           }${
+             (b.t!.bank_fee ?? 0) > 0 ? ` · bank ${rp(b.t!.bank_fee!)}` : ''
            }</div>`;
       const isi = terbuka
         ? `<tr class="det-row"><td colspan="6" class="td !py-2">${

@@ -3499,7 +3499,9 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     Rincian per metode di dialog tutup shift; ketiganya semua masuk omzet),
     `n_topup` (JUMLAH semua `topup_txns` shift ini — **semua kind**, makna
     lama tidak berubah), `topup_nominal` / `topup_admin` (SUM kind=`topup`
-    saja), `tarik_nominal` / `tarik_admin` (SUM kind=`tarik` saja).
+    saja), `topup_bank_fee` (SUM `bank_fee` kind=`topup`, 2026-10-27 — laba
+    bersih = `topup_admin − topup_bank_fee`; laci TIDAK berubah), `tarik_nominal` /
+    `tarik_admin` (SUM kind=`tarik` saja).
     `topup`/`tarik` terpisah dua kolom karena aturan domain: **jangan satukan
     nominal+admin jadi satu angka di laporan**.
     `n_expense` (COUNT) / `expense_total` (SUM `jumlah`, Tahap 1 2026-10-11) —
@@ -3789,12 +3791,18 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     Riwayat (bukan omzet baru — uang kembali ke pelanggan). Diuji
     `tests/retur-test.mjs` section D & F (kini 35 asersi).
   - Urutan `created_at DESC, rowid DESC` (yang terbaru di atas).
-* `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor?,token?,nominal>0,admin>=0,pay_method?,shift_id?,cashier?,sale_id?}`
+* `POST /api/topups` `{id?,kind:topup|tarik,provider,nomor?,token?,nominal>0,admin>=0,bank_fee?,pay_method?,shift_id?,cashier?,sale_id?}`
   - `provider` = **kode jenis layanan** (bukan brand). Nilai yang digunakan POS:
     `E-WALLET | PULSA | PLN-TOKEN | PLN-BILL` (kind=topup) dan `TARIK-EWALLET | TARIK-BANK` (kind=tarik).
     Kontrak API tidak berubah; kolom tetap TEXT non-kosong. Penambahan brand
     (DANA/OVO/GoPay/BCA) dilakukan sebagai kolom baru jika dibutuhkan, bukan
     dengan mengubah `provider` menjadi opsional.
+  - **`bank_fee` (baru 2026-10-27)**: potongan bank/agen dari porsi admin.
+    Laba bersih topup = `admin − bank_fee`. **Laci shift TIDAK berubah**
+    (kasir menerima admin penuh); `bank_fee` hanya untuk pelaporan laba.
+    Validasi server: `bank_fee <= admin` (400 `"potongan bank tidak boleh
+    melebihi admin"`). Default 0. Aggregate shift: `topup_bank_fee` = Σ
+    `bank_fee` kind=topup.
   - **`nomor` OPSIONAL sejak 2026-10-06 (revisi pemilik)**: e-wallet/pulsa
     "untuk pencatatan saja tidak perlu nomor HP" dan tarik tunai "hanya nominal
     saja dan admin" — client mengirim `''` untuk jenis itu (hanya `provider`
@@ -3834,7 +3842,29 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Baris juga memuat **`sale_id`** (uuid sale yang menemani, atau null —
     lihat `POST /api/topups`): halaman Riwayat memakainya untuk menentukan
     topup hibrida yang harus jadi sub-baris di bawah induknya.
-* `GET /api/topups/suggest-admin?nominal=` (<=0->0, <50rb->3000, <200rb->5000, else 7000)
+* `GET /api/topups/suggest-admin?nominal=&provider=` — fallback tier lama
+  (<=0->0, <50rb->3000, <200rb->5000, else 7000). **`provider` opsional
+  (2026-10-27)**: bila dikirim dan ada baris `topup_services` aktif dengan
+  kode itu, balasan = `{admin, bank_fee}` dari master (auto-fill admin +
+  potongan bank per jenis); tanpa `provider` / tidak ada baris = balasan
+  `{admin}` lama (fallback tier).
+* **`/api/topup-services` (baru 2026-10-27, master admin + potongan bank per
+  jenis layanan)** — card "Layanan topup" di halaman Sistem (#/settings,
+  owner-only), POS memakai `GET` untuk auto-fill saat kasir memilih jenis:
+  - `GET /api/topup-services` -> `{data:[{provider,label,admin_default,
+    bank_fee_default,is_active}]}` — semua sesi terautentikasi boleh (POS
+    kasir butuh auto-fill; bukan `hanyaOwner`). Global middleware tetap
+    meminta token.
+  - `POST /api/topup-services` `{provider,label,admin_default>=0,
+    bank_fee_default>=0}` (hanyaOwner, upsert by provider; audit entity
+    `topup_service`) -> 200 update / 201 baru. Validasi 400: `provider`
+    wajib, **`label` wajib non-kosong** (400 `"label wajib"` — form UI
+    mengisi otomatis dari provider saat ketik, tapi API tidak menurunkannya),
+    `bank_fee_default <= admin_default` (400 `"potongan bank default tidak
+    boleh melebihi admin default"`).
+  - `DELETE /api/topup-services/:provider` (hanyaOwner) -> `{data:{provider,
+    deleted:true}}` — hapus konfigurasi, POS kembali fallback tier lama.
+    404 bila tidak ada.
 * `GET /api/reports/daily?date=YYYY-MM-DD`
   -> `{data:{date,sales:{n,omzet,diskon},hpp,laba,byHour,byCategory,byMethod,topup,topItems,lowStock,expense:{n,total},kas_masuk:{n,total},retur:{n,total},purchase:{n,total},piutang:{baru,bayar}}}`
   - Bentuk dihitung SATU fungsi `laporanRentang(dari,sampai)` (2026-10-11) —
@@ -4166,7 +4196,34 @@ Port: web 5656, api 3001, print-agent 9100. JANGAN ganti port tanpa update
   `products.markup`, dan tabel `units` (+ FK `products.unit` -> `units.slug`).
   `units` WAJIB ter-seed SEBELUM `products` (FK checked langsung, bukan deferred).
   Kolom `products.deleted_at` ditambahkan 2026-09-27 (tombstone hapus produk).
-  **Migrasi terakhir 2026-10-26 (retur ke supplier — butir ROADMAP 1.9):**
+  **Migrasi terakhir 2026-10-27 (potongan bank topup — butir bank_fee):**
+  kolom baru **`topup_txns.bank_fee`** (`INTEGER NOT NULL DEFAULT 0`) +
+  tabel baru **`topup_services`** (master admin + potongan bank per jenis).
+  `topup_services` = `migrate()` cukup (`CREATE TABLE IF NOT EXISTS`).
+  `bank_fee` = kolom baru di tabel lama → **ALTER manual di install yang
+  tidak boleh di-recreate**; di DB dev sudah dijalankan (backup
+  `data.db.bak.bank-fee` dibuat dengan WAL checkpoint + `VACUUM INTO`,
+  integrity `ok`). SQL untuk install lain:
+  ```sql
+  ALTER TABLE topup_txns ADD COLUMN bank_fee INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS topup_services (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider         TEXT UNIQUE NOT NULL,
+    label            TEXT NOT NULL,
+    admin_default    INTEGER NOT NULL DEFAULT 0,
+    bank_fee_default INTEGER NOT NULL DEFAULT 0,
+    is_active        INTEGER NOT NULL DEFAULT 1,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  ```
+  (mirror persis `db/schema.sql` — `provider` = kode layanan unik uppercase,
+  `label` NOT NULL karena API menolak label kosong.)
+  **Jangan backfill** `bank_fee` transaksi lama (fitur baru; nilai 0 =
+  tanpa potongan, laporan laba bersih = admin penuh untuk data lama).
+  Kolom ini TIDAK mengubah `kasSeharusnya()` — hanya memengaruhi pelaporan
+  laba bersih (`admin − bank_fee`).
+  **Migrasi sebelumnya 2026-10-26 (retur ke supplier — butir ROADMAP 1.9):**
   dua tabel BARU **`purchase_returns`** (satu baris per EVENT retur; FK
   `purchases.id ON DELETE CASCADE`, `shift_id -> shifts(id)`, `client_id
   TEXT UNIQUE` = kunci idempotensi retry, `total` = nilai barang diretur)

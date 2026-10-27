@@ -11,7 +11,7 @@
 // (printer tiap PC kasir beda: thermal 58mm, Epson L3110, atau tanpa printer),
 // jadi disimpan lewat ui/print-pref.ts di localStorage browser ini.
 
-import { apiGet, apiPost, HttpError } from '../api';
+import { apiGet, apiPost, apiDelete, HttpError } from '../api';
 import { confirmDialog } from '../ui/confirm';
 import { icon, type IconName } from '../ui/icons';
 import { getToko } from '../ui/user';
@@ -34,6 +34,7 @@ import { LEBAR_LOGO, resetLogoStrukCache } from '../logo-struk';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { getZonaWaktu, setZonaWaktu, ZONA_WAKTU_PILIHAN, ZONA_WAKTU_BAWAAN, type ZonaWaktu } from '../ui/timezone';
 import { getCurrencyFormat, setCurrencyFormat, CURRENCY_BAWAAN, type FormatCurrency } from '../ui/currency';
+import { LAYANAN_URUT } from './pos';
 
 type Toko = { store_name: string; store_address: string; store_phone: string; store_email: string };
 type Settings = OpsiCetak & {
@@ -48,6 +49,19 @@ type Settings = OpsiCetak & {
 };
 type BarisBackup = { nama: string; ukuran: number; waktu: string };
 type SeksiId = 'transaksi' | 'toko' | 'perangkat' | 'data';
+
+/** Baris master `topup_services` (2026-10-27): admin default + potongan bank
+ *  per jenis layanan. Kasir memilih jenis di dialog POS → kedua angka terisi
+ *  otomatis (bisa diubah per transaksi). Potongan bank TIDAK menggerakkan laci
+ *  — hanya memengaruhi pelaporan laba (laba bersih = admin − potongan bank). */
+type LayananTopup = {
+  provider: string; label: string;
+  admin_default: number; bank_fee_default: number; is_active: number;
+};
+
+/** Draft form layanan topup — disimpan di state supaya repaint lain (mis.
+ *  kartu saklar) TIDAK membuang ketikan (pola draft toko/dokumen). */
+const layananDraftKosong = () => ({ provider: LAYANAN_URUT[0]?.provider ?? 'E-WALLET', label: '', admin_default: '', bank_fee_default: '' });
 
 /** Menu seksi (riset 2026-10-20): pola katalog Settings Loyverse + menu
  *  laporan repo ini — nav kiri yang menempel, isi kanan. Empat seksi adalah
@@ -122,6 +136,14 @@ const state = {
   currencyJalan: false,
   /** Seksi yang sedang ditampilkan (panel mode — hanya satu yang tampil). */
   seksiAktif: 'transaksi' as SeksiId,
+  /** Master layanan topup (2026-10-27) — di muat dari /api/topup-services. */
+  layanan: [] as LayananTopup[],
+  layananErr: '',
+  layananJalan: false,
+  /** Provider yang sedang diedit di form ('' = menambah baru). */
+  layananEdit: '',
+  /** Draft form layanan (provider/label/admin/potongan bank). */
+  layananDraft: layananDraftKosong(),
 };
 
 let host: HTMLElement | null = null;
@@ -219,6 +241,7 @@ function renderBody(): string {
             cari: 'kadaluarsa kedaluwarsa expiry tanggal barang basi aturan server',
           })}
         </div>
+        ${kartuLayananTopup()}
       </section>
       <section id="set-sec-toko" data-set-sec="toko" class="scroll-mt-2 space-y-2" aria-label="Identitas toko">
         ${kepalaSeksi('toko')}
@@ -669,6 +692,96 @@ function kartuToko(): string {
         <button type="button" id="set-toko-simpan" class="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60" ${state.tokoJalan || !kotor ? 'disabled' : ''}>
           ${icon('check')}<span>${state.tokoJalan ? 'Menyimpan…' : 'Simpan toko'}</span>
         </button>
+      </div>
+    </div>`;
+}
+
+/** Nama tampil jenis layanan — dari daftar bersama POS (`LAYANAN_URUT`, satu
+ *  sumber kode provider), fallback ke kodenya sendiri bila server menyimpan
+ *  jenis yang tidak dikenal klien. */
+function namaLayanan(provider: string): string {
+  return LAYANAN_URUT.find((j) => j.provider === provider)?.label ?? provider;
+}
+
+/** Kartu master layanan topup (2026-10-27, permintaan pemilik: admin per jenis
+ *  layanan boleh dibagi "potongan bank/agen" — contoh pemilik: pulsa admin
+ *  Rp2.000 masuk penuh ke laba, e-wallet admin Rp3.000 tapi Rp1.500-nya
+ *  potongan bank). Pemilik mengisi di sini → POS auto-fill saat kasir memilih
+ *  jenis (tetap bisa diubah per transaksi).
+ *  UANG: pelanggan tetap membayar `nominal + admin PENUH`, jadi laci shift TIDAK
+ *  berubah — potongan bank hanya memisahkan laba bersih di laporan & rekap. */
+function kartuLayananTopup(): string {
+  const d = state.layananDraft;
+  const edit = state.layananEdit !== '';
+  const f = (id: string, label: string, nilai: string, ph: string) => `
+    <div class="field-sm">
+      <label class="label" for="${id}">${label}</label>
+      <input class="input" id="${id}" value="${esc(nilai)}" placeholder="${esc(ph)}" inputmode="numeric" autocomplete="off">
+    </div>`;
+  const baris = state.layanan.map((s) => `
+    <tr>
+      <td class="td"><span class="font-medium text-gray-900 dark:text-white">${esc(namaLayanan(s.provider))}</span><br><span class="text-xs text-gray-500 dark:text-gray-400">${esc(s.provider)}</span></td>
+      <td class="td td-num">${rp(s.admin_default)}</td>
+      <td class="td td-num">${s.bank_fee_default > 0 ? `-${rp(s.bank_fee_default)}` : '—'}</td>
+      <td class="td td-num font-semibold">${rp(Math.max(0, s.admin_default - s.bank_fee_default))}</td>
+      <td class="td whitespace-nowrap text-right">
+        <button type="button" class="btn btn-ghost btn-sm" data-svc-edit="${esc(s.provider)}" title="Ubah pengaturan jenis ini">${icon('pencil')}<span>Ubah</span></button>
+        <button type="button" class="btn btn-ghost btn-sm !text-red-600 dark:!text-red-400" data-svc-del="${esc(s.provider)}" title="Hapus pengaturan jenis ini">${icon('trash')}<span>Hapus</span></button>
+      </td>
+    </tr>`).join('');
+  const opsi = LAYANAN_URUT.map((j) => {
+    const ada = state.layanan.some((s) => s.provider === j.provider);
+    return `<option value="${j.provider}" ${d.provider === j.provider ? 'selected' : ''}>${esc(j.label)} — ${j.provider}${ada ? ' (sudah diatur)' : ''}</option>`;
+  }).join('');
+  return `
+    <div class="card" data-set-card data-cari="layanan topup admin potongan bank agen fee e-wallet pulsa pln token tagihan tarik saran kasir">
+      <div class="flex items-start gap-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary dark:bg-primary/15 [&>svg]:size-4">${icon('wallet')}</span>
+        <div class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Layanan topup — admin & potongan bank</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Atur <b>admin default</b> dan <b>potongan bank/agen</b> per jenis layanan. Saat kasir memilih
+            jenis di POS, kedua angka terisi otomatis (tetap boleh diubah per transaksi).
+            Pelanggan tetap membayar <b>admin penuh</b>, jadi laci tidak berubah — potongan bank hanya
+            memisahkan <b>laba bersih</b> di laporan & rekap shift.
+          </p>
+        </div>
+      </div>
+      <div class="mt-3 overflow-x-auto">
+        ${state.layanan.length ? `
+        <table class="w-full text-left text-sm">
+          <thead><tr>
+            <th class="th">Jenis layanan</th><th class="th text-right">Admin</th>
+            <th class="th text-right">Potongan bank</th><th class="th text-right">Laba bersih</th>
+            <th class="th text-right">Aksi</th>
+          </tr></thead>
+          <tbody>${baris}</tbody>
+        </table>` : `<div class="empty">${icon('alert')}<span>Belum ada pengaturan — POS memakai saran admin otomatis berdasarkan nominal.</span></div>`}
+      </div>
+      <div class="mt-3 rounded-xl border border-gray-100 p-3 dark:border-gray-700/60">
+        <p class="text-sm font-medium text-gray-900 dark:text-white">${edit ? `Ubah ${esc(namaLayanan(state.layananEdit))}` : 'Tambah / ubah pengaturan'}</p>
+        <div class="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="field-sm">
+            <label class="label" for="set-svc-provider">Jenis layanan</label>
+            <select class="input" id="set-svc-provider" ${edit ? 'disabled' : ''}>${opsi}</select>
+          </div>
+          <div class="field-sm">
+            <label class="label" for="set-svc-label">Nama tampil</label>
+            <input class="input" id="set-svc-label" value="${esc(d.label)}" placeholder="otomatis dari jenis" maxlength="80" autocomplete="off">
+          </div>
+          ${f('set-svc-admin', 'Admin default (Rp)', d.admin_default, 'mis. 3000')}
+          ${f('set-svc-bankfee', 'Potongan bank (Rp)', d.bank_fee_default, 'mis. 1500')}
+        </div>
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <span id="set-svc-status" aria-live="polite" class="text-xs ${state.layananErr ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}">${state.layananErr ? esc(state.layananErr) : 'Potongan bank tidak boleh melebihi admin.'}</span>
+          <div class="flex flex-wrap gap-2">
+            ${edit ? `<button type="button" id="set-svc-hapus" class="btn btn-ghost !text-red-600 dark:!text-red-400">${icon('trash')}<span>Hapus</span></button>` : ''}
+            ${edit ? `<button type="button" id="set-svc-batal" class="btn btn-ghost">Batal</button>` : ''}
+            <button type="button" id="set-svc-simpan" class="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60" ${state.layananJalan ? 'disabled' : ''}>
+              ${icon('check')}<span>${state.layananJalan ? 'Menyimpan…' : 'Simpan layanan'}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>`;
 }
@@ -1657,6 +1770,140 @@ function bind(): void {
       }
     }),
   );
+
+  // Kartu "Layanan topup" (master admin + potongan bank per jenis).
+  bindLayanan();
+}
+
+/** Binding kartu layanan topup (2026-10-27): form draft pola toko/dokumen
+ *  (ketikan disimpan di state supaya repaint lain tidak membuang isian) +
+ *  aksi Ubah/Hapus per baris. */
+function bindLayanan(): void {
+  const el = <T extends HTMLElement>(id: string) => host?.querySelector<T>(`#${id}`);
+  // Ganti jenis: label mengikuti jenis BARU hanya bila kolomnya masih kosong
+  // atau masih nama default jenis sebelumnya (ketikan merek sendiri TIDAK
+  // ditimpa — pemilik boleh menulis "GoPay"/"Telkomsel").
+  el<HTMLSelectElement>('set-svc-provider')?.addEventListener('change', (ev) => {
+    const v = (ev.target as HTMLSelectElement).value;
+    const lama = state.layananDraft.label.trim();
+    const labelLama = namaLayanan(state.layananDraft.provider);
+    state.layananDraft.provider = v;
+    if (!lama || lama === labelLama) {
+      state.layananDraft.label = namaLayanan(v);
+      const inp = el<HTMLInputElement>('set-svc-label');
+      if (inp) inp.value = state.layananDraft.label;
+    }
+  });
+  // Draft angka/label — tanpa repaint (fokus ketikan selamat).
+  host?.querySelector<HTMLElement>('#set-svc-label')?.addEventListener('input', (ev) => {
+    state.layananDraft.label = (ev.target as HTMLInputElement).value;
+  });
+  host?.querySelector<HTMLElement>('#set-svc-admin')?.addEventListener('input', (ev) => {
+    state.layananDraft.admin_default = (ev.target as HTMLInputElement).value;
+  });
+  host?.querySelector<HTMLElement>('#set-svc-bankfee')?.addEventListener('input', (ev) => {
+    state.layananDraft.bank_fee_default = (ev.target as HTMLInputElement).value;
+  });
+
+  // Ubah baris: isi draft dari baris itu lalu repaint (tombol Hapus/Batal muncul).
+  host?.querySelectorAll<HTMLElement>('[data-svc-edit]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const p = b.dataset.svcEdit ?? '';
+      const s = state.layanan.find((x) => x.provider === p);
+      if (!s) return;
+      state.layananEdit = p;
+      state.layananErr = '';
+      state.layananDraft = {
+        provider: s.provider,
+        label: s.label,
+        admin_default: String(s.admin_default || ''),
+        bank_fee_default: String(s.bank_fee_default || ''),
+      };
+      paint();
+      el<HTMLInputElement>('set-svc-admin')?.focus();
+    }));
+
+  // Hapus baris: konfirmasi -> DELETE -> muat ulang. POS kembali memakai
+  // saran admin otomatis untuk jenis ini (tidak ada konfigurasi).
+  const hapus = async (p: string) => {
+    const yes = await confirmDialog({
+      title: `Hapus pengaturan ${namaLayanan(p)}?`,
+      message: 'POS kembali memakai saran admin otomatis berdasarkan nominal untuk jenis ini. Riwayat transaksi yang sudah tercatat TIDAK berubah.',
+      okLabel: 'Ya, hapus',
+      danger: true,
+    });
+    if (!yes) return;
+    try {
+      await apiDelete<{ data: { provider: string } }>(`/api/topup-services/${encodeURIComponent(p)}`);
+      toast(`Pengaturan ${namaLayanan(p)} dihapus`, 'success');
+      if (state.layananEdit === p) resetDraftLayanan();
+      await muatLayanan();
+    } catch (e) {
+      toast(`Gagal hapus: ${errMsg(e)}`, 'error');
+    }
+    if (host?.isConnected) paint();
+  };
+  host?.querySelectorAll<HTMLElement>('[data-svc-del]').forEach((b) =>
+    b.addEventListener('click', () => void hapus(b.dataset.svcDel ?? '')));
+  el('set-svc-hapus')?.addEventListener('click', () => void hapus(state.layananEdit));
+
+  // Batal mengedit.
+  el('set-svc-batal')?.addEventListener('click', () => {
+    resetDraftLayanan();
+    state.layananErr = '';
+    paint();
+  });
+
+  // Simpan (upsert by provider — POST menerima update parsial per provider).
+  el('set-svc-simpan')?.addEventListener('click', async () => {
+    if (state.layananJalan) return;
+    const d = state.layananDraft;
+    const admin = Math.round(Number(d.admin_default || 0));
+    const bf = Math.round(Number(d.bank_fee_default || 0));
+    if (!(admin >= 0) || !(bf >= 0)) {
+      state.layananErr = 'Admin & potongan bank harus angka >= 0.';
+      paint();
+      return;
+    }
+    if (bf > admin) {
+      state.layananErr = 'Potongan bank tidak boleh melebihi admin.';
+      paint();
+      return;
+    }
+    const label = d.label.trim() || namaLayanan(d.provider);
+    state.layananJalan = true;
+    state.layananErr = '';
+    paint();
+    try {
+      await apiPost<{ data: LayananTopup }>('/api/topup-services', {
+        provider: d.provider, label, admin_default: admin, bank_fee_default: bf,
+      });
+      toast(`Layanan ${label} tersimpan`, 'success');
+      resetDraftLayanan();
+      await muatLayanan();
+    } catch (e) {
+      state.layananErr = errMsg(e);
+    }
+    state.layananJalan = false;
+    if (host?.isConnected) paint();
+  });
+}
+
+function resetDraftLayanan(): void {
+  state.layananEdit = '';
+  state.layananDraft = layananDraftKosong();
+}
+
+/** Muat master layanan topup — gagal TIDAK menggagalkan halaman (kartu lain
+ *  tetap jalan), cukup pesan di baris status kartu. */
+async function muatLayanan(): Promise<void> {
+  try {
+    const r = await apiGet<{ data: LayananTopup[] }>('/api/topup-services');
+    state.layanan = Array.isArray(r.data) ? r.data : [];
+    state.layananErr = '';
+  } catch (e) {
+    state.layananErr = `Gagal memuat layanan topup: ${errMsg(e)}`;
+  }
 }
 
 // Ambil daftar backup — gagal TIDAK menggagalkan halaman (kartu saklar tetap
@@ -1675,10 +1922,12 @@ async function load(): Promise<void> {
   state.loading = true;
   state.error = '';
   paint();
-  // Settings dan daftar backup paralel — daftar tidak memblokir kartu saklar.
+  // Settings, daftar backup & master layanan topup paralel — tidak saling
+  // memblokir. `muatLayanan()` menangkap error sendiri (cukup pesan di kartu).
   const [s, _] = await Promise.allSettled([
     apiGet<{ data: Settings }>('/api/settings'),
     muatBackup(),
+    muatLayanan(),
   ]);
   if (s.status === 'fulfilled') {
     state.minus = s.value.data?.allow_negative_stock === true;

@@ -117,6 +117,10 @@ const SUITE = [
   ['orders-test.mjs', 73],
   ['izin-test.mjs', 34],
   ['pin-lock-test.mjs', 13],
+  // Potongan bank topup (2026-10-27): bank_fee per transaksi + master
+  // topup_services (CRUD + suggest-admin?provider=). Self-heal: provider uji
+  // UJI-BF-* + shift UJI-BF-KASIR dihapus di awal/akhir via better-sqlite3.
+  ['bank-fee-test.mjs', 42],
   // restore-test memulihkan DB ke snapshot yang ia buat SENDIRI di awal suite
   // (data suite sebelumnya ikut masuk snapshot) — taruh menjelang akhir supaya
   // suite yang butuh data live panjang tidak terpengaruh urutan.

@@ -183,7 +183,10 @@ export type TopupLine = {
   nomor: string;           // '' = tanpa nomor (jenis yang boleh tanpa nomor)
   token: string;           // nomor token PLN ('' bila bukan pln-token)
   nominal: number;         // mutasi modal — ikut tagihan, BUKAN omzet
-  admin: number;           // pendapatan jasa — ikut tagihan
+  admin: number;           // pendapatan jasa KOTOR — ikut tagihan
+  bank_fee: number;        // potongan bank/agen (2026-10-27): porsi admin yang
+                            // dibayar ke bank. Laba bersih = admin − bank_fee.
+                            // Laci TIDAK berubah (kasir menerima admin penuh).
 };
 /** Baris layanan di keranjang + nomor urutnya (pola `manualSeq`). */
 let cartTopup: TopupLine[] = [];
@@ -424,8 +427,10 @@ function htmlResumePenjualan(o: {
   items: { qty: number; nama: string; net: number }[];
   /** Baris topup keranjang (Opsi B hybrid) — ditampilkan SETELAH daftar
    *  produk; nominal & admin tetap dua baris terpisah (aturan domain §1).
-   *  Absen/[] = keluaran PERSIS seperti sebelum fitur (uji lama aman). */
-  topups?: { label: string; nominal: number; admin: number; keluar?: boolean }[];
+   *  Absen/[] = keluaran PERSIS seperti sebelum fitur (uji lama aman).
+   *  `bank_fee` (2026-10-27) = potongan bank/agen — sub-baris laba bersih
+   *  hanya tampil bila > 0. */
+  topups?: { label: string; nominal: number; admin: number; bank_fee?: number; keluar?: boolean }[];
   metode: PayMethod;
   uang: number;
   tot: number;
@@ -467,6 +472,10 @@ function htmlResumePenjualan(o: {
         `<div class="struk-baris"><span>${t.keluar ? 'Tarik' : 'Topup'} ${esc(t.label)}</span><span>${rp(t.nominal)}</span></div>` +
         (t.admin > 0
           ? `\n      <div class="struk-baris struk-redup struk-indent"><span>admin</span><span>${rp(t.admin)}</span></div>`
+          : '') +
+        // Potongan bank (2026-10-27) — laba bersih = admin − bank fee
+        ((t.bank_fee ?? 0) > 0
+          ? `\n      <div class="struk-baris struk-redup struk-indent"><span>potongan bank</span><span>${rp(t.bank_fee!)}</span></div>`
           : ''),
     )
     .join('\n      ');
@@ -2533,6 +2542,16 @@ const TARIK_JENIS: Jenis[] = [
   { key: 'tarik-bank', label: 'Dari rekening', ringkas: 'rekening', hint: 'Tarik ke tunai', nomorLabel: 'Nomor rekening', nomorPh: 'Nomor rekening', butuhNomor: false, icon: 'landmark' },
 ];
 
+/** Daftar gabungan jenis layanan untuk master `topup_services` (2026-10-27,
+ *  kartu "Layanan topup" di halaman Sistem). SATU-SUMBER dengan
+ *  TOPUP_JENIS/TARIK_JENIS di atas: `provider` yang dikirim POS =
+ *  `key.toUpperCase()`, jadi halaman Sistem memakai kode yang sama untuk
+ *  auto-fill admin + potongan bank per jenis. */
+export const LAYANAN_URUT: { provider: string; label: string }[] = [
+  ...TOPUP_JENIS.map((j) => ({ provider: j.key.toUpperCase(), label: j.label })),
+  ...TARIK_JENIS.map((j) => ({ provider: j.key.toUpperCase(), label: j.label })),
+];
+
 /** `label` = judul di tile (cth. "Dari rekening"),
  *  `ringkas` = satu kata untuk toast/struk. */
 interface Jenis {
@@ -2572,6 +2591,9 @@ function barisStrukTopup(t: TopupLine): StrukBaris[] {
   return [
     { kiri: `${awal} ${j.ringkas}`, kanan: rp(t.nominal) },
     ...(t.admin > 0 ? [{ kiri: 'Biaya admin', kanan: rp(t.admin) }] : []),
+    // Potongan bank/agen (2026-10-27): hanya untuk pelaporan laba — TIDAK
+    // memengaruhi struk (struk = uang yang ditagih = nominal + admin).
+    ...(t.bank_fee > 0 ? [{ kiri: 'Potongan bank', kanan: rp(t.bank_fee) }] : []),
     ...(t.nomor ? [{ kiri: j.nomorLabel, kanan: t.nomor }] : []),
     ...(t.token ? [{ kiri: 'Token', kanan: t.token, besar: true }] : []),
   ];
@@ -2597,7 +2619,7 @@ function topupRowHtml(l: TopupLine): string {
         <div class="flex items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="cell-strong">${badge}${esc(j.label)} ${rp(l.nominal)}${detail ? ` <span class="cell-sub">${detail}</span>` : ''}</div>
-            <div class="cell-sub">admin ${rp(l.admin)} — ${keluar ? 'uang keluar diserahkan tunai' : 'topup, bukan stok'} (dibayar bersama nota ini)</div>
+            <div class="cell-sub">admin ${rp(l.admin)}${(l.bank_fee ?? 0) > 0 ? ` − potongan bank ${rp(l.bank_fee!)} = laba ${rp(l.admin - l.bank_fee!)}` : ''} — ${keluar ? 'uang keluar diserahkan tunai' : 'topup, bukan stok'} (dibayar bersama nota ini)</div>
           </div>
           <div class="flex shrink-0 items-center gap-2">
             <span class="font-semibold tabular-nums text-gray-900 dark:text-white">${rp(keluar ? l.admin : l.nominal + l.admin)}</span>
@@ -3187,6 +3209,7 @@ function muatKeranjang(): boolean {
       token: String(t.token ?? ''),
       nominal,
       admin,
+      bank_fee: Math.max(0, Math.round(Number(t.bank_fee) || 0)),
     });
   }
   discount = bolehDiskon() ? Math.max(0, Math.round(s.discount || 0)) : 0;
@@ -3316,6 +3339,7 @@ async function muatHold(h: Hold): Promise<void> {
     .map((t) => ({
       ...t,
       admin: Math.max(0, Math.round(Number(t.admin) || 0)),
+      bank_fee: Math.max(0, Math.round(Number(t.bank_fee) || 0)),
       nomor: String(t.nomor ?? ''),
       token: String(t.token ?? ''),
     }));
@@ -3490,6 +3514,8 @@ function bukaTertahan(): void {
         t.nomor ? esc(t.nomor) : '',
         t.token ? `token ${esc(t.token)}` : '',
         `admin ${rp(t.admin)}`,
+        // Potongan bank (2026-10-27) — hanya tampil bila ada
+        (t.bank_fee ?? 0) > 0 ? `bank ${rp(t.bank_fee!)}` : '',
       ].filter(Boolean).join(' · ');
       return `<li class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-3 dark:bg-gray-700/40">
         <div class="min-w-0">
@@ -4162,6 +4188,11 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
           <input id="ptk-admin" class="input" type="number" inputmode="numeric" min="0" step="500" value="" />
         </div>
       </div>
+      <div id="ptk-bankfee-wrap" class="ptk-field">
+        <label class="label" for="ptk-bankfee">Potongan bank/agen (Rp)</label>
+        <input id="ptk-bankfee" class="input" type="number" inputmode="numeric" min="0" step="500" value="0" />
+        <p class="ptk-hint" id="ptk-bankfee-hint">Laba bersih = admin − potongan bank. Laci tidak berubah (kasir menerima admin penuh).</p>
+      </div>
       <p class="ptk-hint">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
       <!-- Kotak total: dipindah ke .modal-header di onMount (kanan atas). -->
       <div class="ptk-totalbox" id="ptk-totalbox">
@@ -4198,6 +4229,7 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
       const inpToken = api.el.querySelector<HTMLInputElement>('#ptk-token')!;
       const inpNominal = api.el.querySelector<HTMLInputElement>('#ptk-nominal')!;
       const inpAdmin = api.el.querySelector<HTMLInputElement>('#ptk-admin')!;
+      const inpBankFee = api.el.querySelector<HTMLInputElement>('#ptk-bankfee')!;
       const elTotal = api.el.querySelector<HTMLElement>('#ptk-total')!;
       const elTotalLabel = api.el.querySelector<HTMLElement>('#ptk-total-label')!;
       /** Baris ringkasan bawah — pola baris Total modal resume (label kiri,
@@ -4208,9 +4240,19 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
       const tampilTotal = () => {
         const nominal = Math.round(Number(inpNominal.value || 0));
         const admin = Math.max(0, Math.round(Number(inpAdmin.value || 0)));
+        const bankFee = Math.max(0, Math.round(Number(inpBankFee.value || 0)));
         const tarik = jenis.startsWith('tarik');
         elTotalLabel.textContent = tarik ? 'Biaya admin ditagih' : 'Ditambah ke nota';
         elTotal.textContent = rp(tarik ? admin : nominal + admin);
+        // Tampilkan laba bersih bila ada potongan bank (hanya topup, bukan tarik)
+        const hint = api.el.querySelector<HTMLElement>('#ptk-bankfee-hint');
+        if (hint) {
+          if (!tarik && bankFee > 0) {
+            hint.textContent = `Laba bersih: ${rp(Math.max(0, admin - bankFee))} (admin ${rp(admin)} − potongan bank ${rp(bankFee)}). Laci tidak berubah.`;
+          } else {
+            hint.textContent = 'Laba bersih = admin − potongan bank. Laci tidak berubah (kasir menerima admin penuh).';
+          }
+        }
       };
       const aktif = () =>
         TOPUP_JENIS.find((j) => j.key === jenis)
@@ -4238,6 +4280,9 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         labelNomor.textContent = j.nomorLabel;
         inpNomor.placeholder = j.nomorPh;
         wrapToken.classList.toggle('hidden', !j.butuhToken);
+        // Sembunyikan potongan bank untuk tarik (uang keluar — tidak ada bank fee)
+        const wrapBankFee = api.el.querySelector<HTMLElement>('#ptk-bankfee-wrap');
+        wrapBankFee?.classList.toggle('hidden', jenis.startsWith('tarik'));
         tampilTotal(); // label baris ringkasan ikut jenis (topup vs tarik)
       };
       const pilihJenis = (e: Event) => {
@@ -4246,18 +4291,53 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         jenis = b.dataset.ptkJenis as TopupJenis;
         tampilJenis();
       };
-      wrapJenis?.addEventListener('click', pilihJenis);
-      wrapTarik?.addEventListener('click', pilihJenis);
-      // Saran admin mengikuti tier form topup; berhenti menimpa begitu kasir
-      // mengedit kolomnya sendiri (pola saran-admin form layanan).
-      inpNominal.addEventListener('input', () => {
-        if (!adminTouched) inpAdmin.value = String(suggestAdmin(Number(inpNominal.value || 0)) || '');
+      // Auto-fill admin & bank fee dari master layanan topup (2026-10-27).
+      // Fetch saat dialog dibuka; fallback tier lama bila API gagal/tidak ada
+      // konfigurasi. `svcMap` = {PROVIDER: {admin_default, bank_fee_default}}.
+      const svcMap = new Map<string, { admin_default: number; bank_fee_default: number }>();
+      void apiGet<{ data: { provider: string; admin_default: number; bank_fee_default: number; is_active: number }[] }>('/api/topup-services').then((r) => {
+        if (r?.data) {
+          for (const s of r.data) {
+            if (s.is_active) svcMap.set(s.provider, { admin_default: s.admin_default, bank_fee_default: s.bank_fee_default });
+          }
+        }
+        // Kasir mungkin sudah mengetik nominal sebelum fetch selesai (tier
+        // fallback terisi lebih dulu) — segarkan supaya konfigurasi menang.
+        // Microtask pasti jalan setelah onMount selesai (isiSaran ter-init).
+        isiSaran();
+      }).catch(() => { /* offline/gagal — saran tier sudah terisi */ });
+      // Jenis → provider code (uppercase, sama dengan yang dikirim server)
+      const providerCode = (j: TopupJenis) => j.toUpperCase();
+      // Saran admin mengikuti master layanan (atau tier fallback); berhenti
+      // menimpa begitu kasir mengedit kolomnya sendiri.
+      const isiSaran = () => {
+        if (adminTouched) return;
+        const nominal = Number(inpNominal.value || 0);
+        const code = providerCode(jenis);
+        const cfg = svcMap.get(code);
+        if (cfg) {
+          inpAdmin.value = String(cfg.admin_default || '');
+          inpBankFee.value = String(cfg.bank_fee_default || 0);
+        } else {
+          inpAdmin.value = String(suggestAdmin(nominal) || '');
+          inpBankFee.value = '0';
+        }
         tampilTotal();
-      });
+      };
+      inpNominal.addEventListener('input', isiSaran);
       inpAdmin.addEventListener('input', () => {
         adminTouched = true;
         tampilTotal();
       });
+      inpBankFee.addEventListener('input', tampilTotal);
+      // Saat ganti jenis, reset admin + bank fee ke konfigurasi baru
+      const pilihJenisReset = (e: Event) => {
+        pilihJenis(e);
+        adminTouched = false;
+        isiSaran();
+      };
+      wrapJenis?.addEventListener('click', pilihJenisReset);
+      wrapTarik?.addEventListener('click', pilihJenisReset);
       tampilJenis();
       inpNominal.focus();
       // Guard anti-double-submit (bug nyata 2026-10-08: "tambah 1 topup
@@ -4296,6 +4376,7 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
           token: wrapToken.classList.contains('hidden') ? '' : inpToken.value.trim(),
           nominal,
           admin,
+          bank_fee: jenis.startsWith('tarik') ? 0 : Math.max(0, Math.round(Number(inpBankFee.value || 0))),
         });
         simpanKeranjang();
         api.close();
@@ -4670,6 +4751,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         token: t.jenis === 'pln-token' ? t.token : '',
         nominal: t.nominal,
         admin: t.admin,
+        bank_fee: t.bank_fee ?? 0, // potongan bank/agen (2026-10-27)
         pay_method: payMethod,
         shift_id: shift.id,
         cashier: getCashier(),
@@ -4770,6 +4852,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
           label: jenisTopupLokal(t.jenis).label,
           nominal: t.nominal,
           admin: t.admin,
+          bank_fee: t.bank_fee,
           keluar: isTarik(t),
         })),
         metode: payMethod,
@@ -5020,6 +5103,7 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
         label: jenisTopupLokal(t.jenis).label,
         nominal: t.nominal,
         admin: t.admin,
+        bank_fee: t.bank_fee,
         keluar: isTarik(t),
       })),
       metode: payMethod,

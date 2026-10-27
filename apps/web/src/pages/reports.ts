@@ -60,7 +60,7 @@ import { toast } from '../ui/toast';
 /* ---------- tipe (ikuti kontrak GET /api/reports/*) ---------- */
 
 type ByMethod = { pay_method: string; n: number; total: number };
-type TopupBaris = { kind: string; n: number; nominal: number; admin: number };
+type TopupBaris = { kind: string; n: number; nominal: number; admin: number; bank_fee?: number };
 /** `hpp`/`laba` per baris DIHITUNG SERVER (2026-10-17) — rumus laba produk
  *  hanya hidup di laporanRentang (index.ts), klien menampilkan apa adanya. */
 type TopItem = { name: string; unit: string; qty: number; amount: number; hpp: number; laba: number };
@@ -382,6 +382,8 @@ function topupCard(l: Laporan): string {
   const n = l.topup.reduce((a, t) => a + t.n, 0);
   const nominal = l.topup.reduce((a, t) => a + t.nominal, 0);
   const admin = l.topup.reduce((a, t) => a + t.admin, 0);
+  const bankFee = l.topup.reduce((a, t) => a + (t.bank_fee ?? 0), 0);
+  const adaBankFee = bankFee > 0;
   return `
   <div class="card min-w-0">
     <div class="flex items-baseline justify-between gap-2">
@@ -391,7 +393,7 @@ function topupCard(l: Laporan): string {
     ${
       l.topup.length
         ? `<table class="mt-2 w-full text-left text-sm">
-        <thead><tr><th class="th">Jenis</th><th class="th text-right">Transaksi</th><th class="th text-right">Nominal</th><th class="th text-right">Admin</th></tr></thead>
+        <thead><tr><th class="th">Jenis</th><th class="th text-right">Transaksi</th><th class="th text-right">Nominal</th><th class="th text-right">Admin</th>${adaBankFee ? '<th class="th text-right">Pot. bank</th><th class="th text-right">Laba bersih</th>' : ''}</tr></thead>
         <tbody>
           ${l.topup
             .map(
@@ -400,6 +402,7 @@ function topupCard(l: Laporan): string {
                 <td class="td td-num">${t.n}</td>
                 <td class="td td-num">${rp(t.nominal)}</td>
                 <td class="td td-num">${rp(t.admin)}</td>
+                ${adaBankFee ? `<td class="td td-num">${(t.bank_fee ?? 0) > 0 ? `-${rp(t.bank_fee!)}` : rp(0)}</td><td class="td td-num">${rp(t.admin - (t.bank_fee ?? 0))}</td>` : ''}
               </tr>`,
             )
             .join('')}
@@ -408,11 +411,12 @@ function topupCard(l: Laporan): string {
             <td class="td td-num font-semibold">${n}</td>
             <td class="td td-num font-semibold">${rp(nominal)}</td>
             <td class="td td-num font-semibold">${rp(admin)}</td>
+            ${adaBankFee ? `<td class="td td-num font-semibold">-${rp(bankFee)}</td><td class="td td-num font-semibold">${rp(admin - bankFee)}</td>` : ''}
           </tr>
         </tbody>
       </table>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-        Nominal = mutasi modal, admin = pendapatan jasa. Keduanya TIDAK masuk omzet.
+        Nominal = mutasi modal, admin = pendapatan jasa${adaBankFee ? ', potongan bank = biaya agen/bank (laba bersih = admin − potongan bank)' : ''}. Keduanya TIDAK masuk omzet.
       </p>`
         : `<div class="empty">Belum ada topup/tarik pada tanggal ini.</div>`
     }
@@ -954,8 +958,8 @@ function csvHarian(): (string | number)[][] {
     ...l.byMethod.map((m) => [metode(m.pay_method), m.n, m.total] as [string, number, number]),
     [],
     ['Topup/tarik'],
-    ['Jenis', 'Transaksi', 'Nominal', 'Admin'],
-    ...l.topup.map((t) => [jenis(t.kind), t.n, t.nominal, t.admin] as [string, number, number, number]),
+    ['Jenis', 'Transaksi', 'Nominal', 'Admin', 'Potongan bank', 'Laba bersih'],
+    ...l.topup.map((t) => [jenis(t.kind), t.n, t.nominal, t.admin, t.bank_fee ?? 0, t.admin - (t.bank_fee ?? 0)] as [string, number, number, number, number, number]),
     [],
     ['Produk terlaris'],
     ['Nama', 'Satuan', 'Qty', 'Omzet', 'HPP', 'Laba'],

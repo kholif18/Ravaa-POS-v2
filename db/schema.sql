@@ -383,7 +383,11 @@ CREATE TABLE IF NOT EXISTS topup_txns (
   nomor       TEXT NOT NULL DEFAULT '',-- no HP / no pelanggan ('' = layanan tanpa nomor: e-wallet/pulsa/tarik, pemilik 2026-10-06)
   token       TEXT NOT NULL DEFAULT '',-- Nomor Token PLN (dicetak di struk; kosong untuk layanan lain)
   nominal     INTEGER NOT NULL,        -- nilai isi/tarik
-  admin       INTEGER NOT NULL DEFAULT 0, -- biaya admin (pendapatan)
+  admin       INTEGER NOT NULL DEFAULT 0, -- biaya admin (pendapatan KOTOR — yang ditagih ke pelanggan)
+  bank_fee    INTEGER NOT NULL DEFAULT 0, -- potongan bank/agen (2026-10-27): porsi admin yang
+                                          -- dibayar ke bank/penyedia layanan. Laba bersih = admin - bank_fee.
+                                          -- Laci shift TIDAK berubah (kasir menerima admin penuh);
+                                          -- bank_fee hanya untuk pelaporan laba.
   total       INTEGER NOT NULL,        -- nominal + admin (yang dibayar pelanggan)
   pay_method  TEXT NOT NULL DEFAULT 'tunai',
   cashier     TEXT NOT NULL DEFAULT 'kasir',
@@ -393,6 +397,21 @@ CREATE TABLE IF NOT EXISTS topup_txns (
   -- baris topup ditulis SEBELUM baris sales tercipta, jadi foreign key akan
   -- gagal saat insert. Dipakai Riwayat mengelompokkan topup di bawah nota.
   sale_id     TEXT
+);
+
+-- Master layanan topup (2026-10-27): pemilik mengatur admin default +
+-- potongan bank per jenis layanan. Kasir pilih jenis → admin & bank fee
+-- otomatis terisi di dialog POS (bisa di-edit per transaksi).
+-- provider = kode layanan (E-WALLET, PULSA, PLN-TOKEN, dst — unik).
+CREATE TABLE IF NOT EXISTS topup_services (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider    TEXT UNIQUE NOT NULL,     -- kode layanan (unik, uppercase)
+  label       TEXT NOT NULL,            -- nama tampil: "GoPay", "Telkomsel", "PLN Token"
+  admin_default INTEGER NOT NULL DEFAULT 0, -- admin default (Rp)
+  bank_fee_default INTEGER NOT NULL DEFAULT 0, -- potongan bank default (Rp)
+  is_active   INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS stock_moves (
