@@ -11,6 +11,9 @@ serta menambahkan catatan kebijakan **MDR QRIS 0%** (efektif 1 Okt 2026).
 (akses 25 Okt 2026); kandidat baru §4.15–4.18 (outbox offline, riwayat
 pesanan per pelanggan, scan LAN HTTPS, retur supplier) — semuanya ACC
 pemilik 2026-10-25; antrian eksekusi di `ROADMAP.md` §1.7.
+**v2.2 (2026-10-27)** — kandidat §4.19 (potongan bank/agen topup +
+master layanan topup) selesai (commit `556552e`, permintaan pemilik — di luar
+riset kompetitor); baris retur supplier §3.2 & §6 dikoreksi mengikuti §4.18.
 Riwayat v1 utuh tersimpan di git log dokumen ini.
 
 **Keputusan kandidat §4 (pemilik, 19 Okt 2026):** 7 butir disetujui dan
@@ -35,7 +38,7 @@ untuk tidak dikerjakan**.
 * Tabel: `✓` ada · `~` parsial/terbatas · `✗` tidak (Ravaa: "sengaja" =
   keputusan §5) · `·` tidak muncul di sumber yang dibaca — **bukan** berarti
   fiturnya tidak ada. Seluruh butir §4 sudah berkeputusan & tuntas
-  (19 Okt 2026) — tidak ada butir "sedang dikerjakan".
+  (19–27 Okt 2026) — tidak ada butir "sedang dikerjakan".
 
 ---
 
@@ -242,7 +245,9 @@ AI forecasting.
   atribusi `sale_payments`, Σ amount per nota selalu = total; tanpa jalur
   hutang); F12 bayar pas; **uang kurang → hutang otomatis** (syarat:
   pelanggan terpilih bukan "Pelanggan Umum"); modal resume pasca-bayar +
-  cetak Thermal/A4; kick laci otomatis untuk tunai.
+  cetak Thermal/A4; kick laci otomatis untuk tunai; topup/tarik =
+  `nominal`+`admin` dengan **potongan bank/agen `bank_fee`** (laba bersih =
+  admin − potongan; laci tak berubah) + master `topup_services` (§4.19).
 * **Master**: produk (foto, diskon, kadaluarsa, catatan, harga dinamis,
   grosir, borongan, multi-satuan, tombstone), kategori (`track_stock` /
   `use_expiry`), satuan, pelanggan (+tier, +umur hutang, +riwayat nota per
@@ -314,7 +319,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | PO supplier + penerimaan barang | ✓ | ~ | ✓ | ✓ | ✓ (add-on) | **✓** |
 | Hutang supplier + aging | ✓ | · | · | · | · | **✓** |
 | Retur pelanggan | ✓ | ~ | · | · | · | **✓** |
-| Retur/batal ke supplier | ✓ | · | · | · | · | ~ (PO batal saja) |
+| Retur/batal ke supplier | ✓ | · | · | · | · | **✓** (dari PO, 26 Okt 2026 — §4.18) |
 | Cetak label/barcode | ✓ | · | · | ✓ | ✓ | **✓** (EAN/Code 128) |
 | Bundling / paket produk | · | · | ✓ | · | · | ✗ ditolak 19 Okt 2026 (4.8) |
 
@@ -363,6 +368,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 | 4.16 | **Riwayat pesanan jasa per pelanggan** | **✅ selesai 2026-10-25** — ROADMAP §1.10 | Qasir vertikal Laundry/Barbershop ("layanan & pembayaran tiap pelanggan tercatat") | `GET /api/orders?customer_id=` + seksi "Pesanan jasa" di modal riwayat Pelanggan (pesanan belum diserah kini terlihat) |
 | 4.17 | **Scan kamera di LAN (HTTPS)** | **✅ selesai 2026-10-25** — ROADMAP §1.7 | Loyverse (scan kamera), semua app Android | `getUserMedia` butuh konteks aman → Caddy `tls internal` (`https://ip:5656`); deteksi + baca produk cache IndexedDB 100% offline |
 | 4.18 | **Retur ke supplier (retur pembelian)** | **✅ selesai 2026-10-26** — ROADMAP §1.9 | KulaPOS (retur ke supplier) | Tabel `purchase_returns` + stok keluar `retur-beli` + sisa hutang net + idempotensi `client_id`; uang kembali dicatat manual di Kas masuk; `purchase-retur-test` 34 asersi |
+| 4.19 | **Potongan bank/agen topup + master layanan** | **✅ selesai 2026-10-27** (commit `556552e`) | · (permintaan pemilik; tidak muncul di sumber kompetitor yang dibaca) | `topup_txns.bank_fee` — laba bersih topup = `admin − bank_fee` (laci TIDAK berubah, validasi `bank_fee ≤ admin`) + master `topup_services` (admin/potongan default per jenis) + auto-fill `suggest-admin?provider=` |
 
 ---
 
@@ -409,7 +415,7 @@ multi-outlet · PPOB integrasi · F&B · email laporan · AI forecasting.
 * v1: "Pembelian/PO supplier ✗" → **✓** Tahap 3 (2026-10-11), termasuk
   hutang supplier + aging.
 * v1: "Retur ✗" → **✓** retur penjualan Tahap 2 (2026-10-11); retur ke
-  **supplier** masih belum (PO batal saja).
+  **supplier** → **✓** selesai 2026-10-26 (§4.18).
 * v1: "Ravaa hanya restock manual" → sudah ada opname, riwayat stok
   ber-referensi nota, dan PO supplier.
 * v1: "hutang manual saja" → + otomatis dari POS (uang kurang), aging FIFO,
