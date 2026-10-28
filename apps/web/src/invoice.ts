@@ -84,8 +84,8 @@ export function htmlLaporan(d: DokLaporan, toko: Toko): string {
   .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
   .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
   .baris-kop .lbl { font-weight: 700; }
-  .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; text-transform: uppercase; }
-  .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
+  .title { font-size: 18px; font-weight: 800; color: #111827; margin: 0; letter-spacing: -.3px; text-transform: uppercase; }
+  .title-no { font-size: 14px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.3px; }
   .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
   .info-box { width: 48%; }
   .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }
@@ -376,8 +376,8 @@ export function htmlInvoice(sale: SaleNota, items: ItemNota[], toko: Toko, piuta
   .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
   .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
   .baris-kop .lbl { font-weight: 700; }
-  .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; }
-  .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
+  .title { font-size: 18px; font-weight: 800; color: #111827; margin: 0; letter-spacing: -.3px; }
+  .title-no { font-size: 14px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.3px; }
   .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
   .info { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
   .info-box { width: 48%; }
@@ -526,8 +526,8 @@ export function htmlRekapShift(s: ShiftRow, toko: Toko, fisik: number | null): s
   .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
   .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
   .baris-kop .lbl { font-weight: 700; }
-  .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; }
-  .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
+  .title { font-size: 18px; font-weight: 800; color: #111827; margin: 0; letter-spacing: -.3px; }
+  .title-no { font-size: 14px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.3px; }
   .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
   .info-box { width: 48%; }
   .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }

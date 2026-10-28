@@ -5,6 +5,26 @@
 > plus `frontend-pos` untuk setiap tugas UI di `apps/web/`.
 > Jika ragu antara menebak atau memverifikasi: VERIFIKASI.
 
+## 0. Kapan pakai codebase-memory MCP vs langsung baca file
+
+Aturan global `~/.config/opencode/AGENTS.md` minta "ALWAYS prefer MCP graph
+tools" — di repo ini DIKECAUALIKAN sebagai berikut (keputusan pemilik
+2026-10-28: graph query memperlambat perbaikan kecil karena agent membaca
+ulang proyek lewat banyak roundtrip):
+
+* **Langsung baca/grep/edit** (TANPA query graph) — dipakai lebih dulu untuk:
+  perbaikan CSS/layout/HTML yang targetnya sudah diketahui (mis. cetak A4,
+  pos.css, styles.css), typo, konstanta, mengubah satu fungsi yang sudah
+  tahu file-nya, dan membaca file yang sudah disebut di peta §2.
+  Peta file §2 + grep repo = cukup; jangan query graph dulu.
+* **search_graph / trace_path / query_graph** — hanya untuk: impact analysis
+  (siapa memanggil X sebelum refactor besar), mencari simbol yang tidak ada
+  di peta §2, pola lintas-file yang gagal ketemu lewat grep, atau saat
+  diminta eksplisit memakai graph.
+* Keputusan akhir tetap milik agent: yang penting SELESAI CEPAT tanpa
+  mengorbankan ketepatan (antislop §verifikasi tetap berlaku — bukti dari
+  file nyata, bukan dari ingatan graph saja).
+
 ## 1. Konteks bisnis (jangan dilanggar)
 
 * Toko: ATK, Cetak, Desain, Jasa ketik & service Laptop/PC, Topup e-wallet /

@@ -329,7 +329,10 @@ function htmlHutangA4(r: Rincian, toko: Toko, tglCetak: string): string {
   .container { width: 100%; margin: 0; padding: 0; }
   .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
   .nama-toko { font-size: 16px; font-weight: 800; margin-top: 4px; letter-spacing: .2px; }
+  .title { font-size: 18px; font-weight: 800; color: #111827; margin: 0; letter-spacing: -.3px; }
+  .title-no { font-size: 14px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.3px; }
   .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }
+  .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
   th { text-align: left; padding: 6px 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
   td { padding: 6px 5px; border-bottom: 1px solid #d1d5db; vertical-align: middle; }

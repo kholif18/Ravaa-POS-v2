@@ -408,8 +408,11 @@ function htmlPoA4(po: Po, items: PoItem[], toko: Toko, tglCetak: string): string
   .alamat-toko { font-size: 11px; color: #374151; margin-top: 2px; }
   .baris-kop { margin-top: 2px; font-size: 11px; color: #374151; }
   .baris-kop .lbl { font-weight: 700; }
-  .title { font-size: 26px; font-weight: 900; color: #111827; margin: 0; letter-spacing: -.5px; }
-  .title-no { font-size: 20px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.5px; }
+  .title { font-size: 18px; font-weight: 800; color: #111827; margin: 0; letter-spacing: -.3px; }
+  .title-no { font-size: 14px; font-weight: 700; color: #111827; margin-top: 2px; letter-spacing: -.3px; }
+  .meta { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+  .info-box { width: 48%; }
+  .info-title { font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #333; margin-bottom: 6px; padding-bottom: 3px; font-size: 11px; letter-spacing: .3px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
   th { text-align: left; padding: 6px 5px; border-bottom: 1.5px solid #333; text-transform: uppercase; font-size: 10px; letter-spacing: .3px; }
   td { padding: 6px 5px; border-bottom: 1px solid #d1d5db; vertical-align: middle; }
