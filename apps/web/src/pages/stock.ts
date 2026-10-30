@@ -284,7 +284,7 @@ function tableCard(): string {
                       ? `<span class="badge-low">${icon('alert')}<span>${p.stock} / min ${p.min_stock}</span></span>`
                       : `<span class="badge-ok">${icon('check')}<span>${p.stock}</span></span>`;
                 const off = p.is_active === 0;
-                return `<tr class="tr${off ? ' opacity-60' : ''}">
+                return `<tr class="tr${off ? ' opacity-60' : ''}" data-id="${p.id}">
                   <td class="td w-12 text-center tabular-nums text-gray-400">${i + 1}</td>
                   <td class="td">
                     <div class="cell-strong">${esc(p.name)}${off ? ' <span class="badge-off ml-1">nonaktif</span>' : ''}</div>
@@ -325,11 +325,20 @@ function tableCard(): string {
   </div>`;
 }
 
+/** Target baris yang baru diedit (untuk scroll ke situ pasca-reload). */
+let editedProductId: number | null = null;
+
 function paint(): void {
   if (!host) return;
   const cari = host.querySelector<HTMLInputElement>('#st-q');
   const posisi = cari?.selectionStart ?? null;
   const fokus = document.activeElement === cari;
+
+  // Di desktop (>=lg) scroll berada di .table-wrap; di mobile di .page.
+  const wrap = host.querySelector<HTMLElement>('.table-wrap');
+  const page = host.closest<HTMLElement>('.page');
+  const scrollSource = wrap ?? page;
+  const scroll = scrollSource?.scrollTop ?? 0;
 
   // Rantai `lg:h-full` + `lg:min-h-0` mengikuti halaman Produk: di desktop (>= lg)
   // halaman TIDAK scroll — hanya tbody tabel yang scroll, jadi ringkasan, toolbar,
@@ -348,6 +357,21 @@ function paint(): void {
         <div class="min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">${tableCard()}</div>
       </div>
     </div>`;
+
+  // Pulihkan scroll ke container yang benar.
+  const newWrap = host.querySelector<HTMLElement>('.table-wrap');
+  const newPage = host.closest<HTMLElement>('.page');
+  const newScrollSource = newWrap ?? newPage;
+  if (newScrollSource) newScrollSource.scrollTop = scroll;
+
+  // Jika ada produk yang baru diedit, scroll ke barisnya.
+  if (editedProductId !== null) {
+    const row = host.querySelector<HTMLTableRowElement>(`#st-rows tr[data-id="${editedProductId}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center', behavior: 'auto' });
+      editedProductId = null;
+    }
+  }
 
   bind();
   // Search harus tetap hidup setiap paint: kehilangan fokus di tengah mengetik
@@ -432,6 +456,7 @@ function bind(): void {
       }
       // restockForm memanggil callback ini setelah menyimpan, supaya angka di
       // halaman ini ikut terbaru tanpa reload penuh.
+      editedProductId = p.id;
       restockForm(p, () => load());
     }),
   );
