@@ -16,7 +16,7 @@
 // Cetak menghormati "Jeda semua cetak" (`getPrintPause`, default PAUSED):
 // tombol Cetak menolak dengan toast selama dijeda (keputusan asumsi plan A3).
 
-import { apiGet, HttpError } from '../api';
+import { apiGet } from '../api';
 import { getCachedProducts, type Category, type Product } from '../store';
 import {
   CSS_LABEL,
@@ -38,6 +38,8 @@ import {
 import { getPrintPause } from '../ui/print-pref';
 import { icon } from '../ui/icons';
 import { toast } from '../ui/toast';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 const rp = (n: number) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 
@@ -72,17 +74,6 @@ const state = {
 
 let host: HTMLElement | null = null;
 let pageAbort: AbortController | null = null;
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /** Produk layak yang lolos filter kategori + pencarian (SEMUA kata harus cocok,
  *  konsisten dengan halaman Produk & POS). */

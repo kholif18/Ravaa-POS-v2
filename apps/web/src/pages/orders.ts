@@ -22,7 +22,7 @@
 // POST /:id/status (dikerjakan<->selesai), POST /:id/take (serah = nota +
 // pelunasan + hutang), POST /:id/cancel (refund baris bila sudah ada uang).
 
-import { apiGet, apiPost, HttpError } from '../api';
+import { apiGet, apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { choiceDialog } from '../ui/confirm';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
@@ -37,6 +37,8 @@ import { tglPendek } from '../ui/waktu';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { getPrintPause } from '../ui/print-pref';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 import { cetakUlang, type SaleRow } from './history';
 
 /* ---------- tipe (kontrak GET /api/orders & :id) ---------- */
@@ -113,17 +115,6 @@ let host: HTMLElement | null = null;
 let searchTimer = 0;
 
 /* ---------- util ---------- */
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /** Tanggal/jam gaya Indonesia zona KASIR (pola purchases/invoice.ts):
  *  created_at disimpan UTC, diparse lalu tampil lokal. */

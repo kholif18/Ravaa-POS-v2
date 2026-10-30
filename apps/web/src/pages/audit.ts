@@ -13,11 +13,13 @@
 // Server: urutan id DESC (terbaru di atas), `q` multi-kata, `date`
 // divalidasi round-trip (tanggal mustahil = 400, bukan halaman kosong).
 
-import { apiGet, HttpError } from '../api';
+import { apiGet } from '../api';
 import { icon } from '../ui/icons';
 import { openModal } from '../ui/modal';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { waktu } from '../ui/waktu';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 type Baris = {
   id: number;
@@ -46,17 +48,6 @@ const state = {
 
 let host: HTMLElement | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /** Label manusiawi per aksi — kunci DB tetap bahasa Inggris (kontrak audit). */
 const AKSI_LABEL: Record<string, string> = {

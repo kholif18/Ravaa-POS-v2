@@ -6,7 +6,7 @@
 // baru, id = update), DELETE /api/customers/:id (400 bila masih ada catatan
 // hutang — pesannya menyuruh menghapus catatan di halaman Hutang dulu).
 
-import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { apiDelete, apiGet, apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { punyaIzin } from '../ui/auth';
 import { confirmDialog } from '../ui/confirm';
@@ -16,6 +16,8 @@ import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { rp } from '../escpos';
 import { waktu } from '../ui/waktu';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 type Customer = {
   id: number;
@@ -77,17 +79,6 @@ const state = {
 
 let host: HTMLElement | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 // Lebar penuh ke seluruh body — konsisten dengan Satuan/Stok/Produk.
 function renderPage(): string {

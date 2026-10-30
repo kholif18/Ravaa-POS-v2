@@ -100,7 +100,7 @@ const SUITE = [
   ['recap-test.mjs', 16],
   ['logo-test.mjs', 21],
   ['a4-logo-test.mjs', 14],
-  ['laporan-menu-test.mjs', 38],
+  ['laporan-menu-test.mjs', 40],
   ['analitik-test.mjs', 26],
   ['sidebar-dark-test.mjs', 12],
   ['sidebar-scroll-test.mjs', 5],

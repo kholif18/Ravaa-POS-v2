@@ -11,10 +11,12 @@
 // (printer tiap PC kasir beda: thermal 58mm, Epson L3110, atau tanpa printer),
 // jadi disimpan lewat ui/print-pref.ts di localStorage browser ini.
 
-import { apiGet, apiPost, apiDelete, HttpError } from '../api';
+import { apiGet, apiPost, apiDelete } from '../api';
 import { confirmDialog } from '../ui/confirm';
 import { icon, type IconName } from '../ui/icons';
 import { getToko } from '../ui/user';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 import {
   LACI_BAWAAN_HEX, getAgentUrl, getAutoPrint, getDrawerKick, getDrawerKickHex,
   getPrintPause, getStrukLayout, setAgentUrl, setAutoPrint, setDrawerKick,
@@ -150,11 +152,6 @@ let host: HTMLElement | null = null;
 /** Listener dokumen (Ctrl+K) milik kunjungan terakhir — di-abort saat mount
  *  berikutnya supaya berpindah-pindah halaman tidak menumpuk listener. */
 let sinyal: AbortController | null = null;
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
 // halaman Stok & Produk.
@@ -1302,12 +1299,6 @@ function kartuBackup(): string {
       ${err}
       ${daftar}
     </div>`;
-}
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
 }
 
 function paint(): void {

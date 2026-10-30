@@ -10,7 +10,7 @@
 // Stok hanya kembali untuk produk track_stock=1; uang kembali dihitung untuk
 // semua baris. Hari = UTC persis server & Riwayat/Laporan.
 
-import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { apiDelete, apiGet, apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { punyaIzin } from '../ui/auth';
 import { confirmDialog } from '../ui/confirm';
@@ -21,6 +21,8 @@ import { getCashier } from '../ui/user';
 import { hariIni, geser, tglPanjang } from '../ui/waktu';
 import { rp } from '../escpos';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 type Retur = {
   id: number;
@@ -56,17 +58,6 @@ const state = {
 
 let host: HTMLElement | null = null;
 let cariTimer: ReturnType<typeof setTimeout> | undefined;
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 const jam = (iso: string) => (iso ?? '').slice(11, 16) || '—';
 

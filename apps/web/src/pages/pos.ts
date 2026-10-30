@@ -53,6 +53,8 @@ import { toast } from '../ui/toast';
 import { openModal, type ModalHandle } from '../ui/modal';
 import { bukaScanKamera, scanKameraTerbuka, tutupScanKamera } from '../ui/scan-kamera';
 import { icon, type IconName } from '../ui/icons';
+import { esc } from '../ui/html';
+import { kbd } from '../ui/ui';
 import { AMBAT_EXPIRY, statusExpiry, tglExpiry } from '../ui/expiry';
 import { dialogTutupShift, type ShiftRow } from './shift-tutup';
 // cetakUlang = jalur Riwayat (Tahap 2 2026-10-06): tombol "Cetak ulang" di
@@ -374,9 +376,8 @@ function stopJam(): void {
 const labelMetode = (m: PayMethod) => PAY_METHODS.find((x) => x.key === m)?.label ?? m;
 
 /** Label shortcut gaya `<kbd>` (P3) — SATU gaya untuk semua tombol POS
- *  (Cari F3, Qty F4, Bersihkan F5, Diskon F6, bayar F2/Enter). */
-const kbd = (t: string) =>
-  `<kbd class="rounded border border-gray-300 px-1 dark:border-gray-600">${t}</kbd>`;
+ *  (Cari F3, Qty F4, Bersihkan F5, Diskon F6, bayar F2/Enter).
+ *  Helper diambil dari ui/ui.ts (class .kbd didefinisikan di styles.css) */
 
 /** Kirim struk. Kegagalan cetak TIDAK PERNAH membatalkan penjualan — uang sudah
  *  tercatat, hanya kertasnya yang belum keluar. */
@@ -677,15 +678,6 @@ function suggestAdmin(nominal: number): number {
 }
 
 const rp = (n: number) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
-
-/** Nama produk bisa diketik sendiri oleh kasir (item manual, nama produk), jadi
- *  wajib di-escape sebelum masuk template — tanpa ini satu nama berisi `<b>`
- *  merusak seluruh baris tabel keranjang. */
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
 
 /* ---------- hitung ---------- */
 
@@ -4156,50 +4148,65 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
     // total modal bayar KulaPOS. ID/atribut lama TIDAK berubah — suite
     // e2e-topup-keranjang & e2e-struk menempel padanya (`#ptk-nomor-wrap`
     // tetap toggle class `hidden`, tile aktif tetap dapat `!border-primary`).
+    // **REFactor 2 kolom (keputusan pemilik 2026-10-29): modal lama terlalu
+    // panjang & butuh scroll di layar 720px** — tumpukan satu kolom `.ptk`
+    // (pos.css) kini dibelah: kolom KIRI = grup tile (topup + tarik),
+    // kolom KANAN = field (nomor/token, Nominal|Admin, bank fee, petunjuk),
+    // dipisah garis putus-putus vertikal `.ptk-cols`. Modal ikut `wide`
+    // (768px) supaya tiap kolom lega; di bawah `sm` kembali satu kolom
+    // (grid collapse — HP tinggi, scroll bukan masalah). Tinggi turun
+    // ±600 -> ±400px, muat tanpa scroll. Semua ID KONTRAK tidak berubah;
+    // `.ptk-totalbox` tetap anak `.ptk` (dipindah ke header di onMount).
     body: `<div class="ptk pos-scope">
-      ${bisaTopup ? `<div>
-        <div class="ptk-group-title">Jenis topup</div>
-        <div class="ptk-tiles ptk-tiles-topup" id="ptk-jenis">
-          ${TOPUP_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
+      <div class="ptk-cols">
+        <div class="ptk-col">
+          ${bisaTopup ? `<div>
+            <div class="ptk-group-title">Jenis topup</div>
+            <div class="ptk-tiles ptk-tiles-topup" id="ptk-jenis">
+              ${TOPUP_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
+            </div>
+          </div>` : ''}
+          ${bisaTarik ? `<div>
+            <div class="ptk-group-title">Tarik tunai (uang keluar)</div>
+            <div class="ptk-tiles ptk-tiles-tarik" id="ptk-jenis-tarik">
+              ${TARIK_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
+            </div>
+          </div>` : ''}
         </div>
-      </div>` : ''}
-      ${bisaTarik ? `<div>
-        <div class="ptk-group-title">Tarik tunai (uang keluar)</div>
-        <div class="ptk-tiles ptk-tiles-tarik" id="ptk-jenis-tarik">
-          ${TARIK_JENIS.map((j) => `<button type="button" class="btn ptk-tile" data-ptk-jenis="${j.key}" title="${esc(j.hint)}">${icon(j.icon)}<span>${j.label}</span></button>`).join('')}
+        <div class="ptk-col">
+          <div id="ptk-nomor-wrap" class="hidden ptk-field">
+            <label class="label" for="ptk-nomor" id="ptk-nomor-label">Nomor HP tujuan</label>
+            <input id="ptk-nomor" class="input" type="text" value="" />
+          </div>
+          <div id="ptk-token-wrap" class="hidden ptk-field">
+            <label class="label" for="ptk-token">Nomor Token</label>
+            <input id="ptk-token" class="input" type="text" inputmode="numeric" value="" />
+          </div>
+          <div class="ptk-nums">
+            <div class="ptk-field">
+              <label class="label" for="ptk-nominal">Nominal (Rp)</label>
+              <input id="ptk-nominal" class="input" type="number" inputmode="numeric" min="0" step="1000" value="" />
+            </div>
+            <div class="ptk-field">
+              <label class="label" for="ptk-admin">Biaya admin (Rp)</label>
+              <input id="ptk-admin" class="input" type="number" inputmode="numeric" min="0" step="500" value="" />
+            </div>
+          </div>
+          <div id="ptk-bankfee-wrap" class="ptk-field">
+            <label class="label" for="ptk-bankfee">Potongan bank/agen (Rp)</label>
+            <input id="ptk-bankfee" class="input" type="number" inputmode="numeric" min="0" step="500" value="0" />
+            <p class="ptk-hint" id="ptk-bankfee-hint">Laba bersih = admin − potongan bank. Laci tidak berubah (kasir menerima admin penuh).</p>
+          </div>
+          <p class="ptk-hint">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
         </div>
-      </div>` : ''}
-      <div class="ptk-div"></div>
-      <div id="ptk-nomor-wrap" class="hidden ptk-field">
-        <label class="label" for="ptk-nomor" id="ptk-nomor-label">Nomor HP tujuan</label>
-        <input id="ptk-nomor" class="input" type="text" value="" />
       </div>
-      <div id="ptk-token-wrap" class="hidden ptk-field">
-        <label class="label" for="ptk-token">Nomor Token</label>
-        <input id="ptk-token" class="input" type="text" inputmode="numeric" value="" />
-      </div>
-      <div class="ptk-nums">
-        <div class="ptk-field">
-          <label class="label" for="ptk-nominal">Nominal (Rp)</label>
-          <input id="ptk-nominal" class="input" type="number" inputmode="numeric" min="0" step="1000" value="" />
-        </div>
-        <div class="ptk-field">
-          <label class="label" for="ptk-admin">Biaya admin (Rp)</label>
-          <input id="ptk-admin" class="input" type="number" inputmode="numeric" min="0" step="500" value="" />
-        </div>
-      </div>
-      <div id="ptk-bankfee-wrap" class="ptk-field">
-        <label class="label" for="ptk-bankfee">Potongan bank/agen (Rp)</label>
-        <input id="ptk-bankfee" class="input" type="number" inputmode="numeric" min="0" step="500" value="0" />
-        <p class="ptk-hint" id="ptk-bankfee-hint">Laba bersih = admin − potongan bank. Laci tidak berubah (kasir menerima admin penuh).</p>
-      </div>
-      <p class="ptk-hint">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
       <!-- Kotak total: dipindah ke .modal-header di onMount (kanan atas). -->
       <div class="ptk-totalbox" id="ptk-totalbox">
         <div class="ptk-total-label" id="ptk-total-label">Ditambah ke nota</div>
         <div class="ptk-total" id="ptk-total">Rp0</div>
       </div>
     </div>`,
+    wide: true,
     onMount: (api) => {
       // Total -> header kanan (lihat komentar body di atas): selalu terlihat
       // saat kasir mengetik nominal. `#ptk-totalbox` dibiarkan di body saat

@@ -34,7 +34,7 @@
 // rincian PO = TABEL barang (qty/harga beli/sub total) + tfoot
 // Total/Terbayar/Sisa.
 
-import { apiGet, apiPost, HttpError } from '../api';
+import { apiGet, apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { punyaIzin } from '../ui/auth';
 import { confirmDialog } from '../ui/confirm';
@@ -44,6 +44,8 @@ import { toast } from '../ui/toast';
 import { getCashier } from '../ui/user';
 import { tglPendek } from '../ui/waktu';
 import { rp } from '../escpos';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 // Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026) —
 // helper tinggal di invoice.ts, dipakai juga oleh debts.ts & rekap/laporan.
 import { CSS_LOGO_A4, bukaTabCetak, footerDokumenA4, logoA4Html, rpIdr, tglSingkat, tglLengkap, cityToko } from '../invoice';
@@ -133,17 +135,6 @@ const state = {
 
 let host: HTMLElement | null = null;
 let cariTimer: ReturnType<typeof setTimeout> | undefined;
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 const STATUS: { key: string; label: string }[] = [
   { key: 'semua', label: 'Semua' },

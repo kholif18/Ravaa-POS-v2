@@ -15,7 +15,7 @@
 // "Buat retur" per nota (dialog prefill item), bukan edit nota lama: riwayat
 // penjualan tetap utuh, stok kembali + uang keluar tercatat di #/returns.
 
-import { apiGet, apiPost, HttpError } from '../api';
+import { apiGet, apiPost } from '../api';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { icon } from '../ui/icons';
 import { punyaIzin } from '../ui/auth';
@@ -30,6 +30,8 @@ import { openModal } from '../ui/modal';
 import { rp, strukUntukTercetak, kirimPrint, type Struk } from '../escpos';
 import { cetakInvoice } from '../invoice';
 import { choiceDialog } from '../ui/confirm';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 /* ---------- tipe ---------- */
 
@@ -156,17 +158,6 @@ const state = {
 let host: HTMLElement | null = null;
 
 /* ---------- util ---------- */
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 // hariIni()/geser()/tglPanjang() pindah ke ui/waktu.ts 2026-09-30 — satu
 // implementasi UTC untuk Riwayat, Laporan, dan Dashboard.

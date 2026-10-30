@@ -11,7 +11,7 @@
 // (Pengguna/Pengaturan/Backup/Audit) tidak pernah muncul di sini — tetap
 // khusus owner dan ditegakkan `hanyaOwner` di server.
 
-import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { apiDelete, apiGet, apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
@@ -32,6 +32,8 @@ import {
   type Izin,
 } from '../ui/izin';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 type UserRow = {
   id: number;
@@ -49,17 +51,6 @@ type UserRow = {
 
 const state = { items: [] as UserRow[], loading: true, error: '' };
 let host: HTMLElement | null = null;
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 function badgePeran(role: string): string {
   return role === 'owner'

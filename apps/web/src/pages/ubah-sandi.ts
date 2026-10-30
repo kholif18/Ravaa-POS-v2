@@ -4,16 +4,12 @@
 // Restyle 2026-10-17: memakai kerangka yang SAMA dengan login
 // (authLayarHtml() ui/auth-screen.ts) — satu tampilan auth di kedua rute.
 // ID #gs-form/#gs-lama/#gs-baru/#gs-ulang/#gs-err/#gs-ok tidak berubah.
-import { apiPost, HttpError } from '../api';
+import { apiPost } from '../api';
 import { toast } from '../ui/toast';
 import { akunTersimpan, ruteBawaan, type Akun } from '../ui/auth';
 import { icon } from '../ui/icons';
 import { authLayarHtml } from '../ui/auth-screen';
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
+import { errMsg } from '../ui/http';
 
 export function renderUbahSandiPage(el: HTMLElement): void {
   const tersimpan = akunTersimpan();

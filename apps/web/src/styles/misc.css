@@ -1,0 +1,225 @@
+/* Sidebar collapse (desktop) */
+[data-collapsed="1"] .sidebar {
+  @apply w-20;
+}
+[data-collapsed="1"] .main-col {
+  @apply lg:ml-20;
+}
+[data-collapsed="1"] .nav-label,
+[data-collapsed="1"] .nav-title,
+[data-collapsed="1"] .brand-name {
+  @apply hidden;
+}
+[data-collapsed="1"] .nav-link {
+  @apply justify-center;
+}
+
+/* ---------- SweetAlert2: tombol & popup (buttonsStyling: false) ----------
+   SweetAlert2 tidak menata tombol saat buttonsStyling:false, dan opsi
+   confirmButtonColor/cancelButtonColor ikut diabaikan. Semua tampilan
+   tombol karena itu di-holder di sini, bukan dari opsi swal.
+   PENTING: blok ini SENGAJA DI LUAR @layer. CSS swal di-inject TANPA @layer,
+   dan aturan unlayered selalu menang atas aturan ber-layer apa pun
+   spesifisitasnya — aturan yang berada di dalam @layer components tidak akan
+   pernah mengalahkannya. Selectivity dinaikkan dengan prefix .swal2-container. */
+
+/* Ukuran & ruang diseragamkan dengan .modal (styles.css): default swal
+   512px / ikon 80px / judul 30px terlalu gemuk untuk konfirmasi kasir yang
+   muncul puluhan kali dalam satu shift. */
+.swal2-container {
+  --swal2-width: 24rem;
+  --swal2-padding: 0 0 1.125em;
+  --swal2-title-padding: 0.5em 1.25em 0;
+  --swal2-html-container-padding: 0.4em 1.5em 0.25em;
+  --swal2-actions-margin: 0.875em auto 0;
+  --swal2-border-radius: 1rem;
+  --swal2-background: #fff;
+  --swal2-color: #71717a;
+  --swal2-backdrop: rgb(24 24 27 / 0.5);
+  --swal2-backdrop-transition: background-color 180ms ease-out;
+  /* Animasi memakai keyframe modal-in/modal-out yang SAMA dengan modal
+     generik: mendarat dengan pantulan halus (back-out), keluar lebih cepat.
+     Swal menunggu `animationend` untuk melepas popup, jadi durasi di sini
+     ikut menentukan kapan dialog dilepas — dan saat animasinya dimatikan
+     (reduced-motion) Swal langsung melepas nodenya sendiri, karena
+     hasCssAnimation(popup) jadi false. */
+  --swal2-show-animation: modal-in 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --swal2-hide-animation: modal-out 120ms ease-in forwards;
+}
+/* Sama dengan backdrop-blur-sm pada .modal-overlay supaya scrim seragam. */
+.swal2-container.swal2-backdrop-show {
+  backdrop-filter: blur(4px);
+}
+/* Ikon 80 -> 56 -> 50 -> 45px (super-compact 2026-10-04: font-size 0.7 ->
+   0.625 -> 0.5625rem; glyph ikon = 3.75em terhadap nilai ini, jadi "!"
+   42 -> 37.5 -> 33.75px — tetap piktogram, bukan teks). Yang diskalakan adalah font-size, BUKAN hanya box-nya:
+   geometri ikon (mis. garis X pada ikon error dihitung `top: 2.3125em`)
+   diukur dalam em terhadap font-size ikon, jadi mengecilkan lebar/tinggi
+   saja akan membuat isinya meluber keluar lingkaran. */
+.swal2-container .swal2-popup .swal2-icon {
+  font-size: 0.5625rem;
+  margin-top: 1.25em;
+}
+/* Judul 30 -> 18 -> 14 -> 13px (super-compact 2026-10-04: kini seukuran
+   body agar dialog ikut skala global — hierarki vs isi dibangun font-weight
+   600 + warna #18181b, bukan ukuran).
+   Warna ditetapkan eksplisit: .swal2-title mewarisi
+   --swal2-color, dan var itu sekarang memakai teks muted milik kita. */
+.swal2-container .swal2-popup .swal2-title {
+  font-size: 0.8125em;
+  color: #18181b;
+}
+/* Isi 16 -> 14 -> 13px (setara .modal-body yang kini text-sm = 13px). */
+.swal2-container .swal2-popup .swal2-html-container {
+  font-size: 0.8125em;
+}
+/* .modal memakai rounded-2xl + shadow-xl; popup ikut sama supaya rasa
+   dialognya satu keluarga (token radius/ shadow yang sudah ada — bukan baru). */
+.swal2-container .swal2-popup {
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+[data-theme="dark"] .swal2-container {
+  --swal2-background: #18181b;
+  --swal2-color: #a1a1aa;
+}
+[data-theme="dark"] .swal2-container .swal2-popup .swal2-title {
+  color: #fafafa;
+}
+
+/* Restyle 2026-10-08 — aksen teks primer DI DARK MODE. Token
+   `--color-primary` (#1d6df0) dipilih agar teks putih di atasnya lolos AA
+   di mode terang (4.7:1), tetapi sebagai TEKS di atas kartu gelap ia hanya
+   ±3.7:1. Mengganti token di scope dark tidak bisa menolong: bg-primary ikut
+   berubah sehingga putih-di-atas-biru jatuh ke 3.0:1. Solusinya menerangi
+   kelas `.text-primary` khusus dark (±6.9:1 di atas gray-800). Aturan ini
+   SENGAJA di luar @layer — unlayered menang atas @layer utilities. */
+[data-theme="dark"] .text-primary,
+[data-theme="dark"] .dark\:text-primary,
+[data-theme="dark"] .hover\:text-primary:hover {
+  color: #6aa5ff;
+}
+
+.swal2-container .sw-actions {
+  @apply flex flex-row flex-wrap items-center justify-center gap-3;
+}
+.swal2-container .sw-btn {
+  @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-[10px] border border-transparent px-4 py-2 text-sm font-semibold transition focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none;
+}
+/* Umpan balik tekan — sama dengan .btn:active, supaya rasanya seragam. */
+.swal2-container .sw-btn:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: 90ms;
+}
+  /* ---------- Layar auth ala Sandik (restyle 2026-10-17) ----------
+     Latar gradasi biru 135deg + tiga ornamen lingkaran blur (glassmorphism)
+     + kartu kaca putih/10 dengan backdrop-blur. Dipakai #/login & #/ubah-sandi
+     lewat satu kerangka `authLayarHtml()` (ui/auth-screen.ts).
+
+     Restyle 2026-10-17 (permintaan pemilik "layout halaman login jadi lebih
+     responsif dan modern"):
+     - `.page:has(.login-bg)` = gradasi FULL-BLEED (dulu ada bingkai canvas
+       10-12px dari padding .page; pola :has sama dengan `.page:has(.pm-shell)`).
+     - `.login-wrap` = grid 1 kolom di HP (brand ringkas di atas kartu) /
+       2 kolom >=lg (brand kiri, kartu kanan). `m-auto` = SATU-satunya pemusat
+       vertikal: rantai `min-h-full` bersarang lama tidak pernah teresolusi
+       (kartu terukur mentok atas top=28px), sedangkan margin-auto pada flex
+       item tetap aman saat konten lebih tinggi dari layar (auto margin kolaps
+       ke 0 — tidak terpotong di atas seperti `justify-center`).
+     - `.login-field` = input berikon (svg absolute kiri) + tombol lihat sandi
+       (kanan); padding kiri/kanan diatur utility di template (pl-9/pr-10). */
+  .page:has(.login-bg) {
+    @apply p-0;
+  }
+  .login-bg {
+    @apply relative flex min-h-full flex-col overflow-hidden;
+    background-image: linear-gradient(135deg, var(--grad-blue-from) 0%, var(--grad-blue-via) 45%, var(--grad-blue-to) 100%);
+  }
+  .login-orb {
+    @apply pointer-events-none absolute rounded-full;
+    background: radial-gradient(circle at 30% 30%, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0.04) 65%);
+    filter: blur(2px);
+  }
+  .login-orb-1 {
+    @apply -left-24 -top-24 size-80;
+  }
+  .login-orb-2 {
+    @apply -right-32 top-1/3 size-96 opacity-80;
+  }
+  .login-orb-3 {
+    @apply -bottom-28 left-1/4 size-72 opacity-60;
+  }
+  .login-wrap {
+    @apply relative z-10 m-auto grid w-full max-w-5xl items-center gap-8 p-4 sm:p-6 lg:grid-cols-2 lg:gap-16 lg:p-10;
+  }
+  /* Tile ikon brand (ukuran panjang x lebar per template: size-12/size-11 —
+     kelas ini TIDAK mengunci size supaya utility tetap bisa menyesuaikan;
+     kelas unlayered menang atas utility, jadi jangan letakkan size di sini). */
+  .login-logo {
+    @apply flex shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white shadow-lg shadow-black/15 ring-1 ring-white/20;
+  }
+  .login-logo svg {
+    @apply size-6;
+  }
+  .login-card-glass {
+    @apply relative mx-auto w-full max-w-sm rounded-2xl border border-white/15 bg-white/10 p-6 shadow-2xl backdrop-blur-md;
+  }
+  /* Hero panel kiri — satu-satunya teks >13px di layar auth (28px; pola sama
+     #pos-grand 48px: ukuran arbitrer yang disengaja, bukan token baru). */
+  .auth-judul {
+    @apply text-[28px] font-bold leading-tight tracking-tight;
+  }
+  .login-point {
+    @apply flex items-start gap-2.5 text-xs leading-relaxed text-white/75;
+  }
+  .login-point > svg {
+    @apply mt-0.5 size-4 shrink-0 text-white/50;
+  }
+  /* Input di atas kaca: putih solid agar kontras teks tetap AA. */
+  .login-input {
+    @apply border-transparent bg-white/95 text-gray-900 placeholder:text-gray-400 focus:bg-white;
+  }
+  .login-field {
+    @apply relative;
+  }
+  .login-field > svg {
+    @apply pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400;
+  }
+  .login-toggle {
+    @apply absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none;
+  }
+  .login-toggle svg {
+    @apply size-4;
+  }
+  /* Kotak galat: tetap `hidden` sampai ada pesan (teks di-set JS — kontrak
+     tests/login-test.mjs). role="alert" di template. */
+  .login-err {
+    @apply rounded-lg border border-amber-300/40 bg-amber-400/15 px-3 py-2 text-xs font-medium text-amber-100;
+  }
+  /* Tombol aksi utama DI ATAS KACA: putih solid + teks primary. Sengaja BUKAN
+     .btn-primary — varian itu memasang `background-image` gradien (260-263)
+     yang TIDAK bisa ditimpa utility `!bg-white`, sehingga tombol lama tampil
+     biru-di-atas-biru (bug nyata ditemukan 2026-10-17). */
+  .login-btn {
+    @apply bg-white text-primary shadow-lg shadow-black/15 hover:bg-primary-soft;
+  }
+
+  .swal2-container .sw-btn-primary {
+  @apply bg-primary text-white shadow-md shadow-primary/30 hover:bg-primary-hover hover:shadow-lg hover:shadow-primary/35;
+}
+.swal2-container .sw-btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700;
+}
+/* Batal = outline netral, selalu jelas berbeda dari tombol aksi. */
+.swal2-container .sw-btn-ghost {
+  @apply border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
+}
+/* Wajib SETELAH aturan judul di atas: selector sama (0,3,0), jadi yang
+   menang adalah urutan — dan milik .sw-danger sudah memakai !important. */
+.swal2-container .sw-danger .swal2-icon {
+  @apply !border-red-500 !text-red-500;
+}
+.swal2-container .sw-danger .swal2-title {
+  @apply !text-red-600 dark:!text-red-400;
+}
+
+/* ---------- Komponen tabel, form, modal, toast (halaman data) ---------- */

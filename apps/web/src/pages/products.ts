@@ -4,7 +4,7 @@
 // Catatan `type` produk (barang|jasa|cetak|desain|topup) SUDAH DIHAPUS 2026-09-26:
 // nature produk sudah tercermin dari kategori (categories.track_stock).
 
-import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { apiDelete, apiGet, apiPost } from '../api';
 import { fullReset, getCachedProducts, removeProductBySku, syncMaster, type Category, type Product, type Unit } from '../store';
 import { icon } from '../ui/icons';
 import { toggleNavDrawer } from '../ui/shell';
@@ -16,6 +16,8 @@ import { statusExpiry, tglExpiry } from '../ui/expiry';
 import { punyaIzin } from '../ui/auth';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 const SIDE_KEY = 'ravaa.prodside';
 
@@ -81,20 +83,9 @@ function readSide(): boolean {
   }
 }
 
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
 const rp = (n: number) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 const slugify = (s: string) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /* ---------- MARKUP ---------- */
 

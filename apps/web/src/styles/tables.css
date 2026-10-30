@@ -1,0 +1,53 @@
+@layer components {
+  .table-wrap {
+    @apply relative w-full overflow-x-auto;
+  }
+  .table {
+    @apply w-full min-w-[720px] border-collapse text-left text-sm;
+  }
+  .th {
+    @apply border-b border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400;
+  }
+  .th-sticky {
+    @apply sticky top-0 z-10 dark:bg-[#192231];
+  }
+  .th-sort {
+    @apply inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 transition hover:text-primary focus-visible:outline-2 focus-visible:outline-primary;
+  }
+  .th-sort.is-on {
+    @apply text-primary;
+  }
+  .th-arrow {
+    @apply text-[9px] leading-none opacity-60;
+  }
+  .th-sort:not(.is-on) .th-arrow {
+    @apply opacity-35;
+  }
+  .table-scroll {
+    @apply lg:min-h-0 lg:flex-1 lg:overflow-y-auto;
+  }
+  .td {
+    @apply border-b border-gray-100 px-2.5 py-1.5 align-middle text-gray-700 dark:border-gray-700/60 dark:text-gray-300;
+  }
+  .tr:hover {
+    @apply bg-gray-50 dark:bg-gray-900/30;
+  }
+  .td-num {
+    @apply text-right tabular-nums;
+  }
+  .cell-strong {
+    @apply font-semibold text-gray-900 dark:text-white;
+  }
+  .cell-sub {
+    @apply text-xs text-gray-500 dark:text-gray-400;
+  }
+  .table-compact th {
+    @apply px-2.5 py-1.5;
+  }
+  .table-compact td {
+    @apply px-2.5 py-1;
+  }
+  .table-foot {
+    @apply flex flex-wrap items-center justify-between gap-2 border-t border-gray-200/70 bg-gray-50/60 px-3 py-2 dark:border-gray-700/70 dark:bg-white/5;
+  }
+}

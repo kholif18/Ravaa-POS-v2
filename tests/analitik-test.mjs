@@ -199,8 +199,8 @@ p.on('pageerror', (e) => err.push(String(e).slice(0, 120)));
 await p.goto(`${WEB}/#/reports`, { waitUntil: 'networkidle' });
 await p.waitForSelector('#rp-body', { timeout: 15000 });
 await p.waitForTimeout(1200);
-chk('B1 8 menu laporan (Harian…Stok + Analitik)',
-  await p.locator('[data-menu]').count() === 8 && await p.locator('[data-menu="analitik"]').count() === 1);
+chk('B1 9 menu laporan (Harian…Akuntansi + Stok + Analitik)',
+  await p.locator('[data-menu]').count() === 9 && await p.locator('[data-menu="analitik"]').count() === 1);
 
 await p.click('[data-menu="analitik"]');
 await p.waitForTimeout(1500);

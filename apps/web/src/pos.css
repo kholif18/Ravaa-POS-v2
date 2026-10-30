@@ -160,9 +160,26 @@
   /* ---------- 6. Modal topup/tarik (.ptk) ----------
      Redesain 2026-10-09 (pemilik memilih modal ini prioritas 1 dari
      screenshot): tile berikon ala KulaPOS, input 44px, total di HEADER
-     (kanan — dipindah DOM di onMount, bukan posisi statis di sini). */
+     (kanan — dipindah DOM di onMount, bukan posisi statis di sini).
+     **REFactor 2 KOLOM (keputusan pemilik 2026-10-29 — ACC "Ya — wide +
+     2 kolom")**: tumpukan satu kolom terlalu panjang & butuh scroll di
+     layar 720px. `.ptk` kini memuat grid `.ptk-cols`: kolom KIRI = grup
+     tile (topup + tarik), kolom KANAN = field (nomor/token, Nominal|
+     Admin, bank fee, petunjuk), dipisah garis putus-putus vertikal
+     mulai sm; di bawah sm (HP) kembali menumpuk tanpa garis. Modal
+     dibuka `wide: true` (768px — pos.ts) supaya tiap kolom lega.
+     `.ptk-totalbox` tetap anak `.ptk` — dipindah ke header di onMount. */
   .ptk {
-    @apply space-y-3 text-sm text-gray-700 dark:text-gray-200;
+    @apply text-sm text-gray-700 dark:text-gray-200;
+  }
+  .ptk-cols {
+    @apply grid gap-x-6 gap-y-4 sm:grid-cols-2;
+  }
+  /* Pemisah kolom KANAN (hanya variant sm — tanpa nilai dasar, jadi tidak
+     ada konflik property antar-variant; border-width tetap 0 di bawah sm,
+     warna dark cukup berlaku sendiri). `pl` jarakkan isi kolom dari garis. */
+  .ptk-col + .ptk-col {
+    @apply sm:border-l sm:border-dashed sm:border-gray-300 sm:pl-6 dark:border-gray-600;
   }
   .ptk-group-title {
     @apply mb-2 text-sm font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400;
@@ -170,9 +187,12 @@
   .ptk-tiles {
     @apply grid gap-2;
   }
-  /* Topup = 4 jenis (2 kolom di layar sempit, 4 kolom mulai sm). */
+  /* Topup = 4 jenis — SELALU 2 kolom (2×2). Dulu `sm:grid-cols-4` selebar
+     modal penuh 512px; sejak dialog 2 kolom (2026-10-29) grup tile duduk
+     di kolom kiri ~330px — 4 kolom akan memipihkan tile jadi ~76px dan
+     label "PLN Tagihan" terpotong dua baris. */
   .ptk-tiles-topup {
-    @apply grid-cols-2 sm:grid-cols-4;
+    @apply grid-cols-2;
   }
   /* Tarik = 2 jenis — SELALU 2 kolom (4 kolom akan menyisakan 2 slot kosong). */
   .ptk-tiles-tarik {
@@ -189,9 +209,8 @@
        di-link setelah styles.css jadi yang menang. */
     @apply size-5 shrink-0;
   }
-  .ptk-div {
-    @apply border-t border-dashed border-gray-300 dark:border-gray-600;
-  }
+  /* `.ptk-div` (garis putus horizontal pemisah tile|field) DIHAPUS 2026-10-29
+     — pemisah kini garis vertikal `.ptk-col + .ptk-col` di atas. */
   .ptk-field {
     @apply space-y-1;
   }
@@ -203,7 +222,9 @@
     @apply grid grid-cols-2 gap-3;
   }
   .ptk-hint {
-    @apply text-center text-sm leading-snug text-gray-500 dark:text-gray-400;
+    /* Rata kiri sejak 2 kolom (2026-10-29): petunjuk kini berada di dalam
+       kolom field sempit — teks rata tengah melompat-lompat antarbaris. */
+    @apply text-left text-sm leading-snug text-gray-500 dark:text-gray-400;
   }
   /* Kotak total — DOM-nya dipindahkan ke .modal-header (onMount) lalu
      ditempel kanan sebelum tombol X. */

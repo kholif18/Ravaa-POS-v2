@@ -1,0 +1,19 @@
+   aturan unlayered menang atas ber-layer, jadi menimpa .modal-overlay.is-open
+   tanpa perlu mengandalkan urutan atau !important. Pemanggilan di modal.ts
+   ikut menyesuaikan (langsung remove node, tanpa jeda 160ms). */
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay.is-open,
+  .modal-overlay.is-open .modal,
+  .modal-overlay.is-closing,
+  .modal-overlay.is-closing .modal {
+    animation: none;
+  }
+  /* SweetAlert2: cukup matikan lewat variabelnya. Dampaknya dua arah —
+     dialog tampil/hilang seketika, dan karena animation-name jadi `none`,
+     hasCssAnimation(popup) ikut false sehingga Swal melepas popup-nya
+     seketika juga (bukan menunggu animationend yang tak akan pernah datang). */
+  .swal2-container {
+    --swal2-show-animation: none;
+    --swal2-hide-animation: none;
+  }
+}

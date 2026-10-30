@@ -16,7 +16,7 @@
 // tiap baris: `GET /api/stock-moves?product_id=` sudah ada sejak Fase 1, jadi
 // halaman ini menjanjikan riwayat tanpa endpoint tambahan.
 
-import { apiGet, apiPost, HttpError } from '../api';
+import { apiGet, apiPost } from '../api';
 import { getCachedProducts, type Category, type Product } from '../store';
 import { icon } from '../ui/icons';
 import { toggleNavDrawer } from '../ui/shell';
@@ -26,6 +26,8 @@ import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { HEADER_STOK, bacaStok, csvStok, unduhCSV, type BarisStok } from '../importcsv';
 import { restockForm } from './products';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 const rp = (n: number) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 
@@ -70,16 +72,6 @@ const state = {
 
 let host: HTMLElement | null = null;
 
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /* ---------- Klasifikasi ---------- */
 

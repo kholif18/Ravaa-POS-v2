@@ -15,7 +15,7 @@
 // PIN disimpan server (scrypt); perangkat menyimpan verifier PBKDF2 agar layar
 // bisa dibuka saat WiFi mati. Mengganti sandi menghapus PIN (keputusan server).
 
-import { apiPost, HttpError } from '../api';
+import { apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { toast } from '../ui/toast';
 import { akunTersimpan, profilSaya, type Akun } from '../ui/auth';
@@ -30,11 +30,10 @@ import {
 } from '../ui/lock';
 import { initials } from '../ui/user';
 import { waktu } from '../ui/waktu';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
+
 
 /** Baca berkas gambar -> thumbnail JPEG maksimal 256px sebagai dataURL
  *  (pola kecilkanFoto() produk, ukuran avatar). */
@@ -63,11 +62,7 @@ async function kecilkanAvatar(file: File): Promise<string> {
   }
 }
 
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
+
 
 function kartuPinHtml(akun: Akun | undefined): string {
   const id = akun?.id ?? 0;

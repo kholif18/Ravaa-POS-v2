@@ -1,0 +1,227 @@
+@layer components {
+  .card-flush {
+    @apply overflow-hidden rounded-2xl border border-gray-200/70 bg-white shadow-card dark:border-gray-700/70 dark:bg-gray-800;
+  }
+  /* Keranjang POS (#pos-cart): padatkan SEKALI LAGI dari .table-compact
+     (permintaan pemilik 2026-10-03 "lebih compactkan lagi", 2026-10-04
+     super-compact). Teks kini mengikuti skala global: nama 13px /
+     sub-SKU 11px; stepper tetap 32px.
+     Specificity `#pos-cart td` (1,0,1) menang atas `.table-compact td`
+     (0,1,1); td baris catatan .note-row (tanpa class) ikut kena aturan ini,
+     termasuk padding kiri/kanannya. */
+  #pos-cart th {
+    @apply px-2.5 py-1;
+  }
+  #pos-cart td {
+    @apply px-2 py-0.5;
+  }
+  /* Baris item nama + SKU: rapatkan line-height antar dua teks tanpa
+     mengecilkan font — sub-SKU (text-xs = 11px) tetap terbaca. */
+  #pos-cart .cell-strong {
+    @apply leading-tight;
+  }
+  #pos-cart .cell-sub {
+    @apply leading-tight;
+  }
+
+  /* Sidebar kategori: show/hide dengan animasi — lebar di desktop, tinggi di mobile.
+     Wrapper ini tetap di DOM (hanya lebarnya yang 0) supaya bisa dianimasikan;
+     conditional render (innerHTML) tidak bisa dianimasikan sama sekali. */
+  .prod-side-wrap {
+    @apply min-w-0 overflow-hidden;
+    transition: max-height 280ms ease, opacity 220ms ease, width 280ms ease, margin 280ms ease;
+    max-height: 0;
+    opacity: 0;
+    width: 100%;
+  }
+  .prod-side-wrap[data-open='true'] {
+    max-height: 60rem;
+    opacity: 1;
+  }
+  @media (min-width: 1024px) {
+    .prod-side-wrap {
+      max-height: none;
+      width: 0;
+      margin-right: -1rem; /* batalkan gap saat tertutup */
+    }
+    .prod-side-wrap[data-open='true'] {
+      width: 16rem;
+      margin-right: 0;
+    }
+  }
+
+  .toolbar {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+
+  /* Dropdown hasil pencarian (POS). Dipakai juga halaman lain yang butuh
+     autocomplete: di dalam .search-wrap, jadi px-9 biar sejajar dengan input. */
+  .suggest {
+    @apply absolute top-full right-0 left-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-pop dark:border-gray-700 dark:bg-gray-800;
+  }
+  .suggest-item {
+    @apply flex w-full cursor-pointer items-center gap-2 px-2.5 py-1 text-left transition;
+  }
+  /* Hover/aktif DIPERTAJAM (2026-10-19, laporan pemilik: *"pada hover silakan
+     di pertajam warnanya, di LCD kurang terlihat"*): gray-100 (#f3f4f6) dan
+     gray-700/60 nyaris tak terbaca di panel LCD; kini tint primer dari token
+     `--color-primary` — light 25%, dark 30%. */
+  .suggest-item:hover,
+  .suggest-item.is-active {
+    @apply bg-primary/25 dark:bg-primary/30;
+  }
+  /* Chip satuan alternatif di bawah baris hasil (fitur #3 Multi satuan).
+     Baris utama = satuan dasar; chip = pack/dus/dsb. Sengaja TIDAK diberi
+     pemisah antar grup supaya tampilan produk tanpa chip tidak berubah. */
+  .suggest-units {
+    @apply flex flex-wrap gap-1.5 px-2.5 pb-1.5;
+  }
+  .suggest-unit {
+    @apply cursor-pointer rounded-full border border-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-600 transition hover:border-primary hover:text-primary dark:border-gray-600 dark:text-gray-300 dark:hover:border-primary dark:hover:text-primary;
+  }
+
+  .side-list {
+    @apply space-y-1;
+  }
+  .side-item {
+    @apply flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-700/60 dark:hover:text-white;
+  }
+  .side-item.is-active {
+    @apply bg-primary-soft text-primary dark:bg-primary/15 dark:text-primary;
+  }
+  .side-item .side-count {
+    @apply ml-auto text-xs font-semibold text-gray-400;
+  }
+  /* Aksi kategori: muncul saat hover di device mouse, selalu tampil di perangkat sentuh. */
+  .side-collapse-btn {
+    @apply inline-flex size-8 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200;
+  }
+  .side-collapse-btn svg {
+    @apply size-4;
+  }
+  .side-collapse-btn.is-on {
+    @apply bg-primary-soft text-primary dark:bg-primary/15 dark:text-primary;
+  }
+  .side-actions {
+    @apply absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 transition-opacity;
+  }
+  @media (hover: hover) {
+    .side-actions {
+      @apply opacity-0;
+    }
+    .group:hover .side-actions,
+    .group:focus-within .side-actions {
+      @apply opacity-100;
+    }
+  }
+  .row-btn {
+    @apply inline-flex size-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white;
+  }
+  .row-btn svg {
+    @apply size-4;
+  }
+  .row-btn-danger:hover {
+    @apply bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400;
+  }
+  /* Tombol "aktifkan kembali" — hijau, kontras dengan aksi destruktif. */
+  .row-btn-ok {
+    @apply text-emerald-600 dark:text-emerald-400;
+  }
+  .row-btn-ok:hover {
+    @apply bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300;
+  }
+
+  /* Menu ⋮ "aksi lain" baris tabel Produk: hanya Ubah + Hapus yang selalu
+     tampil langsung; sisanya (stok, duplikat, nonaktifkan) masuk ke sini.
+     `position: fixed` WAJIB: .table-wrap pakai overflow-x-auto, dan menurut
+     spesifikasi itu memaksa overflow-y ikut dihitung `auto` — anak ber-position
+     absolute di dalamnya ikut terpotong / memicu scrollbar tabel. Posisi
+     kiri-atasnya dihitung JS di bukaMenu() dari getBoundingClientRect tombol.
+     KEDUA: leluhur .row-dd DILARANG pakai `opacity` (dulu baris nonaktif
+     diredupkan opacity-60) — opacity membuat stacking context sehingga z-50
+     menu TERJEBAK di dalam baris: tampil samar + tertimpa baris sesudahnya
+     (klik item mati; bug nyata 2026-10-19). Redupkan baris lewat WARNA, jangan
+     opacity. */
+  .row-more {
+    @apply relative;
+  }
+  .row-more .row-btn[aria-expanded='true'] {
+    @apply bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-white;
+  }
+  .row-dd {
+    position: fixed;
+    @apply z-50 w-52 rounded-xl border border-gray-200 bg-white p-1.5 shadow-pop dark:border-gray-700 dark:bg-gray-800;
+  }
+  .row-dd[hidden] {
+    display: none;
+  }
+  .row-more.is-open .row-dd {
+    animation: dd-in 140ms ease-out;
+  }
+
+  .badge-ok {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400;
+  }
+  .badge-low {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400;
+  }
+  .badge-off {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500 dark:bg-gray-700 dark:text-gray-300;
+  }
+  .badge-dyn {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2 py-0.5 text-xs font-semibold text-primary dark:bg-primary/15 dark:text-primary;
+  }
+
+  /* Strip "N produk stok menipis" di layar POS. `icon()` sengaja TIDAK
+     membawa width/height (diatur CSS wadahnya) — tanpa aturan di sini ikon
+     segitiga meregang seukuran panel lalu menutupi keranjang (bug 2026-09-29). */
+  .strip-low svg {
+    @apply size-4 shrink-0;
+  }
+
+
+  .toast-root {
+    @apply pointer-events-none fixed inset-x-0 bottom-0 z-60 flex flex-col items-center gap-2 p-4 sm:inset-x-auto sm:right-0 sm:items-end;
+  }
+  .toast {
+    @apply pointer-events-auto flex w-full max-w-sm items-center gap-2 rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-sm font-medium text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100;
+  }
+  .toast .tdot {
+    @apply size-2 shrink-0 rounded-full;
+  }
+  .toast-success .tdot {
+    @apply bg-emerald-500;
+  }
+  .toast-error .tdot {
+    @apply bg-red-500;
+  }
+  .toast-warning .tdot {
+    @apply bg-amber-500;
+  }
+  .toast-info .tdot {
+    @apply bg-primary;
+  }
+  .empty {
+    @apply flex flex-col items-center gap-2 px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400;
+  }
+  /* Ikon empty-state harus DIPEGANG ukurannya: `icon()` sengaja tidak menulis
+     width/height (kebijakan repo — dikontrol CSS wadah, lihat komentar
+     .chip svg), jadi tanpa aturan ini svg melebar mengikuti kontainer.
+     Pola identik pernah bikin chip ringkasan Riwayat 40–90px.
+     Base size-5 (20px) untuk empty-state inline/kecil (tabel, kartu info). */
+  .empty svg {
+    @apply size-5 shrink-0;
+  }
+  /* Empty-state HERO (mis. "Belum ada transaksi" di halaman Riwayat):
+     ikon MEDIUM = 25% lebar layar — permintaan pemilik 2026-10-01
+     (setelah 20px dinilai "kecil sekali", sebelumnya dinilai "terlalu besar").
+     Modifier terpisah supaya empty-state di dalam tabel / kartu sempit
+     tidak ikut meledak. vw = lebar viewport ("screen page"). */
+  .empty-hero svg {
+    width: 25vw;
+    height: 25vw;
+  }
+}
+
+/* prefers-reduced-motion: matikan animasi modal. Sengaja di LUAR @layer —

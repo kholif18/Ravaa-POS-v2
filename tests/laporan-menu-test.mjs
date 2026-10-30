@@ -2,6 +2,9 @@
 // Stok + summary range + cashiers + products + piutang + cetak/PDF/CSV +
 // dropdown rentang tanggal (2026-10-17, revisi "jadikan dropdown saja") +
 // anti-regresi aside (kartu mandiri setinggi isinya + sticky utuh saat digulir).
+// Menu Akuntansi (2026-10-29): 9 menu; angka laba bersih diuji terhadap
+// summary API (bukan angka hardcode), kartu utang supplier boleh "tidak
+// tersedia" (izin pembelian kasir).
 //
 // Fixture menu Stok (2026-10-18): asersi "Saran order" jangan bergantung data
 // ambient — DB sehat = daftar "Perlu dikulak" kosong dan header tabelnya tidak
@@ -98,7 +101,7 @@ console.log('=== B. UI menu + filter ===');
 await p.goto('http://localhost:5656/#/reports', { waitUntil: 'networkidle' });
 await p.waitForSelector('#rp-body', { timeout: 15000 });
 await p.waitForTimeout(1200);
-chk('8 menu (Harian/Laba/Kasir/Produk/Kategori/Piutang/Stok/Analitik), Harian aktif', await p.locator('[data-menu]').count() === 8
+chk('9 menu (Harian/Laba/Kasir/Produk/Kategori/Piutang/Akuntansi/Stok/Analitik), Harian aktif', await p.locator('[data-menu]').count() === 9
   && await p.locator('[data-menu="harian"]').count() === 1);
 chk('harian: 24 batang jam + chip jam teramai', await p.locator('[data-jam]').count() === 24
   && (await p.textContent('#rp-body')).includes('Jam teramai'));
@@ -211,13 +214,13 @@ await gulir(0); await p.waitForTimeout(250);
 // ruang geser (Harian/Laba/Produk 72 vs Kasir/Piutang/Stok 56); `top-0` kini
 // seragam + sejajar tepi kolom kanan.
 const pola = [];
-for (const m of ['harian', 'laba', 'kasir', 'produk', 'kategori', 'piutang', 'stok', 'analitik']) {
+for (const m of ['harian', 'laba', 'kasir', 'produk', 'kategori', 'piutang', 'akuntansi', 'stok', 'analitik']) {
   await p.click(`[data-menu="${m}"]`);
   await p.waitForTimeout(1200);
   const u = await ukurAside();
   pola.push(`${m}=${u.top}/${u.tinggi}/${u.kananTop}`);
 }
-chk('aside: template identik di 8 menu (atas+tinggi kartu, sejajar kolom kanan)',
+chk('aside: template identik di 9 menu (atas+tinggi kartu, sejajar kolom kanan)',
   new Set(pola.map((s) => s.split('=')[1])).size === 1,
   pola.join(' '));
 // Menu Kategori (roadmap 2.2): baris "Jumlah" = Σ baris byCategory server.
@@ -237,6 +240,26 @@ chk('menu Kategori: tabel + Jumlah = Σ angka byCategory server',
       && teksJumlahKat.includes(rp(kcRows.reduce((a, r) => a + r.laba, 0)))
     : teksKat.includes('Belum ada penjualan'),
   teksJumlahKat.replace(/\s+/g, ' ').slice(0, 130) || `rows=${kcRows.length}`);
+// Menu Akuntansi (2026-10-29): laba rugi disusun dari angka summary server —
+// laba bersih WAJIB = (omzet − retur − HPP) + jasa (admin − bank_fee) −
+// pengeluaran, dihitung ulang di test dari API yang sama (bukan dari UI).
+await p.click('[data-menu="akuntansi"]'); await p.waitForTimeout(1500);
+const aFrom = await p.locator('#rp-from').inputValue();
+const aTo = await p.locator('#rp-to').inputValue();
+const ka = (await api(`/api/reports/summary?from=${aFrom}&to=${aTo}`)).data;
+const expLabaBersih =
+  (ka.sales.omzet - (ka.retur?.total ?? 0) - ka.hpp)
+  + (ka.topup ?? []).reduce((x, t) => x + t.admin - (t.bank_fee ?? 0), 0)
+  - (ka.expense?.total ?? 0);
+const teksAkun = await p.textContent('#rp-body');
+const teksExp = expLabaBersih < 0 ? `−${rp(-expLabaBersih)}` : rp(expLabaBersih);
+chk('menu Akuntansi: laba rugi + arus kas + utang tampil, laba bersih = angka summary',
+  teksAkun.includes('Laba rugi') && teksAkun.includes('Arus kas') && teksAkun.includes('Utang supplier')
+    && teksAkun.includes(teksExp),
+  `exp=${teksExp} dari ${aFrom}..${aTo}`);
+chk('menu Akuntansi: kartu utang supplier (nilai PO) ATAU "tidak tersedia" bila izin kurang',
+  /Utang supplier[\s\S]{0,200}(tidak tersedia|Rp)/.test(teksAkun));
+
 // Kembali ke Stok: section C menguji popup + CSV menu Stok dulu (urutan lama).
 await p.click('[data-menu="stok"]'); await p.waitForTimeout(1200);
 

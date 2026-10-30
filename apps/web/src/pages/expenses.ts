@@ -9,7 +9,7 @@
 // luar shift) tetap tercatat + masuk laporan harian. Hari = UTC persis
 // server & Riwayat/Laporan (`date(created_at)=date(?)`, lihat ui/waktu.ts).
 
-import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { apiDelete, apiGet, apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
@@ -19,6 +19,8 @@ import { getCashier } from '../ui/user';
 import { hariIni, geser, tglPanjang } from '../ui/waktu';
 import { rp } from '../escpos';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 type Expense = {
   id: number;
@@ -47,16 +49,7 @@ const state = {
 
 let host: HTMLElement | null = null;
 
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
 
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 const jam = (iso: string) => (iso ?? '').slice(11, 16) || '—';
 

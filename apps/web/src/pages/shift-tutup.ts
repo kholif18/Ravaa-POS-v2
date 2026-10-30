@@ -47,7 +47,7 @@
 // invoice.ts, pola cetakInvoice). X = cetak kapan pun tanpa menutup shift
 // (tanpa fisik/selisih); Z = setelah tutup (lengkap fisik + selisih).
 
-import { apiGet, apiPost, HttpError } from '../api';
+import { apiGet, apiPost } from '../api';
 import { icon } from '../ui/icons';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
@@ -55,6 +55,7 @@ import { choiceDialog } from '../ui/confirm';
 import { getAutoPrint, getPrintPause } from '../ui/print-pref';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { cetakRekapShift, tglLengkap } from '../invoice';
+import { errMsg } from '../ui/http';
 
 /** Baris `GET /api/shifts` (kontrak lengkap dengan agregat subquery —
  *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran, kas masuk,
@@ -90,11 +91,6 @@ export type ShiftRow = {
   /** Piutang TERBAYAR ke laci dalam periode shift — laci naik. */
   piutang_bayar: number;
 };
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /** Kas yang SEHARUSNYA ada di laci menurut keputusan pemilik 2026-10-01
  *  (lihat komentar kepala file) + Tahap 1–3 (2026-10-11) + kas masuk

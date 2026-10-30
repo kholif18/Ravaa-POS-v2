@@ -6,13 +6,15 @@
 // Server: GET/POST /api/units (upsert by slug), DELETE /api/units/:slug
 // (ditolak 400 bila masih dipakai produk — FK products.unit -> units.slug).
 
-import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { apiDelete, apiGet, apiPost } from '../api';
 import { type Unit } from '../store';
 import { icon } from '../ui/icons';
 import { confirmDialog } from '../ui/confirm';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 type EditUnit = { isNew: boolean; slug: string; name: string };
 
@@ -24,19 +26,8 @@ const state = {
 
 let host: HTMLElement | null = null;
 
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
 const slugify = (s: string) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 // Lebar penuh ke seluruh body (tanpa max-w/mx-auto) — konsisten dengan
 // halaman Stok & Produk.

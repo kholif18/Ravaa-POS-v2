@@ -1,0 +1,55 @@
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  /* ---------- Skala teks SUPER-COMPACT (permintaan pemilik 2026-10-04) ----------
+     Acuan: KulaPOS + RPOS (`Modules/`), di mana body ≈13px, tabel ≈13px, label/th
+     ≈11px. Nilai bawaan Tailwind (xs 12 / sm 14 / base 16 / lg 18 / xl 20 /
+     2xl 24 / 3xl 30) sudah dipakai mode compact sebelumnya, tapi pemilik menilai
+     masih "terlalu besar" — jadi SELURUH tangga diturunkan satu tingkat di SATU
+     tempat ini. Dampak otomatis ke ±90 pemakaian `text-xs` + ±89 `text-sm` di
+     semua halaman tanpa menyentuh template (th tabel, label, badge, chip, hint
+     ikut 11px; body/isi tabel/tombol ikut 13px).
+     Line-height bawaan Tailwind berupa RATIO unitless (calc(1.25/0.875) dst) —
+     ikut mengecil mengikuti font-size-nya, jadi TIDAK perlu dioverride.
+     Batas: teks apapun jangan turun di bawah 10px (masih terbaca di kasir HP);
+     angka penting (total, kembalian, stok) memakai text-sm = 13px + font-bold. */
+  --text-xs: 0.6875rem; /* 11px — label, th tabel, badge, chip, hint, sub-SKU */
+  --text-sm: 0.8125rem; /* 13px — teks umum, body, isi tabel, tombol (default app) */
+  --text-base: 0.875rem; /* 14px */
+  --text-lg: 0.9375rem; /* 15px */
+  --text-xl: 1.0625rem; /* 17px */
+  --text-2xl: 1.25rem; /* 20px — hanya untuk aksen langka (mis. total besar bila dipakai) */
+  --text-3xl: 1.5rem; /* 24px */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* ---------- Palet restyle 2026-10-08 (arahan pemilik: "style lebih
+     modern, warna lebih hidup seperti KulaPOS") ----------
+     Biru primer diperdalam #0087ff -> #1d6df0: kontras teks putih 13px naik
+     dari ~3.1:1 (GAGAL AA) ke ~4.7:1 (lolos AA) — tombol biru kini sah
+     WCAG, dan tampilannya lebih "matang" tanpa kehilangan karakter biru
+     terang. Canvas/sedikit didinginkan, sidebar dinavy-kan, dan dua token
+     bayangan BARU ditambahkan supaya permukaan berlapis, bukan datar:
+     `shadow-card` (istirahat) vs `shadow-pop` (dropdown/melayang). */
+  --color-primary: #1d6df0;
+  --color-primary-hover: #1757c8;
+  --color-primary-soft: #e9f1ff;
+  --color-canvas: #f2f5fa;
+  --color-sidebar: #0F2858;
+  --color-sidebar-hover: #1a3a7e;
+  --color-sidebar-active: #2563eb;
+  --color-sidebar-text: #b9c8e4;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 12px 28px -18px rgb(15 23 42 / 0.22);
+  --shadow-pop: 0 2px 6px rgb(15 23 42 / 0.06), 0 18px 40px -22px rgb(15 23 42 / 0.3);
+  /* Gradasi biru modern ala Sandik (2026-10-12): sidebar & layar login.
+     Semua anggota keluarga primary biru — BUKAN warna baru di luar palet. */
+  --grad-blue-from: #1d6df0;
+  --grad-blue-via: #1b4fd8;
+  --grad-blue-to: #12337f;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin.woff2") format("woff2");
+}

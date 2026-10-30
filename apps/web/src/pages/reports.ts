@@ -48,7 +48,7 @@
 // baru topup, baru produk terlaris — grafik per jam sengaja DIV (bukan tabel)
 // supaya urutan itu tidak bergeser saat menambah fitur.
 
-import { apiGet, HttpError } from '../api';
+import { apiGet } from '../api';
 import { icon } from '../ui/icons';
 import { punyaIzin } from '../ui/auth';
 import { hariIni, geser, tglPanjang, tglPendek, jam, awalMinggu, awalBulan, akhirBulan } from '../ui/waktu';
@@ -56,6 +56,9 @@ import { unduhCSV } from '../importcsv';
 import { rp } from '../escpos';
 import { cetakLaporan, type DokLaporan } from '../invoice';
 import { toast } from '../ui/toast';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
+import { PAGE_SIZE, pagerHtml, bindPager, bindPagerLimit } from '../ui/pager';
 
 /* ---------- tipe (ikuti kontrak GET /api/reports/*) ---------- */
 
@@ -160,7 +163,7 @@ type AnalitikData = {
 
 /* ---------- state ---------- */
 
-type MenuId = 'harian' | 'laba' | 'kasir' | 'produk' | 'kategori' | 'piutang' | 'stok' | 'analitik';
+type MenuId = 'harian' | 'laba' | 'kasir' | 'produk' | 'kategori' | 'piutang' | 'akuntansi' | 'stok' | 'analitik';
 type GrupMenu = 'Penjualan' | 'Keuangan' | 'Stok';
 
 /** Satu menu laporan = satu objek ini. `ada()` menggerakkan disabled tombol
@@ -193,11 +196,25 @@ const state = {
   data: null as Laporan | null,
   sumData: null as (Omit<Laporan, 'date'> & { from: string; to: string }) | null,
   kasir: null as KasirData | null,
+  kasirOffset: 0,
+  kasirLimit: PAGE_SIZE,
   produk: null as ProdukData | null,
   kategori: null as KategoriData | null,
   laba: null as ProfitData | null,
+  labaOffset: 0,
+  labaLimit: PAGE_SIZE,
   analitik: null as AnalitikData | null,
+  stokOffset: 0,
+  stokLimit: PAGE_SIZE,
+  analitikValOffset: 0,
+  analitikValLimit: PAGE_SIZE,
+  analitikDeadOffset: 0,
+  analitikDeadLimit: PAGE_SIZE,
   sisaPiutang: 0,
+  /** Σ sisa PO status=hutang (live) untuk menu Akuntansi (2026-10-29);
+   *  null = tak bisa dibaca (izin pembelian tidak ada / server sibuk) —
+   *  kartu "Utang supplier" tampil "tidak tersedia", bukan error. */
+  utangSupplier: null as { n: number; sisa: number } | null,
   loading: true,
   error: '',
 };
@@ -206,17 +223,6 @@ let host: HTMLElement | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
 /* ---------- util ---------- */
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 // hariIni()/geser()/tglPanjang() pindah ke ui/waktu.ts 2026-09-30 — satu
 // implementasi UTC untuk Riwayat, Laporan, dan Dashboard.
@@ -529,7 +535,11 @@ function labaView(): string {
       </tr>`,
     )
     .join('');
-  const trx = d.trx
+  const totalTrx = d.trx.length;
+  const offset = state.labaOffset;
+  const limit = state.labaLimit;
+  const slice = d.trx.slice(offset, offset + limit);
+  const trx = slice
     .map(
       (t) => `<tr>
         <td class="td">
@@ -584,7 +594,7 @@ function labaView(): string {
     <div class="card">
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Laba per transaksi</h2>
-        <span class="chip">${icon('receipt')}<span>${d.trx.length} dari ${d.total.n} nota</span></span>
+        <span class="chip">${icon('receipt')}<span>${totalTrx} dari ${d.total.n} nota</span></span>
       </div>
       <table class="mt-2 w-full text-left text-sm">
         <thead><tr><th class="th">Waktu</th><th class="th">Nota</th><th class="th">Kasir</th><th class="th text-right">Omzet</th><th class="th text-right">HPP</th><th class="th text-right">Laba</th></tr></thead>
@@ -597,6 +607,7 @@ function labaView(): string {
           </tr>
         </tbody>
       </table>
+      ${pagerHtml(offset, limit, totalTrx)}
       ${
         d.total.n > d.trx.length
           ? `<p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -618,7 +629,10 @@ function labaView(): string {
 function kasirView(): string {
   const d = state.kasir;
   if (!d) return '';
-  const rows = d.rows
+  const offset = state.kasirOffset;
+  const limit = state.kasirLimit;
+  const slice = d.rows.slice(offset, offset + limit);
+  const rows = slice
     .map(
       (r) => `<tr>
         <td class="td"><div class="cell-strong">${esc(r.cashier)}</div></td>
@@ -643,7 +657,8 @@ function kasirView(): string {
             <td class="td td-num font-semibold">${rp(d.total.diskon)}</td>
           </tr>
         </tbody>
-      </table>`
+      </table>
+      ${pagerHtml(offset, limit, d.rows.length)}`
         : `<div class="empty">Belum ada penjualan pada rentang ini.</div>`
     }
   </div>`;
@@ -779,7 +794,10 @@ function piutangView(): string {
 function stokView(): string {
   const l = state.sumData;
   if (!l) return '';
-  const rows = l.lowStock
+  const offset = state.stokOffset;
+  const limit = state.stokLimit;
+  const slice = l.lowStock.slice(offset, offset + limit);
+  const rows = slice
     .map(
       (p) => `<tr>
         <td class="td">
@@ -804,6 +822,7 @@ function stokView(): string {
         <thead><tr><th class="th">Produk</th><th class="th text-right">Stok</th><th class="th text-right">Min</th><th class="th text-right">Saran order</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${pagerHtml(offset, limit, l.lowStock.length)}
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
         Saran order = stok minimum − stok kini (kembali ke batas aman). Buat PO-nya di halaman Pembelian.
       </p>`
@@ -828,7 +847,8 @@ function analitikView(): string {
     { label: 'Margin potensial', nilai: rp(v.total.jual - v.total.hpp), sub: 'jual − modal bila habis di harga penuh' },
     { label: 'Modal menganggur', nilai: rp(d.dead.nilai), sub: `${d.dead.n} item tak laku dalam ${hari} hari` },
   ];
-  const valRows = v.rows
+  const valSlice = v.rows.slice(state.analitikValOffset, state.analitikValOffset + state.analitikValLimit);
+  const valRows = valSlice
     .map(
       (t) => `<tr>
         <td class="td"><div class="cell-strong">${esc(t.category)}</div></td>
@@ -839,7 +859,8 @@ function analitikView(): string {
       </tr>`,
     )
     .join('');
-  const deadRows = d.dead.rows
+  const deadSlice = d.dead.rows.slice(state.analitikDeadOffset, state.analitikDeadOffset + state.analitikDeadLimit);
+  const deadRows = deadSlice
     .map(
       (p) => `<tr>
         <td class="td">
@@ -887,7 +908,8 @@ function analitikView(): string {
             <td class="td td-num font-semibold">${rp(v.total.jual)}</td>
           </tr>
         </tbody>
-      </table>`
+      </table>
+      <div data-pager="val">${pagerHtml(state.analitikValOffset, state.analitikValLimit, v.rows.length)}</div>`
         : `<div class="empty">Belum ada barang fisik berstok.</div>`
     }
     <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -913,6 +935,7 @@ function analitikView(): string {
           </tr>
         </tbody>
       </table>
+      <div data-pager="dead">${pagerHtml(state.analitikDeadOffset, state.analitikDeadLimit, d.dead.rows.length)}</div>
       ${
         d.dead.terpotong
           ? `<p class="mt-2 text-xs text-amber-600 dark:text-amber-400">Menampilkan ${d.dead.rows.length} dari ${d.dead.n} item (nilai modal terbesar). Persempit rentang untuk daftar yang lebih pendek.</p>`
@@ -923,6 +946,169 @@ function analitikView(): string {
     <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
       Barang fisik berstok &gt; 0 tanpa penjualan sejak ${esc(tglPendek(d.from))} s/d ${esc(tglPendek(d.to))};
       urut nilai stok (stok × modal tertimbang). Terakhir laku = penjualan terakhir kapan pun.
+    </p>
+  </div>`;
+}
+
+/* ---------- menu Akuntansi (2026-10-29, ACC pemilik — "v1 dari data ada") ----------
+   Laba rugi + arus kas ringkas + utang/piutang, disusun dari agregat yang SUDAH
+   dipublikasikan server (`/api/reports/summary` + saldo live) — tanpa endpoint
+   baru, tanpa migrasi, tanpa PPN. Jurnal umum/buku besar = tahap berikutnya
+   (butuh endpoint enumerasi transaksi). */
+
+/** Tampil minus ala akuntansi — `−Rp5.000`. `rp()` menulis `Rp-5.000` (tanda
+ *  setelah prefiks) yang berantakan di kolom rata kanan. */
+const rpAkun = (n: number) => (n < 0 ? `−${rp(-n)}` : rp(n));
+
+/** Angka menu Akuntansi — SATU-SUMBER DATA: klien hanya menyusun/menjumlah
+ *  agregat server, tidak menghitung ulang dari baris mentah (pola kartu
+ *  Harian). Susunan akuntansi menyusun ulang definisi dari angka yang sama:
+ *  retur membalik omzet, jasa topup/tarik = admin − potongan bank (nominal =
+ *  mutasi modal BUKAN omzet — aturan domain), pengeluaran mengurangi laba.
+ *  Arus kas memakai komponen rumus kas shift (`kasSeharusnya`) yang tersedia
+ *  di summary — indikatif, lihat kaki kartu untuk batasnya. */
+function akuntansiAngka() {
+  const l = state.sumData!;
+  const omzet = l.sales.omzet;
+  const retur = l.retur?.total ?? 0;
+  const hpp = l.hpp;
+  const expense = l.expense?.total ?? 0;
+  const kasMasuk = l.kas_masuk?.total ?? 0;
+  const piutangBaru = l.piutang?.baru ?? 0;
+  const piutangBayar = l.piutang?.bayar ?? 0;
+  const purchase = l.purchase?.total ?? 0;
+  // Jasa = Σ (admin − potongan bank) seluruh baris topup & tarik; nominal
+  // topup BUKAN pendapatan (mutasi modal), nominal tarik diserahkan tunai.
+  const jasa = l.topup.reduce((a, t) => a + (t.admin - (t.bank_fee ?? 0)), 0);
+  const topupMasuk = l.topup
+    .filter((t) => t.kind === 'topup')
+    .reduce((a, t) => a + t.nominal + t.admin, 0);
+  const omzetBersih = omzet - retur;
+  const labaKotor = omzetBersih - hpp;
+  const labaBersih = labaKotor + jasa - expense;
+  const kasDariJual = omzet - piutangBaru;
+  const arusMasuk = kasDariJual + piutangBayar + kasMasuk + topupMasuk;
+  const arusKeluar = expense + retur + purchase;
+  return {
+    omzet, retur, hpp, expense, kasMasuk, purchase,
+    piutangBaru, piutangBayar, jasa, topupMasuk,
+    omzetBersih, labaKotor, labaBersih,
+    kasDariJual, arusMasuk, arusKeluar, arusBersih: arusMasuk - arusKeluar,
+  };
+}
+
+function akuntansiView(): string {
+  if (!state.sumData) return '';
+  const a = akuntansiAngka();
+  const utang = state.utangSupplier;
+  const kartu = [
+    { label: 'Laba bersih', nilai: rpAkun(a.labaBersih), sub: 'laba kotor + jasa topup/tarik − pengeluaran' },
+    { label: 'Arus kas bersih', nilai: rpAkun(a.arusBersih), sub: 'indikatif — rincian di kartu Arus kas' },
+    { label: 'Piutang berjalan', nilai: rp(state.sisaPiutang), sub: 'saldo live seluruh pelanggan', link: '#/debts' },
+    utang
+      ? { label: 'Utang supplier', nilai: rp(utang.sisa), sub: `${utang.n} nota PO belum lunas`, link: '#/purchases' }
+      : { label: 'Utang supplier', nilai: '—', sub: 'tidak tersedia — butuh izin pembelian' },
+  ];
+  // Baris tabel 2 kolom (uraian | nilai) — label statis dari kode, angka dari
+  // rp()/rpAkun(), jadi tidak perlu esc() (pola baris tabel menu lain).
+  const row = (label: string, nilai: string, kuat = false) =>
+    `<tr>
+      <td class="td${kuat ? ' font-semibold' : ''}">${label}</td>
+      <td class="td td-num${kuat ? ' font-semibold' : ''}">${nilai}</td>
+    </tr>`;
+  const grup = (teks: string) =>
+    `<tr><td class="td font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400" colspan="2">${teks}</td></tr>`;
+  return `
+  <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
+    ${kartu
+      .map((k) => {
+        const isi = `
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">${k.label}</p>
+          <p class="mt-1 text-sm font-semibold tabular-nums text-gray-900 dark:text-white">${esc(k.nilai)}</p>
+          <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">${esc(k.sub)}</p>`;
+        return 'link' in k && k.link
+          ? `<a href="${k.link}" class="card transition hover:border-primary">${isi}</a>`
+          : `<div class="card">${isi}</div>`;
+      })
+      .join('')}
+  </div>
+  <div class="card">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Laba rugi — ${esc(periode())}</h2>
+      <span class="chip"><span>Laba bersih ${esc(rpAkun(a.labaBersih))}</span></span>
+    </div>
+    <table class="mt-2 w-full text-left text-sm">
+      <thead><tr><th class="th">Uraian</th><th class="th text-right">Nilai</th></tr></thead>
+      <tbody>
+        ${row('Omzet', rp(a.omzet))}
+        ${row('Retur (uang kembali ke pelanggan)', rpAkun(-a.retur))}
+        ${row('Omzet bersih', rp(a.omzetBersih), true)}
+        ${row('HPP (modal terjual)', rpAkun(-a.hpp))}
+        ${row('Laba kotor', rpAkun(a.labaKotor), true)}
+        ${row('Jasa topup &amp; tarik (admin − potongan bank)', rpAkun(a.jasa))}
+        ${row('Pengeluaran operasional', rpAkun(-a.expense))}
+        ${row('Laba bersih periode', rpAkun(a.labaBersih), true)}
+      </tbody>
+    </table>
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+      Retur membalik omzet; laba kotor = omzet bersih − HPP. Jasa topup/tarik =
+      admin − potongan bank (nominal topup = mutasi modal, bukan omzet; nominal
+      tarik diserahkan tunai). Definisi laba dasar toko = omzet − HPP — penyusunan
+      di atas memakai angka server yang sama, tanpa menghitung ulang nota.
+    </p>
+  </div>
+  <div class="card">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Arus kas ringkas — ${esc(periode())}</h2>
+      <span class="chip"><span>Indikatif</span></span>
+    </div>
+    <table class="mt-2 w-full text-left text-sm">
+      <tbody>
+        ${grup('Kas masuk')}
+        ${row('Penjualan diterima', rp(a.kasDariJual))}
+        ${row('Piutang pelanggan terbayar', rp(a.piutangBayar))}
+        ${row('Kas masuk non-penjualan', rp(a.kasMasuk))}
+        ${row('Topup (nominal + admin)', rp(a.topupMasuk))}
+        ${row('Total kas masuk', rp(a.arusMasuk), true)}
+        ${grup('Kas keluar')}
+        ${row('Pengeluaran operasional', rpAkun(-a.expense))}
+        ${row('Retur penjualan', rpAkun(-a.retur))}
+        ${row('Pembelian diterima (nilai barang)', rpAkun(-a.purchase))}
+        ${row('Total kas keluar', rpAkun(-a.arusKeluar), true)}
+        ${row('Arus kas bersih (indikatif)', rpAkun(a.arusBersih), true)}
+      </tbody>
+    </table>
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+      Komponen sama dengan rumus kas shift. "Penjualan diterima" = omzet − piutang
+      terbentuk periode (uang yang benar-benar diterima, bukan omzet kredit).
+      Uang pesanan jasa (DP/pelunasan/serah) belum termasuk; tarik tunai di luar
+      rumus laci (adminnya tercatat di laba rugi); pembelian = nilai barang diterima,
+      uang keluar mengikuti jadwal kedatangan. Fisik laci sebenarnya = dialog Tutup shift.
+    </p>
+  </div>
+  <div class="card">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Utang &amp; piutang</h2>
+      <span class="chip"><span>Periode + saldo live</span></span>
+    </div>
+    <table class="mt-2 w-full text-left text-sm">
+      <tbody>
+        ${row('Piutang terbentuk (periode)', rp(a.piutangBaru))}
+        ${row('Piutang terbayar (periode)', rp(a.piutangBayar))}
+        ${row('Sisa piutang berjalan (kini)', rp(state.sisaPiutang), true)}
+        <tr>
+          <td class="td">
+            <div class="cell-strong">Utang supplier (kini)</div>
+            <div class="cell-sub">${utang ? `${utang.n} nota PO belum lunas` : 'tidak tersedia — butuh izin pembelian'}</div>
+          </td>
+          <td class="td td-num font-semibold">${utang ? rp(utang.sisa) : '—'}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+      Sisa piutang &amp; utang supplier = saldo live (tidak terpengaruh rentang);
+      baris periode mengikuti rentang terpilih. Rincian pelanggan di halaman Hutang,
+      rincian nota PO di halaman Pembelian.
     </p>
   </div>`;
 }
@@ -1093,6 +1279,47 @@ function csvAnalitik(): (string | number)[][] {
     ),
     ['Jumlah', '', '', '', d.dead.nilai, ''],
     ...(d.dead.terpotong ? [['Menampilkan', `${d.dead.rows.length} dari ${d.dead.n} item (nilai modal terbesar)`]] : []),
+  ];
+}
+
+function csvAkuntansi(): (string | number)[][] {
+  const a = akuntansiAngka();
+  const utang = state.utangSupplier;
+  return [
+    ['Laporan akuntansi', 'Ravaa POS'],
+    ['Periode', periode()],
+    [],
+    ['Laba rugi'],
+    ['Uraian', 'Nilai'],
+    ['Omzet', a.omzet],
+    ['Retur (uang kembali ke pelanggan)', -a.retur],
+    ['Omzet bersih', a.omzetBersih],
+    ['HPP (modal terjual)', -a.hpp],
+    ['Laba kotor', a.labaKotor],
+    ['Jasa topup & tarik (admin − potongan bank)', a.jasa],
+    ['Pengeluaran operasional', -a.expense],
+    ['Laba bersih periode', a.labaBersih],
+    [],
+    ['Arus kas ringkas (indikatif)'],
+    ['Uraian', 'Nilai'],
+    ['Penjualan diterima (omzet − piutang terbentuk)', a.kasDariJual],
+    ['Piutang pelanggan terbayar', a.piutangBayar],
+    ['Kas masuk non-penjualan', a.kasMasuk],
+    ['Topup (nominal + admin)', a.topupMasuk],
+    ['Total kas masuk', a.arusMasuk],
+    ['Pengeluaran operasional', -a.expense],
+    ['Retur penjualan', -a.retur],
+    ['Pembelian diterima (nilai barang)', -a.purchase],
+    ['Total kas keluar', -a.arusKeluar],
+    ['Arus kas bersih', a.arusBersih],
+    [],
+    ['Utang & piutang'],
+    ['Uraian', 'Nilai'],
+    ['Piutang terbentuk (periode)', a.piutangBaru],
+    ['Piutang terbayar (periode)', a.piutangBayar],
+    ['Sisa piutang berjalan (kini)', state.sisaPiutang],
+    ['Utang supplier (kini)', utang ? utang.sisa : ''],
+    ['Jumlah nota utang supplier', utang ? utang.n : ''],
   ];
 }
 
@@ -1285,6 +1512,68 @@ async function cetakAnalitik(): Promise<void> {
   });
 }
 
+async function cetakAkuntansi(): Promise<void> {
+  if (!state.sumData) return;
+  const a = akuntansiAngka();
+  const utang = state.utangSupplier;
+  await cetakLaporan({
+    judul: 'LAPORAN AKUNTANSI',
+    periode: periode(),
+    meta: [],
+    kolom: [{ label: 'Uraian' }, { label: 'Nilai', kanan: true }],
+    baris: [
+      ['Omzet', rp(a.omzet)],
+      ['Retur (uang kembali ke pelanggan)', rpAkun(-a.retur)],
+      ['Omzet bersih', rp(a.omzetBersih)],
+      ['HPP (modal terjual)', rpAkun(-a.hpp)],
+      ['Laba kotor', rpAkun(a.labaKotor)],
+      ['Jasa topup & tarik (admin − potongan bank)', rpAkun(a.jasa)],
+      ['Pengeluaran operasional', rpAkun(-a.expense)],
+    ],
+    ringkas: [
+      ['Laba bersih periode', rpAkun(a.labaBersih)],
+      ['Arus kas bersih (indikatif)', rpAkun(a.arusBersih)],
+    ],
+    catatan:
+      'Laba kotor = omzet bersih − HPP; laba bersih = laba kotor + jasa topup/tarik − pengeluaran.',
+    bagian: [
+      {
+        judul: 'ARUS KAS RINGKAS (INDIKATIF)',
+        kolom: [{ label: 'Uraian' }, { label: 'Nilai', kanan: true }],
+        baris: [
+          ['KAS MASUK', ''],
+          ['Penjualan diterima (omzet − piutang terbentuk)', rp(a.kasDariJual)],
+          ['Piutang pelanggan terbayar', rp(a.piutangBayar)],
+          ['Kas masuk non-penjualan', rp(a.kasMasuk)],
+          ['Topup (nominal + admin)', rp(a.topupMasuk)],
+          ['Total kas masuk', rp(a.arusMasuk)],
+          ['KAS KELUAR', ''],
+          ['Pengeluaran operasional', rpAkun(-a.expense)],
+          ['Retur penjualan', rpAkun(-a.retur)],
+          ['Pembelian diterima (nilai barang)', rpAkun(-a.purchase)],
+          ['Total kas keluar', rpAkun(-a.arusKeluar)],
+          ['Arus kas bersih', rpAkun(a.arusBersih)],
+        ],
+        catatan:
+          'Komponen sama dengan rumus kas shift. Uang pesanan jasa belum termasuk; tarik tunai di luar rumus laci (admin tercatat di laba rugi); pembelian = nilai barang diterima, uang keluar mengikuti jadwal kedatangan.',
+      },
+      {
+        judul: 'UTANG & PIUTANG',
+        kolom: [{ label: 'Uraian' }, { label: 'Nilai', kanan: true }],
+        baris: [
+          ['Piutang terbentuk (periode)', rp(a.piutangBaru)],
+          ['Piutang terbayar (periode)', rp(a.piutangBayar)],
+          ['Sisa piutang berjalan (kini)', rp(state.sisaPiutang)],
+          ['Utang supplier (kini)', utang ? rp(utang.sisa) : 'tidak tersedia'],
+        ],
+        catatan: utang
+          ? `${utang.n} nota PO belum lunas. Rincian pelanggan di halaman Hutang, nota PO di halaman Pembelian.`
+          : 'Utang supplier butuh izin pembelian (akun kasir biasa tidak membacanya).',
+      },
+    ],
+  });
+}
+
 /* ---------- registry menu (SATU tempat untuk seluruh katalog) ---------- */
 
 const defHarian: MenuDef = {
@@ -1396,6 +1685,55 @@ const defPiutang: MenuDef = {
   cetak: cetakPiutang,
 };
 
+/** Menu Akuntansi (2026-10-29, ACC pemilik — "v1 dari data ada"): laba rugi +
+ *  arus kas ringkas + utang/piutang dari `/api/reports/summary` + saldo live,
+ *  TANPA endpoint/migrasi baru dan TANPA PPN. `izin` = `hutang.lihat` ( saldo
+ *  piutang live); utang supplier membaca `/api/purchases` yang dijaga
+ *  `pembelian.kelola` di server — kasir tanpa izin itu TETAP boleh membuka
+ *  menu (laba rugi + piutang lengkap; kartu supplier tampil "tidak tersedia"
+ *  lewat try/catch, bukan 403 di tengah jalan — pola graceful degradation). */
+const defAkuntansi: MenuDef = {
+  id: 'akuntansi',
+  label: 'Akuntansi',
+  grup: 'Keuangan',
+  filter: 'rentang',
+  izin: 'hutang.lihat',
+  ada: () => !!state.sumData,
+  muat: async () => {
+    const j = await apiGet<{ data: Omit<Laporan, 'date'> & { from: string; to: string } }>(
+      `/api/reports/summary?from=${encodeURIComponent(state.from)}&to=${encodeURIComponent(state.to)}`,
+    );
+    state.sumData = j.data;
+    // Sisa piutang live (saldo seluruh pelanggan, bukan per periode).
+    const s = await apiGet<{ data: unknown; total: number }>('/api/customer-debts?status=open');
+    state.sisaPiutang = s.total;
+    // Σ sisa PO status=hutang (paginasi 200 — `total` = baris cocok-filter).
+    // GAGAL (izin kurang/jaringan) tidak membatalkan menu: kartu supplier
+    // saja yang jadi "tidak tersedia".
+    state.utangSupplier = null;
+    try {
+      let n = 0;
+      let sisa = 0;
+      for (let offset = 0; offset <= 10000; offset += 200) {
+        const p = await apiGet<{ data: { sisa: number }[]; total: number }>(
+          `/api/purchases?status=hutang&limit=200&offset=${offset}`,
+        );
+        for (const row of p.data) {
+          n += 1;
+          sisa += row.sisa;
+        }
+        if (p.data.length < 200) break;
+      }
+      state.utangSupplier = { n, sisa };
+    } catch {
+      state.utangSupplier = null;
+    }
+  },
+  isi: akuntansiView,
+  csv: csvAkuntansi,
+  cetak: cetakAkuntansi,
+};
+
 const defStok: MenuDef = {
   id: 'stok',
   label: 'Stok',
@@ -1432,7 +1770,7 @@ const defAnalitik: MenuDef = {
   cetak: cetakAnalitik,
 };
 
-const MENUS: MenuDef[] = [defHarian, defLaba, defKasir, defProduk, defKategori, defPiutang, defStok, defAnalitik];
+const MENUS: MenuDef[] = [defHarian, defLaba, defKasir, defProduk, defKategori, defPiutang, defAkuntansi, defStok, defAnalitik];
 
 /** Menu yang boleh dilihat akun ini = registry penuh disaring izin tambahan.
  *  Dipakai nav kiri DAN pemilihan menu aktif, supaya `state.menu` yang
@@ -1699,6 +2037,70 @@ function bind(): void {
   });
   root.querySelector('#rp-csv')?.addEventListener('click', () => eksporCSV());
   root.querySelector('#rp-print')?.addEventListener('click', () => void cetak());
+  // Pager untuk tabel Laba per transaksi (client-side)
+  if (state.menu === 'laba' && state.laba) {
+    bindPager(root, (offset) => {
+      state.labaOffset = offset;
+      paint();
+    });
+    bindPagerLimit(root, (limit) => {
+      state.labaLimit = limit;
+      state.labaOffset = 0;
+      paint();
+    });
+  }
+  // Pager untuk tabel Kasir (client-side)
+  if (state.menu === 'kasir' && state.kasir) {
+    bindPager(root, (offset) => {
+      state.kasirOffset = offset;
+      paint();
+    });
+    bindPagerLimit(root, (limit) => {
+      state.kasirLimit = limit;
+      state.kasirOffset = 0;
+      paint();
+    });
+  }
+  // Pager untuk tabel Perlu dikulak (client-side)
+  if (state.menu === 'stok' && state.sumData) {
+    bindPager(root, (offset) => {
+      state.stokOffset = offset;
+      paint();
+    });
+    bindPagerLimit(root, (limit) => {
+      state.stokLimit = limit;
+      state.stokOffset = 0;
+      paint();
+    });
+  }
+  // Dua pager menu Analitik (valuasi + tidak laku) — dibedakan lewat scope
+  // `data-pager` karena bindPager menangkap SEMUA `[data-pg]` di root-nya.
+  if (state.menu === 'analitik' && state.analitik) {
+    const val = root.querySelector('[data-pager="val"]');
+    const dead = root.querySelector('[data-pager="dead"]');
+    if (val) {
+      bindPager(val, (offset) => {
+        state.analitikValOffset = offset;
+        paint();
+      });
+      bindPagerLimit(val, (limit) => {
+        state.analitikValLimit = limit;
+        state.analitikValOffset = 0;
+        paint();
+      });
+    }
+    if (dead) {
+      bindPager(dead, (offset) => {
+        state.analitikDeadOffset = offset;
+        paint();
+      });
+      bindPagerLimit(dead, (limit) => {
+        state.analitikDeadLimit = limit;
+        state.analitikDeadOffset = 0;
+        paint();
+      });
+    }
+  }
 }
 
 /* ---------- dropdown rentang tanggal (preset kiri + dua kalender kanan) ---------- */
@@ -1928,6 +2330,8 @@ async function cetak(): Promise<void> {
 async function load(): Promise<void> {
   state.loading = true;
   state.error = '';
+  if (state.menu === 'laba') state.labaOffset = 0;
+  if (state.menu === 'kasir') state.kasirOffset = 0;
   paint();
   try {
     await defAktif().muat();

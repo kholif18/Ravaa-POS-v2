@@ -16,11 +16,13 @@
 // dengan gerbang POS. Outbox dibaca dari `outboxCount()` dan disegarkan
 // tiap 5 detik selama halaman terpasang.
 
-import { apiGet, HttpError, outboxCount } from '../api';
+import { apiGet, outboxCount } from '../api';
 import { icon, type IconName } from '../ui/icons';
 import { getCashier } from '../ui/user';
 import { waktu, hariIni, geser, tglPanjang, tglPendek, hariPendek } from '../ui/waktu';
 import { rp } from '../escpos';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 
 /* ---------- tipe (subkumpulan kontrak GET /api/reports/daily & shifts) ---------- */
 
@@ -60,19 +62,6 @@ const state = {
 
 let host: HTMLElement | null = null;
 let jedaOutbox: ReturnType<typeof setInterval> | null = null;
-
-/* ---------- util ---------- */
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /** N hari menaik: hari ini − (N−1) ... hari ini. */
 function tanggalPekan(n: number): string[] {

@@ -12,7 +12,7 @@
 // Hutang DICATAT MANUAL di sini — POS sengaja tidak punya metode bayar piutang
 // (kontrak POST /api/sales tidak berubah).
 
-import { apiDelete, apiGet, apiPost, HttpError } from '../api';
+import { apiDelete, apiGet, apiPost } from '../api';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { icon } from '../ui/icons';
@@ -23,6 +23,8 @@ import { toast } from '../ui/toast';
 import { waktu } from '../ui/waktu';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { getCashier, getToko } from '../ui/user';
+import { esc } from '../ui/html';
+import { errMsg } from '../ui/http';
 import {
   footerStruk, syncDariServerSettings,
 } from '../ui/identitas-struk';
@@ -87,17 +89,6 @@ const state = {
 };
 
 let host: HTMLElement | null = null;
-
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-function errMsg(e: unknown): string {
-  if (e instanceof HttpError) return e.message;
-  return e instanceof Error ? e.message : 'terjadi kesalahan';
-}
 
 /** Shift terbuka kasir ini (pola expenses.ts). Gagal/jaringan putus = NULL
  *  (di luar shift), bukan error halaman: pembayaran tetap harus bisa dicatat. */
