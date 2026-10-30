@@ -1489,6 +1489,8 @@ function productForm(
             fotoGagal ? 'warning' : 'success',
           );
           close();
+          // Simpan ID produk yang diedit agar paint() bisa scroll ke barisnya.
+          if (d) editedProductId = d.id;
           await reload(true);
         } catch (e) {
           toast(`Gagal simpan: ${errMsg(e)}`, 'error');
@@ -1866,15 +1868,47 @@ function resetFilterScroll(): void {
   if (page) page.scrollTop = 0;
 }
 
+/** Target baris yang baru diedit (untuk scroll ke situ pasca-reload). */
+let editedProductId: number | null = null;
+
 function paint(): void {
   // Host bisa sudah lepas dari DOM: mountProductsPage async masih jalan (reload)
   // lalu kasir pindah halaman. Tanpa guard, tabel Products menimpa halaman lain.
   if (!host || !host.isConnected) return;
-  const scroll = host.scrollTop;
-  // Render ulang penuh = filter/data berubah -> mulai lagi dari PAGE pertama.
-  state.limit = PAGE;
+  // Di desktop (>=lg) scroll berada di .table-wrap; di mobile di .page.
+  const wrap = host.querySelector<HTMLElement>('.table-wrap');
+  const page = host.closest<HTMLElement>('.page');
+  const scrollSource = wrap ?? page;
+  const scroll = scrollSource?.scrollTop ?? 0;
+
+  // Jika ada produk yang baru diedit, pastikan state.limit mencakup barisnya.
+  if (editedProductId !== null) {
+    const list = filteredProducts();
+    const idx = list.findIndex((p) => p.id === editedProductId);
+    if (idx >= 0 && idx >= state.limit) {
+      // Bulatkan ke kelipatan STEP supaya infinite scroll tetap berfungsi rapi.
+      state.limit = Math.ceil((idx + 1) / STEP) * STEP;
+    }
+  } else {
+    // Render ulang penuh = filter/data berubah -> mulai lagi dari PAGE pertama.
+    state.limit = PAGE;
+  }
+
   host.innerHTML = renderProductsPage();
-  host.scrollTop = scroll;
+  // Pulihkan scroll ke container yang benar.
+  const newWrap = host.querySelector<HTMLElement>('.table-wrap');
+  const newPage = host.closest<HTMLElement>('.page');
+  const newScrollSource = newWrap ?? newPage;
+  if (newScrollSource) newScrollSource.scrollTop = scroll;
+
+  // Jika ada produk yang baru diedit, scroll ke barisnya (override posisi lama).
+  if (editedProductId !== null) {
+    const row = host.querySelector<HTMLTableRowElement>(`#rows tr[data-id="${editedProductId}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center', behavior: 'auto' });
+      editedProductId = null;
+    }
+  }
   bind();
 }
 
