@@ -735,6 +735,10 @@ app.post('/api/users', hanyaOwner, async (c) => {
       | { id: number; username: string; name: string; role: string; is_active: number; pin_hash: string | null }
       | undefined;
     if (!ada) return c.json({ error: 'pengguna tidak ada' }, 404);
+    // Demo tidak boleh mengubah owner (hanya di alpha/testing)
+    if (saya.username === 'demo' && ada.role === 'owner') {
+      return c.json({ error: 'Akun demo tidak boleh mengubah akun owner' }, 403);
+    }
     const name = body?.name === undefined ? undefined : String(body.name).trim();
     const role = body?.role;
     const aktif = body?.is_active;
@@ -818,8 +822,12 @@ app.post('/api/users/:id/password', hanyaOwner, async (c) => {
     const body = await c.req.json();
     const password = String(body?.password ?? '');
     if (password.length < BOLEH_SANDI_MIN) return c.json({ error: `sandi minimal ${BOLEH_SANDI_MIN} karakter` }, 400);
-    const ada = db.prepare('SELECT id FROM users WHERE id = ?').get(id) as { id: number } | undefined;
+    const ada = db.prepare('SELECT id, role FROM users WHERE id = ?').get(id) as { id: number; role: string } | undefined;
     if (!ada) return c.json({ error: 'pengguna tidak ada' }, 404);
+    const saya = c.get('user') as Pengguna;
+    if (saya.username === 'demo' && ada.role === 'owner') {
+      return c.json({ error: 'Akun demo tidak boleh mengubah sandi akun owner' }, 403);
+    }
     db.prepare(
       `UPDATE users SET password_hash = ?, must_change = 1, pin_hash = NULL,
          pin_failed = 0, pin_locked_until = NULL, pin_updated_at = NULL WHERE id = ?`,
@@ -947,10 +955,14 @@ app.post('/api/users/password', async (c) => {
 app.delete('/api/users/:id', hanyaOwner, (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'id harus integer' }, 400);
-  const saya = (c.get('user') as Pengguna).id;
-  if (id === saya) return c.json({ error: 'tidak bisa menghapus diri sendiri' }, 400);
+  const saya = (c.get('user') as Pengguna);
+  if (id === saya.id) return c.json({ error: 'tidak bisa menghapus diri sendiri' }, 400);
   const ada = db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string } | undefined;
   if (!ada) return c.json({ error: 'pengguna tidak ada' }, 404);
+  // Demo tidak boleh menghapus owner
+  if (saya.username === 'demo' && ada.role === 'owner') {
+    return c.json({ error: 'Akun demo tidak boleh menghapus akun owner' }, 403);
+  }
   if (ada.role === 'owner') {
     const lain = (db.prepare(
       "SELECT COUNT(*) AS n FROM users WHERE role = 'owner' AND is_active = 1 AND id != ?",

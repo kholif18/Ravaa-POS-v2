@@ -102,6 +102,17 @@ function renderPage(): string {
   </div>`;
 }
 
+/** Cek apakah user login adalah demo. */
+function isDemoLogin(): boolean {
+  const akun = akunTersimpan()?.akun;
+  return akun?.username === 'demo';
+}
+
+/** Cek apakah aksi terhadap owner diizinkan (demo tidak boleh ubah owner). */
+function bolehUbahOwner(u: UserRow): boolean {
+  return !(isDemoLogin() && u.role === 'owner');
+}
+
 function renderTable(): string {
   if (state.loading) {
     return `<div class="card"><div class="skel h-6 w-40"></div></div>`;
@@ -125,10 +136,10 @@ function renderTable(): string {
         <td class="td">${u.is_active ? '<span class="text-emerald-600 dark:text-emerald-400">Aktif</span>' : '<span class="text-gray-400">Nonaktif</span>'}</td>
         <td class="td">
           <div class="flex items-center justify-end gap-1">
-            <button type="button" data-usr-edit="${u.id}" class="row-btn" title="Ubah pengguna & izin" aria-label="Ubah ${esc(u.username)}">${icon('pencil')}</button>
-            <button type="button" data-usr-pin="${u.id}" class="row-btn" title="${u.pin_set ? 'Reset PIN (semua sesi diputus)' : 'Akun ini belum punya PIN'}" aria-label="Reset PIN ${esc(u.username)}"${u.pin_set ? '' : ' disabled'}>${icon('lock')}</button>
-            <button type="button" data-usr-reset="${u.id}" class="row-btn" title="Reset sandi (target wajib ganti saat masuk)" aria-label="Reset sandi ${esc(u.username)}">${icon('sync')}</button>
-            <button type="button" data-usr-del="${u.id}" class="row-btn row-btn-danger" title="Hapus pengguna" aria-label="Hapus ${esc(u.username)}">${icon('trash')}</button>
+            <button type="button" data-usr-edit="${u.id}" class="row-btn" title="Ubah pengguna & izin" aria-label="Ubah ${esc(u.username)}" ${!bolehUbahOwner(u) ? 'disabled' : ''}>${icon('pencil')}</button>
+            <button type="button" data-usr-pin="${u.id}" class="row-btn" title="${u.pin_set ? 'Reset PIN (semua sesi diputus)' : 'Akun ini belum punya PIN'}" aria-label="Reset PIN ${esc(u.username)}"${!bolehUbahOwner(u) || !u.pin_set ? ' disabled' : ''}>${icon('lock')}</button>
+            <button type="button" data-usr-reset="${u.id}" class="row-btn" title="Reset sandi (target wajib ganti saat masuk)" aria-label="Reset sandi ${esc(u.username)}" ${!bolehUbahOwner(u) ? 'disabled' : ''}>${icon('sync')}</button>
+            <button type="button" data-usr-del="${u.id}" class="row-btn row-btn-danger" title="Hapus pengguna" aria-label="Hapus ${esc(u.username)}" ${!bolehUbahOwner(u) ? 'disabled' : ''}>${icon('trash')}</button>
           </div>
         </td>
       </tr>`,
