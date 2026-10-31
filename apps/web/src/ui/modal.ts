@@ -22,6 +22,14 @@ export function openModal(o: {
    *  `wide` (max-w-3xl) tidak cukup: kolom kanan menyusut jadi ±460px dan
    *  grid 3 kolom "Harga" di dalamnya tinggal ±140px per input. */
   wider?: boolean;
+  /** Fokus otomatis ke isian pertama di body (input teks/select/textarea
+   *  pertama yang bisa diketik) supaya modal create/edit langsung siap
+   *  diketik tanpa klik — berlaku untuk SEMUA modal secara bawaan
+   *  (permintaan pemilik 2026-10-31). Isian `file/hidden/checkbox/radio/
+   *  readonly/disabled` dilewati. Set `false` untuk menolak; modal dengan
+   *  fokus khusus di onMount (mis. form bayar POS -> #pos-cash) tetap
+   *  benar karena fokus generik dijalankan SEBELUM onMount. */
+  autoFocus?: boolean;
   onMount?: (api: ModalHandle) => void;
 }): ModalHandle {
   const overlay = document.createElement('div');
@@ -88,6 +96,15 @@ export function openModal(o: {
     ok: overlay.querySelector('[data-ok]') as HTMLButtonElement,
     close,
   };
+  if (o.autoFocus !== false) {
+    overlay
+      .querySelector<HTMLElement>(
+        '.modal-body input:not([type=file]):not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([readonly]):not([disabled]),' +
+          ' .modal-body select:not([disabled]),' +
+          ' .modal-body textarea:not([readonly]):not([disabled])',
+      )
+      ?.focus();
+  }
   o.onMount?.(handle);
   return handle;
 }
