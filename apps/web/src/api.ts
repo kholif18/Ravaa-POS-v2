@@ -69,7 +69,16 @@ export async function cekJaringan(): Promise<boolean> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4000);
     try {
-      const res = await fetch(`${BASE}/api/me`, { cache: 'no-store', signal: ctrl.signal });
+      const res = await fetch(`${BASE}/api/me`, {
+        cache: 'no-store',
+        signal: ctrl.signal,
+        // Token ikut bila ada supaya sesi sah mendapat 200 — bukan 401 yang
+        // selalu merah di console tiap tick probe (keluhan pemilik 2026-10-31
+        // di halaman Produk). Tanpa token / token basi tetap 401 dan itu
+        // tetap berarti "server hidup" (status < 500) — perilaku probe,
+        // batas 4 detik, dan aturan JSON=tersambung tidak berubah.
+        ...(tokenAuth() ? { headers: { Authorization: `Bearer ${tokenAuth()}` } } : {}),
+      });
       const tipe = res.headers.get('content-type') ?? '';
       const hidup = res.status < 500 || tipe.includes('json');
       setTersambung(hidup);

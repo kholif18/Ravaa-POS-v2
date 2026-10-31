@@ -18,6 +18,7 @@ import { pasangAksiBaru } from '../ui/aksi-baru';
 import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { hintCollapsible } from '../ui/hint-collapsible';
 
 const SIDE_KEY = 'ravaa.prodside';
 
@@ -721,15 +722,10 @@ function fotoKolom(d: Product | null, mode: ModeForm): string {
           <button type="button" id="f-photo-del" class="foto-kotak-x hidden"
             title="Buang foto terpilih" aria-label="Buang foto terpilih">${icon('trash')}</button>
         </div>
-        <p class="hint mt-1.5">
-          Pilih foto sekarang juga boleh — ia disimpan dulu di memori lalu
-          <b>diunggah otomatis setelah produk disimpan</b> (endpoint fotonya butuh
-          id produk). <b>Batal</b> membuang pilihan tanpa mengirim apa pun ke
-          server. Foto dikecilkan jadi thumbnail &le;512px JPEG supaya ringan
-          dibuka HP kasir${
-            mode === 'copy' ? '; foto produk sumber <b>tidak ikut disalin</b>.' : '.'
-          }
-        </p>`;
+        ${hintCollapsible({
+          label: 'Foto',
+          children: `Dikecilkan jadi thumbnail & diunggah otomatis setelah produk disimpan${mode === 'copy' ? ' — foto sumber tidak ikut.' : '.'}`,
+        })}`;
   }
   const src = d.image ? `/api/products/${d.id}/image?v=${d.version}` : '';
   return `
@@ -744,12 +740,10 @@ function fotoKolom(d: Product | null, mode: ModeForm): string {
           <button type="button" id="f-photo-del" class="foto-kotak-x ${src ? '' : 'hidden'}"
             title="Hapus foto" aria-label="Hapus foto">${icon('trash')}</button>
         </div>
-        <p class="hint mt-1.5">
-          Foto <b>langsung tersimpan</b> begitu dipilih (tidak menunggu Simpan) dan otomatis
-          dikecilkan jadi thumbnail supaya ringan dibuka HP kasir — file aslinya disimpan di
-          server, bukan di cache browser. Karena simpannya seketika, tombol <b>Batal</b> tidak
-          mengembalikan foto yang sudah terlanjur diunggah.
-        </p>`;
+        ${hintCollapsible({
+          label: 'Foto',
+          children: 'Tersimpan seketika saat dipilih — tombol Batal tidak mengembalikannya.',
+        })}`;
 }
 
 /** Baca berkas gambar -> thumbnail JPEG maksimal 512px sebagai dataURL.
@@ -828,12 +822,15 @@ function productForm(
     okLabel: mode === 'new' ? 'Tambah' : salin ? 'Buat produk' : 'Simpan',
     wider: true,
     body: `
-      ${salin ? `<p class="hint">Salinan baru — SKU dikosongkan dan akan diisi server dengan nomor urut <b>PRD#####</b> saat disimpan; barcode &amp; stok sengaja dikosongkan. Ubah nama &amp; barcode sesuai varian.</p>` : ''}
+      ${salin ? hintCollapsible({
+        label: 'Mode Salin',
+        children: 'Salinan baru — SKU & barcode dikosongkan, diisi ulang otomatis.',
+      }) : ''}
       <div class="grid grid-cols-1 gap-x-4 gap-y-3 lg:grid-cols-[240px_1fr]">
-        <div class="mx-auto w-44 sm:w-56 lg:mx-0 lg:w-full">
+        <div class="order-2 mx-auto w-36 sm:w-48 lg:order-1 lg:mx-0 lg:w-full">
           ${fotoKolom(mode === 'edit' && d ? d : null, mode)}
         </div>
-        <div class="space-y-2 min-w-0">
+        <div class="order-1 min-w-0 space-y-2 lg:order-2">
         <p class="form-sec">Detail produk</p>
         <div class="field-sm">
           <label class="label" for="f-name">Nama produk *</label>
@@ -847,7 +844,7 @@ function productForm(
             } />
           </div>
           <div class="field-sm">
-            <label class="label" for="f-barcode">Barcode <span class="hint font-normal">1 produk = 1 barcode</span></label>
+            <label class="label" for="f-barcode">Barcode</label>
             <input id="f-barcode" class="input input-sm" value="${esc(barcodeAwal)}" inputmode="numeric" placeholder="opsional" />
           </div>
         </div>
@@ -862,7 +859,10 @@ function productForm(
               .join('')}</select>
           </div>
           <div class="field-sm">
-            <label class="label" for="f-unit">Satuan <span class="hint font-normal">daftar: halaman Satuan</span></label>
+            <label class="label" for="f-unit">Satuan ${hintCollapsible({
+              label: 'Satuan',
+              children: 'Satuan pack/dus dibuat di halaman Satuan.',
+            })}</label>
             <select id="f-unit" class="input input-sm">${unitOptions(d?.unit)}</select>
           </div>
         </div>
@@ -887,22 +887,24 @@ function productForm(
             <input id="f-grosir" class="input input-sm" inputmode="numeric" value="${d?.price_grosir ?? 0}" />
           </div>
         </div>
-        <p class="hint">Harga grosir dipakai POS bila pelanggan tier grosir dipilih — 0 = ikut harga jual. Pack/dus tanpa harga eksplisit ikut harga tier × factor.</p>
-        ${mode === 'edit' && d && d.track_stock ? `
-        <p class="-mt-1 text-xs text-gray-500 dark:text-gray-400">
-          Modal rata-rata: <b class="text-gray-700 dark:text-gray-200">${rp(d.avg_cost)}</b>
-          — hasil penimbangan seluruh restock, dipakai sebagai HPP saat jual.
-          <span class="text-gray-400 dark:text-gray-500">"Harga beli" di atas adalah angka manual Anda (patokan markup) dan TIDAK ikut berubah oleh restock.</span>
-        </p>` : ''}
+        ${hintCollapsible({
+          label: 'Harga Grosir',
+          children: 'Dipakai pelanggan grosir; 0 = ikut harga jual.',
+        })}
+        ${mode === 'edit' && d && d.track_stock ? hintCollapsible({
+          label: 'Modal Rata-rata (HPP)',
+          children: `<b>${rp(d.avg_cost)}</b> — rata-rata restock, dipakai sebagai HPP saat jual.`,
+        }) : ''}
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2 pt-0.5">
           ${switchHtml('f-dyn', d ? !!d.price_dynamic : false, 'Boleh ubah harga saat jual')}
           ${switchHtml('f-note', d ? !!d.use_note : false, 'Catatan di POS')}
           ${mode === 'edit' && d ? switchHtml('f-active', !!d.is_active, 'Aktif') : ''}
         </div>
-        <p class="hint">Aktifkan bila produk ini butuh catatan per transaksi di keranjang POS
-          (mis. Cetak Banner — ukuran, bahan) — teksnya ikut tercetak di struk.</p>
+        ${hintCollapsible({
+          label: 'Catatan di POS',
+          children: 'Catatan per transaksi di keranjang POS (cth. ukuran banner).',
+        })}
 
-        <p class="form-sec">Diskon</p>
         <div class="grid grid-cols-2 gap-2">
           <div class="field-sm">
             <label class="label" for="f-disc-type">Tipe diskon</label>
@@ -918,33 +920,26 @@ function productForm(
         </div>
         <p class="hint" id="f-disc-hint"></p>
 
-        <p class="form-sec">Satuan jual</p>
-        <div class="space-y-1.5">
-          <p class="hint">
-            Satuan dasar <b id="f-unit-base">${esc(d?.unit ?? 'pcs')}</b> selalu ada; baris di bawah untuk
-            pack/dus — <b>stok &amp; HPP pakai satuan dasar</b>.
-          </p>
-          <div class="grid grid-cols-[1fr_72px_1fr_auto] gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-            <span>Satuan</span><span class="text-center">1 = berapa</span><span>Harga</span><span></span>
-          </div>
-          <div id="f-unit-rows" class="space-y-1.5"></div>
-          <button type="button" id="f-unit-add" class="btn btn-ghost">${icon('plus')}<span>Tambah satuan</span></button>
+        <p class="form-sec">Satuan jual & borongan</p>
+        ${hintCollapsible({
+          label: 'Satuan Jual',
+          children: `Stok & HPP tetap dihitung di satuan dasar <b id="f-unit-base">${esc(d?.unit ?? 'pcs')}</b>.`,
+        })}
+        <div class="grid grid-cols-[1fr_72px_1fr_auto] gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+          <span>Satuan</span><span class="text-center">1 = berapa</span><span>Harga</span><span></span>
         </div>
+        <div id="f-unit-rows" class="space-y-1.5"></div>
+        <button type="button" id="f-unit-add" class="btn btn-ghost">${icon('plus')}<span>Tambah satuan</span></button>
 
-        <p class="form-sec">Harga borongan (qty)</p>
-        <div class="space-y-1.5">
-          <p class="hint">
-            "Beli banyak" untuk satuan <b id="f-bor-base">${esc(d?.unit ?? 'pcs')}</b>:
-            setiap <b>qty</b> tercapai, bagian itu berharga <b>total paket</b> — sisanya harga normal
-            (mis. 6 &rarr; Rp5.000: beli 7 = 5.000 + 1.000). Berlaku juga untuk jasa.
-            Kosong = tanpa aturan; pak/dus memakai harga satuan jual di atas.
-          </p>
-          <div class="grid grid-cols-[1fr_1fr_auto] gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-            <span>Beli qty</span><span>Total harga paket (Rp)</span><span></span>
-          </div>
-          <div id="f-bor-rows" class="space-y-1.5"></div>
-          <button type="button" id="f-bor-add" class="btn btn-ghost">${icon('plus')}<span>Tambah tingkatan</span></button>
+        ${hintCollapsible({
+          label: 'Harga Borongan',
+          children: `Per <b id="f-bor-base">${esc(d?.unit ?? 'pcs')}</b>: qty tercapai = harga paket total (cth. 6 &rarr; Rp5.000, beli 7 = 5.000 + 1.000).`,
+        })}
+        <div class="grid grid-cols-[1fr_1fr_auto] gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+          <span>Beli qty</span><span>Total harga paket (Rp)</span><span></span>
         </div>
+        <div id="f-bor-rows" class="space-y-1.5"></div>
+        <button type="button" id="f-bor-add" class="btn btn-ghost">${icon('plus')}<span>Tambah tingkatan</span></button>
 
         <div id="f-stock-wrap">
           <p class="form-sec">Stok</p>
@@ -966,7 +961,7 @@ function productForm(
           </div>
         </div>
         </div><!-- /kolom kanan (form) -->
-      </div><!-- /grid 2 kolom -->`,
+      </div><!-- /grid 2 kolom: desktop foto kiri, mobile form dulu -->`,
     onMount: ({ el, ok, close }) => {
       const val = (id: string) => (el.querySelector(`#${id}`) as HTMLInputElement).value.trim();
       const num = (id: string) => Number(val(id).replace(/\D/g, '') || 0);
@@ -999,8 +994,8 @@ function productForm(
         // field yang tak terlihat tapi masih terkirim bikin kasir bingung.
         stockWrap.hidden = !t;
         trackHint.textContent = t
-          ? 'Kategori ini melacak stok, jadi blok Stok di bawah aktif.'
-          : `Kategori "${cats.find((c) => c.slug === catSel.value)?.name ?? ''}" tidak melacak stok (jasa/cetak/topup) — stok diisi lewat penjualan, bukan master.`;
+          ? ''
+          : `"${cats.find((c) => c.slug === catSel.value)?.name ?? ''}" tidak pakai stok — tercatat lewat penjualan.`;
         // Kadaluarsa: tampil bila KATEGORI menyalakan `use_expiry` (checkbox di
         // form Kategori). TAPI produk yang sudah punya tanggal tetap
         // menampilkan fieldnya — data tidak boleh disembunyikan begitu
@@ -1009,10 +1004,10 @@ function productForm(
         const nyalakan = cats.find((c) => c.slug === catSel.value)?.use_expiry === 1;
         expWrap.hidden = !perluExpiry(catSel.value, adaNilai);
         expHint.textContent = nyalakan
-          ? 'Diisi untuk barang cepat basi — tampil di tabel Produk dan dipakai peringatan stok.'
+          ? 'Untuk barang cepat basi.'
           : adaNilai
-            ? 'Kategori ini tidak menyalakan tanggal kadaluarsa, tapi produk ini sudah punya tanggal — kolomnya tetap ditampilkan supaya datanya tidak tersembunyi.'
-            : 'Kategori ini belum menyalakan tanggal kadaluarsa — centang di form Kategori bila produknya butuh.';
+            ? 'Kategori ini tidak pakai kadaluarsa — tanggal lama tetap ditampil.'
+            : 'Centang di form Kategori bila produknya butuh.';
       };
 
       // --- harga: modal <-> markup <-> harga jual saling mengisi -------------
@@ -1085,7 +1080,8 @@ function productForm(
         const harga = num('f-price');
         discHint.classList.remove(...warnaMerah);
         if (nilai <= 0) {
-          discHint.innerHTML = 'Tanpa diskon — dijual sesuai harga jual di atas.';
+          // Sunyi saat wajar — form yang jadi fokus, bukan penjelasan.
+          discHint.textContent = '';
           return;
         }
         if (pct && nilai > 100) {
@@ -1102,14 +1098,14 @@ function productForm(
         // dan memang harga per transaksilah yang akan dipotong.
         if (dyn.checked || harga <= 0) {
           discHint.textContent = pct
-            ? `Potong ${nilai}% dari harga yang diketik kasir saat transaksi.`
-            : `Potong ${rp(nilai)} dari harga yang diketik kasir saat transaksi.`;
+            ? `Potong ${nilai}% dari harga saat transaksi.`
+            : `Potong ${rp(nilai)} dari harga saat transaksi.`;
           return;
         }
         const akhir = pct ? Math.round((harga * (1 - nilai / 100)) / 100) * 100 : harga - nilai;
         discHint.innerHTML =
           `Harga jual ${rp(harga)} &rarr; <b class="text-gray-700 dark:text-gray-200">${rp(Math.max(0, akhir))}</b>` +
-          ` (${pct ? `${nilai}%` : `potong ${rp(nilai)}`}) — jadi diskon awal baris di kasir.`;
+          ` (${pct ? `${nilai}%` : `potong ${rp(nilai)}`}).`;
       };
 
       // --- foto: unggah seketika (lihat catatan pada fotoKolom) --------------
