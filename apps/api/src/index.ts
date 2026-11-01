@@ -1914,17 +1914,23 @@ const upsertProduct = transaksi((
     }
   }
 
-  let pid: number;
+let pid: number;
   if (!existing) {
+    // Set avg_cost = cost when product baru dengan cost > 0 agar HPP langsung muncul di transaksi/laporan
+    const avgCostAwal = (cost > 0) ? cost : 0;
     const info = db.prepare(
       `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_grosir, price_dynamic, cost, avg_cost, markup, stock, min_stock,
                              image, discount_type, discount, expiry_date, use_note, is_active, updated_at, version)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
-         COALESCE((SELECT MAX(version) FROM products), 0) + 1)`,
+       COALESCE((SELECT MAX(version) FROM products), 0) + 1)`,
     ).run(cat.id, sku, barcode, input.name, unit,
-      price, priceGrosir, priceDynamic, cost, cost, markup, stock, minStock,
+      price, priceGrosir, priceDynamic, cost, avgCostAwal, markup, stock, minStock,
       image, discountType, discount, expiry, useNote, isActive);
     pid = Number(info.lastInsertRowid);
+    // Jika product baru dan cost > 0, pastikan avg_cost terisi biar laporan langsung benar
+    if (cost > 0) {
+      db.prepare('UPDATE products SET avg_cost = ?, version = version + 1 WHERE id = ?').run(avgCostAwal, pid);
+    }
   } else {
     pid = existing.id;
     // deleted_at IKUT di-set NULL di sini: pencarian `existing` (baris 310) tidak
@@ -1936,16 +1942,19 @@ const upsertProduct = transaksi((
     // Konsisten dengan semangat upsert by SKU: menyebut SKU yang sama berarti
     // "produk ini ada (lagi)". version tetap naik supaya delta sync membangkitkan
     // barisnya kembali di semua device (dipertegas di tests bagian E).
+    // Tambahan: kalau produk diedit membawa cost baru, update avg_cost juga biar laporan tetap konsisten
+    const costBaru = cost;
     db.prepare(
       `UPDATE products SET category_id=?, barcode=?, name=?, unit=?, price=?, price_grosir=?, price_dynamic=?,
          cost=?, markup=?, stock=?, min_stock=?, image=?, discount_type=?, discount=?, expiry_date=?,
          use_note=?, is_active=?, deleted_at=NULL,
          updated_at=datetime('now'),
-         version=(SELECT COALESCE(MAX(version),0)+1 FROM products)
+         version=(SELECT COALESCE(MAX(version),0)+1 FROM products),
+         avg_cost = CASE WHEN ? > 0 THEN ? ELSE avg_cost END
        WHERE id=?`,
     ).run(cat.id, barcode, input.name, unit,
       price, priceGrosir, priceDynamic, cost, markup, stock, minStock,
-      image, discountType, discount, expiry, useNote, isActive, pid);
+      image, discountType, discount, expiry, useNote, isActive, costBaru, costBaru, pid);
   }
   // units === undefined -> biarkan apa adanya; array (termasuk []) -> ganti semua.
   if (input.units !== undefined) simpanSatuanJual(pid, unit, input.units);
