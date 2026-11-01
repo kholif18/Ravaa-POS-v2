@@ -1917,12 +1917,12 @@ const upsertProduct = transaksi((
   let pid: number;
   if (!existing) {
     const info = db.prepare(
-      `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_grosir, price_dynamic, cost, markup, stock, min_stock,
+      `INSERT INTO products (category_id, sku, barcode, name, unit, price, price_grosir, price_dynamic, cost, avg_cost, markup, stock, min_stock,
                              image, discount_type, discount, expiry_date, use_note, is_active, updated_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
          COALESCE((SELECT MAX(version) FROM products), 0) + 1)`,
     ).run(cat.id, sku, barcode, input.name, unit,
-      price, priceGrosir, priceDynamic, cost, markup, stock, minStock,
+      price, priceGrosir, priceDynamic, cost, cost, markup, stock, minStock,
       image, discountType, discount, expiry, useNote, isActive);
     pid = Number(info.lastInsertRowid);
   } else {
@@ -2579,7 +2579,7 @@ const insertSale = transaksi((sale: {
         `SELECT p.*, c.track_stock FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=? AND p.is_active=1`,
       ).get(pid) as {
         id: number; name: string; unit: string; price: number; price_dynamic: number; stock: number;
-        track_stock: number; avg_cost: number; expiry_date: string | null;
+        track_stock: number; avg_cost: number; cost: number; expiry_date: string | null;
       } | undefined;
       if (!p) throw new Error(`produk #${pid} tidak aktif/tidak ada`);
       name = p.name;
@@ -2627,7 +2627,11 @@ const insertSale = transaksi((sale: {
       }
       // HPP per SATUAN JUAL: stok dikeluarkan dalam satuan dasar (qty*factor),
       // jadi HPP baris juga harus dikalikan faktor yang sama.
-      cost = Math.round(p.avg_cost * factor);
+      // `avg_cost` di-seed dari `cost` saat produk dibuat (upsertProduct); kalau
+      // somehow masih 0 (produk lama sebelum perbaikin, atau belum direstock
+      // sama sekali), fall back ke `cost` (harga beli manual) agar HPP laporan
+      // tidak nol dan laba tidak meleset ke penuh.
+      cost = Math.round((p.avg_cost || p.cost) * factor);
       const keluar = qty * factor;
       if (p.track_stock) {
         // SATU-SATUNYA pintu "stok kurang" ada di sini. Dilewati bila pengaturan
