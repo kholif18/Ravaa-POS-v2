@@ -11,6 +11,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO="$PWD"
+# compose file WAJIB disebut eksplisit (-f) di SEMUA perintah docker compose:
+# script ini cd ke root repo (bukan infra/), jadi tanpa -f compose mencari
+# docker-compose.yml di cwd dan gagal "no configuration file provided"
+# (bug nyata 2026-11-01 pada langkah backup).
+COMPOSE_FILE="$REPO/infra/docker-compose.yml"
 
 MODE="${1:-}"
 case "$MODE" in
@@ -19,8 +24,13 @@ case "$MODE" in
 esac
 
 if [ -z "$MODE" ]; then
-  if command -v docker >/dev/null 2>&1 \
-     && docker compose -f "$REPO/infra/docker-compose.yml" ps --services 2>/dev/null | grep -q .; then
+  SvcDocker=""
+  if command -v docker >/dev/null 2>&1; then
+    # ditangkap ke variabel dulu (bukan pipe ke grep -q) supaya pipefail/ SIGPIPE
+    # tidak membuat deteksi mode salah baca.
+    SvcDocker="$(docker compose -f "$COMPOSE_FILE" ps --services 2>/dev/null || true)"
+  fi
+  if [ -n "$SvcDocker" ]; then
     MODE=docker
   elif systemctl --user list-unit-files 2>/dev/null | grep -q '^ravaa-api'; then
     MODE=native
@@ -38,16 +48,32 @@ jam_utc()   { date -u +%H%M%S; }
 if [ "$MODE" = "docker" ]; then
   # --- Docker: backup via kontainer api (better-sqlite3 .backup) ---
   BA=""
-  if docker compose -f infra/docker-compose.yml ps api 2>/dev/null | grep -q "running\|Up"; then
+  # Hasil ps ditangkap dulu (bukan `… | grep -q`): grep -q menutup pipe lebih
+  # awal → dengan pipefail bisa kena SIGPIPE dan statusnya salah baca.
+  PS_API="$(docker compose -f "$COMPOSE_FILE" ps api 2>/dev/null || true)"
+  if printf '%s' "$PS_API" | grep -qi "running\|Up"; then
     echo "-- backup DB (dalam volume api-data) …"
-    BA="$(docker compose exec -T api node -e '
-const bs = require("better-sqlite3");
-const db = new bs(process.env.DB_PATH || "/data/data.db");
-const d = new Date(), p = n => String(n).padStart(2, "0");
-const name = "data-" + d.getUTCFullYear() + "-" + p(d.getUTCMonth()+1) + "-" + p(d.getUTCDate())
-  + "-" + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + ".db";
-db.backup("/data/" + name); db.close(); console.log(name);
-')"
+    # Catatan: db.backup() mengembalikan Promise — tanpa di-await lalu db.close()
+    # dipanggil duluan, muncul "The database connection is not open" dan file
+    # backup bisa gagal setengah jadi (bug nyata 2026-11-01). async IIFE +
+    # await menunggu backup benar-benar selesai sebelum exit (non-0 = gagal →
+    # set -e MEMBATALKAN update, pola integrity check mode native).
+    if ! BA="$(docker compose -f "$COMPOSE_FILE" exec -T api node -e '
+(async () => {
+  const bs = require("better-sqlite3");
+  const db = new bs(process.env.DB_PATH || "/data/data.db");
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  const name = "data-" + d.getUTCFullYear() + "-" + p(d.getUTCMonth()+1) + "-" + p(d.getUTCDate())
+    + "-" + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + ".db";
+  await db.backup("/data/" + name);
+  db.close();
+  console.log(name);
+})().catch((e) => { console.error(e); process.exit(1); });
+')"; then
+      echo "!! backup DB GAGAL — update DIBATALKAN (data tidak disentuh)" >&2
+      exit 1
+    fi
+    [ -n "$BA" ] || { echo "!! backup DB gagal (nama kosong) — update DIBATALKAN" >&2; exit 1; }
     echo "   backup: $BA (muncul juga di daftar backup UI)"
   else
     echo "!! kontainer api tidak jalan — backup dilewati (volume tetap utuh)"
@@ -57,11 +83,11 @@ db.backup("/data/" + name); db.close(); console.log(name);
   git -C "$REPO" pull --ff-only
 
   echo "-- rebuild + start kontainer …"
-  docker compose -f infra/docker-compose.yml up -d --build
+  docker compose -f "$COMPOSE_FILE" up -d --build
 
   echo "-- cek health …"
   for i in $(seq 1 30); do curl -fsS localhost:3001/health >/dev/null 2>&1 && break; sleep 1; done
-  curl -fsS localhost:3001/health || { echo "API tidak sehat — docker compose -f infra/docker-compose.yml logs api"; exit 1; }
+  curl -fsS localhost:3001/health || { echo "API tidak sehat — docker compose -f $COMPOSE_FILE logs api" >&2; exit 1; }
   echo "SELESAI. Web: https://$(hostname -I 2>/dev/null | awk '{print $1}'):5656"
 else
   # --- Native: systemd user service ---
