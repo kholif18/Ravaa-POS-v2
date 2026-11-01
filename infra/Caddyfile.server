@@ -16,7 +16,7 @@ https://:5656 {
   # 'localhost'", terbukti 2026-10-27). Generate cert di server sekali:
   #   bash infra/gen-cert.sh  →  infra/certs/ravaa-selfsigned.{crt,key}
   # Untuk native, salin/kunci file cert ini lalu tunjuk path absolut di bawah.
-  tls /etc/caddy/certs/ravaa-selfsigned.crt /etc/caddy/certs/ravaa-selfsigned.key
+  tls /certs/ravaa-selfsigned.crt /certs/ravaa-selfsigned.key
   # /api/* di-proxy; sisanya SPA. Bungkus `handle` terpisah — root+file_server
   # tanpa handle ikut men-serve /api/* sebagai file → balik HTML (bug 2026-10-27).
   @api path /api/*

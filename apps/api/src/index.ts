@@ -4996,7 +4996,7 @@ setInterval(backupHarian, 60 * 60 * 1000); // lalu cek tiap jam
 // Ubah durasi = ubah RETENSI_AUDIT_HARI saja (mis. 90, 730) — jangan
 // didiamkan tanpa batas lagi. Prune gagal = warning saja, tak pernah
 // memblokir boot atau menulis audit (hiasan tak boleh merusak data).
-const RETENSI_AUDIT_HARI = 365;
+const RETENSI_AUDIT_HARI = 30;
 function pruneAudit(): void {
   try {
     const r = db
