@@ -1123,9 +1123,16 @@ app.get('/api/customers', wajibIzin('pelanggan.lihat'), (c) => {
   // `total` = baris COCOK filter (tanpa limit) — footer "A–B dari N".
   const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  // Urutan (2026-11-01): tanpa `sort` = lama (name NOCASE, id). Kunci header:
+  // code / nama / alamat (lihat halaman Pelanggan).
+  const urut = urutDari(
+    (k) => c.req.query(k),
+    { code: 'c.code', nama: 'c.name COLLATE NOCASE', alamat: 'c.address' },
+    'c.name COLLATE NOCASE, c.id',
+  );
   const rows = db
     .prepare(
-      `SELECT c.* FROM customers c ${where} ORDER BY c.name COLLATE NOCASE, c.id LIMIT ? OFFSET ?`,
+      `SELECT c.* FROM customers c ${where} ORDER BY ${urut} LIMIT ? OFFSET ?`,
     )
     .all(...params, limit, offset);
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM customers c ${where}`).get(...params) as { n: number }).n;
@@ -1254,8 +1261,15 @@ app.get('/api/suppliers', wajibIzin('supplier.kelola'), (c) => {
   // `total` = baris COCOK filter (tanpa limit) — footer "A–B dari N".
   const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+  // Urutan (2026-11-01): tanpa `sort` = lama (name NOCASE, id). Kunci header:
+  // code / nama / alamat (lihat halaman Supplier).
+  const urut = urutDari(
+    (k) => c.req.query(k),
+    { code: 's.code', nama: 's.name COLLATE NOCASE', alamat: 's.address' },
+    's.name COLLATE NOCASE, s.id',
+  );
   const rows = db
-    .prepare(`SELECT s.* FROM suppliers s ${where} ORDER BY s.name COLLATE NOCASE, s.id LIMIT ? OFFSET ?`)
+    .prepare(`SELECT s.* FROM suppliers s ${where} ORDER BY ${urut} LIMIT ? OFFSET ?`)
     .all(...params, limit, offset);
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM suppliers s ${where}`).get(...params) as { n: number }).n;
   return c.json({ data: rows, total });
@@ -1396,6 +1410,22 @@ app.get('/api/customer-debts', wajibIzin('hutang.lihat'), (c) => {
        ${status === 'semua' ? '' : 'HAVING sisa > 0'}
      )`,
   ).get() as { n: number }).n;
+  // Urutan (2026-11-01): tanpa `sort` = lama (sisa DESC, terakhir DESC, id).
+  // Kunci header: nama / dihutang / dibayar / sisa / terakhir (alias agregat
+  // — ORDER BY alias sah di SQLite). Sekunder EKSPLISIT `c.id`: query ini
+  // JOIN customers + customer_debts, jadi `id` polos ambigu.
+  const urut = urutDari(
+    (k) => c.req.query(k),
+    {
+      nama: 'c.name COLLATE NOCASE',
+      dihutang: 'charge',
+      dibayar: 'bayar',
+      sisa: 'sisa',
+      terakhir: 'terakhir',
+    },
+    'sisa DESC, terakhir DESC, c.id',
+    'c.id',
+  );
   const rows = db
     .prepare(
       `SELECT c.id AS customer_id, c.name, c.phone,
@@ -1405,7 +1435,7 @@ app.get('/api/customer-debts', wajibIzin('hutang.lihat'), (c) => {
                                 ELSE -d.amount END), 0) AS sisa,
               MAX(d.created_at) AS terakhir
        ${dasar}
-        ORDER BY sisa DESC, terakhir DESC, c.id
+        ORDER BY ${urut}
         LIMIT ? OFFSET ?`,
     )
     .all(limit, offset) as { customer_id: number; name: string; phone: string; charge: number; bayar: number; sisa: number; terakhir: string | null }[];
@@ -2831,6 +2861,33 @@ app.post('/api/sales', wajibIzin('pos.jual'), async (c) => {
   }
 });
 
+// ---------- urutkan daftar (param opsional sort/dir, 2026-11-01) ----------
+// Halaman dengan pagination server-side (customers, suppliers, orders,
+// purchases, customer-debts) memakai sort KLIEN hanya akan mengurutkan baris
+// SATU halaman (halaman 1 rapi, halaman 2 berantakan) — menyesatkan kasir.
+// Karena itu urutan ikut ke server lewat `?sort=<kunci>&dir=asc|desc`.
+// Hanya kunci whitelist yang diterima (`peta` per endpoint); kunci asing =
+// diabaikan (bukan 400 — param ini dekoratif, tombol header tak pernah
+// mengirim kunci asing), `dir` selain 'desc' = 'asc'. Tanpa `sort` sama
+// sekali = frasa ORDER BY lama masing-masing endpoint (kontrak lama utuh,
+// suite test yang tak mengirim param tetap melihat urutan identik).
+// Setiap frasa diakhiri sekunder stabil supaya baris berkunci kembar tidak
+// berpindah-pindah tiap render: default `, id` (cukup untuk FROM satu tabel),
+// atau `, <tabel>.id` bila query JOIN/GROUP dua tabel (alias `id` ambigu —
+// terbukti di customer-debts: "ambiguous column name: id").
+function urutDari(
+  query: (k: string) => string | undefined,
+  peta: Record<string, string>,
+  bawaan: string,
+  sekunder = 'id',
+): string {
+  const key = query('sort') ?? '';
+  const expr = peta[key];
+  if (!expr) return bawaan;
+  const dir = (query('dir') ?? '').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+  return `${expr} ${dir}, ${sekunder}`;
+}
+
 // ---------- riwayat transaksi (menu "Riwayat transaksi") ----------
 // Filter hari memakai `date(created_at) = date(?)` yang SAMA dengan
 // /api/reports/daily, dan defaultnya juga hari UTC yang sama
@@ -3085,10 +3142,26 @@ app.get('/api/orders', wajibIzin('pesanan.lihat'), (c) => {
   const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
   const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM orders o ${klausul}`).get(...params) as { n: number }).n;
+  // Urutan (2026-11-01): tanpa `sort` = lama (id DESC — terbaru dulu). Kunci
+  // header: nomor / pelanggan / status / waktu / total / dibayar / sisa
+  // (dibayar & sisa = alias SQL_ORDER_UANG — ORDER BY alias sah di SQLite).
+  const urut = urutDari(
+    (k) => c.req.query(k),
+    {
+      nomor: 'o.order_no',
+      pelanggan: 'o.customer_name COLLATE NOCASE',
+      status: 'o.status',
+      waktu: 'o.created_at',
+      total: 'o.total',
+      dibayar: 'dibayar',
+      sisa: 'sisa',
+    },
+    'o.id DESC',
+  );
   const data = db.prepare(
     `SELECT o.*, ${SQL_ORDER_UANG}
        FROM orders o ${klausul}
-      ORDER BY o.id DESC LIMIT ? OFFSET ?`,
+      ORDER BY ${urut} LIMIT ? OFFSET ?`,
   ).all(...params, limit, offset);
   // Ringkasan kepala halaman: jumlah per status (chip filter) + piutang
   // pesanan aktif (Σ sisa status dikerjakan/selesai — cermin kartu halaman).
@@ -4428,6 +4501,21 @@ app.get('/api/purchases', wajibIzin('pembelian.kelola'), (c) => {
   };
   const where = klausul[status];
   const total = (db.prepare(`${SQL_PO_HIT} SELECT COUNT(*) AS n FROM hit ${where}`).get() as { n: number }).n;
+  // Urutan (2026-11-01): tanpa `sort` = lama (id DESC). Kunci header: nota
+  // (PO-<id> → urut id) / supplier / status / total / terbayar / sisa.
+  // `status_tampil` & `sisa` = alias CTE hit (ORDER BY alias sah di SQLite).
+  const urut = urutDari(
+    (k) => c.req.query(k),
+    {
+      nota: 'hit.id',
+      supplier: 'hit.supplier_name COLLATE NOCASE',
+      status: 'hit.status_tampil',
+      total: 'hit.total',
+      terbayar: 'hit.terbayar',
+      sisa: 'hit.sisa',
+    },
+    'hit.id DESC',
+  );
   const data = db.prepare(
     `${SQL_PO_HIT}
      SELECT hit.*,
@@ -4435,7 +4523,7 @@ app.get('/api/purchases', wajibIzin('pembelian.kelola'), (c) => {
                  THEN MAX(0, CAST(julianday('now') - julianday(hit.received_at) AS INTEGER))
                  ELSE NULL END AS umur_hari,
             (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = hit.id) AS n_items
-       FROM hit ${where} ORDER BY hit.id DESC LIMIT ? OFFSET ?`,
+       FROM hit ${where} ORDER BY ${urut} LIMIT ? OFFSET ?`,
   ).all(limit, offset);
   const lewat30 = (db.prepare(
     `${SQL_PO_HIT} SELECT COUNT(*) AS n FROM hit
@@ -4882,6 +4970,34 @@ function backupHarian(): void {
 }
 backupHarian(); // sekali saat API hidup (idempoten — restart aman)
 setInterval(backupHarian, 60 * 60 * 1000); // lalu cek tiap jam
+
+// --- Retensi jejak audit (2026-11-01, permintaan pemilik "ada batasan …
+// supaya tidak membenani storage") ---
+// Sebelumnya audit_log TANPA batas sama sekali (INSERT saja, tak pernah
+// DELETE) — jaring pengaman jangka panjang: laju nyata ±60 baris/hari di
+// produksi (≈150 byte/baris ≈ 3 MB/tahun), kecil sekarang tapi selamanya.
+// Simpan 1 tahun terakhir; pola sama dengan backupHarian: jalan sekali saat
+// boot + cek tiap jam (restart tsx watch sering — interval murni tak
+// bergantung umur proses). `at` = TEXT 'YYYY-MM-DD HH:MM:SS' (UTC, format
+// SQLite) → perbandingan dengan datetime('now', …) sah lexicographically.
+// Ubah durasi = ubah RETENSI_AUDIT_HARI saja (mis. 90, 730) — jangan
+// didiamkan tanpa batas lagi. Prune gagal = warning saja, tak pernah
+// memblokir boot atau menulis audit (hiasan tak boleh merusak data).
+const RETENSI_AUDIT_HARI = 365;
+function pruneAudit(): void {
+  try {
+    const r = db
+      .prepare(`DELETE FROM audit_log WHERE at < datetime('now', ?)`)
+      .run(`-${RETENSI_AUDIT_HARI} days`);
+    if (r.changes > 0) {
+      console.log(`[audit] retensi ${RETENSI_AUDIT_HARI} hari — buang ${r.changes} baris lama`);
+    }
+  } catch (e) {
+    console.warn('[audit] prune gagal:', e instanceof Error ? e.message : e);
+  }
+}
+pruneAudit();
+setInterval(pruneAudit, 60 * 60 * 1000);
 
 // Daftar file backup (terbaru dulu).
 app.get('/api/backup', hanyaOwner, (c) => c.json({ data: daftarBackup() }));

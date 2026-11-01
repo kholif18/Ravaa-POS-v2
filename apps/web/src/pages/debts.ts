@@ -25,6 +25,7 @@ import { pasangAksiBaru } from '../ui/aksi-baru';
 import { getCashier, getToko } from '../ui/user';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 import {
   footerStruk, syncDariServerSettings,
 } from '../ui/identitas-struk';
@@ -86,7 +87,14 @@ const state = {
    *  null = di luar shift — pembayaran tetap tercatat, tapi tidak menggerakkan
    *  laci shift mana pun (baris baru selalu ber-cashier non-kosong). */
   shiftId: null as number | null,
+  /** null = urutan bawaan server (sisa DESC, terakhir DESC — piutang terbesar di atas). */
+  sort: null as SortAktif<HutSortKey>,
 };
+
+/** Kunci header yang bisa diurutkan — PERSIS kunci whitelist server
+ *  (GET /api/customer-debts ?sort=). */
+type HutSortKey = 'nama' | 'dihutang' | 'dibayar' | 'sisa' | 'terakhir';
+const HUT_SORT_KEYS: readonly HutSortKey[] = ['nama', 'dihutang', 'dibayar', 'sisa', 'terakhir'];
 
 let host: HTMLElement | null = null;
 
@@ -213,11 +221,11 @@ function renderTable(): string {
       <table class="table">
         <thead>
           <tr>
-            <th class="th">Pelanggan</th>
-            <th class="th text-right">Dihutang</th>
-            <th class="th text-right">Dibayar</th>
-            <th class="th text-right">Sisa</th>
-            <th class="th text-right">Terakhir</th>
+            ${thUrut('nama', 'Pelanggan', state.sort)}
+            ${thUrut('dihutang', 'Dihutang', state.sort, 'text-right')}
+            ${thUrut('dibayar', 'Dibayar', state.sort, 'text-right')}
+            ${thUrut('sisa', 'Sisa', state.sort, 'text-right')}
+            ${thUrut('terakhir', 'Terakhir', state.sort, 'text-right')}
             <th class="th text-right">Aksi</th>
           </tr>
         </thead>
@@ -945,6 +953,12 @@ function bindRows(): void {
     state.offset = 0;
     void load();
   });
+  // Klik header = sort di SERVER (pagination server-side). RESET offset.
+  bindSort(host!, state.sort, HUT_SORT_KEYS, (_key, next) => {
+    state.sort = next;
+    state.offset = 0;
+    void load();
+  });
   host!.querySelectorAll<HTMLElement>('[data-rincian]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = Number(b.dataset.rincian);
@@ -968,8 +982,13 @@ async function load(): Promise<void> {
   state.error = '';
   paint();
   try {
+    const p = new URLSearchParams();
+    p.set('status', state.status);
+    p.set('limit', String(state.limit));
+    p.set('offset', String(state.offset));
+    paramSort(state.sort, p);
     const r = await apiGet<{ data: Ringkasan[]; total: number; count: number; lewat30: number }>(
-      `/api/customer-debts?status=${state.status}&limit=${state.limit}&offset=${state.offset}`,
+      `/api/customer-debts?${p}`,
     );
     state.rows = r.data;
     state.total = r.total;

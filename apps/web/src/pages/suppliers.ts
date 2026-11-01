@@ -18,6 +18,7 @@ import { pasangAksiBaru } from '../ui/aksi-baru';
 import { pasangCariBersih } from '../ui/cari-bersih';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 
 type Supplier = {
   id: number;
@@ -34,16 +35,23 @@ type Supplier = {
 
 type EditSupplier = { id: number | null; name: string; phone: string; address: string; note: string; code: string };
 
+/** Kunci header yang bisa diurutkan — PERSIS kunci whitelist server
+ *  (GET /api/suppliers ?sort=): `nama` / `alamat`. */
+type SupSortKey = 'nama' | 'alamat';
+const SUP_SORT_KEYS: readonly SupSortKey[] = ['nama', 'alamat'];
+
 const state = {
   items: [] as Supplier[],
   total: 0,
   q: '',
   // Paginasi (2026-10-11): offset + limit halaman (ui/pager.ts).
-  // RESET offset ke 0 setiap kata kunci/limit berubah.
+  // RESET offset ke 0 setiap kata kunci/limit/urutan berubah.
   offset: 0,
   limit: PAGE_SIZE,
   loading: true,
   error: '',
+  /** null = urutan bawaan server (nama alfabetis). */
+  sort: null as SortAktif<SupSortKey>,
 };
 
 let host: HTMLElement | null = null;
@@ -120,8 +128,8 @@ function renderTable(): string {
         <thead>
           <tr>
             <th class="th">No</th>
-            <th class="th">Supplier</th>
-            <th class="th">Alamat</th>
+            ${thUrut('nama', 'Supplier', state.sort)}
+            ${thUrut('alamat', 'Alamat', state.sort)}
             <th class="th">Catatan</th>
             <th class="th text-right">Aksi</th>
           </tr>
@@ -212,6 +220,13 @@ function bindRows(): void {
     state.offset = 0;
     void load();
   });
+  // Klik header = sort di SERVER (pagination server-side — sort klien hanya
+  // mengurutkan baris satu halaman). RESET offset: urutan baru = halaman 1.
+  bindSort(host!, state.sort, SUP_SORT_KEYS, (_key, next) => {
+    state.sort = next;
+    state.offset = 0;
+    void load();
+  });
   host!.querySelectorAll<HTMLElement>('[data-sup-edit]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = Number(b.dataset.supEdit);
@@ -252,6 +267,7 @@ async function load(): Promise<void> {
     if (state.q) p.set('q', state.q);
     p.set('limit', String(state.limit));
     p.set('offset', String(state.offset));
+    paramSort(state.sort, p);
     const r = await apiGet<{ data: Supplier[]; total: number }>(`/api/suppliers?${p}`);
     state.items = r.data;
     state.total = r.total;

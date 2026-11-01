@@ -29,6 +29,7 @@ import { pasangCariBersih } from '../ui/cari-bersih';
 import { restockForm } from './products';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { bindSort, thUrut, type SortAktif } from '../ui/sort-header';
 
 const rp = (n: number) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;
 
@@ -69,6 +70,8 @@ const state = {
   cat: 'all',
   side: readSide(),
   q: '',
+  /** null = urutan bawaan (minus → habis → kritis → aman, lalu nama). */
+  sort: null as SortAktif<StokSortKey>,
 };
 
 let host: HTMLElement | null = null;
@@ -97,6 +100,13 @@ function urutan(p: Product): number {
   return 2;
 }
 
+/** Kunci header yang bisa diurutkan (klik = asc, klik lagi = desc). */
+type StokSortKey = 'produk' | 'kategori' | 'stok' | 'minimum' | 'nilai';
+const STOK_SORT_KEYS: readonly StokSortKey[] = ['produk', 'kategori', 'stok', 'minimum', 'nilai'];
+
+/** Nilai kolom "Nilai" = stock × avg_cost (modal, sama dengan tampilan). */
+const nilaiBaris = (p: Product) => p.stock * p.avg_cost;
+
 /** Dasar penghitung: sudah tersaring KATEGORI + PENCARIAN, belum tersaring status.
  *  Dipakai bersama oleh isi tabel DAN angka pada tombol filter, supaya keduanya
  *  tidak pernah beda — sama polanya dengan filteredProducts() halaman Produk. */
@@ -115,14 +125,29 @@ function dasar(): Product[] {
 }
 
 function terlihat(): Product[] {
-  return dasar()
-    .filter((p) => {
-      if (state.filter === 'semua') return true;
-      if (state.filter === 'minus') return minus(p);
-      if (state.filter === 'habis') return habis(p);
-      return kritis(p) || habis(p); // "Stok menipis" tetap menyertakan yang habis
-    })
-    .sort((a, b) => urutan(a) - urutan(b) || a.name.localeCompare(b.name, 'id'));
+  const list = dasar().filter((p) => {
+    if (state.filter === 'semua') return true;
+    if (state.filter === 'minus') return minus(p);
+    if (state.filter === 'habis') return habis(p);
+    return kritis(p) || habis(p); // "Stok menipis" tetap menyertakan yang habis
+  });
+  // Tanpa sort aktif = urutan bawaan lama (minus → habis → kritis → aman,
+  // lalu nama) — default tidak diklaim lewat panah ▲ karena memang bukan
+  // urutan kolom mana pun (semua th ↕ sampai diklik).
+  if (!state.sort) {
+    return list.sort((a, b) => urutan(a) - urutan(b) || a.name.localeCompare(b.name, 'id'));
+  }
+  const n = state.sort.dir === 'desc' ? -1 : 1;
+  return list.sort((a, b) => {
+    let x = 0;
+    if (state.sort!.key === 'stok') x = a.stock - b.stock;
+    else if (state.sort!.key === 'minimum') x = a.min_stock - b.min_stock;
+    else if (state.sort!.key === 'nilai') x = nilaiBaris(a) - nilaiBaris(b);
+    else if (state.sort!.key === 'kategori') x = a.category_name.localeCompare(b.category_name, 'id');
+    else x = a.name.localeCompare(b.name, 'id');
+    // Sekunder nama (atau status mendesak bila kolom nama kembar) = stabil.
+    return n * (x !== 0 ? x : urutan(a) - urutan(b) || a.name.localeCompare(b.name, 'id'));
+  });
 }
 
 /** Teks footer di bawah tabel — selalu sebanding dengan isi tabel karena
@@ -263,11 +288,11 @@ function tableCard(): string {
           <thead>
             <tr>
               <th class="th th-sticky w-12 text-center">No.</th>
-              <th class="th th-sticky">Produk</th>
-              <th class="th th-sticky">Kategori</th>
-              <th class="th th-sticky text-right">Stok</th>
-              <th class="th th-sticky text-right">Minimum</th>
-              <th class="th th-sticky text-right">Nilai</th>
+              ${thUrut('produk', 'Produk', state.sort, 'th-sticky')}
+              ${thUrut('kategori', 'Kategori', state.sort, 'th-sticky')}
+              ${thUrut('stok', 'Stok', state.sort, 'th-sticky text-right')}
+              ${thUrut('minimum', 'Minimum', state.sort, 'th-sticky text-right')}
+              ${thUrut('nilai', 'Nilai', state.sort, 'th-sticky text-right')}
               <th class="th th-sticky text-right">Aksi</th>
             </tr>
           </thead>
@@ -471,6 +496,12 @@ function bind(): void {
       if (p) riwayatForm(p);
     }),
   );
+
+  // Klik header = urut lokal (seluruh data stok sudah di klien lewat load()).
+  bindSort(host, state.sort, STOK_SORT_KEYS, (_key, next) => {
+    state.sort = next;
+    paint();
+  });
 }
 
 /* ---------- Riwayat stok ---------- */

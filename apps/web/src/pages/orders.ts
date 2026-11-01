@@ -41,6 +41,7 @@ import { pasangCariBersih } from '../ui/cari-bersih';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
 import { cetakUlang, type SaleRow } from './history';
+import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 
 /* ---------- tipe (kontrak GET /api/orders & :id) ---------- */
 
@@ -84,6 +85,12 @@ type Ringkas = { dikerjakan: number; selesai: number; diambil: number; batal: nu
 
 type Metode = 'tunai' | 'qris' | 'transfer';
 
+/** Kunci header yang bisa diurutkan — PERSIS kunci whitelist server
+ *  (GET /api/orders ?sort=): nomor/pelanggan/status/total/dibayar/sisa
+ *  (`waktu` juga ada di server tapi tidak punya kolom terpisah di tabel). */
+type OrdSortKey = 'nomor' | 'pelanggan' | 'status' | 'total' | 'dibayar' | 'sisa';
+const ORD_SORT_KEYS: readonly OrdSortKey[] = ['nomor', 'pelanggan', 'status', 'total', 'dibayar', 'sisa'];
+
 /* ---------- state ---------- */
 
 const state = {
@@ -97,6 +104,8 @@ const state = {
   ringkas: { dikerjakan: 0, selesai: 0, diambil: 0, batal: 0, piutang: 0 } as Ringkas,
   loading: true,
   error: '',
+  /** null = urutan bawaan server (id DESC — pesanan terbaru di atas). */
+  sort: null as SortAktif<OrdSortKey>,
   // Form pesanan baru
   customers: [] as { id: number; code: string; name: string }[],
   custId: null as number | null,
@@ -263,12 +272,12 @@ function renderTable(): string {
       <table class="table">
         <thead>
           <tr>
-            <th class="th">Nomor</th>
-            <th class="th">Pelanggan</th>
-            <th class="th">Status</th>
-            <th class="th text-right">Total</th>
-            <th class="th text-right">Dibayar</th>
-            <th class="th text-right">Sisa</th>
+            ${thUrut('nomor', 'Nomor', state.sort)}
+            ${thUrut('pelanggan', 'Pelanggan', state.sort)}
+            ${thUrut('status', 'Status', state.sort)}
+            ${thUrut('total', 'Total', state.sort, 'text-right')}
+            ${thUrut('dibayar', 'Dibayar', state.sort, 'text-right')}
+            ${thUrut('sisa', 'Sisa', state.sort, 'text-right')}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -304,6 +313,12 @@ function bindListRows(): void {
     state.offset = 0;
     void load();
   });
+  // Klik header = sort di SERVER (pagination server-side). RESET offset.
+  bindSort(host, state.sort, ORD_SORT_KEYS, (_key, next) => {
+    state.sort = next;
+    state.offset = 0;
+    void load();
+  });
   host.querySelectorAll<HTMLElement>('[data-ord-buka]').forEach((tr) =>
     tr.addEventListener('click', () => {
       location.hash = `#/orders/${tr.dataset.ordBuka}`;
@@ -316,8 +331,14 @@ async function load(): Promise<void> {
   state.error = '';
   paintList();
   try {
+    const p = new URLSearchParams();
+    p.set('status', state.status);
+    if (state.q) p.set('q', state.q);
+    p.set('limit', String(state.limit));
+    p.set('offset', String(state.offset));
+    paramSort(state.sort, p);
     const r = await apiGet<{ data: OrderRow[]; total: number; ringkas: Ringkas }>(
-      `/api/orders?status=${encodeURIComponent(state.status)}&q=${encodeURIComponent(state.q)}&limit=${state.limit}&offset=${state.offset}`,
+      `/api/orders?${p}`,
     );
     state.items = r.data;
     state.total = r.total;

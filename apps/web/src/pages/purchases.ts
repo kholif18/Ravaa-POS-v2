@@ -46,6 +46,7 @@ import { tglPendek } from '../ui/waktu';
 import { rp } from '../escpos';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 // Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026) —
 // helper tinggal di invoice.ts, dipakai juga oleh debts.ts & rekap/laporan.
 import { CSS_LOGO_A4, bukaTabCetak, footerDokumenA4, logoA4Html, rpIdr, tglSingkat, tglLengkap, cityToko } from '../invoice';
@@ -124,14 +125,21 @@ const state = {
   // Pengingat hutang supplier (2026-10-16): jumlah PO received bersisa >30 hari
   // (dihitung server dari seluruh nota, bukan cuma halaman ini).
   lewat30: 0,
-  // Paginasi (2026-10-11): RESET ke 0 setiap status berubah.
+  // Paginasi (2026-10-11): RESET ke 0 setiap status/urutan berubah.
   offset: 0,
   limit: PAGE_SIZE,
   loading: true,
   error: '',
   shiftId: null as number | null,
   suppliers: [] as SupplierOpt[],
+  /** null = urutan bawaan server (id DESC — nota terbaru di atas). */
+  sort: null as SortAktif<PoSortKey>,
 };
+
+/** Kunci header yang bisa diurutkan — PERSIS kunci whitelist server
+ *  (GET /api/purchases ?sort=). `nota` = hit.id (PO-<id> → urut id). */
+type PoSortKey = 'nota' | 'supplier' | 'status' | 'total' | 'terbayar' | 'sisa';
+const PO_SORT_KEYS: readonly PoSortKey[] = ['nota', 'supplier', 'status', 'total', 'terbayar', 'sisa'];
 
 let host: HTMLElement | null = null;
 let cariTimer: ReturnType<typeof setTimeout> | undefined;
@@ -260,12 +268,12 @@ function renderTable(): string {
       <table class="table">
         <thead>
           <tr>
-            <th class="th">Nota</th>
-            <th class="th">Supplier</th>
-            <th class="th">Status</th>
-            <th class="th text-right">Total</th>
-            <th class="th text-right">Terbayar</th>
-            <th class="th text-right">Sisa</th>
+            ${thUrut('nota', 'Nota', state.sort)}
+            ${thUrut('supplier', 'Supplier', state.sort)}
+            ${thUrut('status', 'Status', state.sort)}
+            ${thUrut('total', 'Total', state.sort, 'text-right')}
+            ${thUrut('terbayar', 'Terbayar', state.sort, 'text-right')}
+            ${thUrut('sisa', 'Sisa', state.sort, 'text-right')}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -294,6 +302,12 @@ function paint(): void {
   });
   bindPagerLimit(host!, (v) => {
     state.limit = v;
+    state.offset = 0;
+    void load();
+  });
+  // Klik header = sort di SERVER (pagination server-side). RESET offset.
+  bindSort(host!, state.sort, PO_SORT_KEYS, (_key, next) => {
+    state.sort = next;
     state.offset = 0;
     void load();
   });
@@ -1289,8 +1303,13 @@ async function load(): Promise<void> {
   // satu 403 supplier memerahkan seluruh daftar PO (akses yang sebenarnya sah).
   void muatSupplier();
   try {
+    const p = new URLSearchParams();
+    p.set('status', state.status);
+    p.set('limit', String(state.limit));
+    p.set('offset', String(state.offset));
+    paramSort(state.sort, p);
     const r = await apiGet<{ data: Po[]; total: number; lewat30: number }>(
-      `/api/purchases?status=${encodeURIComponent(state.status)}&limit=${state.limit}&offset=${state.offset}`,
+      `/api/purchases?${p}`,
     );
     state.items = r.data;
     state.total = r.total;

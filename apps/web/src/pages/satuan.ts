@@ -15,13 +15,21 @@ import { toast } from '../ui/toast';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { bindSort, thUrut, type SortAktif } from '../ui/sort-header';
 
 type EditUnit = { isNew: boolean; slug: string; name: string };
+
+/** Kunci header yang bisa diurutkan (klik = asc, klik lagi = desc). */
+type UnitSortKey = 'satuan' | 'dipakai';
+const UNIT_SORT_KEYS: readonly UnitSortKey[] = ['satuan', 'dipakai'];
 
 const state = {
   units: [] as Unit[],
   loading: true,
   error: '',
+  // Default A-Z = urutan lama (server mengirim alfabetis); th "Satuan"
+  // menyala ▲ sejak awal, persis pola halaman Produk (default 'nama' asc).
+  sort: { key: 'satuan', dir: 'asc' } as SortAktif<UnitSortKey>,
 };
 
 let host: HTMLElement | null = null;
@@ -67,7 +75,16 @@ function renderTable(): string {
     </div>`;
   }
 
+  // Urut lokal (seluruh master muat di klien — pola halaman Produk).
+  const n = state.sort?.dir === 'desc' ? -1 : 1;
   const rows = state.units
+    .slice()
+    .sort((a, b) => {
+      let x = 0;
+      if (state.sort?.key === 'dipakai') x = (a.dipakai ?? 0) - (b.dipakai ?? 0);
+      else x = a.name.localeCompare(b.name, 'id');
+      return n * (x !== 0 ? x : a.name.localeCompare(b.name, 'id'));
+    })
     .map(
       (u) => `
       <tr data-row="${u.slug}">
@@ -92,8 +109,8 @@ function renderTable(): string {
       <table class="table">
         <thead>
           <tr>
-            <th class="th">Satuan</th>
-            <th class="th">Dipakai</th>
+            ${thUrut('satuan', 'Satuan', state.sort)}
+            ${thUrut('dipakai', 'Dipakai', state.sort)}
             <th class="th text-right">Aksi</th>
           </tr>
         </thead>
@@ -102,7 +119,7 @@ function renderTable(): string {
     </div>
   </div>
   <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-    ${state.units.length} satuan, urut dari A-Z. Dipakai dropdown satuan di form produk.
+    ${state.units.length} satuan. Klik judul kolom untuk mengurutkan. Dipakai dropdown satuan di form produk.
     Satuan yang masih dipakai produk tidak bisa dihapus.
   </p>`;
 }
@@ -111,6 +128,10 @@ function paint(): void {
   const body = host?.querySelector('#unit-body');
   if (body) body.innerHTML = renderTable();
   bindRows();
+  bindSort(host ?? document.body, state.sort, UNIT_SORT_KEYS, (_key, next) => {
+    state.sort = next;
+    paint();
+  });
 }
 
 /* ---------- FORM ---------- */

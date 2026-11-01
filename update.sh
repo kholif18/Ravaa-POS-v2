@@ -58,14 +58,22 @@ if [ "$MODE" = "docker" ]; then
     # backup bisa gagal setengah jadi (bug nyata 2026-11-01). async IIFE +
     # await menunggu backup benar-benar selesai sebelum exit (non-0 = gagal →
     # set -e MEMBATALKAN update, pola integrity check mode native).
-    if ! BA="$(docker compose -f "$COMPOSE_FILE" exec -T api node -e '
+    # Tulis ke /data/backups/ (BUKAN /data/ root) — folder yang sama dengan
+  # POST /api/backup: supaya file ikut tampil di daftar backup UI DAN ikut
+  # retensi KEEP=14 (dijalankan buatBackup berikutnya). Sebelum 2026-11-01
+  # file update.sh jatuh di root /data: tidak terbaca daftarBackup() dan
+  # tidak pernah dibuang — tiap update +1 file permanen (klaim komentar
+  # lama "muncul juga di daftar backup UI" ternyata keliru).
+  if ! BA="$(docker compose -f "$COMPOSE_FILE" exec -T api node -e '
 (async () => {
   const bs = require("better-sqlite3");
+  const fs = require("fs");
   const db = new bs(process.env.DB_PATH || "/data/data.db");
   const d = new Date(), p = n => String(n).padStart(2, "0");
   const name = "data-" + d.getUTCFullYear() + "-" + p(d.getUTCMonth()+1) + "-" + p(d.getUTCDate())
     + "-" + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + ".db";
-  await db.backup("/data/" + name);
+  fs.mkdirSync("/data/backups", { recursive: true });
+  await db.backup("/data/backups/" + name);
   db.close();
   console.log(name);
 })().catch((e) => { console.error(e); process.exit(1); });

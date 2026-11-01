@@ -2347,6 +2347,13 @@ apps/web/src/ui/confirm.ts  Swal wrapper repo: `confirmDialog()` (ya/batal,
                           harus identik kondisi normal.
 apps/web/src/ui/switch.ts  Saklar checkbox bergaya (label + toggle) dipakai form
                           produk, panel mode POS, dan kartu Sistem.
+apps/web/src/ui/sort-header.ts  Header tabel sortable (2026-11-01): `thUrut`,
+                          `paramSort`, `bindSort`, `toggleSort`, `SortAktif<K>`;
+                          dipakai satuan/stock (sort klien) dan
+                          customers/suppliers/orders/purchases/debts (sort
+                          server lewat `?sort=&dir=`). Pola sama dengan
+                          halaman Produk; `th-sort`/`.th-arrow` di
+                          `styles/tables.css`.
 apps/web/src/ui/izin.ts   **Paket B4 (baru 2026-10-20)**: daftar 36 izin
                           operasional + 4 core owner, label/grup, preset
                           Standar/Ketat/Semua/Kosong, `punyaIzin()` — satu
@@ -2660,12 +2667,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     `SUM(charge) - SUM(payment)` selalu dihitung ulang saat dibaca — angka
     tersimpan akan selisih begitu salah satu baris mutasi diedit/dihapus.
     `charge` = pelanggan berhutang (beli belum bayar), `payment` = pembayaran.
-  - `GET /api/customers?q=&limit=&offset=` -> `{data:[{id,code,tier,name,phone,address,note,created_at,updated_at}], total}`
+  - `GET /api/customers?q=&limit=&offset=&sort=&dir=` -> `{data:[{id,code,tier,name,phone,address,note,created_at,updated_at}], total}`
     - `q` opsional, multi-kata (SEMUA kata harus cocok di `name`/`phone`/`note`,
       pola search produk — tidak harus di field atau urutan yang sama).
     - Urutan `name COLLATE NOCASE, id`; `limit` default 50 maks 200,
       `offset` default 0 (pola shifts/sales, 2026-10-11); `total` = baris
       COCOK filter (tanpa limit) — footer "A–B dari N".
+    - **Urut header `sort`/`dir` (2026-11-01, opsional)**: kunci whitelist
+      `code`|`nama`|`alamat` lewat helper `urutDari()` — kunci asing DIABAIKAN
+      (bukan 400), `dir` selain `desc` = `asc`, tiap frasa diakhiri sekunder
+      stabil `, id`. Tanpa `sort` = urutan lama persis (kontrak test lama
+      utuh). UI: `ui/sort-header.ts` (thUrut/paramSort/bindSort).
     - **Pager UI (2026-10-11, pola acuan halaman lain)** — footer tabel
       konvensional (bukan infinite-scroll): komponen bersama `ui/pager.ts`
       (`PAGE_SIZE=20` bawaan, `PAGE_CHOICES=[10,20,50,100]`): kiri = info
@@ -2718,10 +2730,12 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
     lahir dari pencabutan `customers.supplier_no`: nomor `SUP-000001` kini
     menjadi `code` master ini. Dipakai Tahap 3 Pembelian sebagai pilihan
     pemasok. Read-only terhadap `products.version`.
-    - `GET /api/suppliers?q=&limit=&offset=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
+    - `GET /api/suppliers?q=&limit=&offset=&sort=&dir=` -> `{data:[{id,code,name,phone,address,note,created_at,updated_at}], total}`
       (`q` multi-kata name/phone/note, urutan `name COLLATE NOCASE, id`,
       `limit`/`offset` + `total` cocok-filter — pola persis
-      `GET /api/customers`, termasuk pager UI).
+      `GET /api/customers`, termasuk pager UI). **Urut header `sort`/`dir`
+      (2026-11-01)**: kunci `code`|`nama`|`alamat`, aturan sama dengan
+      customers (`urutDari()`; kunci asing diabaikan, tanpa `sort` = lama).
     - `POST /api/suppliers` `{id?,name,phone?,address?,note?}` -> 201/200
       (validasi & penomoran `SUP-<6 digit>` via `nomorUrut` persis customers;
       **sengaja TIDAK upsert by phone**, alasan sama).
@@ -2812,8 +2826,13 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `"sudah ada penerimaan barang — PO tidak bisa dibatalkan; koreksi stok
       lewat opname / kas lewat pengeluaran"`. `received`/`cancel` tetap
       ditolak. Tak ada DELETE (nota PO = arsip).
-    - `GET /api/purchases?status=order|sebagian|received|cancel|hutang|semua&limit=&offset=`
+    - `GET /api/purchases?status=order|sebagian|received|cancel|hutang|semua&limit=&offset=&sort=&dir=`
       -> `{data:[<baris computed + umur_hari + n_items>], total, lewat30}`
+      (**Urut header `sort`/`dir` 2026-11-01** — kunci whitelist
+      `nota`(=`hit.id`)|`supplier`|`status`|`total`|`terbayar`|`sisa` pada
+      alias CTE `SQL_PO_HIT` (`hit.*`; ORDER BY alias sah di SQLite), bawaan
+      `hit.id DESC`; aturan `urutDari()` sama dengan customers — kunci asing
+      diabaikan, tanpa `sort` = lama).
       (`id DESC`). Baris computed: **`diterima`** = Σ nilai kedatangan (nota
       LAMA received tanpa baris kedatangan = `total`, fallback), **`sisa =
       max(0, diterima − terbayar)`** (barang belum datang bukan hutang),
@@ -2916,7 +2935,7 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       `"maksimal 100 item per pesanan"`); per item `"item 1: nama wajib
       diisi"`, `"item 1: qty harus > 0"`, `"item 1: harga harus angka >= 0"`,
       catatan baris > 200 -> 400. Status awal `dikerjakan`.
-    - `GET /api/orders?status=&q=&customer_id=&limit=&offset=` ->
+    - `GET /api/orders?status=&q=&customer_id=&limit=&offset=&sort=&dir=` ->
       `{data:[<orders + dibayar/sisa/refund_total/n_items>], total, ringkas}`.
       `status` default `semua`; sah `dikerjakan|selesai|diambil|batal|semua`
       (400 `"status harus dikerjakan|selesai|diambil|batal|semua"`). `q`
@@ -2927,7 +2946,11 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
       TIDAK punya nota, jadi tanpa filter ini riwayat jasa pelanggan terlihat
       kosong. Harus integer > 0 bila dikirim (400
       `"customer_id harus integer"`); `''`/absen = tanpa filter. Kombinasi
-      dengan `status`/`q` sah (AND). `ringkas` = hitungan per status +
+      dengan `status`/`q` sah (AND). **Urut header `sort`/`dir` (2026-11-01)**:
+      kunci `nomor`|`pelanggan`|`status`|`waktu`|`total`|`dibayar`|`sisa`
+      (`dibayar`/`sisa` = alias SQL_ORDER_UANG), bawaan `o.id DESC`; aturan
+      `urutDari()` sama dengan customers (kunci asing diabaikan, tanpa `sort`
+      = lama). `ringkas` = hitungan per status +
       `piutang` (Σ sisa pesanan dikerjakan/selesai) — semua `COALESCE` supaya
       tabel kosong mengirim 0, bukan null (sumber chip kepala halaman).
       `dibayar`/`sisa` dari `SQL_ORDER_UANG` (Σ `order_payments` net refund;
@@ -3347,6 +3370,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   - Diuji `tests/audit-test.mjs` (24 asersi): pencatatan create/update/delete,
     filter q/tanggal/limit, 401 tanpa token, kasir 403, login-gagal tercatat,
     dan UI `#/audit` (chip jumlah, cari, modal detail, Esc).
+  - **Retensi 1 tahun (2026-11-01, permintaan pemilik "ada batasan … supaya
+    tidak membenani storage")**: `audit_log` sebelumnya TANPA batas sama
+    sekali (INSERT saja, tak pernah DELETE — laju nyata ±60 baris/hari
+    produksi ≈ 3 MB/tahun, kecil sekarang tapi selamanya). Konstanta
+    **`RETENSI_AUDIT_HARI = 365`** di `apps/api/src/index.ts` (dekat
+    `KEEP = 14`) + `pruneAudit()`: `DELETE … WHERE at < datetime('now',
+    '-365 days')`, jalan sekali saat boot + `setInterval` tiap 1 jam
+    (pola `backupHarian`; proses tsx watch sering restart, jangan andalkan
+    interval murni). Gagal prune = `console.warn` saja — tak pernah
+    memblokir boot. Ubah durasi = ubah satu konstanta itu (mis. 90/730);
+    jangan kembalikan ke tanpa-batas.
 * `GET /api/settings` -> `{data:{allow_negative_stock:false,tolak_jual_kadaluarsa:false,
   store_name:"",store_address:"",store_phone:"",store_email:"",store_logo:"",
   invoice_title:"INVOICE",invoice_footer:"",
@@ -4016,6 +4050,17 @@ infra/                   docker-compose.yml + Dockerfile.api + Dockerfile.web + 
   * **Retensi `KEEP = 14`** (konstanta di `apps/api/src/index.ts`, BUKAN
     `/api/settings` — kontrak settings tervalidasi boolean): tiap backup
     membuang 15+ terbesar (urutan nama = kronologis) beserta `-shm`/`-wal`.
+    Hanya file yang cocok `POLA_BACKUP` yang dihitung — satu file lokal
+    `data-2026-10-20-123.db` (3 digit jam, format aneh) sengaja nyangkut
+    tidak ikut retensi (1 file, biarkan).
+  * **`update.sh` mode docker kini menulis backup ke `/data/backups/`
+    (2026-11-01)** — BUKAN `/data/` root seperti sebelumnya. Dampak lama:
+    file update.sh TIDAK terbaca `daftarBackup()` (hanya membaca folder
+    `backups/`) sehingga tak tampil di daftar backup UI dan tak pernah
+    ikut `KEEP=14` → tiap deploy +1 file permanen (klaim komentar lama
+    "muncul juga di daftar backup UI" keliru; terbukti 2 file menumpuk di
+    root volume produksi). Kini satu folder dengan backup API: ikut UI +
+    ikut retensi. Mode native sudah benar dari awal (`BAK_DIR=…/backups`).
   * **Scheduler idempoten harian**: `backupHarian()` jalan sekali saat API
     hidup + `setInterval` tiap 1 jam; cek "sudah ada `data-<hari-UTC>-*.db`?"
     sebelum membuat — restart `tsx watch` tidak menggandakan backup, gap

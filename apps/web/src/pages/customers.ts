@@ -19,6 +19,7 @@ import { rp } from '../escpos';
 import { waktu } from '../ui/waktu';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 
 type Customer = {
   id: number;
@@ -65,6 +66,11 @@ type OrderPelanggan = {
   sisa: number;
 };
 
+/** Kunci header yang bisa diurutkan — PERSIS kunci whitelist server
+ *  (GET /api/customers ?sort=): `nama` / `alamat`. */
+type CustSortKey = 'nama' | 'alamat';
+const CUST_SORT_KEYS: readonly CustSortKey[] = ['nama', 'alamat'];
+
 const state = {
   items: [] as Customer[],
   total: 0,
@@ -76,6 +82,8 @@ const state = {
   limit: PAGE_SIZE,
   loading: true,
   error: '',
+  /** null = urutan bawaan server (nama alfabetis). */
+  sort: null as SortAktif<CustSortKey>,
 };
 
 let host: HTMLElement | null = null;
@@ -153,8 +161,8 @@ function renderTable(): string {
         <thead>
           <tr>
             <th class="th">No</th>
-            <th class="th">Pelanggan</th>
-            <th class="th">Alamat</th>
+            ${thUrut('nama', 'Pelanggan', state.sort)}
+            ${thUrut('alamat', 'Alamat', state.sort)}
             <th class="th">Catatan</th>
             <th class="th text-right">Aksi</th>
           </tr>
@@ -436,6 +444,12 @@ function bindRows(): void {
     state.offset = 0;
     void load();
   });
+  // Klik header = sort di SERVER (pagination server-side). RESET offset.
+  bindSort(host!, state.sort, CUST_SORT_KEYS, (_key, next) => {
+    state.sort = next;
+    state.offset = 0;
+    void load();
+  });
   host!.querySelectorAll<HTMLElement>('[data-cust-hist]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = Number(b.dataset.custHist);
@@ -492,6 +506,7 @@ async function load(): Promise<void> {
     if (state.q) p.set('q', state.q);
     p.set('limit', String(state.limit));
     p.set('offset', String(state.offset));
+    paramSort(state.sort, p);
     const r = await apiGet<{ data: Customer[]; total: number }>(`/api/customers?${p}`);
     state.items = r.data;
     state.total = r.total;
