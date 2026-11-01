@@ -175,7 +175,7 @@ function renderPage(): string {
       <div class="flex flex-wrap items-center gap-2">
         <div class="relative w-full sm:w-80">
           <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">${icon('search')}</span>
-          <input id="set-cari" class="input pl-9 pr-9" type="search" enterkeyhint="search"
+          <input id="set-cari" class="input pl-9 pr-9 has-clear" type="search" enterkeyhint="search"
                  placeholder="Cari pengaturan…"
                  autocomplete="off" aria-label="Cari pengaturan" />
           <button type="button" id="set-cari-hapus" class="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"

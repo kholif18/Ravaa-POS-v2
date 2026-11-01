@@ -29,6 +29,41 @@
   .search-wrap .input {
     @apply pl-9;
   }
+  /* Tombol × hapus-pencarian aplikasi (ui/cari-bersih.ts — 2026-11-01,
+     laporan pemilik "kenapa di Firefox tidak ada tombol x"): × bawaan Chrome
+     adalah pseudo-element WebKit `::-webkit-search-cancel-button` yang TIDAK
+     ada di Firefox, jadi aplikasi menggambar × sendiri supaya sama di semua
+     browser. Dua aturan di bawah mendampinginya:
+     - `has-clear` (ditempel helper) menyisakan ruang kanan teks supaya kolom
+       tidak menabrak ×, lalu menyembunyikan × bawaan WebKit supaya Chrome
+       tidak menampilkan dua ×. Spesifisitas `input.has-clear` mengalahkan
+       `.input { px-2.5 }` (lapisan sama, lebih berat).
+     - `.cari-x` = tombolnya (posisi/interaksi) — dipakai lintas halaman. */
+  input[type="search"].has-clear {
+    @apply pr-8;
+  }
+  input[type="search"].has-clear::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  /* `hidden` SENGAJA tidak masuk @apply: visibilitas tombol dikelola lewat
+     kelas `.hidden` (JS ui/cari-bersih.ts) — bila `hidden` ditanam di sini,
+     menghapus kelas dari elemen tidak mengubah apa-apa (display tetap none).
+     Helper memanggil sinkron() SEBELUM tombol masuk DOM, jadi tidak ada
+     kilatan saat kolom kosong. */
+  .cari-x {
+    @apply absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200;
+  }
+  .cari-x svg {
+    @apply size-4;
+  }
+  /* Aturan bawaan `.search-wrap svg` (ikat ikon pencarian kiri: absolut di
+     kiri + `pointer-events-none`) ikut menimpa ikon X DI DALAM tombol —
+     spesifisitas lebih berat + urutan setelahnya mengembalikannya ke alur
+     normal (posisi mengikuti tombol, sentuhan diteruskan ke tombol). */
+  .search-wrap .cari-x svg {
+    @apply static left-auto translate-y-0 pointer-events-auto;
+  }
   .foto-kotak {
     @apply relative flex aspect-square w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 text-gray-400 transition hover:border-primary hover:text-primary dark:border-gray-600 dark:bg-gray-900 dark:text-gray-500;
   }

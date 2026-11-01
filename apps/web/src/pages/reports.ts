@@ -59,6 +59,7 @@ import { toast } from '../ui/toast';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
 import { PAGE_SIZE, pagerHtml, bindPager, bindPagerLimit } from '../ui/pager';
+import { pasangCariBersih } from '../ui/cari-bersih';
 
 /* ---------- tipe (ikuti kontrak GET /api/reports/*) ---------- */
 
@@ -2050,6 +2051,9 @@ function bind(): void {
       void load();
     }
   });
+  // Tombol × hapus-cari (Firefox tak punya × bawaan — ui/cari-bersih.ts);
+  // ikut dipasang ulang tiap paint karena toolbar ada di dalam #rp-body.
+  pasangCariBersih(root);
   root.querySelector('#rp-csv')?.addEventListener('click', () => eksporCSV());
   root.querySelector('#rp-print')?.addEventListener('click', () => void cetak());
   // Pager untuk tabel Laba per transaksi (client-side)

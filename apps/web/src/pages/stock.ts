@@ -25,6 +25,7 @@ import { waktu } from '../ui/waktu';
 import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { HEADER_STOK, bacaStok, csvStok, unduhCSV, type BarisStok } from '../importcsv';
+import { pasangCariBersih } from '../ui/cari-bersih';
 import { restockForm } from './products';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
@@ -391,6 +392,9 @@ function bind(): void {
     state.q = q.value;
     paint();
   });
+  // Tombol × hapus-cari ikut dipasang ulang tiap paint (toolbar dirender
+  // ulang per ketikan) — helper idempoten (ui/cari-bersih.ts).
+  pasangCariBersih(host);
 
   host.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) =>
     b.addEventListener('click', () => {

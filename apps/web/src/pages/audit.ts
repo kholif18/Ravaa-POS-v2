@@ -17,6 +17,7 @@ import { apiGet } from '../api';
 import { icon } from '../ui/icons';
 import { openModal } from '../ui/modal';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
+import { pasangCariBersih } from '../ui/cari-bersih';
 import { waktu } from '../ui/waktu';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
@@ -320,6 +321,8 @@ export async function mountAuditPage(el: HTMLElement): Promise<void> {
       void load();
     }
   });
+  // Tombol × hapus-cari (Firefox tak punya × bawaan — ui/cari-bersih.ts).
+  pasangCariBersih(el);
   el.querySelector<HTMLSelectElement>('#audit-entity')?.addEventListener('change', (ev) => {
     state.entity = (ev.target as HTMLSelectElement).value;
     state.offset = 0;

@@ -36,6 +36,7 @@ import {
   type SetelanLabel,
 } from '../labelsheet';
 import { getPrintPause } from '../ui/print-pref';
+import { pasangCariBersih } from '../ui/cari-bersih';
 import { icon } from '../ui/icons';
 import { toast } from '../ui/toast';
 import { esc } from '../ui/html';
@@ -584,6 +585,8 @@ function bind(): void {
   bindPengaturan();
   bindHasil();
   bindDipilih();
+  // Tombol × hapus-cari kolom produk (ui/cari-bersih.ts).
+  pasangCariBersih(host);
 
   const q = host.querySelector<HTMLInputElement>('#lb-q');
   const hasil = host.querySelector<HTMLElement>('#lb-hasil');

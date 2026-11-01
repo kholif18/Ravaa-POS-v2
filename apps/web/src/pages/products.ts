@@ -15,6 +15,7 @@ import { toast } from '../ui/toast';
 import { statusExpiry, tglExpiry } from '../ui/expiry';
 import { punyaIzin } from '../ui/auth';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { pasangCariBersih } from '../ui/cari-bersih';
 import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV, type BarisImpor } from '../importcsv';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
@@ -1922,6 +1923,8 @@ function bind(): void {
     resetFilterScroll();
     renderRows();
   });
+  // Tombol × hapus-cari (Firefox tak punya × bawaan — ui/cari-bersih.ts).
+  pasangCariBersih(host);
 
   /* Infinite scroll: tambah STEP baris saat sudah dekat bawah area scroll.
      Tidak ada tombol "Muat lagi" — 50 baris awal selalu melebihi tinggi layar,

@@ -37,6 +37,7 @@ import { tglPendek } from '../ui/waktu';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { getPrintPause } from '../ui/print-pref';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { pasangCariBersih } from '../ui/cari-bersih';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
 import { cetakUlang, type SaleRow } from './history';
@@ -1158,6 +1159,8 @@ export async function mountOrdersPage(el: HTMLElement): Promise<void> {
         void load();
       }, 250);
     });
+    // Tombol × hapus-cari (Firefox tak punya × bawaan — ui/cari-bersih.ts).
+    pasangCariBersih(el);
     await Promise.all([loadShift(), load()]);
     return;
   }

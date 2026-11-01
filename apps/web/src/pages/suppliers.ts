@@ -15,6 +15,7 @@ import { openModal } from '../ui/modal';
 import { toast } from '../ui/toast';
 import { PAGE_SIZE, bindPager, bindPagerLimit, pagerHtml } from '../ui/pager';
 import { pasangAksiBaru } from '../ui/aksi-baru';
+import { pasangCariBersih } from '../ui/cari-bersih';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
 
@@ -290,5 +291,7 @@ export async function mountSuppliersPage(el: HTMLElement): Promise<void> {
       void load();
     }
   });
+  // Tombol × hapus-cari (Firefox tak punya × bawaan — ui/cari-bersih.ts).
+  pasangCariBersih(el);
   await load();
 }
