@@ -5064,9 +5064,17 @@ function laporanRentang(dari: string, sampai: string) {
      FROM sale_items si JOIN sales s ON s.id = si.sale_id
      WHERE ${dl('s.created_at')}`,
   ).get(...ps) as { hpp: number }).hpp);
-  // laba = omzet SETELAH diskon - HPP. Jasa/cetak punya cost 0, jadi seluruh
-  // penjualannya dihitung sebagai laba (tidak ada biaya persediaan yang dilacak).
-  const laba = (sales as { omzet: number }).omzet - hpp;
+  // laba = omzet SETELAH diskon - HPP + ADMIN LAYANAN BERSIH (keputusan
+  // pemilik 2026-10-31: "admin harusnya termasuk laba" — jasa topup/tarik
+  // adalah pendapatan, dikurangi potongan bank/agen `bank_fee`; nominal
+  // topup = mutasi modal, BUKAN omzet). Jasa/cetak punya cost 0, jadi
+  // seluruh penjualannya dihitung sebagai laba dagang.
+  const layanan = db.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(SUM(admin),0) AS admin, COALESCE(SUM(bank_fee),0) AS bank_fee
+     FROM topup_txns WHERE ${dl('created_at')}`,
+  ).get(...ps) as { n: number; admin: number; bank_fee: number };
+  const layananLaba = layanan.admin - layanan.bank_fee;
+  const laba = (sales as { omzet: number }).omzet - hpp + layananLaba;
   // Pengeluaran kas (Tahap 1, 2026-10-11) — dilaporkan TERPISAH,
   // tidak menggerus laba (laba = laba kotor dagang, definisi lama tetap).
   const expense = db.prepare(
@@ -5134,6 +5142,7 @@ function laporanRentang(dari: string, sampai: string) {
   return {
     sales, hpp, laba, byMethod, topup, topItems, lowStock, expense, kas_masuk: kasMasuk, retur, purchase, purchase_retur: purchaseRetur, byHour, byCategory,
     piutang: { baru: piutangBaru, bayar: piutangBayar },
+    layanan: { n: layanan.n, admin: layanan.admin, bank_fee: layanan.bank_fee, laba: layananLaba },
   };
 }
 
@@ -5246,15 +5255,40 @@ app.get('/api/reports/profit', wajibIzin('laporan.lihat'), (c) => {
             COALESCE(SUM(total) - SUM(hpp),0) AS laba
        FROM (${dasar}) GROUP BY date(created_at) ORDER BY date ASC`,
   ).all(r.dari, r.sampai) as { date: string; n: number; omzet: number; hpp: number; laba: number }[];
+  // Jasa topup/tarik per hari (keputusan pemilik 2026-10-31): admin − potongan
+  // bank = laba layanan, digabung ke laba hari terkait. Hari yang HANYA berisi
+  // topup (tanpa satu pun nota) tetap muncul supaya pendapatannya tidak hilang
+  // dari menu Laba — n/omzet/hpp-nya 0, labanya = admin bersih.
+  const layananHari = db.prepare(
+    `SELECT date(created_at) AS date, COUNT(*) AS n,
+            COALESCE(SUM(admin),0) AS admin, COALESCE(SUM(bank_fee),0) AS bank_fee
+       FROM topup_txns WHERE date(created_at) BETWEEN date(?) AND date(?)
+      GROUP BY date(created_at)`,
+  ).all(r.dari, r.sampai) as { date: string; n: number; admin: number; bank_fee: number }[];
+  const petaLayanan = new Map(layananHari.map((l) => [l.date, l]));
+  const petaHari = new Map(
+    days.map((d) => {
+      const l = petaLayanan.get(d.date);
+      const bersih = (l?.admin ?? 0) - (l?.bank_fee ?? 0);
+      return [d.date, { ...d, layanan: bersih, laba: d.laba + bersih }];
+    }),
+  );
+  for (const l of layananHari) {
+    if (!petaHari.has(l.date)) {
+      const bersih = l.admin - l.bank_fee;
+      petaHari.set(l.date, { date: l.date, n: 0, omzet: 0, hpp: 0, laba: bersih, layanan: bersih });
+    }
+  }
+  const daysMerged = [...petaHari.values()].sort((a, b) => a.date.localeCompare(b.date));
   const trx = db.prepare(
     `SELECT id, created_at, invoice_no, cashier, total, hpp, total - hpp AS laba
        FROM (${dasar}) ORDER BY created_at DESC, id DESC LIMIT 200`,
   ).all(r.dari, r.sampai);
-  const total = days.reduce(
-    (a, d) => ({ n: a.n + d.n, omzet: a.omzet + d.omzet, hpp: a.hpp + d.hpp, laba: a.laba + d.laba }),
-    { n: 0, omzet: 0, hpp: 0, laba: 0 },
+  const total = daysMerged.reduce(
+    (a, d) => ({ n: a.n + d.n, omzet: a.omzet + d.omzet, hpp: a.hpp + d.hpp, layanan: a.layanan + d.layanan, laba: a.laba + d.laba }),
+    { n: 0, omzet: 0, hpp: 0, layanan: 0, laba: 0 },
   );
-  return c.json({ data: { from: r.dari, to: r.sampai, total, days, trx } });
+  return c.json({ data: { from: r.dari, to: r.sampai, total, days: daysMerged, trx } });
 });
 
 /* Menu Analitik (butir ROADMAP 1.6.7, ACC pemilik 2026-10-19) — LAPORAN

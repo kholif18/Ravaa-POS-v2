@@ -49,3 +49,17 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('store_address', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_phone', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_email', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('store_logo', '');
+
+-- Pelanggan Umum = kontak BAWAAN POS (pilihan default header kasir, "Bill to"
+-- invoice) — data FUNGSIONAL, bukan data dev; dulu terhapus bersama seed
+-- prod-only (db7f9dd) hingga default hilang di produksi (laporan pemilik
+-- 2026-10-31). Guard by NAME (bukan code): CUS-000001 bisa saja sudah
+-- dipakai pelanggan asli — kejadian nyata produksi 2026-10-31 ("Partiem"
+-- memegang CUS-000001 karena DB dibuat sebelum baris ini ada). Nomor = MAX+1
+-- pola nomorUrut (index.ts), dihitung ulang saat seed jalan.
+INSERT INTO customers (code, name, phone, address, note)
+SELECT 'CUS-' || printf('%06d', COALESCE(
+         (SELECT MAX(CAST(substr(code, 5) AS INTEGER)) FROM customers WHERE code LIKE 'CUS-%'), 0
+       ) + 1),
+       'Pelanggan Umum', '', '', 'Pelanggan bawaan POS — pilihan otomatis header kasir'
+WHERE NOT EXISTS (SELECT 1 FROM customers WHERE name = 'Pelanggan Umum');

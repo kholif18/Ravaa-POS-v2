@@ -64,6 +64,9 @@ import { PAGE_SIZE, pagerHtml, bindPager, bindPagerLimit } from '../ui/pager';
 
 type ByMethod = { pay_method: string; n: number; total: number };
 type TopupBaris = { kind: string; n: number; nominal: number; admin: number; bank_fee?: number };
+/** Pendapatan layanan topup/tarik (keputusan pemilik 2026-10-31): admin −
+ *  potongan bank = laba. Ikut dihitung ke dalam `laba` harian/summary. */
+type LayananAgg = { n: number; admin: number; bank_fee: number; laba: number };
 /** `hpp`/`laba` per baris DIHITUNG SERVER (2026-10-17) — rumus laba produk
  *  hanya hidup di laporanRentang (index.ts), klien menampilkan apa adanya. */
 type TopItem = { name: string; unit: string; qty: number; amount: number; hpp: number; laba: number };
@@ -82,6 +85,8 @@ type Laporan = {
   laba: number;
   byMethod: ByMethod[];
   topup: TopupBaris[];
+  /** Admin layanan (topup/tarik) rentang itu — komponen laba di atas. */
+  layanan?: LayananAgg;
   topItems: TopItem[];
   lowStock: LowStock[];
   /** Penjualan per jam — 24 ember 0..23, zero-fill server, jam UTC. Opsional
@@ -117,7 +122,7 @@ type ProdukData = { from: string; to: string; rows: ProdukRow[]; total: number }
 
 /** GET /api/reports/profit (menu Laba, 2026-10-17): HPP per NOTA (subquery
  *  per s.id — join langsung menggandakan s.total), trx dibatasi 200 terbaru. */
-type ProfitHari = { date: string; n: number; omzet: number; hpp: number; laba: number };
+type ProfitHari = { date: string; n: number; omzet: number; hpp: number; laba: number; layanan: number };
 type ProfitTrx = {
   id: string;
   created_at: string;
@@ -130,7 +135,7 @@ type ProfitTrx = {
 type ProfitData = {
   from: string;
   to: string;
-  total: { n: number; omzet: number; hpp: number; laba: number };
+  total: { n: number; omzet: number; hpp: number; layanan: number; laba: number };
   days: ProfitHari[];
   trx: ProfitTrx[];
 };
@@ -258,7 +263,12 @@ function ringkasan(l: Laporan): string {
     { label: 'Omzet', nilai: rp(l.sales.omzet), sub: `${l.sales.n} transaksi (setelah diskon)` },
     { label: 'Retur', nilai: rp(ret.total), sub: `${ret.n} retur · uang kembali`, link: '#/returns' },
     { label: 'Omzet bersih', nilai: rp(l.sales.omzet - ret.total), sub: 'omzet − retur' },
-    { label: 'Laba', nilai: rp(l.laba), sub: 'omzet − HPP', tone: l.laba < 0 ? 'danger' : '' },
+    { label: 'Laba', nilai: rp(l.laba), sub: 'omzet − HPP + admin layanan', tone: l.laba < 0 ? 'danger' : '' },
+    {
+      label: 'Admin layanan',
+      nilai: rp(l.layanan?.laba ?? 0),
+      sub: `${l.layanan?.n ?? 0} topup/tarik · admin ${rp(l.layanan?.admin ?? 0)}${(l.layanan?.bank_fee ?? 0) > 0 ? ` − pot. bank ${rp(l.layanan!.bank_fee)}` : ''}`,
+    },
     { label: 'HPP', nilai: rp(l.hpp), sub: 'modal rata-rata tertimbang' },
     { label: 'Diskon', nilai: rp(l.sales.diskon), sub: 'transaksi + per baris' },
     // Pengeluaran kas (Tahap 1) — dilaporkan TERPISAH, tidak menggerus laba
@@ -399,7 +409,7 @@ function topupCard(l: Laporan): string {
     ${
       l.topup.length
         ? `<table class="mt-2 w-full text-left text-sm">
-        <thead><tr><th class="th">Jenis</th><th class="th text-right">Transaksi</th><th class="th text-right">Nominal</th><th class="th text-right">Admin</th>${adaBankFee ? '<th class="th text-right">Pot. bank</th><th class="th text-right">Laba bersih</th>' : ''}</tr></thead>
+        <thead><tr><th class="th">Jenis</th><th class="th text-right">Transaksi</th><th class="th text-right">Nominal</th><th class="th text-right">Admin</th>${adaBankFee ? '<th class="th text-right">Pot. bank</th>' : ''}<th class="th text-right">Laba bersih</th></tr></thead>
         <tbody>
           ${l.topup
             .map(
@@ -408,7 +418,7 @@ function topupCard(l: Laporan): string {
                 <td class="td td-num">${t.n}</td>
                 <td class="td td-num">${rp(t.nominal)}</td>
                 <td class="td td-num">${rp(t.admin)}</td>
-                ${adaBankFee ? `<td class="td td-num">${(t.bank_fee ?? 0) > 0 ? `-${rp(t.bank_fee!)}` : rp(0)}</td><td class="td td-num">${rp(t.admin - (t.bank_fee ?? 0))}</td>` : ''}
+                ${adaBankFee ? `<td class="td td-num">${(t.bank_fee ?? 0) > 0 ? `-${rp(t.bank_fee!)}` : rp(0)}</td>` : ''}<td class="td td-num">${rp(t.admin - (t.bank_fee ?? 0))}</td>
               </tr>`,
             )
             .join('')}
@@ -417,12 +427,12 @@ function topupCard(l: Laporan): string {
             <td class="td td-num font-semibold">${n}</td>
             <td class="td td-num font-semibold">${rp(nominal)}</td>
             <td class="td td-num font-semibold">${rp(admin)}</td>
-            ${adaBankFee ? `<td class="td td-num font-semibold">-${rp(bankFee)}</td><td class="td td-num font-semibold">${rp(admin - bankFee)}</td>` : ''}
+            ${adaBankFee ? `<td class="td td-num font-semibold">-${rp(bankFee)}</td>` : ''}<td class="td td-num font-semibold">${rp(admin - bankFee)}</td>
           </tr>
         </tbody>
       </table>
       <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-        Nominal = mutasi modal, admin = pendapatan jasa${adaBankFee ? ', potongan bank = biaya agen/bank (laba bersih = admin − potongan bank)' : ''}. Keduanya TIDAK masuk omzet.
+        Nominal = mutasi modal, admin = pendapatan jasa${adaBankFee ? ', potongan bank = biaya agen/bank (laba bersih = admin − potongan bank)' : ' — admin langsung jadi laba'}. Keduanya TIDAK masuk omzet; admin ikut dihitung di kartu Laba.
       </p>`
         : `<div class="empty">Belum ada topup/tarik pada tanggal ini.</div>`
     }
@@ -517,12 +527,16 @@ function harianIsi(): string {
 function labaView(): string {
   const d = state.laba;
   if (!d) return '';
-  const margin = d.total.omzet > 0 ? Math.round((d.total.laba / d.total.omzet) * 100) : 0;
+  // Margin dihitung dari laba DAGANG (omzet − HPP) — admin layanan tidak
+  // beromzet, jasa tidak boleh menaikkan persen margin penjualan.
+  const labaDagang = d.total.laba - d.total.layanan;
+  const margin = d.total.omzet > 0 ? Math.round((labaDagang / d.total.omzet) * 100) : 0;
   const kartu = [
-    { label: 'Transaksi', nilai: String(d.total.n), sub: `${d.days.length} hari berisi penjualan` },
+    { label: 'Transaksi', nilai: String(d.total.n), sub: `${d.days.length} hari berisi penjualan/topup` },
     { label: 'Omzet', nilai: rp(d.total.omzet), sub: 'setelah semua diskon' },
     { label: 'HPP', nilai: rp(d.total.hpp), sub: 'modal rata-rata tertimbang' },
-    { label: 'Laba kotor', nilai: rp(d.total.laba), sub: `margin ${margin}%`, tone: d.total.laba < 0 ? 'danger' : '' },
+    { label: 'Admin layanan', nilai: rp(d.total.layanan), sub: `${d.days.reduce((a, h) => a + (h.layanan > 0 ? 1 : 0), 0)} hari ada topup/tarik` },
+    { label: 'Laba', nilai: rp(d.total.laba), sub: `omzet − HPP + admin layanan · margin dagang ${margin}%`, tone: d.total.laba < 0 ? 'danger' : '' },
   ];
   const hari = d.days
     .map(
@@ -561,7 +575,7 @@ function labaView(): string {
   // tabelnya sudah menjelaskan pemotongan ini).
   const terpotong = d.total.n > d.trx.length;
   return `
-  <div class="grid grid-cols-2 gap-2 lg:grid-cols-4">
+  <div class="grid grid-cols-2 gap-2 lg:grid-cols-5">
     ${kartu
       .map((k) => {
         const warna = 'tone' in k && k.tone === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white';
@@ -579,13 +593,14 @@ function labaView(): string {
       ? `<div class="card">
       <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Laba per hari</h2>
       <table class="mt-2 w-full text-left text-sm">
-        <thead><tr><th class="th">Tanggal</th><th class="th text-right">Trx</th><th class="th text-right">Omzet</th><th class="th text-right">HPP</th><th class="th text-right">Laba</th></tr></thead>
+        <thead><tr><th class="th">Tanggal</th><th class="th text-right">Trx</th><th class="th text-right">Omzet</th><th class="th text-right">HPP</th><th class="th text-right">Admin layanan</th><th class="th text-right">Laba</th></tr></thead>
         <tbody>${hari}
           <tr>
             <td class="td font-semibold">Jumlah</td>
             <td class="td td-num font-semibold">${d.total.n}</td>
             <td class="td td-num font-semibold">${rp(d.total.omzet)}</td>
             <td class="td td-num font-semibold">${rp(d.total.hpp)}</td>
+            <td class="td td-num font-semibold">${rp(d.total.layanan)}</td>
             <td class="td td-num font-semibold">${rp(d.total.laba)}</td>
           </tr>
         </tbody>

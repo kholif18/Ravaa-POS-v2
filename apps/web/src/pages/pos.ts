@@ -1613,14 +1613,21 @@ function tombolKembaliHtml(): string {
  *  `selected` saat render; perubahan berikutnya ditangani listener
  *  `#pos-customer` di paint() tanpa repaint. */
 function pilihanPelangganHtml(): string {
-  return customers.length
-    ? customers
-        .map(
-          (c) =>
-            `<option value="${c.id}"${c.id === customerId ? ' selected' : ''}>${esc(c.name)}${c.code ? ` · ${esc(c.code)}` : ''}</option>`,
-        )
-        .join('')
-    : `<option value="">Pelanggan Umum</option>`;
+  // "Pelanggan Umum" (value kosong) = pilihan bawaan TANPA kontak — SELALU
+  // ada di paling atas daftar. Dulu hanya dirender saat daftar pelanggan
+  // KOSONG, jadi di produksi option ini lenyap begitu pemilik menambah
+  // pelanggan asli (laporan pemilik 2026-10-31). customerId === null =
+  // Pelanggan Umum terpilih (pay() mengirim tanpa customer_id).
+  const umum = `<option value=""${customerId === null ? ' selected' : ''}>Pelanggan Umum</option>`;
+  return (
+    umum +
+    customers
+      .map(
+        (c) =>
+          `<option value="${c.id}"${c.id === customerId ? ' selected' : ''}>${esc(c.name)}${c.code ? ` · ${esc(c.code)}` : ''}</option>`,
+      )
+      .join('')
+  );
 }
 
 function infoBarHtml(): string {
