@@ -28,7 +28,7 @@ const post = (path, body) => p.evaluate(
 );
 async function w(sel, v) { await p.fill(sel, v); await p.waitForTimeout(150); }
 
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 // Setup: produk fisik + jasa uji, jual 3 pcs fisik.
@@ -108,7 +108,7 @@ chk('GET /api/sales daftar ikut membawa penanda retur',
   rowRet?.n_retur === 2 && rowRet?.retur_total === 15000, JSON.stringify(rowRet));
 
 console.log('=== E. UI halaman returns ===');
-await p.goto('http://localhost:5656/#/returns', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/returns', { waitUntil: 'networkidle' });
 await p.waitForSelector('#ret-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Retur" aktif', await p.locator('a[href="#/returns"].is-active').count() === 1);
@@ -133,7 +133,7 @@ await post('/api/sales', { id: sale2, shift_id: shift.data.id, pay_method: 'tuna
 const si2 = (await api(`/api/sales/${sale2}`)).data.items[0].id;
 chk('nota kedua: retur 1/2 -> qty_retur 1', (await post('/api/returns', { sale_id: sale2, items: [{ sale_item_id: si2, qty: 1 }], cashier: 'kasir' })).status === 201
   && (await api(`/api/sales/${sale2}`)).data.items[0].qty_retur === 1);
-await p.goto('http://localhost:5656/#/history', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/history', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1000);
 chk('baris nota menandai retur (chip amber)',
   (await p.textContent(`[data-trx="sale:${saleId}"]`)).includes('Retur Rp15.000'));

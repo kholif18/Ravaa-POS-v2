@@ -13,7 +13,7 @@
 import { chromium } from 'playwright-core';
 import { pasangToken } from './bantuan-uji.mjs';
 
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const API = 'http://localhost:3001';
 let lolos = 0, gagal = 0;
 const chk = (n, c, info = '') => {

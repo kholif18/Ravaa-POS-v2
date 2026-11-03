@@ -27,7 +27,7 @@ const post = (path, body) => p.evaluate(
 );
 async function w(sel, v) { await p.fill(sel, v); await p.waitForTimeout(150); }
 
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 // Setup: nama UNIK per run (produk tanpa sku selalu INSERT baru).
@@ -52,7 +52,7 @@ const t2 = await post('/api/products', { sku: prodSku, name: NP, category_slug: 
 chk('toggle nonaktif/aktif pertahankan grosir', t1.status === 201 && t2.status === 201 && t2.json.data.price_grosir === 2500);
 
 console.log('=== B. POS: ecer vs grosir ===');
-await p.goto('http://localhost:5656/#/pos', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/pos', { waitUntil: 'networkidle' });
 await p.waitForSelector('#pos-q', { timeout: 15000 });
 await p.waitForTimeout(1000);
 await w('#pos-q', NP); await p.keyboard.press('Enter'); await p.waitForTimeout(800);
@@ -82,7 +82,7 @@ chk('pack grosir pulih @30000 + chip nyala', (hargaPulih ?? '').includes('30.000
 await p.click('#pos-clear'); await p.waitForTimeout(800);
 
 console.log('=== D. Modal customer: tier ===');
-await p.goto('http://localhost:5656/#/customers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/customers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#cust-body', { timeout: 15000 });
 await p.click('#cust-new'); await p.waitForSelector('.modal');
 chk('select tier ada (ecer/grosir)', await p.locator('#c-tier option').count() === 2);

@@ -11,7 +11,7 @@ import { pasangToken } from './bantuan-uji.mjs';
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
 const API = 'http://localhost:3001';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const SKU_STOK = 'E2E-AKSI-STOK';   // track_stock=1  -> menu berisi Stok & opname
 const SKU_JASA = 'E2E-AKSI-JASA';   // track_stock=0  -> menu TANPA Stok & opname
 const SKU_OFF = 'E2E-AKSI-OFF';     // is_active=0    -> menu berisi Aktifkan kembali

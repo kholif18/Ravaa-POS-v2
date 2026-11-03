@@ -35,7 +35,7 @@ const post = (path, body) => p.evaluate(
 async function w(sel, v) { await p.fill(sel, v); await p.waitForTimeout(150); }
 
 // fetch() relatif butuh origin — buka app dulu sebelum semua evaluate.
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 console.log('=== A. API kas masuk: CRUD + validasi ===');
@@ -74,13 +74,13 @@ chk('GET /api/shifts: n_kas_masuk + kas_masuk_total ikut', (baris?.n_kas_masuk ?
 console.log('=== C. Laporan harian: kas_masuk + kartu ===');
 const har = await api(`/api/reports/daily?date=${TODAY}`);
 chk('daily memuat kas_masuk {n,total}', (har.data?.kas_masuk?.n ?? 0) >= 1 && (har.data?.kas_masuk?.total ?? 0) >= 12345, JSON.stringify(har.data?.kas_masuk));
-await p.goto(`http://localhost:5656/#/reports?x=${Date.now()}`, { waitUntil: 'networkidle' });
+await p.goto(`http://localhost:3001/#/reports?x=${Date.now()}`, { waitUntil: 'networkidle' });
 await p.waitForTimeout(1500);
 chk('kartu "Kas masuk" + link #/kas-masuk di Laporan', (await p.locator('a.card[href="#/kas-masuk"]').count()) === 1
   && (await p.textContent('#page')).includes('Kas masuk'));
 
 console.log('=== D. UI #/kas-masuk ===');
-await p.goto('http://localhost:5656/#/kas-masuk', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/kas-masuk', { waitUntil: 'networkidle' });
 await p.waitForSelector('#km-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Kas masuk" aktif + tombol memuat hint Alt+N', (await p.locator('a[href="#/kas-masuk"].is-active').count()) === 1
@@ -110,7 +110,7 @@ chk('hapus via konfirmasi -> baris hilang + total turun', !(await p.textContent(
   && (await p.textContent('#km-jumlah')).includes(rpUji(g3.jumlah ?? 0)));
 
 console.log('=== E. Dialog tutup shift memuat blok Kas masuk ===');
-await p.goto('http://localhost:5656/#/shifts', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/shifts', { waitUntil: 'networkidle' });
 // Pager bawaan 20 baris — shift runner bisa lebih tua dari 20 shift terakhir.
 // Saring "Terbuka" dulu supaya baris shift yang masih open pasti tampil.
 await p.click('[data-f="open"]');

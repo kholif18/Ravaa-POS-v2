@@ -16,7 +16,7 @@ const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execFileSync('sqlite3', [DB, q], { encoding: 'utf8' }).trim();
 const API = 'http://localhost:3001';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const UJI_USER = process.env.RAVAA_UJI_USER || 'owner';
 const UJI_PASS = process.env.RAVAA_UJI_PASS || 'admin1234';
 

@@ -90,7 +90,7 @@ if (!buatPel.ok) {
   process.exit(1);
 }
 
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 let lolos = 0, gagal = 0;
 const chk = (n, c, info = '') => {
   if (c) { lolos++; console.log(`  OK   ${n}`); }

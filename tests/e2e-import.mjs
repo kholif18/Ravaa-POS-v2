@@ -31,7 +31,7 @@ const cleanup = () => {
 console.log('cleanup awal: sisa E2E-IMP-% =', cleanup());
 
 const CHROME = '/usr/bin/google-chrome-stable';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 
 let lolos = 0, gagal = 0;
 const ok = (n, cond, info = '') => {

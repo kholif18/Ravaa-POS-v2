@@ -38,7 +38,7 @@ const api = (path) => p.evaluate((u) => fetch(u).then((r) => r.json()), path);
 async function w(sel, v) { await p.fill(sel, v); await p.waitForTimeout(150); }
 
 console.log('=== 1. Halaman Pelanggan terbuka & terisi ===');
-await p.goto('http://localhost:5656/#/customers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/customers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#cust-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Pelanggan" aktif', await p.locator('a[href="#/customers"].is-active').count() === 1);
@@ -82,7 +82,7 @@ const bersih = (await api('/api/customers')).data.find((c) => c.name === 'UjiHut
 chk('pelanggan bersih tersimpan', !!bersih, JSON.stringify(bersih));
 
 console.log('=== 6. Halaman Hutang: catat hutang (charge) ===');
-await p.goto('http://localhost:5656/#/debts', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/debts', { waitUntil: 'networkidle' });
 await p.waitForSelector('#hutang-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Hutang" aktif', await p.locator('a[href="#/debts"].is-active').count() === 1);
@@ -165,7 +165,7 @@ chk('baris hilang dari rincian', rowsR2 === 1, `${rowsR2} baris`);
 await p.click('.modal [data-x]'); await p.waitForTimeout(300);
 
 console.log('=== 9. Guard: pelanggan ber-hutang tidak bisa dihapus ===');
-await p.goto('http://localhost:5656/#/customers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/customers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#cust-body tbody tr', { timeout: 15000 });
 await w('#cust-q', 'UjiHutang Papa Baru'); await p.waitForTimeout(700);
 await p.click('[data-cust-del]'); await p.waitForSelector('.swal2-container', { timeout: 8000 });
@@ -175,7 +175,7 @@ chk('server menolak + pesan menunjuk halaman Hutang', /catatan hutang/.test(toas
 chk('pelanggan MASIH ada', (await api('/api/customers')).data.some((c) => c.id === papa.id));
 
 console.log('=== 10. Lunas: hilang dari filter open, muncul di "semua" ===');
-await p.goto('http://localhost:5656/#/debts', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/debts', { waitUntil: 'networkidle' });
 await p.waitForSelector('#hutang-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 // Bayar sisa 50000 -> lunas (lewat API biar cepat; alur UI sudah diuji di §7).
@@ -262,7 +262,7 @@ const dibuat = await p.evaluate(async ({ sid, cid }) => {
 }, { sid: saleId, cid: bersih.id });
 chk('nota uji pelanggan tersimpan', dibuat.status === 201 && dibuat.json?.data?.sale?.customer_id === bersih.id,
   JSON.stringify(dibuat).slice(0, 120));
-await p.goto('http://localhost:5656/#/customers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/customers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#cust-body tbody tr', { timeout: 15000 });
 await w('#cust-q', 'UjiHutang Bersih'); await p.waitForTimeout(700);
 await p.click('[data-cust-hist]'); await p.waitForSelector('.modal', { timeout: 8000 });

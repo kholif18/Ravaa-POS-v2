@@ -95,7 +95,7 @@ const tungguJumlah = async (n) => {
 };
 
 try {
-  await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/pos', { waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 20000 });
   await page.waitForTimeout(500);
 

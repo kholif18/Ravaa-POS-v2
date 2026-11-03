@@ -38,7 +38,7 @@ const err = [];
 p.on('pageerror', (e) => err.push(String(e).slice(0, 120)));
 const api = (path) => p.evaluate((u) => fetch(u).then((r) => r.json()), path);
 
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 // Sediakan fixture section A lewat API (token ikut terpasang via pasangToken).
@@ -82,7 +82,7 @@ for (let i = 1; i <= 22; i++) {
     body: JSON.stringify({ name: `UjiPg Sup ${String(n).padStart(2, '0')}` }),
   }), i);
 }
-await p.goto('http://localhost:5656/#/suppliers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/suppliers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#sup-body tbody tr', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('prev/next + nomor halaman ada', await p.locator('[data-pg="prev"]').count() === 1
@@ -105,14 +105,14 @@ await p.click('button[data-pg="goto"][aria-label="Halaman 3"]'); await p.waitFor
 chk('klik nomor 3 -> Hal 3', /Hal 3 dari 3/.test(await p.textContent('#sup-body')));
 
 console.log('=== C. Halaman kecil: footer tanpa pager ===');
-await p.goto('http://localhost:5656/#/customers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/customers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#cust-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('footer penjelasan tetap ada (tanpa kalimat redundan)', (await p.textContent('#cust-body')).includes('No. customer di-assign'));
 chk('pager absen bila ≤20', await p.locator('#cust-body [data-pg]').count() === 0);
 
 console.log('=== D. Riwayat pager bernomor ===');
-await p.goto('http://localhost:5656/#/history', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/history', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1200);
 if (await p.locator('#page [data-pg]').count()) {
   // Sub-baris hybrid menempel induk — pindah halaman TAK HARUS mengganti

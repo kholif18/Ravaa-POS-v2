@@ -44,7 +44,7 @@ page.on('console', (m) => { if (m.type() === 'error') errs.push(`console: ${m.te
  *  tempat tombol barisnya [data-stock]. Selalu navigasi dulu supaya urutan test
  *  tidak bergantung pada halaman mana yang sedang terbuka. */
 const bukaDialogStok = async (sku) => {
-  await page.goto('http://localhost:5656/#/stock', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/stock', { waitUntil: 'load' });
   await page.waitForSelector('#page tbody tr', { timeout: 20000 });
   await page.fill('#st-q', sku);
   await page.waitForTimeout(500);
@@ -116,7 +116,7 @@ try {
 
   console.log('=== F. Form produk menampilkan modal rata-rata ===');
   // Restock di atas membuka halaman Stok; form produk ada di halaman Produk.
-  await page.goto('http://localhost:5656/#/products', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/products', { waitUntil: 'load' });
   await page.waitForSelector('#rows tr', { timeout: 20000 });
   await page.fill('#q', SKU);
   // Tunggu baris produk INI muncul — mengklik `#rows tr` pertama bisa membuka

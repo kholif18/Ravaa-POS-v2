@@ -10,7 +10,7 @@ import { pasangToken } from './bantuan-uji.mjs';
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
 const API = 'http://localhost:3001';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const SKU1 = 'E2E-DUP-1';
 
 /** Bersihkan lewat sqlite3 (test-only, jalur API sengaja tidak dipakai):

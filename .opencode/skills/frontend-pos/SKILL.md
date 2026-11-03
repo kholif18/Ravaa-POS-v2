@@ -245,7 +245,7 @@ panel topup/laporan, modal struk, atau styling apa pun.
 ## Cara verifikasi
 
 1. `npm run build -w apps/web` lolos.
-2. Cek visual: `npm run dev:web`, buka `http://localhost:5656` di lebar
+2. Cek visual: `npm run dev:web`, buka `http://localhost:3001` di lebar
    desktop (>860px) DAN mobile (~390px) — screenshot bila memungkinkan.
 3. Uji alur: tambah item tiap tab -> bayar tunai pas/kurang/lebih -> topup ->
    modal struk muncul -> Cetak browser hanya mencetak struk.

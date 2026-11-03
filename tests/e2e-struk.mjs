@@ -171,7 +171,7 @@ try {
   });
 
   console.log('=== A. Saklar & penjualan ===');
-  await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/pos', { waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 20000 });
   ok('saklar "Cetak struk otomatis" tampil di baris Mode', await page.isVisible('#pos-autoprint'));
   ok('saklar NYALA secara bawaan', await page.isChecked('#pos-autoprint'));
@@ -1026,7 +1026,7 @@ try {
   // menunjuk halaman Hutang. Note: regex /i karena innerText kena
   // text-transform pada chip.
   console.log('=== L. Riwayat: penanda HUTANG + filter ===');
-  await page.goto('http://localhost:5656/#/history', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/history', { waitUntil: 'load' });
   await page.waitForSelector('tr[data-trx]', { timeout: 15000 });
   const cekBadge = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('tr[data-trx]')];
@@ -1105,7 +1105,7 @@ try {
   // (pos.ts simpanKeranjang) dan dipulihkan mountPosPage -> muatKeranjang()
   // saat cart memori kosong.
   console.log('=== M. Keranjang persisten (reload + pindah halaman) ===');
-  await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/pos', { waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 15000 });
   // Titik awal deterministik: buang sisa section sebelumnya (bila ada) —
   // tombol Bersihkan ikut menulis localStorage, jadi sesudahnya benar-benar kosong.
@@ -1156,9 +1156,9 @@ try {
 
   // Pindah halaman = hash route TANPA reload dokumen -> mountPosPage ulang;
   // isi memori dipertahankan, keranjang tidak boleh hilang.
-  await page.goto('http://localhost:5656/#/dashboard', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/dashboard', { waitUntil: 'load' });
   await page.waitForSelector('#db-reload', { timeout: 15000 });
-  await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/pos', { waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 15000 });
   const navM = {
     baris: await page.locator('#pos-rows tr[data-key]:not(.note-row)').count(),

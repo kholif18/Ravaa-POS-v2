@@ -85,7 +85,7 @@ let popupCount = 0;
 page.on('popup', () => { popupCount++; });
 
 try {
-  await page.goto('http://localhost:5656/#/labels', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/labels', { waitUntil: 'load' });
   await page.waitForSelector('#lb-cetak', { timeout: 20000 });
   // Keranjang DEFAULT KOSONG (permintaan pemilik 2026-10-17) -> tunggu
   // empty-state keranjang + produk termuat (server/cache) supaya

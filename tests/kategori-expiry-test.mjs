@@ -7,7 +7,7 @@ import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
 import { pasangToken } from './bantuan-uji.mjs';
 
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const API = 'http://localhost:3001';
 // Slug yang sengaja disentuh: seed menyalakannya 0 (ATK) dan 1 (Snack), jadi
 // kedua arah perubahan teruji, dan di akhir dikembalikan persis seperti seed.

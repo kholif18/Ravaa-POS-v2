@@ -35,7 +35,7 @@ const post = (path, body) => p.evaluate(
 async function w(sel, v) { await p.fill(sel, v); await p.waitForTimeout(150); }
 
 // fetch() relatif butuh origin — buka app dulu sebelum semua evaluate.
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 console.log('=== A. Suppliers API: CRUD + penomoran SUP ===');
@@ -85,7 +85,7 @@ const baris = sh.data.find((s) => s.id === openShift.data.id);
 chk('agregat n_expense/expense_total ikut', baris?.n_expense >= 1 && baris?.expense_total >= 20000, JSON.stringify({ n: baris?.n_expense, tot: baris?.expense_total }));
 
 console.log('=== E. UI suppliers ===');
-await p.goto('http://localhost:5656/#/suppliers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/suppliers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#sup-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Supplier" aktif', await p.locator('a[href="#/suppliers"].is-active').count() === 1);
@@ -101,7 +101,7 @@ await p.click('.swal2-container .sw-btn-danger'); await p.waitForTimeout(1200);
 chk('hapus via konfirmasi -> hilang', !(await p.textContent('#sup-body')).includes('UjiExp UI Sup'));
 
 console.log('=== F. UI expenses ===');
-await p.goto('http://localhost:5656/#/expenses', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/expenses', { waitUntil: 'networkidle' });
 await p.waitForSelector('#exp-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('kartu jumlah tampil Rp', /Rp[\d.]+/.test(await p.textContent('#exp-jumlah')), await p.textContent('#exp-jumlah'));
@@ -118,12 +118,12 @@ await p.click('.swal2-container .sw-btn-danger'); await p.waitForTimeout(1200);
 chk('hapus via konfirmasi -> hilang', !(await p.textContent('#exp-body')).includes('UjiExp UI Listrik'));
 
 console.log('=== G. UI customers bersih + kartu laporan ===');
-await p.goto('http://localhost:5656/#/customers', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/customers', { waitUntil: 'networkidle' });
 await p.waitForSelector('#cust-body', { timeout: 15000 });
 await p.click('#cust-new'); await p.waitForSelector('.modal');
 chk('modal customer TANPA "No. supplier"', !(await p.textContent('.modal')).includes('No. supplier'));
 await p.click('.modal [data-x]'); await p.waitForTimeout(300);
-await p.goto(`http://localhost:5656/#/reports?x=${Date.now()}`, { waitUntil: 'networkidle' });
+await p.goto(`http://localhost:3001/#/reports?x=${Date.now()}`, { waitUntil: 'networkidle' });
 await p.waitForTimeout(1500);
 chk('laporan memuat kartu Pengeluaran', (await p.textContent('#page')).includes('Pengeluaran'));
 

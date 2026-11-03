@@ -17,7 +17,7 @@ const chk = (name, ok, info = '') => {
   else { fail++; console.log('  GAGAL', name, '|', info); }
 };
 
-const BASE = 'http://localhost:5656';
+const BASE = 'http://localhost:3001';
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome-stable' });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
 await pasangToken(p);

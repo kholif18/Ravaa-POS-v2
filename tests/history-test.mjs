@@ -9,7 +9,7 @@ import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
   import { pasangToken } from './bantuan-uji.mjs';
 
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const API = 'http://localhost:3001';
 
 const ambil = async (u) => {

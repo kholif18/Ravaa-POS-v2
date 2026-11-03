@@ -27,7 +27,7 @@ const post = (path, body) => p.evaluate(
 );
 async function w(sel, v) { await p.fill(sel, v); await p.waitForTimeout(150); }
 
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 // Setup: supplier tetap (pakai ulang antar-run, tak menumpuk) + produk unik.
@@ -108,7 +108,7 @@ const dl = await api(`/api/reports/daily?date=${new Date().toISOString().slice(0
 chk('daily purchase ikut', dl.data.purchase.n >= 2, JSON.stringify(dl.data.purchase));
 
 console.log('=== E. UI halaman purchases (sub-halaman, bukan modal) ===');
-await p.goto('http://localhost:5656/#/purchases', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/purchases', { waitUntil: 'networkidle' });
 await p.waitForSelector('#po-body', { timeout: 15000 });
 await p.waitForTimeout(600);
 chk('nav "Pembelian" aktif', await p.locator('a[href="#/purchases"].is-active').count() === 1);
@@ -205,7 +205,7 @@ chk('terima lunas via halaman -> status received', poStatus === 'received', poSt
 console.log('=== F. Cetak A4 nota PO ===');
 // Buka PO o1 (dibuat via API, punya supplier snapshot "UjiPO Sup Tetap", sudah
 // diterima lunas) — dokumen harus memuat kop, supplier, nomor, item, ringkas.
-await p.goto(`http://localhost:5656/#/purchases/${o1.json.data.purchase.id}`, { waitUntil: 'networkidle' });
+await p.goto(`http://localhost:3001/#/purchases/${o1.json.data.purchase.id}`, { waitUntil: 'networkidle' });
 await p.waitForSelector('[data-po-cetak]', { timeout: 10000 });
 await p.waitForTimeout(400);
 // Stub window.print di SELURUH context sebelum popup (pola customer-debt-test)

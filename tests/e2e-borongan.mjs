@@ -25,7 +25,7 @@ const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 
 const API = 'http://localhost:3001';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const SKU = 'UJIBOR6';   // foto: 6 -> 5.000 (harga 1.000, grosir 900)
 const SKU2 = 'UJIBOR10'; // buku: 10 -> 33.000 (harga 3.500)
 const SKUV = 'UJIBORV';  // produk sementara uji validasi API (tanpa penjualan)

@@ -51,7 +51,7 @@ const cleanupDB = () => {
 };
 
 const API = 'http://localhost:3001';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 let lolos = 0, gagal = 0;
 const chk = (n, ok, d = '') => {
   if (ok) lolos++; else gagal++;

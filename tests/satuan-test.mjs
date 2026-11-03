@@ -30,7 +30,7 @@ const rows = () => p.locator('#unit-body tbody tr').count();
 async function w(sel, v) { await p.fill(sel, v); await p.waitForTimeout(120); }
 
 console.log('=== 1. Halaman Satuan terbuka & terisi ===');
-await p.goto('http://localhost:5656/#/satuan', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/satuan', { waitUntil: 'networkidle' });
 await p.waitForSelector('#unit-body tbody tr', { timeout: 15000 });
 await p.waitForTimeout(600);
 const seedUnits = (await api('/api/units')).data;
@@ -106,7 +106,7 @@ chk(' hilang dari server', !sesudah.some((u) => u.slug === 'karung-api'), `${seb
 chk('baris hilang dari tabel', (await rows()) === sesudah.length, `${await rows()} baris`);
 
 console.log('=== 7. Form produk: satuan = DROPDOWN dari master ===');
-await p.goto('http://localhost:5656/#/products', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/products', { waitUntil: 'networkidle' });
 await p.waitForSelector('#prod-new'); await p.waitForTimeout(1800);
 await p.click('#prod-new'); await p.waitForSelector('.modal');
 const tag = p.locator('#f-unit');
@@ -146,7 +146,7 @@ chk('stok TIDAK tertimpa 0 saat simpan form Ubah', stokSesudah === stokSebelum, 
 
 console.log('=== 9. Error state: halaman survive saat API down ===');
 await p.route('**/api/units', (r) => r.abort());
-await p.goto('http://localhost:5656/#/satuan', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/satuan', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1500);
 chk('halaman tetap tampil (tidak blank)', (await p.locator('#unit-body').count()) === 1);
 chk('pesan error goofy tertera', /Gagal memuat satuan/.test(await p.textContent('#unit-body')), (await p.textContent('#unit-body')).replace(/\s+/g, ' ').slice(0, 60));

@@ -52,7 +52,7 @@ const stokSelai = async () => {
 };
 
 try {
-  await page.goto('http://localhost:5656/#/stock', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/stock', { waitUntil: 'load' });
   await page.waitForSelector('#page tbody tr', { timeout: 20000 });
   await page.fill('#st-q', 'PRD00001');
   await page.waitForTimeout(400);

@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
 const API = 'http://localhost:3001';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const DB = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '../apps/api/data/data.db');
 const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 

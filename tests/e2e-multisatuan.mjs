@@ -101,7 +101,7 @@ try {
   console.log(`  payload uji siap (stok ${StokUji}, dasar pcs Rp3.000)`);
 
   console.log('\n=== A. Form produk menampilkan seksi Satuan jual ===');
-  await page.goto('http://localhost:5656/#/products', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/products', { waitUntil: 'load' });
   await page.waitForSelector('#rows tr', { timeout: 20000 });
   await page.fill('#q', SKU);
   // JANGAN klik `#rows tr` pertama sembarangan: bila filter belum ter-apply,
@@ -131,7 +131,7 @@ try {
   await page.waitForTimeout(300);
 
   console.log('\n=== B. POS: chip satuan -> baris keranjang TERPISAH ===');
-  await page.goto('http://localhost:5656/#/pos', { waitUntil: 'load' });
+  await page.goto('http://localhost:3001/#/pos', { waitUntil: 'load' });
   await page.waitForSelector('#pos-q', { timeout: 20000 });
   await page.fill('#pos-q', SKU);
   await page.waitForSelector('#pos-results .suggest-item', { timeout: 8000 });

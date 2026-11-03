@@ -17,7 +17,7 @@
 import { chromium } from 'playwright-core';
 import { pasangToken, tungguDokumenA4 } from './bantuan-uji.mjs';
 
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 let lolos = 0, gagal = 0;
 const ok = (name, cond, info = '') => {
   if (cond) { lolos++; console.log(`  OK   ${name}${info ? ` | ${info}` : ''}`); }

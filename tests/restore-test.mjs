@@ -18,7 +18,7 @@ const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
 const BACKUP_DIR = path0.join(REPO, 'apps/api/data/backups');
 const sql = (q) => execFileSync('sqlite3', [DB, q], { encoding: 'utf8' }).trim();
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const API = 'http://localhost:3001';
 const jget = async (path) => (await fetch(`${API}${path}`)).json();
 const jpost = async (path, body) => {

@@ -18,7 +18,7 @@ import path0 from 'node:path';
 import { fileURLToPath } from 'node:url';
   import { pasangToken } from './bantuan-uji.mjs';
 
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const API = 'http://localhost:3001';
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');

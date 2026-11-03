@@ -23,7 +23,7 @@ await pasangToken(p);
 const err = [];
 p.on('pageerror', (e) => err.push(String(e).slice(0, 120)));
 
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 const gaya = () => p.evaluate(() => {

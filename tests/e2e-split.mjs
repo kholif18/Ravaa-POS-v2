@@ -28,7 +28,7 @@ const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execSync(`sqlite3 ${DB} "${q}"`).toString().trim();
 
 const API = 'http://localhost:3001';
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const SKU = 'UJISPLIT';
 const NAMA = 'Uji Split Barang';
 const PRICE = 10000;

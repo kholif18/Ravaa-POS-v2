@@ -57,7 +57,7 @@ npm run seed   # buat DB + data master
 npm run dev    # api :3001 + web :5656 sekaligus
 ```
 
-Buka `http://localhost:5656`, login **owner / admin1234** (wajib ganti sandi saat
+Buka `http://localhost:3001`, login **owner / admin1234** (wajib ganti sandi saat
 login pertama). Lengkapnya — server produksi, Docker, native STB/ARM,
 print-agent, HTTPS LAN, backup — di **[INSTALL.md](INSTALL.md)**.
 

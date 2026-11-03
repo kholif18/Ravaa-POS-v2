@@ -7,7 +7,7 @@ import { chromium } from 'playwright-core';
 import { fileURLToPath } from 'node:url';
   import { pasangToken } from './bantuan-uji.mjs';
 
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const API = 'http://localhost:3001';
 const hariIni = () => new Date().toISOString().slice(0, 10);
 const rp = (n) => `Rp${new Intl.NumberFormat('id-ID').format(Math.round(n))}`;

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const API = 'http://localhost:3001';
 const KASIR_UJI = `rekap-uji-${Date.now().toString(36)}`;
 let lolos = 0, gagal = 0;

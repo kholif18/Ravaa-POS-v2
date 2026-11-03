@@ -36,7 +36,7 @@ const post = (path, body) => p.evaluate(
 );
 const { pasangToken } = await import('./bantuan-uji.mjs');
 await pasangToken(p);
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 const namaAwal = (await api('/api/me')).data.user.name;
 
@@ -54,7 +54,7 @@ chk('avatar bukan dataURL -> 400', (await post('/api/users/me/avatar', { image: 
 chk('hapus avatar -> null', (await post('/api/users/me/avatar', { image: '' })).json.data?.avatar === null);
 
 console.log('=== B. UI profil ===');
-await p.goto('http://localhost:5656/#/profil', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/profil', { waitUntil: 'networkidle' });
 await p.waitForTimeout(900);
 chk('username read-only', await p.locator('#pf-username[readonly]').count() === 1);
 chk('sandi blok tersembunyi dulu', await p.locator('#pf-sandi-blok.hidden').count() === 1);
@@ -78,7 +78,7 @@ chk('hapus avatar -> inisial kembali', await p.locator('#pf-avatar-init').count(
 chk('blok Perangkat TIDAK ada di profil', !(await p.textContent('#page')).includes('Tampilan perangkat'));
 
 console.log('=== C. Sistem: kartu Tampilan perangkat ===');
-await p.goto('http://localhost:5656/#/settings', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/settings', { waitUntil: 'networkidle' });
 await p.waitForTimeout(1200);
 chk('kartu Tampilan perangkat ada di Sistem', (await p.textContent('#set-body')).includes('Tampilan perangkat ini'));
 chk('nama toko struk tampil statis + tema tersedia', await p.locator('#set-dev-toko').count() === 1 && await p.locator('#set-dev-theme').count() === 1 && await p.locator('#set-dev-toko input').count() === 0);

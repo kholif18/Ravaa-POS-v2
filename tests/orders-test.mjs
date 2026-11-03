@@ -71,7 +71,7 @@ const post = (path, body) => p.evaluate(
 );
 
 // fetch() relatif butuh origin — buka app dulu sebelum evaluate.
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(700);
 
 const open = await api('/api/shifts/open?cashier=kasir');
@@ -212,7 +212,7 @@ const aksiOrder = new Set((au.data ?? []).map((r) => r.action));
 chk('jejak audit order: create + update tercatat', aksiOrder.has('create') && aksiOrder.has('update'), [...aksiOrder].join(','));
 
 console.log('=== G. UI #/orders (buat -> DP -> serah -> cetak) ===');
-await p.goto('http://localhost:5656/#/orders', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/orders', { waitUntil: 'networkidle' });
 await p.waitForSelector('#ord-body', { timeout: 15000 });
 await p.waitForTimeout(700);
 chk('nav "Pesanan" aktif + tombol memuat hint Alt+N', (await p.locator('a[href="#/orders"].is-active').count()) === 1
@@ -283,7 +283,7 @@ chk('Struk penjualan (jalur cetak ulang) -> payload memuat nomor nota + item', p
 
 console.log('=== H. Riwayat: nota take + penanda Pesanan/Hutang ===');
 chk('GET /api/sales/:id nota take: order_no + sisa_hutang 15000', detC.order_no === ordC.order_no && detC.sisa_hutang === 15000, JSON.stringify({ o: detC.order_no, s: detC.sisa_hutang }));
-await p.goto('http://localhost:5656/#/history', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/history', { waitUntil: 'networkidle' });
 await p.waitForSelector('tr[data-trx]', { timeout: 15000 });
 await p.waitForTimeout(800);
 const trC = p.locator('tr[data-trx]').filter({ hasText: detC.invoice_no });

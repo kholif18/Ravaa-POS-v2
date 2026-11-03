@@ -32,7 +32,7 @@ const chk = (name, ok, info = '') => {
 const REPO = path0.resolve(path0.dirname(fileURLToPath(import.meta.url)), '..');
 const DB = path0.join(REPO, 'apps/api/data/data.db');
 const sql = (q) => execFileSync('sqlite3', [DB, q], { encoding: 'utf8' }).trim();
-const WEB = 'http://localhost:5656';
+const WEB = 'http://localhost:3001';
 const NOTE = 'UjiPO Retur';
 
 /** Hapus SEMUA PO milik suite (note eksak) + kembalikan stok NET-nya.

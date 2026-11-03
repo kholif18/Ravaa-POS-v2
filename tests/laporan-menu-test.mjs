@@ -39,7 +39,7 @@ const get = (path) => p.evaluate(async (u) => {
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }, path);
 
-await p.goto('http://localhost:5656/#/dashboard', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/dashboard', { waitUntil: 'networkidle' });
 await p.waitForTimeout(800);
 
 console.log('=== A. API summary/cashiers/products ===');
@@ -98,7 +98,7 @@ const rFix = await fetch(`${API}/api/products`, {
 if (rFix.status !== 200 && rFix.status !== 201) console.log(`  (catatan) fixture ${FIX_LOW} gagal dibuat: ${rFix.status}`);
 
 console.log('=== B. UI menu + filter ===');
-await p.goto('http://localhost:5656/#/reports', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:3001/#/reports', { waitUntil: 'networkidle' });
 await p.waitForSelector('#rp-body', { timeout: 15000 });
 await p.waitForTimeout(1200);
 chk('9 menu (Harian/Laba/Kasir/Produk/Kategori/Piutang/Akuntansi/Stok/Analitik), Harian aktif', await p.locator('[data-menu]').count() === 9
