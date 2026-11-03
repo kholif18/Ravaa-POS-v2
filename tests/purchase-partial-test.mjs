@@ -353,7 +353,7 @@ try {
     ui1.modal === 0 && ui1.url.includes(`#/purchases/${poUid}`)
       && ['Qty PO', 'Diterima', 'Sisa'].every((x) => ui1.th.includes(x)), JSON.stringify(ui1.th));
   chk('form terima: qty bawaan = SEMUA sisa (3), nilai 3.000, dibayar bawaan 3.000',
-    ui1.max === '3' && ui1.qtyVal === '3' && ui1.total === 'Rp3.000' && ui1.bayar === '3000',
+    ui1.max === '3' && ui1.qtyVal === '3' && ui1.total === 'Rp3.000' && ui1.bayar === '3.000', // format ribuan
     JSON.stringify({ max: ui1.max, qty: ui1.qtyVal, total: ui1.total, bayar: ui1.bayar }));
   chk('rincian menampilkan Belum datang (bukan hutang) + tidak ada tombol Batalkan PO',
     ui1.teks.includes('Belum datang (bukan hutang)') && ui1.batal === 0
@@ -373,7 +373,7 @@ try {
   // Maks bayar = nilai diterima (2.000) + nilai event (1.000) − terbayar
   // (1.000) = 2.000. Barang belum datang TIDAK boleh dibayar duluan.
   chk('ubah qty datang -> nilai 1.000 & dibayar ikut 1.000 (maks 2.000)',
-    ui2.total === 'Rp1.000' && ui2.bayar === '1000' && ui2.maks === '2000', JSON.stringify(ui2));
+    ui2.total === 'Rp1.000' && ui2.bayar === '1.000' && ui2.maks === '2000', JSON.stringify(ui2)); // format ribuan
 
   // A4 saat masih sebagian: kolom Diterima, status SEBAGIAN, baris ketiga
   // "Sisa hutang" (prioritas uang kurang di atas barang kurang).
@@ -413,7 +413,7 @@ try {
   // Lunasi sisa hutang lewat form inline (masih sebagian).
   await p.waitForSelector('#pb-amount', { timeout: 10000 });
   const pbVal = await p.inputValue('#pb-amount');
-  chk('form Bayar sisa muncul saat sebagian dengan nilai = sisa 1.000', pbVal === '1000', pbVal);
+  chk('form Bayar sisa muncul saat sebagian dengan nilai = sisa 1.000', pbVal === '1.000', pbVal); // format ribuan
   await p.click('#pb-ok');
   const detU3 = await tunggu(async () => {
     const d = (await api(`/api/purchases/${poUid}`)).data;

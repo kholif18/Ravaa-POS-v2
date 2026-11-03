@@ -248,7 +248,8 @@ await p.click('[data-dpmetode="transfer"]');
 await p.click('.modal [data-ok]');
 await p.waitForTimeout(1300);
 const teksDp = (await p.textContent('#page')).replace(/\s+/g, ' ');
-chk('dialog DP: "Penuh" = 40000, simpan -> baris Transfer Rp10.000 + sisa 30000', penuhVal === '40000'
+// Format ribuan (2026-10-27): tombol "Penuh" mengisi '40.000' di kolom DP.
+chk('dialog DP: "Penuh" = 40000, simpan -> baris Transfer Rp10.000 + sisa 30000', penuhVal.replace(/\D/g, '') === '40000'
   && teksDp.includes('Transfer') && teksDp.includes('Rp10.000') && /Sisa Rp30\.000/.test(teksDp));
 await p.click('[data-oact="selesai"]');
 await p.waitForTimeout(1300);

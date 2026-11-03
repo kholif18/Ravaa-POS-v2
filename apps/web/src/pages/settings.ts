@@ -17,6 +17,7 @@ import { icon, type IconName } from '../ui/icons';
 import { getToko } from '../ui/user';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { formatNominal, formatNominalLive } from '../ui/nominal';
 import {
   LACI_BAWAAN_HEX, getAgentUrl, getAutoPrint, getDrawerKick, getDrawerKickHex,
   getPrintPause, getStrukLayout, setAgentUrl, setAutoPrint, setDrawerKick,
@@ -766,8 +767,8 @@ function kartuLayananTopup(): string {
             <label class="label" for="set-svc-label">Nama tampil</label>
             <input class="input" id="set-svc-label" value="${esc(d.label)}" placeholder="otomatis dari jenis" maxlength="80" autocomplete="off">
           </div>
-          ${f('set-svc-admin', 'Admin default (Rp)', d.admin_default, 'mis. 3000')}
-          ${f('set-svc-bankfee', 'Potongan bank (Rp)', d.bank_fee_default, 'mis. 1500')}
+          ${f('set-svc-admin', 'Admin default (Rp)', formatNominal(Number(d.admin_default) || 0), 'mis. 3.000')}
+          ${f('set-svc-bankfee', 'Potongan bank (Rp)', formatNominal(Number(d.bank_fee_default) || 0), 'mis. 1.500')}
         </div>
         <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
           <span id="set-svc-status" aria-live="polite" class="text-xs ${state.layananErr ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}">${state.layananErr ? esc(state.layananErr) : 'Potongan bank tidak boleh melebihi admin.'}</span>
@@ -1790,10 +1791,13 @@ function bindLayanan(): void {
     state.layananDraft.label = (ev.target as HTMLInputElement).value;
   });
   host?.querySelector<HTMLElement>('#set-svc-admin')?.addEventListener('input', (ev) => {
-    state.layananDraft.admin_default = (ev.target as HTMLInputElement).value;
+    const t = ev.target as HTMLInputElement;
+    // Format ribuan LIVE; draft menyimpan STRING DIGIT (reader Number aman).
+    state.layananDraft.admin_default = String(formatNominalLive(t));
   });
   host?.querySelector<HTMLElement>('#set-svc-bankfee')?.addEventListener('input', (ev) => {
-    state.layananDraft.bank_fee_default = (ev.target as HTMLInputElement).value;
+    const t = ev.target as HTMLInputElement;
+    state.layananDraft.bank_fee_default = String(formatNominalLive(t));
   });
 
   // Ubah baris: isi draft dari baris itu lalu repaint (tombol Hapus/Batal muncul).

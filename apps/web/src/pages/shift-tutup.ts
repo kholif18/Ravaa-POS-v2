@@ -56,6 +56,7 @@ import { getAutoPrint, getPrintPause } from '../ui/print-pref';
 import { kirimPrint, rp, strukUntukTercetak, type Struk } from '../escpos';
 import { cetakRekapShift, tglLengkap } from '../invoice';
 import { errMsg } from '../ui/http';
+import { formatNominalLive, bacaNominal } from '../ui/nominal';
 
 /** Baris `GET /api/shifts` (kontrak lengkap dengan agregat subquery —
  *  n_sales, omzet, tunai/qris/transfer, topup/tarik, pengeluaran, kas masuk,
@@ -294,7 +295,7 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
       </div>
       <div class="field mt-4">
         <label class="label" for="sh-akhir">Modal akhir (hitung fisik di laci) *</label>
-        <input id="sh-akhir" class="input" type="number" inputmode="numeric" min="0" step="1" placeholder="isi setelah uang dihitung" />
+        <input id="sh-akhir" class="input" type="text" inputmode="numeric" placeholder="isi setelah uang dihitung" autocomplete="off" />
       </div>
       <p class="mt-2 text-sm">
         <span class="text-gray-500 dark:text-gray-400">Selisih (kas fisik − kas seharusnya):</span>
@@ -321,21 +322,28 @@ export function dialogTutupShift(s: ShiftRow, onSelesai: () => void | Promise<vo
           else void kirimRekapThermal(s, null);
         }),
       );
+      // Format ribuan LIVE (satu-sumber ui/nominal) + selisih live segar per
+      // input. PENGECUALIAN "0": laci fisik benar-benar kosong = nilai sah
+      // (value "0" lolos kontrak; kosong = ditolak by validasi) — sedangkan
+      // formatNominalLive membuangnya jadi kosong; tuliskan "0" apa adanya.
       akhir.addEventListener('input', () => {
+        if (akhir.value.replace(/\D/g, '') === '0') akhir.value = '0';
+        else formatNominalLive(akhir);
         const v = akhir.value.trim();
-        if (v === '' || !Number.isFinite(Number(v))) { sel.textContent = '—'; sel.className = 'ml-1 tabular-nums'; return; }
-        const d = hitungSelisih(Number(v), kasHarus);
+        const n = bacaNominal(akhir);
+        if (v === '') { sel.textContent = '—'; sel.className = 'ml-1 tabular-nums'; return; }
+        const d = hitungSelisih(n, kasHarus);
         sel.textContent = `${d >= 0 ? '' : '−'}${rp(Math.abs(d))}`;
         sel.className = `ml-1 tabular-nums ${d === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`;
       });
       ok.addEventListener('click', async () => {
-        const v = akhir.value.trim();
-        if (v === '' || !Number.isFinite(Number(v)) || Number(v) < 0) {
+        if (akhir.value.trim() === '') {
           toast('Modal akhir harus angka >= 0', 'warning');
           return;
         }
+        const v = bacaNominal(akhir);
         try {
-          await apiPost(`/api/shifts/${s.id}/close`, { modal_akhir: Number(v) });
+          await apiPost(`/api/shifts/${s.id}/close`, { modal_akhir: v });
           close();
           // Z pasca-tutup: dialog rekap (Thermal/PDF/Selesai) + onSelesai di
           // dalamnya — toast "ditutup" diganti judul dialog (tak redundan).

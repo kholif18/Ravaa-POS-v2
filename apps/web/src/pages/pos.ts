@@ -57,6 +57,7 @@ import { esc } from '../ui/html';
 import { kbd } from '../ui/ui';
 import { AMBAT_EXPIRY, statusExpiry, tglExpiry } from '../ui/expiry';
 import { dialogTutupShift, type ShiftRow } from './shift-tutup';
+import { formatNominal as formatRibu, parseNominal as parseRibu, formatNominalLive as formatInputRibu, bacaNominal, pasangNominal } from '../ui/nominal';
 // cetakUlang = jalur Riwayat (Tahap 2 2026-10-06): tombol "Cetak ulang" di
 // Aksi cepat memakai dialog + struk yang SAMA PERSIS — jangan ditulis ulang
 // di pos.ts (AGENTS §5: bila kemiripan ≥80% → satu modul).
@@ -903,38 +904,10 @@ function kelasPosChange(): string {
   return `text-3xl font-extrabold tabular-nums ${kelasKembalian()}`;
 }
 
-/** Format ribuan Indonesia untuk KOLOM uang (50.000) — tampil saja, state
- *  `cashIn` tetap angka murni. Regex manual (tanpa toLocaleString) supaya
- *  deterministik di semua runtime. SATU sumber format + parse dipakai input
- *  listener, chip, dan sinkronisasi paintCart. */
-const formatRibu = (n: number): string => {
-  if (!(n > 0)) return '';
-  return String(Math.trunc(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-};
-/** Parse balik tampilan bertitik ("50.000", "Rp 50.000", "50abc000") jadi
- *  angka — ambil digitnya saja, abaikan pemisah/sampah ketik. */
-const parseRibu = (v: string): number => Number((v.match(/\d+/g) ?? []).join('')) || 0;
-
-/** Format ribuan LIVE saat mengetik + kembalikan caret ke digit yang sama
- *  (titik sisipan menggeser posisi — tanpa ini caret loncat ke ujung tiap
- *  ketik di tengah angka). Mengembalikan nilai numeriknya (`|| 0` = guard
- *  NaN). Dipakai dua kolom: `#pos-cash` dan `#bayar-split-nominal` (1.6.5). */
-function formatInputRibu(inp: HTMLInputElement): number {
-  const digitSebelum = (inp.value.slice(0, inp.selectionStart ?? inp.value.length).match(/\d/g) ?? []).length;
-  const nilai = parseRibu(inp.value);
-  const tampil = formatRibu(nilai);
-  if (inp.value !== tampil) {
-    inp.value = tampil;
-    let hitung = 0;
-    let pos = tampil.length;
-    for (let i = 0; i < tampil.length; i++) {
-      if (/\d/.test(tampil[i])) hitung++;
-      if (hitung >= digitSebelum) { pos = i + 1; break; }
-    }
-    inp.setSelectionRange(pos, pos);
-  }
-  return nilai;
-}
+// formatRibu / parseRibu / formatInputRibu PINDAH ke ui/nominal.ts
+// (2026-10-27 — poin ROADMAP "format ribuan semua form nominal"): satu-sumber
+// untuk SELURUH form nominal project, bukan hanya kolom uang POS. Import
+// di atas (alias nama lama supaya semua call site tetap identik).
 
 /** Teks konteks KEMBALIAN (P2): angka "Rp0" saat uang masih kurang
  *  menyesatkan — kasir mengira tidak ada kembalian. Dua frasa sesuai
@@ -1255,7 +1228,7 @@ function clampDiskonTransaksi(): void {
   const maks = bolehDiskon() ? Math.max(0, subtotal() - diskonBaris()) : 0;
   if (discount > maks) discount = maks;
   const inp = host?.querySelector<HTMLInputElement>('#pos-discount');
-  if (inp && Number(inp.value || 0) !== discount) inp.value = discount ? String(discount) : '';
+  if (inp && bacaNominal(inp) !== discount) inp.value = discount ? formatRibu(discount) : '';
 }
 
 /* ---------- gate shift ---------- */
@@ -1325,7 +1298,7 @@ function shiftGateHtml(): string {
       <div class="mt-5 space-y-3">
         <div>
           <label class="label" for="pos-modal-awal">Modal awal (Rp)</label>
-          <input id="pos-modal-awal" class="input" type="number" inputmode="numeric" min="0" step="1000" value="0" />
+          <input id="pos-modal-awal" class="input" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
         </div>
         <div>
           <label class="label" for="pos-kasir">Nama kasir</label>
@@ -1345,6 +1318,17 @@ function bindShiftGate(): void {
   const modalAwal = host!.querySelector<HTMLInputElement>('#pos-modal-awal');
   const kasir = host!.querySelector<HTMLInputElement>('#pos-kasir');
   modalAwal?.focus();
+  // Modal awal ikut format ribuan LIVE (2026-10-27: "100000" -> "100.000");
+  // reader klik tombol memakai bacaNominal (strip digit) supaya payload
+  // `modal_awal` tetap angka murni.
+  pasangNominal(modalAwal ?? null);
+  // Enter = Buka shift (gate BUKAN openModal — modal.ts Enter-on-INPUT tidak
+  // berlaku di sini, jadi dipasang manual).
+  const keBukaShift = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); btn?.click(); }
+  };
+  modalAwal?.addEventListener('keydown', keBukaShift);
+  kasir?.addEventListener('keydown', keBukaShift);
   // Gate OFFLINE (bukan "belum buka shift"): coba lagi = cek /health, lalu
   // muat ulang status shift. paint() dipanggil di kedua ujung supaya kartu
   // berganti (offline -> form buka shift, atau tombol hidup lagi).
@@ -1373,7 +1357,7 @@ function bindShiftGate(): void {
     btn.textContent = 'Membuka…';
     try {
       const res = await apiPost<{ data: Shift }>('/api/shifts/open', {
-        modal_awal: Number(modalAwal?.value || 0),
+        modal_awal: bacaNominal(modalAwal ?? null),
         cashier: name,
       });
       shift = res.data;
@@ -1905,7 +1889,7 @@ function sidebarBayarHtml(): string {
              tombol **Diskon F6** di grid Aksi cepat. -->
         ${bolehDiskon() ? `<div class="space-y-1.5">
           <label class="label" for="pos-discount">Diskon transaksi (Rp)</label>
-          <input id="pos-discount" class="input input-sm" type="number" inputmode="numeric" min="0" step="500" value="${discount || ''}" placeholder="0" />
+          <input id="pos-discount" class="input input-sm" type="text" inputmode="numeric" value="${formatRibu(discount)}" placeholder="0" autocomplete="off" />
         </div>` : ''}
         <!-- 4. Tombol Bayar = BUKA FORM BAYAR (modal), permintaan pemilik
              2026-10-04: metode bayar + uang diterima + chip nominal +
@@ -3378,7 +3362,7 @@ async function muatHold(h: Hold): Promise<void> {
   cashTouched = false;
   resetSplit(); // hold lama tanpa state split — form selalu buka polos
   const disc = host?.querySelector<HTMLInputElement>('#pos-discount');
-  if (disc) disc.value = discount ? String(discount) : '';
+  if (disc) disc.value = discount ? formatRibu(discount) : '';
   const cash = document.querySelector<HTMLInputElement>('#pos-cash');
   if (cash) cash.value = '';
   // Hold = isi keranjang (satu-satunya mode). Muat ulang tampilan +
@@ -4066,7 +4050,7 @@ function openManualItem(): void {
     title: 'Item manual (jasa / cetak)',
     body: `<div class="space-y-3 pos-scope">
       <div><label class="label" for="pm-name">Nama</label><input id="pm-name" class="input" type="text" placeholder="mis. Jasa ketik 1 halaman" /></div>
-      <div><label class="label" for="pm-price">Harga (Rp)</label><input id="pm-price" class="input" type="number" inputmode="numeric" min="0" step="500" value="" /></div>
+      <div><label class="label" for="pm-price">Harga (Rp)</label><input id="pm-price" class="input" type="text" inputmode="numeric" value="" placeholder="cth: 15000" autocomplete="off" /></div>
       <div><label class="label" for="pm-qty">Qty</label><input id="pm-qty" class="input" type="number" inputmode="numeric" min="1" step="1" value="1" /></div>
       <p class="text-sm text-gray-500 dark:text-gray-400">Item manual tidak mengurangi stok dan tidak muncul di Manage Produk.</p>
     </div>`,
@@ -4076,6 +4060,7 @@ function openManualItem(): void {
       const price = api.el.querySelector<HTMLInputElement>('#pm-price');
       const qty = api.el.querySelector<HTMLInputElement>('#pm-qty');
       name?.focus();
+      pasangNominal(price ?? null);
       // Guard anti-double-submit (bug yang sama dengan dialog topup
       // 2026-10-08: 1x Enter = handler el + handler bawaan modal.ts, dua
       // submit = dua baris). Disetel setelah validasi supaya input salah
@@ -4084,7 +4069,7 @@ function openManualItem(): void {
       const submit = () => {
         if (terkirim) return;
         const n = (name?.value || '').trim();
-        const pr = Number(price?.value || 0);
+        const pr = bacaNominal(price);
         const q = Math.max(1, Number(qty?.value || 1));
         if (!n || pr <= 0) {
           toast('Nama dan harga wajib diisi', 'error');
@@ -4192,16 +4177,16 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
           <div class="ptk-nums">
             <div class="ptk-field">
               <label class="label" for="ptk-nominal">Nominal (Rp)</label>
-              <input id="ptk-nominal" class="input" type="number" inputmode="numeric" min="0" step="1000" value="" />
+              <input id="ptk-nominal" class="input" type="text" inputmode="numeric" value="" placeholder="cth: 50000" autocomplete="off" />
             </div>
             <div class="ptk-field">
               <label class="label" for="ptk-admin">Biaya admin (Rp)</label>
-              <input id="ptk-admin" class="input" type="number" inputmode="numeric" min="0" step="500" value="" />
+              <input id="ptk-admin" class="input" type="text" inputmode="numeric" value="" placeholder="cth: 3000" autocomplete="off" />
             </div>
           </div>
           <div id="ptk-bankfee-wrap" class="ptk-field">
             <label class="label" for="ptk-bankfee">Potongan bank/agen (Rp)</label>
-            <input id="ptk-bankfee" class="input" type="number" inputmode="numeric" min="0" step="500" value="0" />
+            <input id="ptk-bankfee" class="input" type="text" inputmode="numeric" value="" placeholder="0" autocomplete="off" />
             <p class="ptk-hint" id="ptk-bankfee-hint">Laba bersih = admin − potongan bank. Laci tidak berubah (kasir menerima admin penuh).</p>
           </div>
           <p class="ptk-hint">Dibayar bersama belanja nota ini; tercatat terpisah di riwayat topup/tarik (nominal bukan omzet, admin = jasa; nominal tarik diserahkan tunai).</p>
@@ -4252,9 +4237,9 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
        *  SATU baris yang sedang diisi). Label ikut jenis supaya tarik tidak
        *  terbaca "Rp50.000 ditagih" padahal yang dibayar hanya adminnya. */
       const tampilTotal = () => {
-        const nominal = Math.round(Number(inpNominal.value || 0));
-        const admin = Math.max(0, Math.round(Number(inpAdmin.value || 0)));
-        const bankFee = Math.max(0, Math.round(Number(inpBankFee.value || 0)));
+        const nominal = bacaNominal(inpNominal);
+        const admin = Math.max(0, bacaNominal(inpAdmin));
+        const bankFee = Math.max(0, bacaNominal(inpBankFee));
         const tarik = jenis.startsWith('tarik');
         elTotalLabel.textContent = tarik ? 'Biaya admin ditagih' : 'Ditambah ke nota';
         elTotal.textContent = rp(tarik ? admin : nominal + admin);
@@ -4326,24 +4311,27 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
       // menimpa begitu kasir mengedit kolomnya sendiri.
       const isiSaran = () => {
         if (adminTouched) return;
-        const nominal = Number(inpNominal.value || 0);
+        const nominal = bacaNominal(inpNominal);
         const code = providerCode(jenis);
         const cfg = svcMap.get(code);
         if (cfg) {
-          inpAdmin.value = String(cfg.admin_default || '');
-          inpBankFee.value = String(cfg.bank_fee_default || 0);
+          inpAdmin.value = formatRibu(cfg.admin_default);
+          inpBankFee.value = formatRibu(cfg.bank_fee_default);
         } else {
-          inpAdmin.value = String(suggestAdmin(nominal) || '');
-          inpBankFee.value = '0';
+          inpAdmin.value = formatRibu(suggestAdmin(nominal));
+          inpBankFee.value = '';
         }
         tampilTotal();
       };
-      inpNominal.addEventListener('input', isiSaran);
-      inpAdmin.addEventListener('input', () => {
+      // Nominal/admin/bankfee = kolom uang — hidup diformat ribuan LIVE
+      // (satu-sumber ui/nominal). Listener isiSaran tetap juga di nominal
+      // (autofill admin mengikuti nominal).
+      pasangNominal(inpNominal, () => isiSaran());
+      pasangNominal(inpAdmin, () => {
         adminTouched = true;
         tampilTotal();
       });
-      inpBankFee.addEventListener('input', tampilTotal);
+      pasangNominal(inpBankFee, tampilTotal);
       // Saat ganti jenis, reset admin + bank fee ke konfigurasi baru
       const pilihJenisReset = (e: Event) => {
         pilihJenis(e);
@@ -4367,8 +4355,8 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
         if (terkirim) return;
         const j = aktif();
         const butuhNomor = j.butuhNomor !== false;
-        const nominal = Math.round(Number(inpNominal.value || 0));
-        const admin = Math.max(0, Math.round(Number(inpAdmin.value || 0)));
+        const nominal = bacaNominal(inpNominal);
+        const admin = Math.max(0, bacaNominal(inpAdmin));
         const nomor = butuhNomor ? inpNomor.value.trim() : '';
         if (!(nominal > 0)) {
           toast('Nominal harus lebih dari 0', 'error');
@@ -4390,7 +4378,7 @@ function openDialogTopupKeranjang(jenisAwal: TopupJenis = 'e-wallet'): void {
           token: wrapToken.classList.contains('hidden') ? '' : inpToken.value.trim(),
           nominal,
           admin,
-          bank_fee: jenis.startsWith('tarik') ? 0 : Math.max(0, Math.round(Number(inpBankFee.value || 0))),
+          bank_fee: jenis.startsWith('tarik') ? 0 : Math.max(0, bacaNominal(inpBankFee)),
         });
         simpanKeranjang();
         api.close();
@@ -5200,14 +5188,15 @@ async function pay(opts?: { hutang?: boolean }): Promise<void> {
 function bindSidebar(): void {
   // Diskon transaksi — batasnya sisa SETELAH diskon item.
   host!.querySelector('#pos-discount')?.addEventListener('input', (e) => {
-    const v = Number((e.target as HTMLInputElement).value || 0);
-    discount = Math.max(0, v);
+    // Format ribuan LIVE (satu-sumber ui/nominal) + batasnya sisa SETELAH
+    // diskon item.
+    discount = formatInputRibu(e.target as HTMLInputElement);
     // Batasnya sisa SETELAH diskon item: total tidak boleh < 0, dan server
     // juga menolak "diskon melebihi subtotal".
     const maks = Math.max(0, subtotal() - diskonBaris());
     if (discount > maks) {
       discount = maks;
-      (e.target as HTMLInputElement).value = String(discount);
+      (e.target as HTMLInputElement).value = formatRibu(discount);
     }
     simpanKeranjang();
     paintAktif();

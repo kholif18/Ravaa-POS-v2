@@ -31,6 +31,7 @@ import { dialogTutupShift, type ShiftRow } from './shift-tutup';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { pasangNominal, bacaNominal } from '../ui/nominal';
 
 /* ---------- tipe (kontrak GET /api/shifts — lihat shift-tutup.ts) ---------- */
 
@@ -232,18 +233,21 @@ function dialogBuka(): void {
       </div>
       <div class="field">
         <label class="label" for="sh-modal">Modal awal (uang di laci) *</label>
-        <input id="sh-modal" class="input" type="number" inputmode="numeric" min="0" step="1" value="0" />
+        <input id="sh-modal" class="input" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
       </div>`,
     onMount: ({ el, ok, close }) => {
       const kasir = el.querySelector('#sh-kasir') as HTMLInputElement;
       const modal = el.querySelector('#sh-modal') as HTMLInputElement;
       kasir.focus();
       kasir.select();
+      pasangNominal(modal); // format ribuan LIVE (satu-sumber ui/nominal)
       ok.addEventListener('click', async () => {
         const nama = kasir.value.trim();
-        const awal = Number(modal.value);
+        const awal = bacaNominal(modal);
         if (!nama) { toast('Nama kasir wajib diisi', 'warning'); return; }
-        if (!Number.isFinite(awal) || awal < 0) { toast('Modal awal harus angka >= 0', 'warning'); return; }
+        // Hypotetis "bukan angka" tak mungkin lagi: helper memformat live +
+        // strip digit, jadi isi apapun hasilnya angka >= 0.
+        if (awal < 0) { toast('Modal awal harus angka >= 0', 'warning'); return; }
         try {
           await apiPost('/api/shifts/open', { cashier: nama, modal_awal: awal });
           close();

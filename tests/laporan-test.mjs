@@ -33,8 +33,10 @@ try {
     && Array.isArray(l.topItems) && Array.isArray(l.lowStock)
     && Array.isArray(l.byHour) && Array.isArray(l.byCategory),
     JSON.stringify(Object.keys(l ?? {})));
-  ok('laba = omzet − hpp', l.laba === l.sales.omzet - l.hpp,
-    `${l.laba} != ${l.sales.omzet} - ${l.hpp}`);
+  // Formula laba (keputusan pemilik 2026-10-31): laba = omzet − hpp +
+  // jasa layanan bersih (admin − bank_fee topup/tarik).
+  ok('laba = omzet − hpp + jasa layanan', l.laba === l.sales.omzet - l.hpp + (l.layanan?.laba ?? 0),
+    `${l.laba} != ${l.sales.omzet} - ${l.hpp} + ${l.layanan?.laba ?? 0}`);
   const nMethod = l.byMethod.reduce((a, m) => a + m.n, 0);
   const tMethod = l.byMethod.reduce((a, m) => a + m.total, 0);
   // Split (1.6.5): satu nota campuran menyumbang `n` di DUA metode (n =

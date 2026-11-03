@@ -101,8 +101,8 @@ function urutan(p: Product): number {
 }
 
 /** Kunci header yang bisa diurutkan (klik = asc, klik lagi = desc). */
-type StokSortKey = 'produk' | 'kategori' | 'stok' | 'minimum' | 'nilai';
-const STOK_SORT_KEYS: readonly StokSortKey[] = ['produk', 'kategori', 'stok', 'minimum', 'nilai'];
+type StokSortKey = 'produk' | 'kategori' | 'modal' | 'stok' | 'minimum' | 'nilai';
+const STOK_SORT_KEYS: readonly StokSortKey[] = ['produk', 'kategori', 'modal', 'stok', 'minimum', 'nilai'];
 
 /** Nilai kolom "Nilai" = stock × avg_cost (modal, sama dengan tampilan). */
 const nilaiBaris = (p: Product) => p.stock * p.avg_cost;
@@ -140,7 +140,8 @@ function terlihat(): Product[] {
   const n = state.sort.dir === 'desc' ? -1 : 1;
   return list.sort((a, b) => {
     let x = 0;
-    if (state.sort!.key === 'stok') x = a.stock - b.stock;
+    if (state.sort!.key === 'modal') x = a.avg_cost - b.avg_cost;
+    else if (state.sort!.key === 'stok') x = a.stock - b.stock;
     else if (state.sort!.key === 'minimum') x = a.min_stock - b.min_stock;
     else if (state.sort!.key === 'nilai') x = nilaiBaris(a) - nilaiBaris(b);
     else if (state.sort!.key === 'kategori') x = a.category_name.localeCompare(b.category_name, 'id');
@@ -290,6 +291,7 @@ function tableCard(): string {
               <th class="th th-sticky w-12 text-center">No.</th>
               ${thUrut('produk', 'Produk', state.sort, 'th-sticky')}
               ${thUrut('kategori', 'Kategori', state.sort, 'th-sticky')}
+              ${thUrut('modal', 'Modal', state.sort, 'th-sticky text-right')}
               ${thUrut('stok', 'Stok', state.sort, 'th-sticky text-right')}
               ${thUrut('minimum', 'Minimum', state.sort, 'th-sticky text-right')}
               ${thUrut('nilai', 'Nilai', state.sort, 'th-sticky text-right')}
@@ -317,6 +319,7 @@ function tableCard(): string {
                     <div class="cell-sub">${esc(p.sku)} · ${esc(p.unit)}</div>
                   </td>
                   <td class="td">${esc(p.category_name)}</td>
+                  <td class="td text-right tabular-nums">${rp(p.avg_cost)}</td>
                   <td class="td text-right">${badge}</td>
                   <td class="td text-right tabular-nums">${p.min_stock > 0 ? p.min_stock : '—'}</td>
                   <td class="td text-right tabular-nums">${rp(p.stock * p.avg_cost)}</td>

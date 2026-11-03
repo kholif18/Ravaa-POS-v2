@@ -21,6 +21,7 @@ import { rp } from '../escpos';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { pasangNominal, bacaNominal } from '../ui/nominal';
 
 type Expense = {
   id: number;
@@ -154,7 +155,7 @@ function expenseForm(): void {
       </div>
       <div class="field">
         <label class="label" for="e-jumlah">Jumlah (Rp) *</label>
-        <input id="e-jumlah" class="input" type="number" inputmode="numeric" min="1" step="500" placeholder="cth: 15000" />
+        <input id="e-jumlah" class="input" type="text" inputmode="numeric" placeholder="cth: 15.000" autocomplete="off" />
       </div>
       <div class="field">
         <label class="label" for="e-note">Catatan</label>
@@ -168,11 +169,12 @@ function expenseForm(): void {
     onMount: ({ el, ok, close }) => {
       const kat = el.querySelector('#e-kategori') as HTMLInputElement;
       kat.focus();
+      pasangNominal(el.querySelector('#e-jumlah') as HTMLInputElement);
       ok.addEventListener('click', async () => {
         const kategori = kat.value.trim();
-        const jumlah = Number((el.querySelector('#e-jumlah') as HTMLInputElement).value || 0);
+        const jumlah = bacaNominal(el.querySelector('#e-jumlah') as HTMLInputElement);
         if (!kategori) { toast('Kategori wajib diisi', 'warning'); kat.focus(); return; }
-        if (!Number.isInteger(jumlah) || jumlah <= 0) {
+        if (jumlah <= 0) {
           toast('Jumlah harus rupiah bulat > 0', 'warning');
           (el.querySelector('#e-jumlah') as HTMLInputElement).focus();
           return;

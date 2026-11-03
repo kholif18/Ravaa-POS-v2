@@ -125,10 +125,15 @@ try {
   await page.click(`#rows tr[data-row="${awal.id}"] [data-edit]`);
   await page.waitForSelector('#f-cost', { timeout: 8000 });
   const form = norm(await page.innerText('.modal'));
-  ok('baris "Modal rata-rata" tampil', /Modal rata-rata:/.test(form), form.slice(0, 300));
-  ok(`nilai baris = ${rp(EKSP)}`, form.includes(`Modal rata-rata: ${rp(EKSP)}`), form.slice(0, 300));
-  ok('membedakan harga beli manual dari rata-rata', /patokan markup/.test(form));
-  ok('Harga beli manual tidak tertimpa', (await page.inputValue('#f-cost')) === String(awal.cost),
+  // Form produk di-redesign (2026-10-31): rata-rata tampil sebagai hint
+  // "Modal Rata-rata (HPP)" (hintCollapsible = div hint biasa di desktop) —
+  // labelnya hanya aria-label; teks tampil = isi
+  // "<rp> — rata-rata restock, dipakai sebagai HPP saat jual."
+  ok('hint HPP tampil (rata-rata restock)', /rata-rata restock/.test(form), form.slice(0, 300));
+  ok(`isi hint = ${rp(EKSP)}`, form.includes(rp(EKSP)), form.slice(0, 300));
+  ok('hint menyebut HPP saat jual (bukan "patokan markup")', /dipakai sebagai HPP/.test(form));
+  // Format ribuan (2026-10-27): #f-cost tampil '2.100' — banding digit.
+  ok('Harga beli manual tidak tertimpa', (await page.inputValue('#f-cost')).replace(/\D/g, '') === String(awal.cost),
     await page.inputValue('#f-cost'));
   // Stok HANYA diisi saat awal (keputusan 2026-09-28): di mode Ubah inputnya
   // tidak dirender SAMA SEKALI — bukan readonly, bukan tersembunyi CSS — jadi
@@ -159,10 +164,17 @@ try {
   ok('laporan punya hpp', typeof rep.hpp === 'number', JSON.stringify(rep.hpp));
   ok(`hpp = qty*cost = ${hppHarap}`, rep.hpp >= hppHarap, `hpp=${rep.hpp} minimal=${hppHarap}`);
   ok('laporan punya laba', typeof rep.laba === 'number', JSON.stringify(rep.laba));
-  ok('laba = omzet - hpp', rep.laba === rep.sales.omzet - rep.hpp,
-    `laba=${rep.laba} omzet=${rep.sales.omzet} hpp=${rep.hpp}`);
-  ok('laba masuk akal (omzet > laba bila ada HPP)', rep.hpp > 0 ? rep.laba < rep.sales.omzet : true,
-    `hpp=${rep.hpp} omzet=${rep.sales.omzet}`);
+  // Formula laba (keputusan pemilik 2026-10-31): laba = omzet − hpp +
+  // jasa layanan bersih (admin − bank_fee topup/tarik; nominal topup =
+  // mutasi modal, bukan omzet).
+  const layananLaba = rep.layanan?.laba ?? 0;
+  ok('laba = omzet - hpp + jasa layanan bersih',
+    rep.laba === rep.sales.omzet - rep.hpp + layananLaba,
+    `laba=${rep.laba} omzet=${rep.sales.omzet} hpp=${rep.hpp} layanan=${layananLaba}`);
+  ok('laba masuk akal (antara omzet−hpp dan omzet−hpp+jasa)',
+    rep.laba >= rep.sales.omzet - rep.hpp
+      && rep.laba <= rep.sales.omzet - rep.hpp + layananLaba,
+    `hpp=${rep.hpp} omzet=${rep.sales.omzet} layanan=${layananLaba}`);
 
   console.log('=== I. Tanpa error runtime ===');
   ok('tidak ada pageerror/console error', errs.length === 0, errs.slice(0, 3).join(' | '));

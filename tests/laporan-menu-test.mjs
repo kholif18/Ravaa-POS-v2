@@ -62,10 +62,14 @@ chk('byHour: 24 ember, Σ menutup totals', Array.isArray(d.byHour) && d.byHour.l
   && d.byHour.reduce((a, b) => a + b.omzet, 0) === d.sales.omzet,
   `len=${d.byHour?.length}`);
 const pf = (await api(`/api/reports/profit?from=${hariIni()}&to=${hariIni()}`)).data;
+// Formula laba (keputusan pemilik 2026-10-31): days[].layanan = jasa layanan
+// bersih (admin − bank_fee) hari itu; laba = omzet − hpp + layanan; total
+// menjumlahkan semuanya; trx[].laba = per nota TANPA layanan (tetap omzet−hpp).
 chk('profit: days & total konsisten', pf.days.reduce((a, h) => a + h.n, 0) === pf.total.n
   && pf.days.reduce((a, h) => a + h.omzet, 0) === pf.total.omzet
-  && pf.days.every((h) => h.laba === h.omzet - h.hpp)
-  && pf.total.laba === pf.total.omzet - pf.total.hpp,
+  && pf.days.reduce((a, h) => a + (h.layanan ?? 0), 0) === pf.total.layanan
+  && pf.days.every((h) => h.laba === h.omzet - h.hpp + (h.layanan ?? 0))
+  && pf.total.laba === pf.total.omzet - pf.total.hpp + pf.total.layanan,
   JSON.stringify(pf.total));
 chk('profit: trx <= 200 + field nota', pf.trx.length <= 200
   && pf.trx.every((t) => 'invoice_no' in t && typeof t.cashier === 'string' && t.laba === t.total - t.hpp),
@@ -166,8 +170,10 @@ chk('menu Stok: saran order + fixture low tampil',
 // yang sama — jangan biarkan menjalar ke suite berikutnya.
 sql(`DELETE FROM products WHERE name='${FIX_LOW}';`);
 await p.click('[data-menu="laba"]'); await p.waitForTimeout(1200);
+// Kartu menu Laba berubah nama saat fitur formula baru (komit 0a4da37:
+// "Laba kotor" -> "Admin layanan" + laba = omzet − HPP + jasa bersih).
 chk('menu Laba: kartu + tabel per hari & per transaksi',
-  (await p.textContent('#rp-body')).includes('Laba kotor')
+  (await p.textContent('#rp-body')).includes('Admin layanan')
   && (await p.textContent('#rp-body')).includes('Laba per hari')
   && (await p.textContent('#rp-body')).includes('Laba per transaksi'));
 // Baris "Jumlah" bawah tabel "Laba per transaksi" (permintaan pemilik

@@ -241,16 +241,23 @@ export function seed(): void {
   migrate();
   db.exec(loadSql('seed.sql'));
 
+  // Akun bawaan owner (kontrak §3/§5 AGENTS: seed owner/admin1234 HANYA bila
+  // tabel users kosong — install baru bisa login langsung, DB berdata tidak
+  // pernah disentuh). must_change=1 memaksa ganti sandi saat login pertama.
+  const nUsers = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  if (nUsers === 0) {
+    db.prepare(
+      `INSERT INTO users (username, name, password_hash, role, must_change)
+       VALUES ('owner', 'kasir', ?, 'owner', 1)`,
+    ).run(hashPassword('admin1234'));
+  }
+
   // HANYA untuk testing (alpha): SEED_DEMO=true membuat akun demo/kasir
-  // tanpa must_change. Production TIDAK membuat akun bawaan apapun —
-  // admin membuat user manual via UI/API.
-  if (process.env.SEED_DEMO === 'true') {
-    const nUsers = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
-    if (nUsers === 0) {
-      db.prepare(
-        `INSERT INTO users (username, name, password_hash, role, must_change)
-         VALUES ('demo', 'Demo Kasir', ?, 'kasir', 0)`,
-      ).run(hashPassword('demo'));
-    }
+  // tanpa must_change (hanya di DB yang sama-samaan kosong dengan owner).
+  if (process.env.SEED_DEMO === 'true' && nUsers === 0) {
+    db.prepare(
+      `INSERT INTO users (username, name, password_hash, role, must_change)
+       VALUES ('demo', 'Demo Kasir', ?, 'kasir', 0)`,
+    ).run(hashPassword('demo'));
   }
 }

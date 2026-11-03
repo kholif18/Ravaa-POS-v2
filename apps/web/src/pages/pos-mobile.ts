@@ -342,7 +342,7 @@ function aksiPanelHtml(ctx: PosMobileCtx): string {
     <span class="label">${ctx.bolehDiskon ? 'Diskon &amp; menu' : 'Menu'}</span>
     ${ctx.bolehDiskon ? `<div class="space-y-1.5">
       <label class="label !mb-0" for="pos-discount">Diskon transaksi (Rp)</label>
-      <input id="pos-discount" class="input" type="number" inputmode="numeric" min="0" step="500" value="${ctx.diskon || ''}" placeholder="0" />
+      <input id="pos-discount" class="input" type="text" inputmode="numeric" value="${ctx.formatRibu(ctx.diskon)}" placeholder="0" autocomplete="off" />
       <div class="flex items-baseline justify-between" id="pos-disc-item-row" ${diskonItem ? '' : 'hidden'}>
         <span class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Diskon item</span>
         <span id="pos-disc-item" class="text-sm font-semibold text-red-600 dark:text-red-400">-${ctx.rp(diskonItem)}</span>

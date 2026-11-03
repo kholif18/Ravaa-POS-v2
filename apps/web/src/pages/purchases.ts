@@ -46,6 +46,7 @@ import { tglPendek } from '../ui/waktu';
 import { rp } from '../escpos';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { pasangNominal, bacaNominal, formatNominal } from '../ui/nominal';
 import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 // Slot logo bersama semua dokumen A4 (permintaan pemilik 19 Okt 2026) —
 // helper tinggal di invoice.ts, dipakai juga oleh debts.ts & rekap/laporan.
@@ -595,7 +596,7 @@ function detailHtml(po: Po, items: PoItem[], receives: PoReceive[], returs: PoRe
       </div>
       <div class="field mt-3">
         <label class="label" for="pt-bayar">Dibayar tunai (Rp)</label>
-        <input id="pt-bayar" class="input text-right font-bold tabular-nums" type="number" inputmode="numeric" min="0" max="${maksBayar}" step="500" value="${totalSisa}" />
+        <input id="pt-bayar" class="input text-right font-bold tabular-nums" type="text" inputmode="numeric" max="${maksBayar}" value="${formatNominal(totalSisa)}" autocomplete="off" />
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Bawaan = nilai kedatangan ini (lunas). Boleh kurang (jadi hutang supplier) atau lebih untuk melunasi kekurangan kedatangan sebelumnya — maksimal ${rp(maksBayar)}.</p>
       </div>
       <div class="field mt-2">
@@ -631,7 +632,7 @@ function detailHtml(po: Po, items: PoItem[], receives: PoReceive[], returs: PoRe
       <h3 class="mb-2 text-sm font-bold">Bayar sisa hutang</h3>
       <div class="field">
         <label class="label" for="pb-amount">Jumlah bayar (Rp)</label>
-        <input id="pb-amount" class="input text-right font-bold tabular-nums" type="number" inputmode="numeric" min="1" max="${po.sisa}" step="500" value="${po.sisa}" />
+        <input id="pb-amount" class="input text-right font-bold tabular-nums" type="text" inputmode="numeric" value="${formatNominal(po.sisa)}" autocomplete="off" />
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Maks sisa hutang. Kas keluar diatribusikan ke Shift #${po.shift_id ?? '—'} (shift kedatangan pertama).</p>
       </div>
       <div class="mt-3">
@@ -895,6 +896,7 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
   // Form Terima BERTAHAP: qty per baris (bawaan = semua sisa), nilai & batas
   // bayar dihitung live — angka yang dikirim harus sama dengan yang dilihat.
   const inputBayar = el.querySelector<HTMLInputElement>('#pt-bayar');
+  pasangNominal(inputBayar); // format ribuan LIVE (satu-sumber ui/nominal)
   const rowInputs = [...el.querySelectorAll<HTMLInputElement>('[data-pt-qty]')];
   // SATU id per form (bukan per klik): klik ganda / retry setelah jawaban
   // hilang memakai kunci yang sama sehingga server mengenali event yang sama.
@@ -922,9 +924,12 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
     if (t) t.textContent = rp(total);
     if (inputBayar) {
       const maks = Math.max(0, (po.diterima ?? 0) + total - po.terbayar);
-      inputBayar.max = String(maks);
-      if (!bayarDisentuh) inputBayar.value = String(adaQty ? total : 0);
-      else if (Number(inputBayar.value || 0) > maks) inputBayar.value = String(maks);
+      // Attr max ikut hidup: tiap perubahan qty memperbarui BATAS bawaan,
+      // bukan hanya value — dulu attr statik dari render awal (membacanya
+      // setelah qty berubah menampilkan angka basi).
+      inputBayar.setAttribute('max', String(maks));
+      if (!bayarDisentuh) inputBayar.value = formatNominal(adaQty ? total : 0);
+      else if (bacaNominal(inputBayar) > maks) inputBayar.value = formatNominal(maks);
     }
     el.querySelector<HTMLButtonElement>('#pt-ok')?.toggleAttribute('disabled', !adaQty);
   };
@@ -941,8 +946,8 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
     if (!dipilih.length) { toast('Isi qty kedatangan minimal satu baris', 'warning'); return; }
     const eventTotal = hitungEvent();
     const maks = Math.max(0, (po.diterima ?? 0) + eventTotal - po.terbayar);
-    const dibayar = Number(inputBayar?.value || 0);
-    if (!Number.isInteger(dibayar) || dibayar < 0 || dibayar > maks) {
+    const dibayar = bacaNominal(inputBayar);
+    if (dibayar < 0 || dibayar > maks) {
       toast(`Dibayar harus bulat 0..${maks}`, 'warning');
       inputBayar?.focus();
       return;
@@ -971,8 +976,8 @@ async function mountDetail(el: HTMLElement, id: number): Promise<void> {
   });
 
   el.querySelector<HTMLElement>('#pb-ok')?.addEventListener('click', async () => {
-    const amount = Number((el.querySelector('#pb-amount') as HTMLInputElement).value || 0);
-    if (!Number.isInteger(amount) || amount <= 0) { toast('Jumlah harus rupiah bulat > 0', 'warning'); return; }
+    const amount = bacaNominal(el.querySelector('#pb-amount') as HTMLInputElement);
+    if (amount <= 0) { toast('Jumlah harus rupiah bulat > 0', 'warning'); return; }
     try {
       const r = await apiPost<{ data: Po }>(`/api/purchases/${po.id}/pay`, { amount });
       toast(r.data.sisa === 0 ? `PO-${po.id} lunas` : `Terbayar · sisa ${rp(r.data.sisa)}`, 'success');
@@ -1143,7 +1148,7 @@ function mountBaru(el: HTMLElement): void {
               <tr>
                 <td class="td"><span class="cell-strong">${esc(b.name)}</span></td>
                 <td class="td td-num"><input data-po-qty="${i}" class="input input-sm !w-20 text-right tabular-nums" type="number" min="0" step="any" value="${b.qty}" aria-label="Qty ${esc(b.name)}" /></td>
-                <td class="td td-num"><input data-po-hb="${i}" class="input input-sm !w-24 text-right tabular-nums" type="number" min="0" step="1" value="${b.harga_beli}" aria-label="Harga beli ${esc(b.name)}" /></td>
+                <td class="td td-num"><input data-po-hb="${i}" class="input input-sm !w-24 text-right tabular-nums" type="text" inputmode="numeric" value="${formatNominal(b.harga_beli)}" aria-label="Harga beli ${esc(b.name)}" autocomplete="off" /></td>
                 <td class="td td-num font-semibold" data-po-sub="${i}">${rp(Math.round((b.qty || 0) * (b.harga_beli || 0)))}</td>
                 <td class="td"><button type="button" data-po-del="${i}" class="row-btn row-btn-danger" aria-label="Hapus baris">${icon('trash')}</button></td>
               </tr>`).join('')}
@@ -1173,10 +1178,11 @@ function mountBaru(el: HTMLElement): void {
       });
     });
     box.querySelectorAll<HTMLInputElement>('input[data-po-hb]').forEach((inp) => {
+      pasangNominal(inp); // harga beli = uang — format ribuan LIVE
       inp.addEventListener('input', () => {
         const i = Number(inp.dataset.poHb);
         if (!baris[i]) return;
-        baris[i].harga_beli = Number(inp.value) || 0;
+        baris[i].harga_beli = bacaNominal(inp);
         segarkan(i);
       });
     });

@@ -44,11 +44,13 @@ const bukaDialogStok = async () => {
 };
 
 const stokSelai = async () => {
-  // Kolom ke-4 pada baris produk yang sedang dicari. Urutannya kini
-  // No. | Produk | Kategori | Stok | ... — kolom No. (nomor urut) ditambahkan
-  // di depan, jadi indeks badge Stok bergeser dari 2 menjadi 3.
+  // Kolom ke-5 pada baris produk yang sedang dicari. Urutannya kini
+  // No. | Produk | Kategori | Modal | Stok | ... — setelah kolom No.
+  // (nomor urut, indeks badge Stok 2 -> 3), kolom Modal (avg_cost,
+  // 2026-11-03) disisipkan sebelum Stok, jadi indeks badge Stok
+  // bergeser lagi dari 3 menjadi 4.
   const tds = await page.locator('#page tbody tr').first().locator('td').allInnerTexts();
-  return norm(tds[3] ?? '');
+  return norm(tds[4] ?? '');
 };
 
 try {

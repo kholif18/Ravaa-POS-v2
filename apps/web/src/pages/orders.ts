@@ -40,6 +40,7 @@ import { pasangAksiBaru } from '../ui/aksi-baru';
 import { pasangCariBersih } from '../ui/cari-bersih';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { formatNominal, formatNominalLive, pasangNominal, bacaNominal } from '../ui/nominal';
 import { cetakUlang, type SaleRow } from './history';
 import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 
@@ -420,7 +421,7 @@ function barisHtml(): string {
       <tr data-ob-row="${i}">
         <td class="td"><input class="input input-sm w-full" data-ob="name" value="${esc(b.name)}" placeholder="cth: Banner 1x3 m, pasang" autocomplete="off" /></td>
         <td class="td"><input class="input input-sm !w-20 text-right tabular-nums" data-ob="qty" type="number" min="0" step="any" value="${esc(b.qty)}" /></td>
-        <td class="td"><input class="input input-sm !w-32 text-right tabular-nums" data-ob="price" type="number" min="0" step="any" value="${esc(b.price)}" placeholder="0" /></td>
+        <td class="td"><input class="input input-sm !w-32 text-right tabular-nums" data-ob="price" type="text" inputmode="numeric" value="${formatNominal(Number(b.price) || 0)}" placeholder="0" autocomplete="off" /></td>
         <td class="td td-num tabular-nums" data-ob-amt>${rp(jumlahBaris(b))}</td>
         <td class="td"><button type="button" class="row-btn row-btn-danger" data-ob-del="${i}" title="Hapus baris" aria-label="Hapus baris ${i + 1}">${icon('trash')}</button></td>
       </tr>`,
@@ -457,14 +458,21 @@ function bindBaru(el: HTMLElement): void {
   });
   // Delegasi input: baris bisa di-render ulang tanpa kehilangan listener.
   el.addEventListener('input', (ev) => {
-    const t = ev.target as HTMLElement;
+    const t = ev.target as HTMLInputElement;
     const f = t.dataset.ob as 'name' | 'qty' | 'price' | undefined;
     if (!f) return;
     const tr = t.closest<HTMLElement>('[data-ob-row]');
     const i = Number(tr?.dataset.obRow);
     const b = state.baris[i];
     if (!b) return;
-    b[f] = (t as HTMLInputElement).value;
+    if (f === 'price') {
+      // Harga = kolom uang — diformat ribuan LIVE di tempat dan state BARIS
+      // menyimpan DIGIT (jumlahBaris/simpan membaca Number), jadi tampilan
+      // "50.000" tidak pernah masuk model.
+      b[f] = String(formatNominalLive(t));
+    } else {
+      b[f] = t.value;
+    }
     const amt = tr?.querySelector('[data-ob-amt]');
     if (amt) amt.textContent = rp(jumlahBaris(b));
     const tot = host?.querySelector('#ord-total');
@@ -827,7 +835,7 @@ function dialogDp(o: OrderRow): void {
         </div>
         <div class="field">
           <label class="label" for="dp-nominal">Nominal DP (Rp) *</label>
-          <input id="dp-nominal" class="input" type="number" inputmode="numeric" min="1" placeholder="cth: 50000" />
+          <input id="dp-nominal" class="input" type="text" inputmode="numeric" placeholder="cth: 50.000" autocomplete="off" />
           <button type="button" class="btn btn-ghost mt-1 !min-h-[30px] !px-2.5" id="dp-penuh">Penuh ${rp(o.sisa)}</button>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400">${
@@ -840,13 +848,14 @@ function dialogDp(o: OrderRow): void {
       const getMetode = bindMetode(el, 'dpmetode', 'tunai');
       const inp = el.querySelector<HTMLInputElement>('#dp-nominal')!;
       inp.focus();
+      pasangNominal(inp); // format ribuan LIVE (satu-sumber ui/nominal)
       el.querySelector('#dp-penuh')?.addEventListener('click', () => {
-        inp.value = String(o.sisa);
+        inp.value = formatNominal(o.sisa);
         inp.focus();
       });
       ok.addEventListener('click', async () => {
-        const amount = Number(inp.value || 0);
-        if (!Number.isInteger(amount) || amount <= 0) {
+        const amount = bacaNominal(inp);
+        if (amount <= 0) {
           toast('Nominal harus rupiah bulat > 0', 'warning');
           inp.focus();
           return;
@@ -898,7 +907,7 @@ function dialogSerahkan(o: OrderRow): void {
         </div>
         <div class="field">
           <label class="label" for="sr-terima">Uang diterima sekarang (Rp)</label>
-          <input id="sr-terima" class="input" type="number" inputmode="numeric" min="0" placeholder="cth: ${o.sisa}" />
+          <input id="sr-terima" class="input" type="text" inputmode="numeric" placeholder="cth: ${formatNominal(o.sisa)}" autocomplete="off" />
           <button type="button" class="btn btn-ghost mt-1 !min-h-[30px] !px-2.5" id="sr-pas">Uang pas ${rp(o.sisa)}</button>
         </div>
         <div class="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-600" id="sr-out"></div>
@@ -909,9 +918,9 @@ function dialogSerahkan(o: OrderRow): void {
       const inp = el.querySelector<HTMLInputElement>('#sr-terima')!;
       const out = el.querySelector<HTMLElement>('#sr-out')!;
       const hitung = (): { terima: number; bayar: number; kembali: number; hutang: number } => {
-        const terima = Number(inp.value || 0);
-        const bayar = Math.min(Number.isFinite(terima) ? terima : 0, o.sisa);
-        return { terima, bayar, kembali: (Number.isFinite(terima) ? terima : 0) - bayar, hutang: o.sisa - bayar };
+        const terima = bacaNominal(inp);
+        const bayar = Math.min(terima, o.sisa);
+        return { terima, bayar, kembali: terima - bayar, hutang: o.sisa - bayar };
       };
       const paint = (): void => {
         const h = hitung();
@@ -924,9 +933,9 @@ function dialogSerahkan(o: OrderRow): void {
             : []),
         ].join('');
       };
-      inp.addEventListener('input', paint);
+      pasangNominal(inp, paint); // format ribuan LIVE + pratinjau ikut segar
       el.querySelector('#sr-pas')?.addEventListener('click', () => {
-        inp.value = String(o.sisa);
+        inp.value = formatNominal(o.sisa);
         paint();
         inp.focus();
       });
@@ -934,7 +943,7 @@ function dialogSerahkan(o: OrderRow): void {
       paint();
       ok.addEventListener('click', async () => {
         const h = hitung();
-        if (!Number.isInteger(h.terima) || h.terima < 0) {
+        if (h.terima < 0) {
           toast('Uang diterima harus rupiah bulat >= 0', 'warning');
           inp.focus();
           return;

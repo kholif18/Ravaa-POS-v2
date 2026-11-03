@@ -114,15 +114,16 @@ try {
   await page.fill('#ptk-nomor', '12345678');
   await page.fill('#ptk-token', '98765432109876');
   await page.fill('#ptk-nominal', '10000');
+  // Format ribuan (2026-10-27): kolom admin tampil '3.000'/'2.000' — banding digit.
   chk('admin terisi otomatis tier suggestAdmin (10rb -> Rp3.000)',
-    (await page.inputValue('#ptk-admin')) === '3000', await page.inputValue('#ptk-admin'));
+    (await page.inputValue('#ptk-admin')).replace(/\D/g, '') === '3000', await page.inputValue('#ptk-admin'));
   await page.fill('#ptk-admin', '2000');
   await page.fill('#ptk-nominal', '12000');
   chk('admin yang sudah diedit TIDAK ditimpa saat nominal berubah',
-    (await page.inputValue('#ptk-admin')) === '2000', await page.inputValue('#ptk-admin'));
+    (await page.inputValue('#ptk-admin')).replace(/\D/g, '') === '2000', await page.inputValue('#ptk-admin'));
   await page.fill('#ptk-nominal', '10000');
   chk('admin tetap 2000 setelah nominal kembali 10000',
-    (await page.inputValue('#ptk-admin')) === '2000');
+    (await page.inputValue('#ptk-admin')).replace(/\D/g, '') === '2000');
   await klikOkModal();
   await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
   const snap1 = JSON.parse((await LS('ravaa.keranjang')) ?? '{}');
@@ -276,7 +277,7 @@ try {
     (await sembunyiT('#ptk-nomor-wrap')) && (await sembunyiT('#ptk-token-wrap')));
   await page.fill('#ptk-nominal', '50000');
   chk('admin tarik ikut tier suggestAdmin (50rb -> Rp5.000)',
-    (await page.inputValue('#ptk-admin')) === '5000', await page.inputValue('#ptk-admin'));
+    (await page.inputValue('#ptk-admin')).replace(/\D/g, '') === '5000', await page.inputValue('#ptk-admin'));
   await page.press('#ptk-nominal', 'Enter'); // submit via Enter (regresi double-submit)
   await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
   const barisTarik = await page.locator('#pos-rows .topup-row').allInnerTexts();

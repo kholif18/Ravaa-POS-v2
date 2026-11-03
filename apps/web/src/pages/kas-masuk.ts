@@ -22,6 +22,7 @@ import { rp } from '../escpos';
 import { pasangAksiBaru } from '../ui/aksi-baru';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { pasangNominal, bacaNominal } from '../ui/nominal';
 
 type KasMasuk = {
   id: number;
@@ -153,7 +154,7 @@ function kasMasukForm(): void {
       </div>
       <div class="field">
         <label class="label" for="km-nominal">Jumlah (Rp) *</label>
-        <input id="km-nominal" class="input" type="number" inputmode="numeric" min="1" step="500" placeholder="cth: 100000" />
+        <input id="km-nominal" class="input" type="text" inputmode="numeric" placeholder="cth: 100.000" autocomplete="off" />
       </div>
       <div class="field">
         <label class="label" for="km-note">Catatan</label>
@@ -167,11 +168,12 @@ function kasMasukForm(): void {
     onMount: ({ el, ok, close }) => {
       const kat = el.querySelector('#km-kategori') as HTMLInputElement;
       kat.focus();
+      pasangNominal(el.querySelector('#km-nominal') as HTMLInputElement);
       ok.addEventListener('click', async () => {
         const kategori = kat.value.trim();
-        const jumlah = Number((el.querySelector('#km-nominal') as HTMLInputElement).value || 0);
+        const jumlah = bacaNominal(el.querySelector('#km-nominal') as HTMLInputElement);
         if (!kategori) { toast('Kategori wajib diisi', 'warning'); kat.focus(); return; }
-        if (!Number.isInteger(jumlah) || jumlah <= 0) {
+        if (jumlah <= 0) {
           toast('Jumlah harus rupiah bulat > 0', 'warning');
           (el.querySelector('#km-nominal') as HTMLInputElement).focus();
           return;

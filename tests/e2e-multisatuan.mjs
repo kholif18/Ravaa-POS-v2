@@ -124,7 +124,8 @@ try {
     (await page.inputValue('#f-unit-rows [data-u-row="0"] [data-u-price]')) === '',
     await page.inputValue('#f-unit-rows [data-u-row="0"] [data-u-price]'));
   ok('baris dus: harga eksplisit 450000',
-    (await page.inputValue('#f-unit-rows [data-u-row="1"] [data-u-price]')) === '450000',
+    // Format ribuan (2026-10-27): input harga pak termasuk form nominal terformat.
+    (await page.inputValue('#f-unit-rows [data-u-row="1"] [data-u-price]')).replace(/\D/g, '') === '450000',
     await page.inputValue('#f-unit-rows [data-u-row="1"] [data-u-price]'));
   // Tutup tanpa menyimpan — perubahan apa pun di form sengaja tidak kita tulis.
   await page.click('.modal [data-x]');
@@ -157,9 +158,12 @@ try {
   ok('2 baris — TIDAK menumpuk', semuaBaris.length === 2, semuaBaris.length);
 
   console.log('\n=== C. Bayar: server memakai faktor stok & HPP ===');
-  // avg_cost TIDAK dikembalikan oleh opname (opname tidak menyentuhnya), jadi
-  // seluruh ekspektasi HPP diukur dari nilai yang benar-benar terbaca sekarang.
-  const A = awal.avg_cost;
+  // avg_cost TIDAK dikembalikan oleh opname, jadi seluruh ekspektasi HPP
+  // diukur dari nilai yang BENAR-BENAR TERBACA SETELAH setup (bukan awal
+  // suite yang mungkin terpolusi oleh suite sebelumnya yang menjalankan
+  // restock pada PRD00001 yang sama). Jual tidak mengubah avg_cost, jadi
+  // nilai ini masih valid saat penjualan di bawah dieksekusi.
+  const A = (await ambil()).avg_cost;
   const costPack = Math.round(A * 12);
   const hppSebelum = (await jget('/api/reports/daily')).data;
   // qty pack jadi 2 lewat tombol + (satu ketukan, tanpa fokus input angka)
@@ -227,8 +231,13 @@ try {
   ok(`HPP selisih = 2x${costPack} + 1x${A} = ${rp(hppHarus)}`, dHpp === hppHarus,
     `selisih=${dHpp}, ekspektasi=${hppHarus}`);
   ok('omzet selisih = 72.000 (pack) + 3.000 (pcs)', dOmzet === 75000, dOmzet);
-  ok('laba = omzet - HPP (konsisten)', rep.laba === rep.sales.omzet - rep.hpp,
-    JSON.stringify({ omzet: rep.sales.omzet, hpp: rep.hpp, laba: rep.laba }));
+  // Formula laba (keputusan pemilik 2026-10-31): laba = omzet − hpp +
+  // jasa layanan bersih (admin − bank_fee topup/tarik). Laporan harian
+  // MENUMUK semua transaksi hari itu (termasuk milik suite lain), jadi
+  // kontribusi layanan dibaca dari field server yang sama (rep.layanan).
+  ok('laba = omzet - HPP + layanan (konsisten)',
+    rep.laba === rep.sales.omzet - rep.hpp + (rep.layanan?.laba ?? 0),
+    JSON.stringify({ omzet: rep.sales.omzet, hpp: rep.hpp, layanan: rep.layanan?.laba ?? 0, laba: rep.laba }));
 
   console.log('\n=== F. Guard API (resolusi satuan di server) ===');
   const tolakUnit = await jpost('/api/sales', {

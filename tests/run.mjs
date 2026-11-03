@@ -51,6 +51,9 @@ const SUITE = [
   ['escpos-test.ts', 70],
   ['labelsheet-test.ts', 80],
   ['borongan-test.ts', 31],
+  // Modul nominal (2026-10-27): format ribuan LIVE semua form — format/parse/
+  // parser strip-digit/prefill 0 = kosong (akar bug "0100000").
+  ['nominal-test.ts', 53],
   // Peta dependensi izin (2026-10-25): preset Standar/Ketat/Supervisor sehat,
   // pengecualian sengaja tidak berubah, normalisasi & izin efektif.
   ['izin-dependensi-test.ts', 27],

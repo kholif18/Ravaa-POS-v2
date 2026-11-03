@@ -281,7 +281,8 @@ try {
   await page.waitForTimeout(400);          // saran admin tier lokal
   const admin = await page.inputValue('#ptk-admin');
   // Kontrak: <50rb -> 3000, <200rb -> 5000. Rp50.000 bukan "<50rb" -> tier 5000.
-  ok('admin terisi otomatis sesuai tier (<200rb = Rp5.000)', admin === '5000', admin);
+  // Format ribuan (2026-10-27): kolom admin terisi '5.000' — banding digit.
+  ok('admin terisi otomatis sesuai tier (<200rb = Rp5.000)', admin.replace(/\D/g, '') === '5000', admin);
   await page.click('.modal [data-ok]');
   await page.waitForSelector('#pos-rows .topup-row', { timeout: 8000 });
   // Bayar lewat MODAL BAYAR bersama (sidebar #pos-bayar, sama dengan belanja).
@@ -357,15 +358,18 @@ try {
   await page.click('[data-pay="tunai"]');
   await page.fill('#pos-cash', '105000');
   await page.click('#pos-pay');
-  // Sama seperti di atas: tunggu nominal spesifik (Rp105.000), bukan teks
-  // generik — toast e-wallet Rp55.000 masih menumpuk dan memalsukan wait.
+  // Sama seperti di atas: tunggu nominal spesifik, bukan teks generik —
+  // toast e-wallet Rp55.000 masih menumpuk dan memalsukan wait.
+  // Admin PLN kini di-auto-fill dari master topup_services (butir bank_fee:
+  // admin 3.000 + potongan bank 1.500), BUKAN tier lama 5.000 — total
+  // = 100.000 + 3.000 = Rp103.000 (terbukti probe: toast + resume).
   await page.waitForFunction(
-    () => document.querySelector('#toast-root')?.textContent?.includes('Rp105.000'),
+    () => document.querySelector('#toast-root')?.textContent?.includes('Rp103.000'),
     { timeout: 15000 },
   );
   const toastPln = norm(await page.innerText('#toast-root'));
-  ok('topup PLN tercatat (toast nominal+admin Rp105.000)',
-    toastPln.includes('Topup tercatat') && toastPln.includes('Rp105.000'), toastPln);
+  ok('topup PLN tercatat (toast nominal+admin Rp103.000)',
+    toastPln.includes('Topup tercatat') && toastPln.includes('Rp103.000'), toastPln);
   // Resume layanan-saja muncul juga di sini (revisi 2026-10-08, lihat e-wallet
   // di atas) — struk PLN baru terkirim SETELAH tombol Thermal dipilih.
   await pilihCetak('Thermal');

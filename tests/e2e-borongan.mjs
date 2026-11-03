@@ -244,7 +244,8 @@ try {
   await p.waitForSelector('.modal [data-b-row]', { timeout: 8000 });
   const bQty = () => p.$$eval('.modal [data-b-row] [data-b-qty]', (els) => els.map((e) => e.value));
   const bPrice = () => p.$$eval('.modal [data-b-row] [data-b-price]', (els) => els.map((e) => e.value));
-  chk('J1 blok menampilkan aturan tersimpan (10 -> 33.000)', JSON.stringify(await bQty()) === '["10"]' && JSON.stringify(await bPrice()) === '["33000"]', `${JSON.stringify(await bQty())} ${JSON.stringify(await bPrice())}`);
+  // Format ribuan (2026-10-27): nilai aturan tersimpan tampil '33.000'.
+  chk('J1 blok menampilkan aturan tersimpan (10 -> 33.000)', JSON.stringify(await bQty()) === '["10"]' && JSON.stringify(await bPrice()) === '["33.000"]', `${JSON.stringify(await bQty())} ${JSON.stringify(await bPrice())}`);
   await p.click('#f-bor-add');
   await p.locator('.modal [data-b-row]').nth(1).locator('[data-b-qty]').fill('5');
   await p.locator('.modal [data-b-row]').nth(1).locator('[data-b-price]').fill('17000');

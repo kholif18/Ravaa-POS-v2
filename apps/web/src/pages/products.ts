@@ -20,6 +20,7 @@ import { CONTOH_KOLOM, csvProduk, mapRows, parseTable, templateProduk, unduhCSV,
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
 import { hintCollapsible } from '../ui/hint-collapsible';
+import { formatNominal, formatNominalLive, pasangNominal } from '../ui/nominal';
 
 const SIDE_KEY = 'ravaa.prodside';
 
@@ -873,19 +874,19 @@ function productForm(
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div class="field-sm">
             <label class="label" for="f-cost">Harga beli (Rp)</label>
-            <input id="f-cost" class="input input-sm" inputmode="numeric" value="${d?.cost ?? 0}" />
+            <input id="f-cost" class="input input-sm" type="text" inputmode="numeric" value="${formatNominal(d?.cost ?? 0)}" placeholder="0" autocomplete="off" />
           </div>
           <div class="field-sm">
             <label class="label" for="f-markup">Markup (%)</label>
-            <input id="f-markup" class="input input-sm" inputmode="decimal" value="${d?.markup ?? 0}" />
+            <input id="f-markup" class="input input-sm" inputmode="decimal" value="${(d?.markup ?? 0) > 0 ? d?.markup : ''}" placeholder="0" />
           </div>
           <div class="field-sm">
             <label class="label" for="f-price">Harga jual (Rp) *</label>
-            <input id="f-price" class="input input-sm" inputmode="numeric" value="${d?.price ?? 0}" />
+            <input id="f-price" class="input input-sm" type="text" inputmode="numeric" value="${formatNominal(d?.price ?? 0)}" placeholder="0" autocomplete="off" />
           </div>
           <div class="field-sm">
             <label class="label" for="f-grosir">Harga grosir (Rp)</label>
-            <input id="f-grosir" class="input input-sm" inputmode="numeric" value="${d?.price_grosir ?? 0}" />
+            <input id="f-grosir" class="input input-sm" type="text" inputmode="numeric" value="${formatNominal(d?.price_grosir ?? 0)}" placeholder="0" autocomplete="off" />
           </div>
         </div>
         ${hintCollapsible({
@@ -967,13 +968,11 @@ function productForm(
       const val = (id: string) => (el.querySelector(`#${id}`) as HTMLInputElement).value.trim();
       const num = (id: string) => Number(val(id).replace(/\D/g, '') || 0);
       const dec = (id: string) => Number(val(id).replace(',', '.').replace(/[^\d.]/g, '') || 0);
-      const setNum = (id: string, v: number) => {
-        (el.querySelector(`#${id}`) as HTMLInputElement).value = String(v);
-      };
       const catSel = el.querySelector('#f-cat') as HTMLSelectElement;
       const dyn = el.querySelector('#f-dyn') as HTMLInputElement;
       const price = el.querySelector('#f-price') as HTMLInputElement;
       const cost = el.querySelector('#f-cost') as HTMLInputElement;
+      const grosirInp = el.querySelector('#f-grosir') as HTMLInputElement;
       const markup = el.querySelector('#f-markup') as HTMLInputElement;
       const min = el.querySelector('#f-min') as HTMLInputElement;
       const name = el.querySelector('#f-name') as HTMLInputElement;
@@ -1030,7 +1029,7 @@ function productForm(
       const syncHargaDariMarkup = () => {
         if (busy) return;
         busy = true;
-        if (num('f-cost') > 0) price.value = String(hargaDariMarkup(num('f-cost'), dec('f-markup')));
+        if (num('f-cost') > 0) price.value = formatNominal(hargaDariMarkup(num('f-cost'), dec('f-markup')));
         markup.disabled = num('f-cost') <= 0;
         busy = false;
       };
@@ -1193,6 +1192,12 @@ function productForm(
       catSel.addEventListener('change', syncTrack);
       dyn.addEventListener('change', syncPrice);
       dyn.addEventListener('change', syncDisc);
+      // Harga beli/jual/grosir = kolom uang — format ribuan LIVE saat mengetik
+      // (satu-sumber ui/nominal). Reader num()/dec() sudah strip-digit sehingga
+      // urutan listener tidak berpengaruh.
+      pasangNominal(cost);
+      pasangNominal(price);
+      pasangNominal(grosirInp);
       cost.addEventListener('input', syncHargaDariMarkup);
       cost.addEventListener('input', syncDisc);
       markup.addEventListener('input', syncHargaDariMarkup);
@@ -1236,8 +1241,8 @@ function productForm(
               <select class="input input-sm" data-u-unit aria-label="Satuan jual">${opsiSatuan(base, u.unit)}</select>
               <input class="input input-sm text-center" data-u-factor inputmode="decimal" value="${u.factor}"
                 title="1 satuan ini = berapa ${esc(base)}" aria-label="Faktor" />
-              <input class="input input-sm" data-u-price inputmode="numeric" value="${u.price ?? ''}"
-                placeholder="otomatis" title="Kosong = faktor &times; harga dasar" aria-label="Harga" />
+              <input class="input input-sm" data-u-price type="text" inputmode="numeric" value="${u.price == null ? '' : formatNominal(u.price)}"
+                placeholder="otomatis" title="Kosong = faktor &times; harga dasar" aria-label="Harga" autocomplete="off" />
               <button type="button" class="row-btn row-btn-danger" data-u-del aria-label="Hapus satuan" title="Hapus satuan">${icon('trash')}</button>
             </div>`,
           )
@@ -1270,6 +1275,12 @@ function productForm(
         renderUnitRows();
       });
 
+      // Harga satuan jual = kolom uang — format ribuan LIVE (delegasi supaya
+      // baris yang dirender ulang tetap hidup). Reader bacaUnitRows strip-digit.
+      unitRowsEl.addEventListener('input', (e) => {
+        const inp = e.target as HTMLInputElement;
+        if (inp.dataset.uPrice !== undefined) formatNominalLive(inp);
+      });
       unitRowsEl.addEventListener('click', (e) => {
         const row = (e.target as HTMLElement).closest<HTMLElement>('[data-u-row]');
         if (!row || !(e.target as HTMLElement).closest('[data-u-del]')) return;
@@ -1298,8 +1309,8 @@ function productForm(
             (b, i) => `<div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2" data-b-row="${i}">
               <input class="input input-sm" data-b-qty inputmode="numeric" value="${b.qty || ''}"
                 placeholder="6" title="Jumlah satuan dasar" aria-label="Beli qty" />
-              <input class="input input-sm" data-b-price inputmode="numeric" value="${b.price || ''}"
-                placeholder="5000" title="Total harga untuk qty tersebut" aria-label="Total harga paket" />
+              <input class="input input-sm" data-b-price type="text" inputmode="numeric" value="${formatNominal(b.price)}"
+                placeholder="5.000" title="Total harga untuk qty tersebut" aria-label="Total harga paket" autocomplete="off" />
               <button type="button" class="row-btn row-btn-danger" data-b-del aria-label="Hapus tingkatan" title="Hapus tingkatan">${icon('trash')}</button>
             </div>`,
           )
@@ -1322,6 +1333,12 @@ function productForm(
         renderBorRows();
       });
 
+      // Harga paket borongan = kolom uang — format ribuan LIVE (delegasi;
+      // renderBorRows sering dipanggil ulang). bacaBorRows strip-digit.
+      borRowsEl.addEventListener('input', (e) => {
+        const inp = e.target as HTMLInputElement;
+        if (inp.dataset.bPrice !== undefined) formatNominalLive(inp);
+      });
       borRowsEl.addEventListener('click', (e) => {
         const row = (e.target as HTMLElement).closest<HTMLElement>('[data-b-row]');
         if (!row || !(e.target as HTMLElement).closest('[data-b-del]')) return;
@@ -1547,7 +1564,7 @@ export function restockForm(p: Product, sesudah?: () => void | Promise<void>): v
       </div>
       <div class="field" id="r-cost-field">
         <label class="label" for="r-cost">Harga beli / nota (Rp)</label>
-        <input id="r-cost" class="input" inputmode="numeric" value="" placeholder="cth: 1500" />
+        <input id="r-cost" class="input" inputmode="numeric" value="" placeholder="cth: 1.500" autocomplete="off" />
         <span class="text-xs text-gray-500 dark:text-gray-400" id="r-cost-hint">
           Diisi = modal rata-rata ikut dihitung ulang (dasar HPP). Kosongkan bila
           tidak ada nota — rata-rata tidak diubah.
@@ -1642,7 +1659,16 @@ export function restockForm(p: Product, sesudah?: () => void | Promise<void>): v
         }),
       );
       input.addEventListener('input', () => { if (mode === 'opname') hintOpname(); else hintMasuk(); });
-      costInput.addEventListener('input', () => { if (mode === 'masuk') hintMasuk(); });
+      // Harga beli restock = kolom uang — format ribuan LIVE + hint dasar
+      // (hintMasuk) tetap menyegar. Reader harga() strip-digit, payload
+      // `harga_beli` tetap angka murni. PENGECUALIAN: "0" eksplisit
+      // dituliskan apa adanya — formatNominal membuangnya jadi kosong, padahal
+      // harga 0 adalah nilai sah (barang hadiah/bonus, lihat komentar harga()).
+      costInput.addEventListener('input', () => {
+        if (costInput.value.replace(/\D/g, '') === '0') costInput.value = '0';
+        else formatNominalLive(costInput);
+        if (mode === 'masuk') hintMasuk();
+      });
 
       if (mode === 'opname') input.value = String(p.stock);
       paint();

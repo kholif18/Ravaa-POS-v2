@@ -106,7 +106,8 @@ try {
   ok('barcode DIKOSONGKAN (1 barcode = 1 produk)', (await page.inputValue('#f-barcode')) === '');
   ok('stok DIreset 0 (varian baru belum tentu ada barangnya)',
     (await page.inputValue('#f-stock')) === '0');
-  ok('harga disalin', (await page.inputValue('#f-price')) === '1000');
+  // Format ribuan (2026-10-27): #f-price tampil '1.000' — banding digit.
+  ok('harga disalin', (await page.inputValue('#f-price')).replace(/\D/g, '') === '1000');
   ok('kategori disalin', (await page.inputValue('#f-cat')) === 'atk');
   ok('SKU TIDAK readonly (beda dengan mode ubah)',
     !(await page.locator('#f-sku').isDisabled()));

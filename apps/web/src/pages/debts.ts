@@ -25,6 +25,7 @@ import { pasangAksiBaru } from '../ui/aksi-baru';
 import { getCashier, getToko } from '../ui/user';
 import { esc } from '../ui/html';
 import { errMsg } from '../ui/http';
+import { pasangNominal, bacaNominal } from '../ui/nominal';
 import { bindSort, paramSort, thUrut, type SortAktif } from '../ui/sort-header';
 import {
   footerStruk, syncDariServerSettings,
@@ -847,7 +848,7 @@ async function catatForm(jenis: 'charge' | 'payment', prefill?: PrefillBayar): P
       }
       <div class="field">
         <label class="label" for="h-amount">Nominal (Rp) *</label>
-        <input id="h-amount" class="input text-right font-semibold tabular-nums" type="number" inputmode="numeric" min="1" step="1" placeholder="cth: 50000" autofocus />
+        <input id="h-amount" class="input text-right font-semibold tabular-nums" type="text" inputmode="numeric" placeholder="cth: 50.000" autocomplete="off" autofocus />
         ${
           hutang
             ? ''
@@ -862,13 +863,14 @@ async function catatForm(jenis: 'charge' | 'payment', prefill?: PrefillBayar): P
     onMount: ({ el, ok, close }) => {
       const amount = el.querySelector('#h-amount') as HTMLInputElement;
       amount.focus();
+      pasangNominal(amount); // format ribuan LIVE (satu-sumber ui/nominal)
 
       // Preview "sisa setelah bayar" + peringatan dini bila melebihi sisa.
       // Server tetap penentu akhir (400 "melebihi sisa") — ini hanya bantuan
       // mengetik supaya kasir tidak perlu trial-and-error.
       const sisaEl = el.querySelector('#h-sisa-setelah');
       const lebihEl = el.querySelector('#h-lebih');
-      const nilai = (): number => (Number.isFinite(Number(amount.value)) ? Number(amount.value) : 0);
+      const nilai = (): number => bacaNominal(amount);
       const preview = (): void => {
         if (sisaEl) {
           // Nominal masih kosong -> tampilkan "—" netral (bukan sisa saat ini
@@ -894,8 +896,8 @@ async function catatForm(jenis: 'charge' | 'payment', prefill?: PrefillBayar): P
       }
 
       ok.addEventListener('click', async () => {
-        const v = Number(amount.value);
-        if (!Number.isInteger(v) || v <= 0) {
+        const v = bacaNominal(amount);
+        if (v <= 0) {
           toast('Nominal harus bilangan bulat rupiah lebih dari 0', 'warning');
           amount.focus();
           return;
